@@ -1,0 +1,27 @@
+# Exclude Vivado/Quartus binary outputs & run directories
+*.runs/
+*.Xil/
+*.jou
+*.log
+*.bit
+*.bin
+*.mcs
+*.slx
+*.cache/
+*.hw/
+*.ip_user_files/
+
+# Exclude simulation build outputs
+work/
+*.wdb/
+xsim.dir/
+*.vcd
+
+# Allow source files explicitly
+!*.v
+!*.sv
+!*.vhdl
+!*.vhd
+!*.tcl
+!*.xdc
+!*.sdc
