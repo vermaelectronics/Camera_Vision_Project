@@ -1,0 +1,105 @@
+// ============================================================================
+// icepi_zero.lpf -- Lattice Physical Constraints for dvp_camera_hdmi_top
+// ----------------------------------------------------------------------------
+// Target board : IcePi-Zero (Lattice ECP5 LFE5U-25F-6BG256C, Pi-Zero form
+//                 factor). Board reference: https://github.com/cheyao/icepi-zero
+// Pin/site assignments for clk / button / led / gpdi_dp below are taken
+// directly from that board's own published LPF (gateware/icepi-zero.lpf),
+// so they are grounded in the real, populated board pinout.
+//
+// The camera signals (cam_*) are NOT part of the IcePi-Zero's fixed board
+// pinout -- it is a Raspberry-Pi-Zero-form-factor board with a generic
+// 40-pin GPIO header, no dedicated parallel-camera connector. The
+// assignments below place the 13 camera signals on 13 of that header's
+// general-purpose GPIO sites (gpio[0..12], again taken from the same
+// reference LPF). Rewire freely to whatever header pins are convenient for
+// your camera breakout -- see README.md "Wiring the camera" for the header
+// pinout table and a caveat about 1.8V-IO camera modules needing a level
+// shifter (this board's IOVOLTAGE is fixed at 3.3V).
+// ============================================================================
+
+SYSCONFIG CONFIG_IOVOLTAGE=3.3 COMPRESS_CONFIG=ON MCCLK_FREQ=62 MASTER_SPI_PORT=ENABLE SLAVE_SPI_PORT=DISABLE SLAVE_PARALLEL_PORT=DISABLE;
+
+// https://www.latticesemi.com/en/Support/AnswerDatabase/1/9/6/1964
+BLOCK RESETPATHS;
+BLOCK ASYNCPATHS;
+
+// ---- 50MHz board reference oscillator -------------------------------------
+LOCATE COMP "clk" SITE "M1";
+IOBUF  PORT "clk" IO_TYPE=LVCMOS33 PULLMODE=NONE;
+FREQUENCY PORT "clk" 50 MHZ;
+
+// ---- Buttons (active-low, external pull-up per board design) --------------
+LOCATE COMP "button[0]" SITE "C4";
+IOBUF  PORT "button[0]" IO_TYPE=LVCMOS33 PULLMODE=UP DRIVE=4;
+LOCATE COMP "button[1]" SITE "C5";
+IOBUF  PORT "button[1]" IO_TYPE=LVCMOS33 PULLMODE=UP DRIVE=4;
+
+// ---- Status LEDs ------------------------------------------------------------
+LOCATE COMP "led[0]" SITE "E13";
+IOBUF  PORT "led[0]" IO_TYPE=LVCMOS33 PULLMODE=DOWN DRIVE=4;
+LOCATE COMP "led[1]" SITE "D14";
+IOBUF  PORT "led[1]" IO_TYPE=LVCMOS33 PULLMODE=DOWN DRIVE=4;
+LOCATE COMP "led[2]" SITE "E12";
+IOBUF  PORT "led[2]" IO_TYPE=LVCMOS33 PULLMODE=DOWN DRIVE=4;
+LOCATE COMP "led[3]" SITE "C13";
+IOBUF  PORT "led[3]" IO_TYPE=LVCMOS33 PULLMODE=DOWN DRIVE=4;
+LOCATE COMP "led[4]" SITE "D13";
+IOBUF  PORT "led[4]" IO_TYPE=LVCMOS33 PULLMODE=DOWN DRIVE=4;
+
+// ---- Native GPDI/TMDS output (dvp_camera_hdmi_top only) -------------------
+// [0]=Blue [1]=Green [2]=Red [3]=Clock. Only the "true" (dp) side is driven
+// from RTL, matching the IcePi-Zero's own reference DVI example -- see
+// tmds_serial_gearbox.v's header comment for why this is correct for this
+// board's GPDI IO_TYPE.
+LOCATE COMP "gpdi_dp[0]" SITE "R13";
+IOBUF  PORT "gpdi_dp[0]" IO_TYPE=LVCMOS33D DRIVE=4;
+LOCATE COMP "gpdi_dp[1]" SITE "R15";
+IOBUF  PORT "gpdi_dp[1]" IO_TYPE=LVCMOS33D DRIVE=4;
+LOCATE COMP "gpdi_dp[2]" SITE "P16";
+IOBUF  PORT "gpdi_dp[2]" IO_TYPE=LVCMOS33D DRIVE=4;
+LOCATE COMP "gpdi_dp[3]" SITE "R12";
+IOBUF  PORT "gpdi_dp[3]" IO_TYPE=LVCMOS33D DRIVE=4;
+
+// ---- External HDMI-transmitter parallel-RGB output (top_ext variant only) -
+// Uncomment and adjust if using dvp_camera_hdmi_top_ext.v with a transmitter
+// IC (ADV7511/IT6613/etc.) wired to spare GPIO header pins instead of GPDI.
+// The site list below reuses gpio[13..27] purely as an example -- match it
+// to how you actually wire your transmitter breakout.
+// LOCATE COMP "hdmi_pclk"   SITE "E3";
+// LOCATE COMP "hdmi_de"     SITE "P1";
+// LOCATE COMP "hdmi_hsync"  SITE "N1";
+// LOCATE COMP "hdmi_vsync"  SITE "H3";
+// (hdmi_d[23:0] -- spread across remaining gpio[] sites; see README.md)
+
+// ---- DVP camera interface, mapped onto the 40-pin GPIO header --------------
+// gpio[0..12] sites below are copied verbatim from the board's own LPF.
+LOCATE COMP "cam_pclk"  SITE "G3";  // gpio[0]  (physical header pin 27)
+LOCATE COMP "cam_href"  SITE "K3";  // gpio[1]  (physical header pin 28)
+LOCATE COMP "cam_vsync" SITE "T2";  // gpio[2]  (physical header pin 3)
+LOCATE COMP "cam_d[0]"  SITE "R2";  // gpio[3]  (physical header pin 5)
+LOCATE COMP "cam_d[1]"  SITE "R1";  // gpio[4]  (physical header pin 7)
+LOCATE COMP "cam_d[2]"  SITE "E1";  // gpio[5]  (physical header pin 29)
+LOCATE COMP "cam_d[3]"  SITE "F3";  // gpio[6]  (physical header pin 31)
+LOCATE COMP "cam_d[4]"  SITE "G1";  // gpio[7]  (physical header pin 26)
+LOCATE COMP "cam_d[5]"  SITE "H2";  // gpio[8]  (physical header pin 24)
+LOCATE COMP "cam_d[6]"  SITE "J1";  // gpio[9]  (physical header pin 21)
+LOCATE COMP "cam_d[7]"  SITE "L2";  // gpio[10] (physical header pin 19)
+LOCATE COMP "cam_scl"   SITE "G2";  // gpio[11] (physical header pin 23)
+LOCATE COMP "cam_sda"   SITE "J3";  // gpio[12] (physical header pin 32)
+
+IOBUF PORT "cam_pclk"  IO_TYPE=LVCMOS33 PULLMODE=NONE;
+IOBUF PORT "cam_href"  IO_TYPE=LVCMOS33 PULLMODE=DOWN;
+IOBUF PORT "cam_vsync" IO_TYPE=LVCMOS33 PULLMODE=DOWN;
+IOBUF PORT "cam_d[0]"  IO_TYPE=LVCMOS33 PULLMODE=DOWN;
+IOBUF PORT "cam_d[1]"  IO_TYPE=LVCMOS33 PULLMODE=DOWN;
+IOBUF PORT "cam_d[2]"  IO_TYPE=LVCMOS33 PULLMODE=DOWN;
+IOBUF PORT "cam_d[3]"  IO_TYPE=LVCMOS33 PULLMODE=DOWN;
+IOBUF PORT "cam_d[4]"  IO_TYPE=LVCMOS33 PULLMODE=DOWN;
+IOBUF PORT "cam_d[5]"  IO_TYPE=LVCMOS33 PULLMODE=DOWN;
+IOBUF PORT "cam_d[6]"  IO_TYPE=LVCMOS33 PULLMODE=DOWN;
+IOBUF PORT "cam_d[7]"  IO_TYPE=LVCMOS33 PULLMODE=DOWN;
+IOBUF PORT "cam_scl"   IO_TYPE=LVCMOS33 PULLMODE=UP DRIVE=4 OPENDRAIN=ON;
+IOBUF PORT "cam_sda"   IO_TYPE=LVCMOS33 PULLMODE=UP DRIVE=4 OPENDRAIN=ON;
+
+FREQUENCY PORT "cam_pclk" 75 MHZ; // worst-case (1080p60-class sensor PCLK); tighten/relax to your sensor's actual PCLK

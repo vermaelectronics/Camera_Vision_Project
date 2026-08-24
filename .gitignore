@@ -16,6 +16,7 @@ work/
 *.wdb/
 xsim.dir/
 *.vcd
+build/
 
 # Allow source files explicitly
 !*.v
