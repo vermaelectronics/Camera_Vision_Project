@@ -3,6 +3,15 @@
 # ----------------------------------------------------------------------------
 # Targets:
 #   make sim            simulate every testbench in tb/ with Icarus Verilog
+#                          (stops at the first FAIL -- a Makefile recipe line
+#                          failing aborts the target)
+#   make check           runs all 5 testbenches regardless of individual
+#                          failures, then prints one PASS/FAIL summary table
+#                          and exits non-zero if anything failed -- the one
+#                          command to run to confirm "everything passes"
+#   make wave_<name>       run one testbench then open its .vcd in GTKWave
+#                          (or: make wave TB=<name>); valid <name>s: async_fifo,
+#                          tmds_encoder, video_timing_gen, dvp_pixel_chain, i2c_master
 #   make synth           synthesize dvp_camera_hdmi_top (720p60) with Yosys
 #   make synth_1080p30    synthesize dvp_camera_hdmi_top for 1080p30
 #   make synth_ext        synthesize dvp_camera_hdmi_top_ext (external-transmitter 1080p60)
@@ -46,7 +55,7 @@ RTL_SOURCES = \
 	rtl/i2c_master.v \
 	rtl/cam_config_rom.v
 
-.PHONY: all sim synth synth_1080p30 synth_ext pnr pnr_ext bit prog clean wave sim_% wave_%
+.PHONY: all sim check synth synth_1080p30 synth_ext pnr pnr_ext bit prog clean wave sim_% wave_%
 
 all: pnr
 
@@ -71,6 +80,57 @@ sim_%: $(BUILD)
 	@echo "== tb_$* =="
 	iverilog -g2005 -o $(BUILD)/tb_$*.vvp $(TB_$*)
 	vvp $(BUILD)/tb_$*.vvp
+
+# ---------------------------------------------------------------------------
+# `make check` -- runs all 5 testbenches, does NOT stop at the first failure
+# (unlike `make sim`, which does -- a Makefile recipe line failing aborts
+# that target), collects every PASS/FAIL, prints one summary table at the
+# end, and exits non-zero if anything failed. This is the one command to
+# run to confirm "everything passes" in a single terminal invocation.
+# ---------------------------------------------------------------------------
+check: $(BUILD)
+	@overall=0; \
+	run_one() { \
+	  name=$$1; shift; \
+	  echo ""; \
+	  echo "== tb_$$name =="; \
+	  if ! iverilog -g2005 -o $(BUILD)/tb_$$name.vvp "$$@" > $(BUILD)/tb_$$name.compile.log 2>&1; then \
+	    echo "COMPILE ERROR (see $(BUILD)/tb_$$name.compile.log):"; \
+	    cat $(BUILD)/tb_$$name.compile.log; \
+	    eval "result_$$name=FAIL_COMPILE"; \
+	    overall=1; \
+	    return; \
+	  fi; \
+	  out=$$(vvp $(BUILD)/tb_$$name.vvp 2>&1); \
+	  echo "$$out"; \
+	  if echo "$$out" | grep -qE "^TB_[A-Z0-9_]+: PASS"; then \
+	    eval "result_$$name=PASS"; \
+	  else \
+	    eval "result_$$name=FAIL"; \
+	    overall=1; \
+	  fi; \
+	}; \
+	run_one async_fifo        $(TB_async_fifo); \
+	run_one tmds_encoder       $(TB_tmds_encoder); \
+	run_one video_timing_gen    $(TB_video_timing_gen); \
+	run_one dvp_pixel_chain      $(TB_dvp_pixel_chain); \
+	run_one i2c_master             $(TB_i2c_master); \
+	echo ""; \
+	echo "============================================================"; \
+	echo " SUMMARY"; \
+	echo "============================================================"; \
+	for n in async_fifo tmds_encoder video_timing_gen dvp_pixel_chain i2c_master; do \
+	  eval "r=\$$result_$$n"; \
+	  printf "  %-20s %s\n" "$$n" "$$r"; \
+	done; \
+	echo "============================================================"; \
+	if [ "$$overall" -eq 0 ]; then \
+	  echo " ALL 5 TESTBENCHES PASSED"; \
+	else \
+	  echo " AT LEAST ONE TESTBENCH FAILED -- see log above"; \
+	fi; \
+	echo "============================================================"; \
+	exit $$overall
 
 # ---------------------------------------------------------------------------
 # Waveform viewing (Icarus Verilog + GTKWave)
