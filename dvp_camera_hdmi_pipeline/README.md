@@ -283,7 +283,15 @@ breakout's silkscreen/datasheet before connecting power — driving a true
 | `XCLK`/`MCLK` | `cam_mclk` | **must** be driven — this module has no onboard crystal; `clk_gen_mclk.v` supplies the required 24 MHz |
 | `RESET`/`RESETB` | `cam_rst_n` | active-low; sequenced by `cam_power_sequencer.v` |
 | `PWDN` | `cam_pwdn` | active-high (powered down when high); sequenced by `cam_power_sequencer.v` |
-| `VCC`/`GND` | board 3.3V/GND | per the module's own power requirements |
+| `VCC` (3.3V) | board 3.3V rail | **header pin 1** — free, not used by any signal above |
+| `GND` | board ground | **header pin 6** — free, not used by any signal above |
+
+These two are pure power rails, not FPGA I/O, so they aren't (and don't
+need to be) in `icepi_zero.lpf` — wire them directly. The OV5640's peak
+current draw during active capture can be a few hundred mA; the header's
+3.3V rail is normally fine, but if you see brownouts/resets while the
+camera is streaming, power the module from a separate 3.3V source and
+only share `GND` with the board.
 
 Do **not** tie `RESET`/`PWDN` to fixed levels or leave them floating —
 without `cam_power_sequencer.v` actively driving the documented
