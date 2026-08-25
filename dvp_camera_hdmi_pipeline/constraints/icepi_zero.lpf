@@ -88,6 +88,13 @@ LOCATE COMP "cam_d[7]"  SITE "L2";  // gpio[10] (physical header pin 19)
 LOCATE COMP "cam_scl"   SITE "G2";  // gpio[11] (physical header pin 23)
 LOCATE COMP "cam_sda"   SITE "J3";  // gpio[12] (physical header pin 32)
 
+// Camera power-up control (MCLK/RESET/PWDN) -- required by modules with no
+// onboard oscillator/reset-default, e.g. the Waveshare OV5640 module this
+// project targets. See cam_power_sequencer.v and clk_gen_mclk.v.
+LOCATE COMP "cam_mclk"  SITE "H3";  // gpio[16] (physical header pin 36)
+LOCATE COMP "cam_rst_n" SITE "R3";  // gpio[17] (physical header pin 11)
+LOCATE COMP "cam_pwdn"  SITE "N4";  // gpio[18] (physical header pin 12)
+
 IOBUF PORT "cam_pclk"  IO_TYPE=LVCMOS33 PULLMODE=NONE;
 IOBUF PORT "cam_href"  IO_TYPE=LVCMOS33 PULLMODE=DOWN;
 IOBUF PORT "cam_vsync" IO_TYPE=LVCMOS33 PULLMODE=DOWN;
@@ -101,5 +108,9 @@ IOBUF PORT "cam_d[6]"  IO_TYPE=LVCMOS33 PULLMODE=DOWN;
 IOBUF PORT "cam_d[7]"  IO_TYPE=LVCMOS33 PULLMODE=DOWN;
 IOBUF PORT "cam_scl"   IO_TYPE=LVCMOS33 PULLMODE=UP DRIVE=4 OPENDRAIN=ON;
 IOBUF PORT "cam_sda"   IO_TYPE=LVCMOS33 PULLMODE=UP DRIVE=4 OPENDRAIN=ON;
+IOBUF PORT "cam_mclk"  IO_TYPE=LVCMOS33 DRIVE=4;
+IOBUF PORT "cam_rst_n" IO_TYPE=LVCMOS33 DRIVE=4;
+IOBUF PORT "cam_pwdn"  IO_TYPE=LVCMOS33 DRIVE=4;
 
 FREQUENCY PORT "cam_pclk" 75 MHZ; // worst-case (1080p60-class sensor PCLK); tighten/relax to your sensor's actual PCLK
+FREQUENCY PORT "cam_mclk" 24 MHZ;

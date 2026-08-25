@@ -1,6 +1,9 @@
 // ============================================================================
 // tb_i2c_master.v -- smoke test for i2c_master.v against a minimal behavioral
 // I2C slave model that always ACKs and records the bytes it receives.
+// Tests BOTH addressing modes: ADDR_BYTES=1 (8-bit reg addressing, e.g.
+// OV7670/OV2640-class) and ADDR_BYTES=2 (16-bit reg addressing, e.g.
+// OV5640/OV5647-class -- what the Waveshare OV5640 module needs).
 // ============================================================================
 `timescale 1ns / 1ps
 
@@ -10,92 +13,133 @@ module tb_i2c_master;
     always #10 clk = ~clk; // 50MHz
 
     reg rst = 1;
-    reg start = 0;
-    reg [7:0] reg_addr = 8'hAA;
-    reg [7:0] reg_data = 8'h55;
-    wire busy, done, nack_error;
+    integer errors = 0;
 
-    wire scl, sda;
-    reg sda_slave_drive = 1'b0;
-    reg sda_slave_out   = 1'b0;
-
-    // slave drives SDA low only to ACK; otherwise releases (open-drain model)
-    assign sda = sda_slave_drive ? 1'b0 : 1'bz;
-    pullup(scl);
-    pullup(sda);
+    // =========================================================================
+    // Instance A: ADDR_BYTES=1 (8-bit register addressing)
+    // =========================================================================
+    reg  start_a = 0;
+    reg  [15:0] reg_addr_a = 16'h00AA;
+    reg  [7:0]  reg_data_a = 8'h55;
+    wire busy_a, done_a, nack_error_a;
+    wire scl_a, sda_a;
+    reg  sda_slave_drive_a = 1'b0;
+    assign sda_a = sda_slave_drive_a ? 1'b0 : 1'bz;
+    pullup(scl_a);
+    pullup(sda_a);
 
     i2c_master #(
-        .CLK_FREQ_HZ(50_000_000),
-        .I2C_FREQ_HZ(400_000),
-        .DEV_ADDR7(7'h21)
-    ) dut (
+        .CLK_FREQ_HZ(50_000_000), .I2C_FREQ_HZ(400_000),
+        .DEV_ADDR7(7'h21), .ADDR_BYTES(1)
+    ) dut_a (
         .clk(clk), .rst(rst),
-        .start(start), .reg_addr(reg_addr), .reg_data(reg_data),
-        .busy(busy), .done(done), .nack_error(nack_error),
-        .scl(scl), .sda(sda)
+        .start(start_a), .reg_addr(reg_addr_a), .reg_data(reg_data_a),
+        .busy(busy_a), .done(done_a), .nack_error(nack_error_a),
+        .scl(scl_a), .sda(sda_a)
     );
 
-    // ---- minimal behavioral I2C slave: always ACK, capture bytes ----------
-    reg [7:0] captured [0:2];
-    integer   cap_idx = 0;
-    reg [7:0] shift_in;
-    integer   bit_cnt;
-    reg       in_byte;
-
-    // Detect START (SDA falls while SCL high) and STOP (SDA rises while SCL high)
-    reg scl_prev, sda_prev;
-    always @(posedge clk) begin
-        scl_prev <= scl;
-        sda_prev <= sda;
-    end
-    // Exclude transitions caused by the slave's own ACK drive -- an SDA fall
-    // while SCL is high looks identical to a repeated START unless the
-    // detector knows it was the slave itself pulling the line low.
-    wire start_cond = scl && sda_prev && !sda && !sda_slave_drive;
-    wire stop_cond  = scl && !sda_prev && sda && !sda_slave_drive;
-
-    initial begin
-        cap_idx = 0;
-        in_byte = 0;
-        bit_cnt = 0;
-    end
+    reg [7:0] captured_a [0:2];
+    integer   cap_idx_a = 0;
+    reg [7:0] shift_in_a;
+    integer   bit_cnt_a;
+    reg       in_byte_a;
+    reg       scl_prev_a, sda_prev_a, scl_d_a;
 
     always @(posedge clk) begin
-        if (start_cond) begin
-            in_byte <= 1;
-            bit_cnt <= 0;
-            sda_slave_drive <= 0;
-        end else if (stop_cond) begin
-            in_byte <= 0;
-            sda_slave_drive <= 0;
+        scl_prev_a <= scl_a;
+        sda_prev_a <= sda_a;
+        scl_d_a    <= scl_a;
+    end
+    wire start_cond_a = scl_a && sda_prev_a && !sda_a && !sda_slave_drive_a;
+    wire stop_cond_a  = scl_a && !sda_prev_a && sda_a && !sda_slave_drive_a;
+    wire scl_rising_a  = scl_a && !scl_d_a;
+    wire scl_falling_a = !scl_a && scl_d_a;
+
+    always @(posedge clk) begin
+        if (start_cond_a) begin
+            in_byte_a <= 1; bit_cnt_a <= 0; sda_slave_drive_a <= 0;
+        end else if (stop_cond_a) begin
+            in_byte_a <= 0; sda_slave_drive_a <= 0;
         end
     end
-
-    // Sample SDA on SCL rising edges while receiving a byte (simple level-based model)
-    reg scl_d;
-    always @(posedge clk) scl_d <= scl;
-    wire scl_rising = scl && !scl_d;
-
     always @(posedge clk) begin
-        if (scl_rising && in_byte) begin
-            if (bit_cnt < 8) begin
-                shift_in <= {shift_in[6:0], sda};
-                bit_cnt  <= bit_cnt + 1;
+        if (scl_rising_a && in_byte_a) begin
+            if (bit_cnt_a < 8) begin
+                shift_in_a <= {shift_in_a[6:0], sda_a};
+                bit_cnt_a  <= bit_cnt_a + 1;
             end else begin
-                // 9th clock = ACK slot: drive SDA low to ACK
-                if (cap_idx < 3) captured[cap_idx] <= shift_in;
-                cap_idx <= cap_idx + 1;
-                sda_slave_drive <= 1'b1;
-                bit_cnt <= 0;
+                if (cap_idx_a < 3) captured_a[cap_idx_a] <= shift_in_a;
+                cap_idx_a <= cap_idx_a + 1;
+                sda_slave_drive_a <= 1'b1;
+                bit_cnt_a <= 0;
             end
         end
     end
-    // release ACK on next SCL falling edge
-    wire scl_falling = !scl && scl_d;
-    always @(posedge clk) if (scl_falling) sda_slave_drive <= 1'b0;
+    always @(posedge clk) if (scl_falling_a) sda_slave_drive_a <= 1'b0;
 
-    integer errors = 0;
+    // =========================================================================
+    // Instance B: ADDR_BYTES=2 (16-bit register addressing -- OV5640-class)
+    // =========================================================================
+    reg  start_b = 0;
+    reg  [15:0] reg_addr_b = 16'h3103; // a real OV5640 register address, for realism
+    reg  [7:0]  reg_data_b = 8'h11;
+    wire busy_b, done_b, nack_error_b;
+    wire scl_b, sda_b;
+    reg  sda_slave_drive_b = 1'b0;
+    assign sda_b = sda_slave_drive_b ? 1'b0 : 1'bz;
+    pullup(scl_b);
+    pullup(sda_b);
 
+    i2c_master #(
+        .CLK_FREQ_HZ(50_000_000), .I2C_FREQ_HZ(400_000),
+        .DEV_ADDR7(7'h3C), .ADDR_BYTES(2)
+    ) dut_b (
+        .clk(clk), .rst(rst),
+        .start(start_b), .reg_addr(reg_addr_b), .reg_data(reg_data_b),
+        .busy(busy_b), .done(done_b), .nack_error(nack_error_b),
+        .scl(scl_b), .sda(sda_b)
+    );
+
+    reg [7:0] captured_b [0:3];
+    integer   cap_idx_b = 0;
+    reg [7:0] shift_in_b;
+    integer   bit_cnt_b;
+    reg       in_byte_b;
+    reg       scl_prev_b, sda_prev_b, scl_d_b;
+
+    always @(posedge clk) begin
+        scl_prev_b <= scl_b;
+        sda_prev_b <= sda_b;
+        scl_d_b    <= scl_b;
+    end
+    wire start_cond_b = scl_b && sda_prev_b && !sda_b && !sda_slave_drive_b;
+    wire stop_cond_b  = scl_b && !sda_prev_b && sda_b && !sda_slave_drive_b;
+    wire scl_rising_b  = scl_b && !scl_d_b;
+    wire scl_falling_b = !scl_b && scl_d_b;
+
+    always @(posedge clk) begin
+        if (start_cond_b) begin
+            in_byte_b <= 1; bit_cnt_b <= 0; sda_slave_drive_b <= 0;
+        end else if (stop_cond_b) begin
+            in_byte_b <= 0; sda_slave_drive_b <= 0;
+        end
+    end
+    always @(posedge clk) begin
+        if (scl_rising_b && in_byte_b) begin
+            if (bit_cnt_b < 8) begin
+                shift_in_b <= {shift_in_b[6:0], sda_b};
+                bit_cnt_b  <= bit_cnt_b + 1;
+            end else begin
+                if (cap_idx_b < 4) captured_b[cap_idx_b] <= shift_in_b;
+                cap_idx_b <= cap_idx_b + 1;
+                sda_slave_drive_b <= 1'b1;
+                bit_cnt_b <= 0;
+            end
+        end
+    end
+    always @(posedge clk) if (scl_falling_b) sda_slave_drive_b <= 1'b0;
+
+    // =========================================================================
     initial begin
         $dumpfile("tb_i2c_master.vcd");
         $dumpvars(0, tb_i2c_master);
@@ -104,38 +148,74 @@ module tb_i2c_master;
         rst = 0;
         repeat (5) @(posedge clk);
 
-        start = 1;
-        @(posedge clk); #1; start = 0;
-
-        wait (done === 1'b1);
+        // ---- Test A: 8-bit addressing (3-byte transaction) --------------------
+        start_a = 1;
+        @(posedge clk); #1; start_a = 0;
+        wait (done_a === 1'b1);
         repeat (2) @(posedge clk);
 
-        if (nack_error) begin
+        if (nack_error_a) begin
             errors = errors + 1;
-            $display("ERROR: nack_error asserted, expected clean ACK'd transaction");
+            $display("ERROR (A): nack_error asserted, expected clean ACK'd transaction");
         end
-
-        if (cap_idx < 3) begin
+        if (cap_idx_a < 3) begin
             errors = errors + 1;
-            $display("ERROR: slave only captured %0d of 3 expected bytes", cap_idx);
+            $display("ERROR (A): slave only captured %0d of 3 expected bytes", cap_idx_a);
         end else begin
-            if (captured[0] !== {7'h21, 1'b0}) begin
+            if (captured_a[0] !== {7'h21, 1'b0}) begin
                 errors = errors + 1;
-                $display("ERROR: byte0 (addr+W) = %02x, expected %02x", captured[0], {7'h21,1'b0});
+                $display("ERROR (A): byte0 (addr+W) = %02x, expected %02x", captured_a[0], {7'h21,1'b0});
             end
-            if (captured[1] !== reg_addr) begin
+            if (captured_a[1] !== reg_addr_a[7:0]) begin
                 errors = errors + 1;
-                $display("ERROR: byte1 (reg_addr) = %02x, expected %02x", captured[1], reg_addr);
+                $display("ERROR (A): byte1 (reg_addr) = %02x, expected %02x", captured_a[1], reg_addr_a[7:0]);
             end
-            if (captured[2] !== reg_data) begin
+            if (captured_a[2] !== reg_data_a) begin
                 errors = errors + 1;
-                $display("ERROR: byte2 (reg_data) = %02x, expected %02x", captured[2], reg_data);
+                $display("ERROR (A): byte2 (reg_data) = %02x, expected %02x", captured_a[2], reg_data_a);
             end
         end
+        if (errors == 0)
+            $display("OK (ADDR_BYTES=1): addr+W=%02x reg_addr=%02x reg_data=%02x, all ACKed",
+                       captured_a[0], captured_a[1], captured_a[2]);
+
+        // ---- Test B: 16-bit addressing (4-byte transaction) -------------------
+        start_b = 1;
+        @(posedge clk); #1; start_b = 0;
+        wait (done_b === 1'b1);
+        repeat (2) @(posedge clk);
+
+        if (nack_error_b) begin
+            errors = errors + 1;
+            $display("ERROR (B): nack_error asserted, expected clean ACK'd transaction");
+        end
+        if (cap_idx_b < 4) begin
+            errors = errors + 1;
+            $display("ERROR (B): slave only captured %0d of 4 expected bytes", cap_idx_b);
+        end else begin
+            if (captured_b[0] !== {7'h3C, 1'b0}) begin
+                errors = errors + 1;
+                $display("ERROR (B): byte0 (addr+W) = %02x, expected %02x", captured_b[0], {7'h3C,1'b0});
+            end
+            if (captured_b[1] !== reg_addr_b[15:8]) begin
+                errors = errors + 1;
+                $display("ERROR (B): byte1 (reg_addr hi) = %02x, expected %02x", captured_b[1], reg_addr_b[15:8]);
+            end
+            if (captured_b[2] !== reg_addr_b[7:0]) begin
+                errors = errors + 1;
+                $display("ERROR (B): byte2 (reg_addr lo) = %02x, expected %02x", captured_b[2], reg_addr_b[7:0]);
+            end
+            if (captured_b[3] !== reg_data_b) begin
+                errors = errors + 1;
+                $display("ERROR (B): byte3 (reg_data) = %02x, expected %02x", captured_b[3], reg_data_b);
+            end
+        end
+        if (errors == 0)
+            $display("OK (ADDR_BYTES=2): addr+W=%02x reg_addr=%02x%02x reg_data=%02x, all ACKed",
+                       captured_b[0], captured_b[1], captured_b[2], captured_b[3]);
 
         if (errors == 0)
-            $display("TB_I2C_MASTER: PASS (addr+W=%02x reg_addr=%02x reg_data=%02x, all ACKed)",
-                       captured[0], captured[1], captured[2]);
+            $display("TB_I2C_MASTER: PASS");
         else
             $display("TB_I2C_MASTER: FAIL (%0d errors)", errors);
 
@@ -144,7 +224,7 @@ module tb_i2c_master;
 
     // watchdog
     initial begin
-        #500000;
+        #600000;
         $display("TB_I2C_MASTER: WATCHDOG TIMEOUT");
         $finish;
     end

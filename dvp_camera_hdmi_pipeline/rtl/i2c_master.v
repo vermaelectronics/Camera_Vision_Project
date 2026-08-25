@@ -2,14 +2,19 @@
 // i2c_master.v -- simple polled I2C master for camera register configuration
 // ----------------------------------------------------------------------------
 // Minimal single-master, write-only (register-configuration-style) I2C
-// engine: START, 7-bit address + W, 8-bit register address, 8-bit data,
-// STOP, with ACK checking. Open-drain SDA/SCL modeled with tri-state
-// buffers (external 4.7k-10k pull-ups to camera-side VDDIO are required on
-// the PCB, as with any I2C bus).
+// engine: START, 7-bit address + W, an 8-bit or 16-bit register address
+// (ADDR_BYTES), 8-bit data, STOP, with ACK checking. Open-drain SDA/SCL
+// modeled with tri-state buffers (external 4.7k-10k pull-ups to camera-side
+// VDDIO are required on the PCB, as with any I2C bus).
 //
-// This is deliberately generic/sensor-agnostic: it just walks a table of
-// {reg_addr, reg_data} pairs handed to it by cam_config_rom.v. Pair that
-// module's table with your specific sensor's documented register list.
+// ADDR_BYTES=1: 8-bit register addressing (OV7670/OV2640/GC0308-class parts)
+// ADDR_BYTES=2: 16-bit register addressing (OV5640/OV5647-class parts --
+//               e.g. this is what the Waveshare OV5640 module needs)
+//
+// This is deliberately generic/sensor-agnostic beyond that one parameter:
+// it just walks a table of {reg_addr, reg_data} pairs handed to it by
+// cam_config_rom.v. Pair that module's table with your specific sensor's
+// documented register list.
 // ============================================================================
 `timescale 1ns / 1ps
 `default_nettype none
@@ -17,14 +22,15 @@
 module i2c_master #(
     parameter CLK_FREQ_HZ = 25_000_000,
     parameter I2C_FREQ_HZ = 100_000,     // standard mode; 400_000 for fast mode
-    parameter DEV_ADDR7   = 7'h21        // default 7-bit device address (edit per sensor)
+    parameter DEV_ADDR7   = 7'h21,       // default 7-bit device address (edit per sensor)
+    parameter ADDR_BYTES  = 1            // 1 = 8-bit reg addressing, 2 = 16-bit
 ) (
     input  wire       clk,
     input  wire        rst,
 
     // simple command interface
     input  wire         start,       // pulse to begin one register write
-    input  wire [7:0]   reg_addr,
+    input  wire [15:0]  reg_addr,    // only reg_addr[7:0] used when ADDR_BYTES=1
     input  wire [7:0]   reg_data,
     output reg           busy,
     output reg           done,        // one-cycle pulse when the transaction completes
@@ -35,6 +41,9 @@ module i2c_master #(
 );
 
     localparam integer QUARTER_PERIOD = CLK_FREQ_HZ / (I2C_FREQ_HZ * 4);
+    // byte_idx sequence: 0=addr+W, 1..ADDR_BYTES=register address byte(s)
+    // (MSB first when ADDR_BYTES=2), LAST_BYTE_IDX=register data byte.
+    localparam integer LAST_BYTE_IDX = ADDR_BYTES + 1;
 
     reg scl_o = 1'b1, sda_o = 1'b1;
     assign scl = scl_o ? 1'bz : 1'b0; // open-drain
@@ -69,9 +78,26 @@ module i2c_master #(
     reg [3:0]  state = S_IDLE;
     reg [1:0]  qphase;             // sub-state within a bit-time (0..3)
     reg [2:0]  bit_idx;
-    reg [1:0]  byte_idx;           // 0=addr+W, 1=reg_addr, 2=reg_data
+    reg [2:0]  byte_idx;           // 0=addr+W, 1..ADDR_BYTES=reg addr byte(s), LAST_BYTE_IDX=data
     reg [7:0]  shift_reg;
-    reg [3:0]  return_state;
+
+    // Next byte to shift out, given the byte we just finished (byte_idx,
+    // pre-increment). Handles both 1-byte and 2-byte register addressing.
+    function [7:0] next_byte;
+        input [2:0] finished_idx;
+        begin
+            if (finished_idx == 0) begin
+                // just sent addr+W -> send first (and, if ADDR_BYTES=1, only) address byte
+                next_byte = (ADDR_BYTES == 2) ? reg_addr[15:8] : reg_addr[7:0];
+            end else if (ADDR_BYTES == 2 && finished_idx == 1) begin
+                // just sent address MSB -> send address LSB
+                next_byte = reg_addr[7:0];
+            end else begin
+                // just sent the last address byte -> send data
+                next_byte = reg_data;
+            end
+        end
+    endfunction
 
     always @(posedge clk) begin
         if (rst) begin
@@ -147,11 +173,11 @@ module i2c_master #(
                                 scl_o <= 1'b0;
                                 if (nack_error) begin
                                     state <= S_STOP1;
-                                end else if (byte_idx == 2) begin
+                                end else if (byte_idx == LAST_BYTE_IDX) begin
                                     state <= S_STOP1;
                                 end else begin
+                                    shift_reg <= next_byte(byte_idx);
                                     byte_idx  <= byte_idx + 1;
-                                    shift_reg <= (byte_idx == 0) ? reg_addr : reg_data;
                                     bit_idx   <= 7;
                                     state     <= S_SHIFT_BIT;
                                 end

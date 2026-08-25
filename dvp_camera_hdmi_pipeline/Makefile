@@ -5,13 +5,14 @@
 #   make sim            simulate every testbench in tb/ with Icarus Verilog
 #                          (stops at the first FAIL -- a Makefile recipe line
 #                          failing aborts the target)
-#   make check           runs all 5 testbenches regardless of individual
+#   make check           runs all 6 testbenches regardless of individual
 #                          failures, then prints one PASS/FAIL summary table
 #                          and exits non-zero if anything failed -- the one
 #                          command to run to confirm "everything passes"
 #   make wave_<name>       run one testbench then open its .vcd in GTKWave
 #                          (or: make wave TB=<name>); valid <name>s: async_fifo,
-#                          tmds_encoder, video_timing_gen, dvp_pixel_chain, i2c_master
+#                          tmds_encoder, video_timing_gen, dvp_pixel_chain,
+#                          i2c_master, cam_power_sequencer
 #   make synth           synthesize dvp_camera_hdmi_top (720p60) with Yosys
 #   make synth_1080p30    synthesize dvp_camera_hdmi_top for 1080p30
 #   make synth_ext        synthesize dvp_camera_hdmi_top_ext (external-transmitter 1080p60)
@@ -50,6 +51,8 @@ RTL_SOURCES = \
 	rtl/video_cdc_buffer.v \
 	rtl/clk_gen_dvi.v \
 	rtl/clk_gen_1080p60.v \
+	rtl/clk_gen_mclk.v \
+	rtl/cam_power_sequencer.v \
 	rtl/tmds_serial_gearbox.v \
 	rtl/test_pattern_gen.v \
 	rtl/i2c_master.v \
@@ -72,7 +75,8 @@ TB_tmds_encoder       = rtl/tmds_encoder.v tb/tb_tmds_encoder.v
 TB_video_timing_gen    = rtl/video_timing_gen.v tb/tb_video_timing_gen.v
 TB_dvp_pixel_chain      = rtl/dvp_capture.v rtl/pixel_formatter.v tb/tb_dvp_pixel_chain.v
 TB_i2c_master             = rtl/i2c_master.v tb/tb_i2c_master.v
-TB_NAMES = async_fifo tmds_encoder video_timing_gen dvp_pixel_chain i2c_master
+TB_cam_power_sequencer   = rtl/cam_power_sequencer.v tb/tb_cam_power_sequencer.v
+TB_NAMES = async_fifo tmds_encoder video_timing_gen dvp_pixel_chain i2c_master cam_power_sequencer
 
 sim: $(foreach t,$(TB_NAMES),sim_$(t))
 
@@ -82,7 +86,7 @@ sim_%: $(BUILD)
 	vvp $(BUILD)/tb_$*.vvp
 
 # ---------------------------------------------------------------------------
-# `make check` -- runs all 5 testbenches, does NOT stop at the first failure
+# `make check` -- runs all 6 testbenches, does NOT stop at the first failure
 # (unlike `make sim`, which does -- a Makefile recipe line failing aborts
 # that target), collects every PASS/FAIL, prints one summary table at the
 # end, and exits non-zero if anything failed. This is the one command to
@@ -115,17 +119,18 @@ check: $(BUILD)
 	run_one video_timing_gen    $(TB_video_timing_gen); \
 	run_one dvp_pixel_chain      $(TB_dvp_pixel_chain); \
 	run_one i2c_master             $(TB_i2c_master); \
+	run_one cam_power_sequencer      $(TB_cam_power_sequencer); \
 	echo ""; \
 	echo "============================================================"; \
 	echo " SUMMARY"; \
 	echo "============================================================"; \
-	for n in async_fifo tmds_encoder video_timing_gen dvp_pixel_chain i2c_master; do \
+	for n in async_fifo tmds_encoder video_timing_gen dvp_pixel_chain i2c_master cam_power_sequencer; do \
 	  eval "r=\$$result_$$n"; \
 	  printf "  %-20s %s\n" "$$n" "$$r"; \
 	done; \
 	echo "============================================================"; \
 	if [ "$$overall" -eq 0 ]; then \
-	  echo " ALL 5 TESTBENCHES PASSED"; \
+	  echo " ALL 6 TESTBENCHES PASSED"; \
 	else \
 	  echo " AT LEAST ONE TESTBENCH FAILED -- see log above"; \
 	fi; \
@@ -140,7 +145,8 @@ check: $(BUILD)
 # variable, e.g.:
 #   make wave TB=tmds_encoder
 # Valid <name> values: async_fifo, tmds_encoder, video_timing_gen,
-# dvp_pixel_chain, i2c_master (same names as the sim_<name> targets above).
+# dvp_pixel_chain, i2c_master, cam_power_sequencer (same names as the
+# sim_<name> targets above).
 # Icarus writes each testbench's .vcd to the directory `make` was invoked
 # from (the project root), not into $(BUILD) -- that's where GTKWave is
 # pointed below. Needs `gtkwave` on PATH (`apt install gtkwave`, or it's
@@ -150,7 +156,7 @@ wave_%: sim_%
 
 wave:
 	@if [ -z "$(TB)" ]; then \
-	  echo "usage: make wave TB=<async_fifo|tmds_encoder|video_timing_gen|dvp_pixel_chain|i2c_master>"; \
+	  echo "usage: make wave TB=<async_fifo|tmds_encoder|video_timing_gen|dvp_pixel_chain|i2c_master|cam_power_sequencer>"; \
 	  exit 1; \
 	fi
 	$(MAKE) wave_$(TB)
@@ -183,7 +189,7 @@ synth_ext: $(BUILD)
 # Place & route + static timing analysis against the real LFE5U-25F-6BG256C
 # ---------------------------------------------------------------------------
 pnr: synth
-	nextpnr-ecp5 --25k --package CABGA256 --speed 6 --seed 4 \
+	nextpnr-ecp5 --25k --package CABGA256 --speed 6 --seed 5 \
 	  --json $(BUILD)/$(TOP720)_720p60.json --lpf $(LPF) \
 	  --textcfg $(BUILD)/$(TOP720)_720p60.config \
 	  2>&1 | tee $(BUILD)/pnr_720p60.log

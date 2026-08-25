@@ -24,7 +24,8 @@ module dvp_camera_hdmi_top #(
     parameter BYTE_SWAP     = 1'b0,
     parameter HREF_POL      = 1'b1,
     parameter VSYNC_POL     = 1'b1,
-    parameter I2C_DEV_ADDR7 = 7'h21
+    parameter I2C_DEV_ADDR7 = 7'h3C,      // default = OV5640 (Waveshare DVP module); 0x21 was the earlier generic placeholder
+    parameter ADDR_BYTES    = 2           // 2 = 16-bit reg addressing (OV5640/OV5647-class); 1 = 8-bit (OV7670/OV2640-class)
 ) (
     input  wire        clk,          // 50MHz board reference oscillator (site M1)
     input  wire  [1:0] button,       // active-low buttons; button[0]=reset, button[1]=pattern select
@@ -36,6 +37,17 @@ module dvp_camera_hdmi_top #(
     input  wire [7:0]   cam_d,
     inout  wire          cam_scl,
     inout  wire          cam_sda,
+
+    // Camera power-up control -- required by modules with no onboard
+    // oscillator/reset-default (e.g. the Waveshare OV5640 module this
+    // project targets): cam_mclk is the sensor's master clock input
+    // (24MHz, generated on-chip -- see clk_gen_mclk.v), cam_rst_n is its
+    // active-low RESET pin, cam_pwdn is its active-high PWDN pin. If your
+    // camera module ties these off on its own PCB (onboard crystal +
+    // pull resistors), these outputs are harmless to leave unconnected.
+    output wire         cam_mclk,
+    output wire         cam_rst_n,
+    output wire         cam_pwdn,
 
     // native GPDI/TMDS output
     output wire [3:0]   gpdi_dp,      // [0]=Blue [1]=Green [2]=Red [3]=Clock
@@ -76,6 +88,30 @@ module dvp_camera_hdmi_top #(
         if (!pll_locked) rst_pixel_sr <= 4'hF;
         else             rst_pixel_sr <= {rst_pixel_sr[2:0], rst_btn};
     wire rst_pixel = rst_pixel_sr[3];
+
+    // ------------------------------------------------------------------
+    // Camera MCLK generation + power-up/reset sequencing
+    // ------------------------------------------------------------------
+    wire mclk_locked;
+
+    clk_gen_mclk u_mclk_pll (
+        .clk_in(clk), .cam_mclk(cam_mclk), .locked(mclk_locked)
+    );
+
+    wire cam_seq_done;
+
+    cam_power_sequencer u_cam_seq (
+        .clk(cam_mclk), .mclk_locked(mclk_locked), .rst_async(rst_btn),
+        .cam_pwdn(cam_pwdn), .cam_rst_n(cam_rst_n), .seq_done(cam_seq_done)
+    );
+
+    // synchronize seq_done (cam_mclk domain) into clk_pixel domain, where
+    // the I2C config sequencer below actually runs
+    reg [1:0] seq_done_sync;
+    always @(posedge clk_pixel or posedge rst_pixel)
+        if (rst_pixel) seq_done_sync <= 2'b00;
+        else           seq_done_sync <= {seq_done_sync[0], cam_seq_done};
+    wire cam_seq_done_px = seq_done_sync[1];
 
     // ------------------------------------------------------------------
     // Camera capture chain (cam_pclk domain)
@@ -194,20 +230,29 @@ module dvp_camera_hdmi_top #(
     );
 
     // ------------------------------------------------------------------
-    // Camera I2C configuration sequencer (runs once after PLL lock)
+    // Camera I2C configuration sequencer -- starts once BOTH the video
+    // pixel-clock PLL has locked AND the camera's own power-up/reset
+    // sequence has completed (cam_seq_done_px). Starting I2C before the
+    // sensor is out of reset/settled is exactly the kind of thing that
+    // silently produces all-NACK behaviour on modules like the OV5640.
     // ------------------------------------------------------------------
     wire i2c_start, i2c_busy, i2c_done, i2c_nack;
-    wire [7:0] i2c_reg_addr, i2c_reg_data;
+    wire [15:0] i2c_reg_addr;
+    wire [7:0]  i2c_reg_data;
     wire cfg_done;
 
-    reg go_d1, go_d2;
+    wire both_ready = pll_locked & cam_seq_done_px;
+    reg  both_ready_d1, both_ready_d2;
     always @(posedge clk_pixel) begin
-        go_d1 <= pll_locked;
-        go_d2 <= go_d1;
+        both_ready_d1 <= both_ready;
+        both_ready_d2 <= both_ready_d1;
     end
-    wire cfg_go = go_d1 & ~go_d2; // one-shot pulse on PLL lock
+    wire cfg_go = both_ready_d1 & ~both_ready_d2; // one-shot pulse
 
-    i2c_master #(.CLK_FREQ_HZ(74_286_000), .I2C_FREQ_HZ(100_000), .DEV_ADDR7(I2C_DEV_ADDR7)) u_i2c (
+    i2c_master #(
+        .CLK_FREQ_HZ(74_286_000), .I2C_FREQ_HZ(100_000),
+        .DEV_ADDR7(I2C_DEV_ADDR7), .ADDR_BYTES(ADDR_BYTES)
+    ) u_i2c (
         .clk(clk_pixel), .rst(rst_pixel),
         .start(i2c_start), .reg_addr(i2c_reg_addr), .reg_data(i2c_reg_data),
         .busy(i2c_busy), .done(i2c_done), .nack_error(i2c_nack),
