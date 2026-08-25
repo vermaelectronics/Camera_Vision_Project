@@ -194,7 +194,7 @@ pnr: synth
 	@echo "during development, see README.md 'Timing closure notes'."
 
 pnr_ext: synth_ext
-	nextpnr-ecp5 --25k --package CABGA256 --speed 6 --seed 4 \
+	nextpnr-ecp5 --25k --package CABGA256 --speed 6 --seed 6 \
 	  --json $(BUILD)/$(TOPEXT).json --lpf $(LPF) \
 	  --textcfg $(BUILD)/$(TOPEXT).config \
 	  2>&1 | tee $(BUILD)/pnr_ext.log

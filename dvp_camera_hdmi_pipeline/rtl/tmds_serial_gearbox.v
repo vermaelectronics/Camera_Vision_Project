@@ -77,6 +77,14 @@ module tmds_serial_gearbox (
     wire [29:0] fifo_rdata;
     wire        fifo_empty, fifo_full;
 
+    // mod-5 nibble counter: position within the current 20-bit (2-pixel)
+    // window. Declared here, ahead of the async_fifo instantiation below
+    // that connects fifo_rd_en to a port, for declare-before-use
+    // portability (see async_fifo.v's header comment on the same issue).
+    reg [2:0] nibble_cnt = 3'd0;
+    wire      wrap = (nibble_cnt == 3'd4);
+    wire      fifo_rd_en = wrap & ~fifo_empty;
+
     async_fifo #(
         .WIDTH(30),
         .DEPTH(16)
@@ -94,11 +102,6 @@ module tmds_serial_gearbox (
         .rd_data (fifo_rdata),
         .rd_empty(fifo_empty)
     );
-
-    // mod-5 nibble counter: position within the current 20-bit (2-pixel) window
-    reg [2:0] nibble_cnt = 3'd0;
-    wire      wrap = (nibble_cnt == 3'd4);
-    wire      fifo_rd_en = wrap & ~fifo_empty;
 
     reg [9:0] sym_a_r, sym_b_r, sym_a_g, sym_b_g, sym_a_b, sym_b_b;
 

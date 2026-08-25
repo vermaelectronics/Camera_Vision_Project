@@ -56,6 +56,17 @@ module async_fifo #(
     // Read pointer synchronized into write clock domain
     reg [ADDR_W:0] rd_gray_s1 = 0, rd_gray_s2 = 0;
 
+    // rd_gray_ptr itself is the read-side pointer register, declared and
+    // driven in the "Read-side pointer" section further down -- declared
+    // here (ahead of its first use, in the write-domain synchronizer
+    // immediately below) purely for declare-before-use portability. Some
+    // Icarus Verilog builds (this was found against an older bundled
+    // release) reject a forward reference to a reg declared later in the
+    // same module, even though later-declared-is-fine is standard Verilog;
+    // declaring it here costs nothing and avoids the whole class of issue.
+    reg [ADDR_W:0] rd_bin = {(ADDR_W+1){1'b0}};
+    reg [ADDR_W:0] rd_gray_ptr = {(ADDR_W+1){1'b0}};
+
     // "Already full" -- built from the CURRENT (already registered) wr_gray,
     // not the predictive wr_gray_p1. Using the predictive value here (the
     // textbook Cummings formulation, meant for an *external* controller to
@@ -108,8 +119,9 @@ module async_fifo #(
     // ------------------------------------------------------------------
     // Read-side pointer (binary + Gray) and empty flag
     // ------------------------------------------------------------------
-    reg [ADDR_W:0] rd_bin = {(ADDR_W+1){1'b0}};
-    reg [ADDR_W:0] rd_gray_ptr = {(ADDR_W+1){1'b0}};
+    // (rd_bin / rd_gray_ptr themselves are declared up top, near the
+    // write-domain synchronizer that needs to see them first -- see the
+    // comment there.)
 
     // Same construction as the write side: "if we were to read this cycle"
     // pointer, computed unconditionally so it never feeds back into

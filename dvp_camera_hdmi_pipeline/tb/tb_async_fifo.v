@@ -39,6 +39,16 @@ module tb_async_fifo;
 
     integer errors = 0;
 
+    // Phase 2 (burst test) scoreboard -- declared up here, ahead of the
+    // watchdog block below that references sb_wr_ptr/sb_rd_ptr, for
+    // declare-before-use portability (some Icarus Verilog builds reject a
+    // forward reference to a reg/integer declared later in the same
+    // module, even though later-declared-is-fine is standard Verilog).
+    reg [7:0] sb_data [0:4095];
+    integer   sb_wr_ptr = 0;
+    integer   sb_rd_ptr = 0;
+    integer   sb_errors = 0;
+
     // ---- Phase 1: fill past capacity, confirm full + drop behaviour ------
     reg [7:0] expect_q [0:255];
     integer   exp_wr = 0, exp_rd = 0;
@@ -125,10 +135,8 @@ module tb_async_fifo;
     end
 
     // ---- Phase 2: continuous burst test with a scoreboard -----------------
-    reg [7:0] sb_data [0:4095];
-    integer   sb_wr_ptr = 0;
-    integer   sb_rd_ptr = 0;
-    integer   sb_errors = 0;
+    // (sb_data / sb_wr_ptr / sb_rd_ptr / sb_errors declared up top -- see
+    // comment there.)
     integer   n_words;
 
     task run_burst_test;

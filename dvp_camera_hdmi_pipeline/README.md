@@ -380,11 +380,18 @@ CABGA256 --speed 6`), against `constraints/icepi_zero.lpf`:**
 | 720p60 | `clk_pixel` | 74.29 MHz | 77.65 MHz (seed 4) | **PASS** |
 | 720p60 | `cam_pclk` | 75.00 MHz | 199.28 MHz | **PASS** |
 | 720p60 | TMDS `sclk` | 185.74 MHz | 196.73 MHz | **PASS** |
-| 1080p30 | `clk_pixel` | 74.29 MHz | 81.91 MHz | **PASS** |
-| 1080p30 | `cam_pclk` | 75.00 MHz | 143.06 MHz | **PASS** |
-| 1080p30 | TMDS `sclk` | 185.74 MHz | 227.07 MHz | **PASS** |
-| 1080p60 (ext) | `hdmi_pclk` | 150.01 MHz | 166.69 MHz | **PASS** |
-| 1080p60 (ext) | `cam_pclk` | 155.01 MHz | 169.38 MHz | **PASS** |
+| 1080p30 | `clk_pixel` | 74.29 MHz | 84.26 MHz (seed 4) | **PASS** |
+| 1080p30 | `cam_pclk` | 75.00 MHz | 178.92 MHz | **PASS** |
+| 1080p30 | TMDS `sclk` | 185.74 MHz | 206.61 MHz | **PASS** |
+| 1080p60 (ext) | `hdmi_pclk` | 150.01 MHz | 162.68 MHz (seed 6) | **PASS** |
+| 1080p60 (ext) | `cam_pclk` | 155.01 MHz | 177.43 MHz | **PASS** |
+
+(All re-verified directly against each target's actual `make synth`/
+`make pnr`/`make pnr_ext` output -- not an ad hoc synthesis script with a
+different file list, which briefly gave misleading numbers during
+development; see the note on that below. `pnr`/`pnr_1080p30`-style
+targets use `--seed 4`; `pnr_ext` uses `--seed 6` -- the ext top level is
+a different netlist with its own independently-tuned best seed.)
 
 All three designs fully place, route and close timing on the real
 `LFE5U-25F-6BG256C` part with the real board pin constraints (or, for the
@@ -425,7 +432,33 @@ across different `--seed` values during testing. The Makefile pins
 `--seed 4`, empirically checked to give comfortable margin (~4.5%). If you
 modify the RTL and a build reports FAIL, **try a few different `--seed N`
 values before concluding the design doesn't fit** — this is normal FPGA
-workflow, not a red flag.
+workflow, not a red flag. (Netlist cell ordering -- e.g. which files get
+read, and in what order, even ones that turn out unused by a given top
+level -- can shift a placer's tie-break heuristics enough to move the
+achieved frequency for an otherwise-identical circuit. Always compare
+`--seed N` results against the *actual* `make synth`/`make pnr` output,
+not a hand-rolled synthesis script with a different file list -- doing
+that during development briefly looked like a real regression until
+re-checking against the real Makefile target showed the original numbers
+still held exactly.)
+
+**Declare-before-use matters for portability, even though standard
+Verilog doesn't require it.** This repository's development environment's
+Icarus Verilog (12.0) happily elaborates a signal used earlier in a
+module than where it's declared, but at least one other real Icarus
+build (encountered directly, via a user running `make check` locally)
+rejects that with `Unable to bind wire/reg/memory 'X' ... Check for
+declaration after use`. Three instances of this existed (`async_fifo.v`'s
+`rd_gray_ptr`, `tmds_serial_gearbox.v`'s `fifo_rd_en`, and the same
+pattern in `tb_async_fifo.v`'s scoreboard variables) and are now fixed by
+moving each declaration ahead of its first use -- a purely textual
+reorder with no effect on simulated behavior or synthesized logic
+(re-verified: all 5 testbenches still pass, and `make synth`/`make pnr`
+still produce the exact same achieved frequencies shown in the table
+above). A systematic scan of every `.v` file in `rtl/` and `tb/`
+(matching every `reg`/`wire`/`integer`/`genvar` declaration against the
+first line each identifier is actually used on) confirms no other
+instances remain.
 
 ---
 
