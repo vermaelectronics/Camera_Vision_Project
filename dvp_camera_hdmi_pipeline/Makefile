@@ -46,7 +46,7 @@ RTL_SOURCES = \
 	rtl/i2c_master.v \
 	rtl/cam_config_rom.v
 
-.PHONY: all sim synth synth_1080p30 synth_ext pnr pnr_ext bit prog clean
+.PHONY: all sim synth synth_1080p30 synth_ext pnr pnr_ext bit prog clean wave sim_% wave_%
 
 all: pnr
 
@@ -54,24 +54,46 @@ $(BUILD):
 	mkdir -p $(BUILD)
 
 # ---------------------------------------------------------------------------
-# Simulation (Icarus Verilog) -- runs every testbench, prints PASS/FAIL
+# Simulation (Icarus Verilog) -- one target per testbench, plus `sim` to run
+# all of them. Each testbench calls $dumpfile/$dumpvars, so running any of
+# these also (re)writes its .vcd waveform -- see the `wave` targets below.
 # ---------------------------------------------------------------------------
-sim: $(BUILD)
-	@echo "== tb_async_fifo =="
-	iverilog -g2005 -o $(BUILD)/tb_async_fifo.vvp rtl/async_fifo.v tb/tb_async_fifo.v
-	vvp $(BUILD)/tb_async_fifo.vvp
-	@echo "== tb_tmds_encoder =="
-	iverilog -g2005 -o $(BUILD)/tb_tmds_encoder.vvp rtl/tmds_encoder.v tb/tb_tmds_encoder.v
-	vvp $(BUILD)/tb_tmds_encoder.vvp
-	@echo "== tb_video_timing_gen =="
-	iverilog -g2005 -o $(BUILD)/tb_video_timing_gen.vvp rtl/video_timing_gen.v tb/tb_video_timing_gen.v
-	vvp $(BUILD)/tb_video_timing_gen.vvp
-	@echo "== tb_dvp_pixel_chain =="
-	iverilog -g2005 -o $(BUILD)/tb_dvp_pixel_chain.vvp rtl/dvp_capture.v rtl/pixel_formatter.v tb/tb_dvp_pixel_chain.v
-	vvp $(BUILD)/tb_dvp_pixel_chain.vvp
-	@echo "== tb_i2c_master =="
-	iverilog -g2005 -o $(BUILD)/tb_i2c_master.vvp rtl/i2c_master.v tb/tb_i2c_master.v
-	vvp $(BUILD)/tb_i2c_master.vvp
+TB_async_fifo        = rtl/async_fifo.v tb/tb_async_fifo.v
+TB_tmds_encoder       = rtl/tmds_encoder.v tb/tb_tmds_encoder.v
+TB_video_timing_gen    = rtl/video_timing_gen.v tb/tb_video_timing_gen.v
+TB_dvp_pixel_chain      = rtl/dvp_capture.v rtl/pixel_formatter.v tb/tb_dvp_pixel_chain.v
+TB_i2c_master             = rtl/i2c_master.v tb/tb_i2c_master.v
+TB_NAMES = async_fifo tmds_encoder video_timing_gen dvp_pixel_chain i2c_master
+
+sim: $(foreach t,$(TB_NAMES),sim_$(t))
+
+sim_%: $(BUILD)
+	@echo "== tb_$* =="
+	iverilog -g2005 -o $(BUILD)/tb_$*.vvp $(TB_$*)
+	vvp $(BUILD)/tb_$*.vvp
+
+# ---------------------------------------------------------------------------
+# Waveform viewing (Icarus Verilog + GTKWave)
+# ---------------------------------------------------------------------------
+# `make wave_<name>` (re)runs that one testbench, then opens the .vcd it
+# just wrote in GTKWave. `make wave TB=<name>` does the same thing via a
+# variable, e.g.:
+#   make wave TB=tmds_encoder
+# Valid <name> values: async_fifo, tmds_encoder, video_timing_gen,
+# dvp_pixel_chain, i2c_master (same names as the sim_<name> targets above).
+# Icarus writes each testbench's .vcd to the directory `make` was invoked
+# from (the project root), not into $(BUILD) -- that's where GTKWave is
+# pointed below. Needs `gtkwave` on PATH (`apt install gtkwave`, or it's
+# bundled in oss-cad-suite).
+wave_%: sim_%
+	gtkwave tb_$*.vcd &
+
+wave:
+	@if [ -z "$(TB)" ]; then \
+	  echo "usage: make wave TB=<async_fifo|tmds_encoder|video_timing_gen|dvp_pixel_chain|i2c_master>"; \
+	  exit 1; \
+	fi
+	$(MAKE) wave_$(TB)
 
 # ---------------------------------------------------------------------------
 # Synthesis

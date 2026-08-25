@@ -33,6 +33,19 @@ module tb_video_timing_gen;
     reg fs_prev;
     integer fs_count;
 
+    // This testbench runs a full 720p frame (1,237,500 clocks) to check the
+    // frame period exactly -- dumping the whole thing would be a huge
+    // (100MB+) VCD. Waveform inspection only ever needs the first few
+    // lines, so the dump is switched off again after 200us (~3 lines'
+    // worth) in a separate, concurrently-running initial block, while the
+    // simulation below keeps running to completion for the actual
+    // PASS/FAIL check.
+    initial begin
+        $dumpfile("tb_video_timing_gen.vcd");
+        $dumpvars(0, tb_video_timing_gen);
+        #200_000 $dumpoff;
+    end
+
     initial begin
         rst = 1;
         de_pixels = 0;
