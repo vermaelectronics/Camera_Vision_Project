@@ -96,9 +96,12 @@ LOCATE COMP "cam_rst_n" SITE "R3";  // gpio[17] (physical header pin 11)
 LOCATE COMP "cam_pwdn"  SITE "N4";  // gpio[18] (physical header pin 12)
 
 // UART hardware-status debug output (115200 8N1) -- see uart_debug.v and
-// README.md "UART debug interface". Wire a USB-TTL adapter's RX pin here
-// (plus GND) and open it in PuTTY/minicom.
-LOCATE COMP "uart_tx" SITE "E4";  // gpio[19] (physical header pin 35)
+// README.md "UART debug interface". Routed to the board's own onboard
+// USB-JTAG programmer chip's UART channel (site/IOBUF taken directly from
+// the board's own LPF: "usb_tx" = "Transmit to ftdi") -- this shows up as
+// a second COM port automatically over the SAME USB cable used for
+// `make prog`/openFPGALoader. No external USB-TTL adapter needed.
+LOCATE COMP "uart_tx" SITE "K15";
 
 IOBUF PORT "cam_pclk"  IO_TYPE=LVCMOS33 PULLMODE=NONE;
 IOBUF PORT "cam_href"  IO_TYPE=LVCMOS33 PULLMODE=DOWN;
@@ -116,7 +119,7 @@ IOBUF PORT "cam_sda"   IO_TYPE=LVCMOS33 PULLMODE=UP DRIVE=4 OPENDRAIN=ON;
 IOBUF PORT "cam_mclk"  IO_TYPE=LVCMOS33 DRIVE=4;
 IOBUF PORT "cam_rst_n" IO_TYPE=LVCMOS33 DRIVE=4;
 IOBUF PORT "cam_pwdn"  IO_TYPE=LVCMOS33 DRIVE=4;
-IOBUF PORT "uart_tx"   IO_TYPE=LVCMOS33 DRIVE=4;
+IOBUF PORT "uart_tx"   PULLMODE=UP IO_TYPE=LVCMOS33 DRIVE=4;
 
 FREQUENCY PORT "cam_pclk" 75 MHZ; // worst-case (1080p60-class sensor PCLK); tighten/relax to your sensor's actual PCLK
 FREQUENCY PORT "cam_mclk" 24 MHZ;

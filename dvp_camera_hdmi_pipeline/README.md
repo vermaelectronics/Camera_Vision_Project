@@ -262,7 +262,10 @@ list:
 | `cam_mclk`  | gpio[16] | 36 |
 | `cam_rst_n` | gpio[17] | 11 |
 | `cam_pwdn`  | gpio[18] | 12 |
-| `uart_tx`   | gpio[19] | 35 |
+
+(`uart_tx` isn't in this table — it's routed to the board's onboard
+USB-JTAG programmer chip, not the 40-pin header. See
+[UART debug interface](#uart-debug-interface).)
 
 Freely reassign these in `constraints/icepi_zero.lpf` to whatever's
 convenient for your camera breakout — nothing in the RTL cares which
@@ -312,10 +315,10 @@ interface may never come up reliably.
 ## UART debug interface
 
 `dvp_camera_hdmi_top.v` streams a live, human-readable hardware-status line
-out of `uart_tx` (gpio[19], header pin 35) once per second, at **115200
-baud, 8 data bits, no parity, 1 stop bit (8N1)** — the same information the
-5 status LEDs give you, plus a live camera-frame counter, all readable in a
-terminal instead of interpreted by eye:
+out of `uart_tx` once per second, at **115200 baud, 8 data bits, no
+parity, 1 stop bit (8N1)** — the same information the 5 status LEDs give
+you, plus a live camera-frame counter, all readable in a terminal instead
+of interpreted by eye:
 
 ```
 === DVP Camera->HDMI Pipeline (720p60, OV5640) -- UART Debug ===
@@ -336,31 +339,34 @@ PLL=1 MCLK=1 SEQ=1 CFG=1 NACK=0 BUF=1 MODE=C FRAMES=0x4D
 | `MODE` | `C`(amera) or `P`(attern) — mirrors `led[4]`/`pattern_sel` |
 | `FRAMES` | hex count of camera VSYNC pulses seen since reset — proves the sensor is actually delivering frames, which the LEDs alone can't show (wraps at `0xFF`; it's a liveness indicator, not a precise frame count) |
 
-**Wiring:** you need a USB-to-TTL-serial adapter (FTDI FT232-based, CP2102,
-CH340, etc. — 3.3V logic level, *not* RS232 level, and *not* 5V):
+**Wiring: none needed.** `uart_tx` is routed to the IcePi‑Zero's own
+onboard USB‑JTAG programmer chip's UART channel (`LOCATE COMP "uart_tx"
+SITE "K15"` in `constraints/icepi_zero.lpf` — that site/IOBUF spec is
+taken directly from the board's own published LPF, where it's named
+`usb_tx`, "Transmit to ftdi"). That chip exposes **two** interfaces over
+the same USB cable you already use for `make prog`/openFPGALoader: the
+JTAG/SPI programming channel, and a plain UART bridged straight to your
+PC as a second COM port/`/dev/ttyUSB*` device. No external USB‑TTL
+adapter, no extra wires — just the one cable.
 
-| Adapter pin | Connect to |
-|---|---|
-| RX | `uart_tx` — header pin 35 |
-| GND | any board GND (e.g. header pin 6, alongside the camera's GND) |
+**Viewing it in PuTTY** (Windows): plug in the board's USB cable, check
+Device Manager for the *second* COM port it enumerates (the first is
+usually the JTAG/programming interface — if unsure, unplug/replug and
+watch which port numbers appear/disappear, or just try both), then in
+PuTTY: Connection type = **Serial**, Serial line = that COM port (e.g.
+`COM6`), Speed = **115200**, then under Connection → Serial confirm Data
+bits = 8, Stop bits = 1, Parity = None, Flow control = None. Click Open.
+You should see the banner once at power-up, then a refreshed status line
+every second.
 
-You only need the adapter's RX and GND pins — this is transmit-only from
-the FPGA's side, nothing is received.
+On Linux/macOS, the board should enumerate as two devices, e.g.
+`/dev/ttyUSB0` (JTAG) and `/dev/ttyUSB1` (UART) — check `dmesg` after
+plugging in to see which is which, then: `minicom -D /dev/ttyUSB1 -b
+115200` (or `screen /dev/ttyUSB1 115200`).
 
-**Viewing it in PuTTY** (Windows): plug in the USB-TTL adapter, check
-Device Manager for its COM port number, then in PuTTY: Connection type =
-**Serial**, Serial line = that COM port (e.g. `COM5`), Speed = **115200**,
-then under Connection → Serial confirm Data bits = 8, Stop bits = 1,
-Parity = None, Flow control = None. Click Open. You should see the banner
-once at power-up, then a refreshed status line every second.
-
-On Linux/macOS, `minicom -D /dev/ttyUSB0 -b 115200` (or `screen
-/dev/ttyUSB0 115200`) does the same thing.
-
-If nothing appears: check the adapter's RX is wired to the FPGA's TX
-(`uart_tx`) — not RX-to-RX, a common miswiring — and that the COM
-port/baud rate match exactly (a wrong baud rate produces garbled/no text,
-not an error message).
+If nothing appears: you're likely on the wrong COM port/device (try the
+other one) — the baud rate/8N1 settings matching exactly also matters (a
+wrong baud rate produces garbled/no text, not an error message).
 
 ---
 
@@ -503,22 +509,22 @@ CABGA256 --speed 6`), against `constraints/icepi_zero.lpf`:**
 
 | Design | Clock domain | Target | Achieved | Result |
 |---|---|---|---|---|
-| 720p60 | `clk_pixel` | 74.29 MHz | 83.51 MHz (seed 2) | **PASS** |
-| 720p60 | `cam_pclk` | 75.00 MHz | 202.06 MHz | **PASS** |
-| 720p60 | `cam_mclk` | 24.00 MHz | 167.11 MHz | **PASS** |
-| 720p60 | `clk` (board osc, drives `uart_debug`) | 50.00 MHz | 123.20 MHz | **PASS** |
+| 720p60 | `clk_pixel` | 74.29 MHz | 82.45 MHz (seed 5) | **PASS** |
+| 720p60 | `cam_pclk` | 75.00 MHz | 223.46 MHz | **PASS** |
+| 720p60 | `cam_mclk` | 24.00 MHz | 179.15 MHz | **PASS** |
+| 720p60 | `clk` (board osc, drives `uart_debug`) | 50.00 MHz | 131.11 MHz | **PASS** |
 | 720p60 | `cam_vsync` (frame-counter clock edge in `uart_debug`) | 1.00 MHz (documentation-only; real rate ≈60Hz) | 894.45 MHz | **PASS** |
-| 720p60 | TMDS `sclk` | 185.74 MHz | 204.16 MHz | **PASS** |
+| 720p60 | TMDS `sclk` | 185.74 MHz | 204.79 MHz | **PASS** |
 | 1080p60 (ext) | `hdmi_pclk` | 150.01 MHz | 157.18 MHz (seed 6) | **PASS** |
 | 1080p60 (ext) | `cam_pclk` | 75.00 MHz | 187.06 MHz | **PASS** |
 
 (720p60 numbers re-verified directly against `make synth` + `make pnr`'s
-actual output. `pnr` uses `--seed 2` (re-tuned after adding
-`uart_tx.v`/`uart_debug.v` — see "Timing closure notes" below); `pnr_ext`
-uses `--seed 6` — the ext top level is a different, unmodified netlist
-with its own independently-tuned best seed, checked with
-`--lpf-allow-unconstrained` since its `hdmi_*` pins aren't assigned real
-sites by default.)
+actual output. `pnr` uses `--seed 5` (re-tuned after moving `uart_tx`
+from a generic `gpio[]` site to the board's dedicated onboard-FTDI UART
+site — see "Timing closure notes" below); `pnr_ext` uses `--seed 6` — the
+ext top level is a different, unmodified netlist with its own
+independently-tuned best seed, checked with `--lpf-allow-unconstrained`
+since its `hdmi_*` pins aren't assigned real sites by default.)
 
 Both designs fully place, route and close timing on the real
 `LFE5U-25F-6BG256C` part with the real board pin constraints (or, for the
@@ -556,37 +562,43 @@ assumed:
 timing-driven placer isn't perfectly deterministic across seeds/runs) —
 the same design measured anywhere from ~68 MHz to ~83 MHz on `clk_pixel`
 across different `--seed` values during testing. The Makefile currently
-pins `--seed 2`, empirically checked to give comfortable margin (~12%). If
-you modify the RTL and a build reports FAIL, **try a few different
-`--seed N` values before concluding the design doesn't fit** — this is
-normal FPGA workflow, not a red flag. (Netlist cell ordering -- e.g. which
-files get read, and in what order, even ones that turn out unused by a
-given top level -- can shift a placer's tie-break heuristics enough to
-move the achieved frequency for an otherwise-identical circuit. Always
-compare `--seed N` results against the *actual* `make synth`/`make pnr`
-output, not a hand-rolled synthesis script with a different file list --
-doing that during development briefly looked like a real regression until
+pins `--seed 5`, empirically checked to give comfortable margin (~11%). If
+you modify the RTL *or the LPF* and a build reports FAIL, **try a few
+different `--seed N` values before concluding the design doesn't fit** —
+this is normal FPGA workflow, not a red flag. (Netlist cell ordering --
+e.g. which files get read, and in what order, even ones that turn out
+unused by a given top level -- can shift a placer's tie-break heuristics
+enough to move the achieved frequency for an otherwise-identical circuit;
+a pin/site reassignment in the LPF can do the same, since it changes where
+the placer has to route to, not just what it's routing. Always compare
+`--seed N` results against the *actual* `make synth`/`make pnr` output,
+not a hand-rolled synthesis script with a different file list -- doing
+that during development briefly looked like a real regression until
 re-checking against the real Makefile target showed the original numbers
 still held exactly.)
 
-**This seed has been re-tuned twice already, and will likely need
-re-tuning again if you change the RTL.** `--seed 4` was the original pick
-(before `clk_gen_mclk.v`, `cam_power_sequencer.v`, and the widened
-`ADDR_BYTES`-capable `i2c_master.v`/`cam_config_rom.v` were added for
-OV5640 support) and gave ~77.65 MHz with good margin at the time. Adding
-that logic shifted the netlist enough that `--seed 4` alone dropped to
-74.04 MHz — a hair under the 74.29 MHz target — while every other seed
-tried still passed comfortably, and `--seed 5` was picked as the best
-margin found in that sweep (79.62 MHz). Later, adding `uart_tx.v` +
+**This seed has been re-tuned three times already, and will likely need
+re-tuning again if you change the RTL or LPF.** `--seed 4` was the
+original pick (before `clk_gen_mclk.v`, `cam_power_sequencer.v`, and the
+widened `ADDR_BYTES`-capable `i2c_master.v`/`cam_config_rom.v` were added
+for OV5640 support) and gave ~77.65 MHz with good margin at the time.
+Adding that logic shifted the netlist enough that `--seed 4` alone
+dropped to 74.04 MHz — a hair under the 74.29 MHz target — while every
+other seed tried still passed comfortably, and `--seed 5` was picked as
+the best margin found in that sweep (79.62 MHz). Adding `uart_tx.v` +
 `uart_debug.v` (and dropping the unused 1080p30 `RESOLUTION` branch) grew
-the netlist again; `--seed 5` alone still passed but with a thinner
-margin, so a fresh sweep was re-run against the real `make synth` output
-(every seed 1–10 passed comfortably, 77.47–83.51 MHz), and `--seed 2` was
-picked as the new best margin, confirmed reproducible across repeated
-runs. This is the run-to-run variance described above working as
-intended, not a sign the design has gotten marginal — re-sweep after any
-netlist-shifting RTL change, exactly per the advice in the paragraph
-above.
+the netlist again, and a fresh sweep landed on `--seed 2` (83.51 MHz).
+Then, moving `uart_tx` from a generic `gpio[19]` header site to the
+board's dedicated onboard-FTDI UART site (`K15`, so the status output
+works over the same USB cable used for flashing, with no external
+adapter) shifted routing enough that `--seed 2` alone dropped to a
+thinner ~78 MHz margin; a fresh sweep against that exact LPF change
+landed back on `--seed 5` (82.45 MHz) -- a coincidental seed-number
+repeat from an earlier, unrelated sweep, not a sign anything reverted.
+Each of these was the same run-to-run variance described above working
+as intended, not a sign the design has gotten marginal — re-sweep after
+any netlist- or placement-shifting change, exactly per the advice in the
+paragraph above.
 
 **Declare-before-use matters for portability, even though standard
 Verilog doesn't require it.** This repository's development environment's
@@ -612,11 +624,12 @@ instances remain.
 
 1. `make pnr` — confirm every clock domain reports **PASS** (see the
    [Verification](#verification) table for the full list).
-2. (Optional, but recommended.) Wire up a USB-TTL adapter to `uart_tx` per
-   [UART debug interface](#uart-debug-interface) and have PuTTY/minicom
-   open before flashing. The status line gives you a live, readable view
-   of everything the LEDs show plus a frame counter, which makes the rest
-   of this checklist much faster to diagnose than reading LEDs alone.
+2. (Optional, but recommended — and no extra wiring needed, see [UART
+   debug interface](#uart-debug-interface)) open PuTTY/minicom on the
+   board's second COM port before flashing. The status line gives you a
+   live, readable view of everything the LEDs show plus a frame counter,
+   which makes the rest of this checklist much faster to diagnose than
+   reading LEDs alone.
 3. Flash the bitstream with no camera connected. `led[0]` (PLL lock)
    should light immediately; the UART banner should print, followed by a
    status line showing `PLL=1` and everything else `0`.
