@@ -5,16 +5,16 @@
 #   make sim            simulate every testbench in tb/ with Icarus Verilog
 #                          (stops at the first FAIL -- a Makefile recipe line
 #                          failing aborts the target)
-#   make check           runs all 6 testbenches regardless of individual
+#   make check           runs all 8 testbenches regardless of individual
 #                          failures, then prints one PASS/FAIL summary table
 #                          and exits non-zero if anything failed -- the one
 #                          command to run to confirm "everything passes"
 #   make wave_<name>       run one testbench then open its .vcd in GTKWave
 #                          (or: make wave TB=<name>); valid <name>s: async_fifo,
 #                          tmds_encoder, video_timing_gen, dvp_pixel_chain,
-#                          i2c_master, cam_power_sequencer
-#   make synth           synthesize dvp_camera_hdmi_top (720p60) with Yosys
-#   make synth_1080p30    synthesize dvp_camera_hdmi_top for 1080p30
+#                          i2c_master, cam_power_sequencer, uart_tx, uart_debug
+#   make synth           synthesize dvp_camera_hdmi_top (720p60, the only
+#                          resolution this design supports) with Yosys
 #   make synth_ext        synthesize dvp_camera_hdmi_top_ext (external-transmitter 1080p60)
 #   make pnr               place & route the 720p60 build against constraints/icepi_zero.lpf
 #   make bit                pack a .bit bitstream (needs ecppack from prjtrellis, see below)
@@ -37,7 +37,6 @@
 # ============================================================================
 
 TOP720        = dvp_camera_hdmi_top
-TOP1080P30    = dvp_camera_hdmi_top
 TOPEXT        = dvp_camera_hdmi_top_ext
 LPF           = constraints/icepi_zero.lpf
 BUILD         = build
@@ -56,9 +55,11 @@ RTL_SOURCES = \
 	rtl/tmds_serial_gearbox.v \
 	rtl/test_pattern_gen.v \
 	rtl/i2c_master.v \
-	rtl/cam_config_rom.v
+	rtl/cam_config_rom.v \
+	rtl/uart_tx.v \
+	rtl/uart_debug.v
 
-.PHONY: all sim check synth synth_1080p30 synth_ext pnr pnr_ext bit prog clean wave sim_% wave_%
+.PHONY: all sim check synth synth_ext pnr pnr_ext bit prog clean wave sim_% wave_%
 
 all: pnr
 
@@ -76,7 +77,9 @@ TB_video_timing_gen    = rtl/video_timing_gen.v tb/tb_video_timing_gen.v
 TB_dvp_pixel_chain      = rtl/dvp_capture.v rtl/pixel_formatter.v tb/tb_dvp_pixel_chain.v
 TB_i2c_master             = rtl/i2c_master.v tb/tb_i2c_master.v
 TB_cam_power_sequencer   = rtl/cam_power_sequencer.v tb/tb_cam_power_sequencer.v
-TB_NAMES = async_fifo tmds_encoder video_timing_gen dvp_pixel_chain i2c_master cam_power_sequencer
+TB_uart_tx                = rtl/uart_tx.v tb/tb_uart_tx.v
+TB_uart_debug              = rtl/uart_tx.v rtl/uart_debug.v tb/tb_uart_debug.v
+TB_NAMES = async_fifo tmds_encoder video_timing_gen dvp_pixel_chain i2c_master cam_power_sequencer uart_tx uart_debug
 
 sim: $(foreach t,$(TB_NAMES),sim_$(t))
 
@@ -86,7 +89,7 @@ sim_%: $(BUILD)
 	vvp $(BUILD)/tb_$*.vvp
 
 # ---------------------------------------------------------------------------
-# `make check` -- runs all 6 testbenches, does NOT stop at the first failure
+# `make check` -- runs all 8 testbenches, does NOT stop at the first failure
 # (unlike `make sim`, which does -- a Makefile recipe line failing aborts
 # that target), collects every PASS/FAIL, prints one summary table at the
 # end, and exits non-zero if anything failed. This is the one command to
@@ -120,17 +123,19 @@ check: $(BUILD)
 	run_one dvp_pixel_chain      $(TB_dvp_pixel_chain); \
 	run_one i2c_master             $(TB_i2c_master); \
 	run_one cam_power_sequencer      $(TB_cam_power_sequencer); \
+	run_one uart_tx                    $(TB_uart_tx); \
+	run_one uart_debug                   $(TB_uart_debug); \
 	echo ""; \
 	echo "============================================================"; \
 	echo " SUMMARY"; \
 	echo "============================================================"; \
-	for n in async_fifo tmds_encoder video_timing_gen dvp_pixel_chain i2c_master cam_power_sequencer; do \
+	for n in async_fifo tmds_encoder video_timing_gen dvp_pixel_chain i2c_master cam_power_sequencer uart_tx uart_debug; do \
 	  eval "r=\$$result_$$n"; \
 	  printf "  %-20s %s\n" "$$n" "$$r"; \
 	done; \
 	echo "============================================================"; \
 	if [ "$$overall" -eq 0 ]; then \
-	  echo " ALL 6 TESTBENCHES PASSED"; \
+	  echo " ALL 8 TESTBENCHES PASSED"; \
 	else \
 	  echo " AT LEAST ONE TESTBENCH FAILED -- see log above"; \
 	fi; \
@@ -145,8 +150,8 @@ check: $(BUILD)
 # variable, e.g.:
 #   make wave TB=tmds_encoder
 # Valid <name> values: async_fifo, tmds_encoder, video_timing_gen,
-# dvp_pixel_chain, i2c_master, cam_power_sequencer (same names as the
-# sim_<name> targets above).
+# dvp_pixel_chain, i2c_master, cam_power_sequencer, uart_tx, uart_debug
+# (same names as the sim_<name> targets above).
 # Icarus writes each testbench's .vcd to the directory `make` was invoked
 # from (the project root), not into $(BUILD) -- that's where GTKWave is
 # pointed below. Needs `gtkwave` on PATH (`apt install gtkwave`, or it's
@@ -156,7 +161,7 @@ wave_%: sim_%
 
 wave:
 	@if [ -z "$(TB)" ]; then \
-	  echo "usage: make wave TB=<async_fifo|tmds_encoder|video_timing_gen|dvp_pixel_chain|i2c_master|cam_power_sequencer>"; \
+	  echo "usage: make wave TB=<async_fifo|tmds_encoder|video_timing_gen|dvp_pixel_chain|i2c_master|cam_power_sequencer|uart_tx|uart_debug>"; \
 	  exit 1; \
 	fi
 	$(MAKE) wave_$(TB)
@@ -169,17 +174,6 @@ synth: $(BUILD)
 	          synth_ecp5 -top $(TOP720) -json $(BUILD)/$(TOP720)_720p60.json" \
 	          2>&1 | tee $(BUILD)/synth_720p60.log
 
-synth_1080p30: $(BUILD)
-	yosys -p "read_verilog -sv $(RTL_SOURCES); \
-	          chparam -set RESOLUTION 1080P30 dvp_camera_hdmi_top 2>/dev/null; \
-	          read_verilog -sv -Dresolution_1080p30 rtl/$(TOP1080P30).v; \
-	          synth_ecp5 -top $(TOP1080P30) -json $(BUILD)/$(TOP1080P30)_1080p30.json" \
-	          2>&1 | tee $(BUILD)/synth_1080p30.log
-	@echo "NOTE: chparam string-parameter overrides can be finicky from the CLI."
-	@echo "      If this target errors, instantiate dvp_camera_hdmi_top with"
-	@echo "      #(.RESOLUTION(\"1080P30\")) from a tiny wrapper module instead"
-	@echo "      (see README.md 'Building the 1080p30 variant')."
-
 synth_ext: $(BUILD)
 	yosys -p "read_verilog -sv $(RTL_SOURCES) rtl/$(TOPEXT).v; \
 	          synth_ecp5 -top $(TOPEXT) -json $(BUILD)/$(TOPEXT).json" \
@@ -189,7 +183,7 @@ synth_ext: $(BUILD)
 # Place & route + static timing analysis against the real LFE5U-25F-6BG256C
 # ---------------------------------------------------------------------------
 pnr: synth
-	nextpnr-ecp5 --25k --package CABGA256 --speed 6 --seed 9 \
+	nextpnr-ecp5 --25k --package CABGA256 --speed 6 --seed 2 \
 	  --json $(BUILD)/$(TOP720)_720p60.json --lpf $(LPF) \
 	  --textcfg $(BUILD)/$(TOP720)_720p60.config \
 	  2>&1 | tee $(BUILD)/pnr_720p60.log

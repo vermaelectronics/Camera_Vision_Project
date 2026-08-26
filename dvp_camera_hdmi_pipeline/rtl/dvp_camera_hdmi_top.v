@@ -2,24 +2,27 @@
 // dvp_camera_hdmi_top.v -- top level: DVP camera -> native GPDI/TMDS output
 // ----------------------------------------------------------------------------
 // Targets the IcePi-Zero board (Lattice ECP5 LFE5U-25F-6BG256C). Produces
-// native TMDS on the board's GPDI connector at a fixed 74.25MHz-class pixel
-// clock, covering:
-//   RESOLUTION = "720P60"  -> 1280x720 @ 60Hz  (CEA-861 VIC 4)
-//   RESOLUTION = "1080P30" -> 1920x1080 @ 30Hz (same H/V blanking totals as
-//                             1080p60, half the pixel clock -- see
-//                             clk_gen_dvi.v and README.md for why 1080p60
-//                             itself needs the *external-transmitter* top
-//                             level, dvp_camera_hdmi_top_ext.v, instead)
+// native TMDS on the board's GPDI connector at a fixed 74.25MHz pixel clock,
+// 1280x720 @ 60Hz (CEA-861 VIC 4) -- this module is 720p60-only. (An
+// earlier revision also supported 1920x1080@30 via a RESOLUTION parameter;
+// that was dropped to simplify bring-up/debugging to a single fixed
+// configuration. 1080p60 itself needs the *external-transmitter* top
+// level, dvp_camera_hdmi_top_ext.v, instead -- see README.md.)
 //
 // Set CAMERA_FORMAT to match your sensor's DVP output ("RGB565" or
 // "YUYV422"), and edit cam_config_rom.v's register table for your specific
 // sensor part number.
+//
+// Also includes a UART debug output (`uart_tx`, 115200 8N1) that streams a
+// live human-readable hardware status line -- PLL/MCLK lock, I2C config
+// progress, NACK count, buffer-ready, camera mode, and a live camera-frame
+// counter -- to a terminal (PuTTY/minicom) on your PC. See uart_debug.v
+// and README.md "UART debug interface".
 // ============================================================================
 `timescale 1ns / 1ps
 `default_nettype none
 
 module dvp_camera_hdmi_top #(
-    parameter RESOLUTION    = "720P60",   // "720P60" or "1080P30"
     parameter CAMERA_FORMAT = "RGB565",   // "RGB565" or "YUYV422"
     parameter BYTE_SWAP     = 1'b0,
     parameter HREF_POL      = 1'b1,
@@ -52,22 +55,24 @@ module dvp_camera_hdmi_top #(
     // native GPDI/TMDS output
     output wire [3:0]   gpdi_dp,      // [0]=Blue [1]=Green [2]=Red [3]=Clock
 
+    // UART hardware-status debug output (115200 8N1) -- see uart_debug.v
+    output wire         uart_tx,
+
     output wire [4:0]   led
 );
 
     // ------------------------------------------------------------------
-    // Video mode selection
+    // Video mode: fixed 1280x720 @ 60Hz (CEA-861 VIC 4)
     // ------------------------------------------------------------------
-    localparam IS_1080 = (RESOLUTION == "1080P30");
-    localparam integer H_ACTIVE = IS_1080 ? 1920 : 1280;
-    localparam integer H_FRONT  = IS_1080 ? 88   : 110;
-    localparam integer H_SYNC   = IS_1080 ? 44   : 40;
-    localparam integer H_BACK   = IS_1080 ? 148  : 220;
-    localparam integer V_ACTIVE = IS_1080 ? 1080 : 720;
-    localparam integer V_FRONT  = IS_1080 ? 4    : 5;
-    localparam integer V_SYNC   = IS_1080 ? 5    : 5;
-    localparam integer V_BACK   = IS_1080 ? 36   : 20;
-    localparam integer BAR_LOG2 = IS_1080 ? 8    : 7;
+    localparam integer H_ACTIVE = 1280;
+    localparam integer H_FRONT  = 110;
+    localparam integer H_SYNC   = 40;
+    localparam integer H_BACK   = 220;
+    localparam integer V_ACTIVE = 720;
+    localparam integer V_FRONT  = 5;
+    localparam integer V_SYNC   = 5;
+    localparam integer V_BACK   = 20;
+    localparam integer BAR_LOG2 = 7;
 
     // ------------------------------------------------------------------
     // Reset + PLL
@@ -153,8 +158,8 @@ module dvp_camera_hdmi_top #(
     wire        out_de;
 
     video_cdc_buffer #(
-        .DEPTH(IS_1080 ? 8192 : 4096),
-        .PREFILL_WORDS(IS_1080 ? 4096 : 2048)
+        .DEPTH(4096),
+        .PREFILL_WORDS(2048)
     ) u_cdc (
         .cam_pclk(cam_pclk), .cam_rst(rst_cam),
         .cam_pixel_valid(cam_pixel_valid), .cam_rgb(cam_rgb),
@@ -273,6 +278,23 @@ module dvp_camera_hdmi_top #(
     assign led[2] = buf_ready;
     assign led[3] = i2c_nack;      // lit = at least one NACK seen during config
     assign led[4] = pattern_sel;
+
+    // ------------------------------------------------------------------
+    // UART hardware-status debug output. Driven from `clk` (the always-
+    // running 50MHz board oscillator) rather than clk_pixel, so status
+    // reporting -- including the startup banner -- works even before the
+    // pixel PLL locks; every status input is resynchronized internally.
+    // ------------------------------------------------------------------
+    uart_debug #(
+        .CLK_FREQ_HZ(50_000_000), .BAUD(115200), .TICK_HZ(1)
+    ) u_uart_debug (
+        .clk(clk), .rst(rst_btn),
+        .pll_locked(pll_locked), .mclk_locked(mclk_locked),
+        .cam_seq_done(cam_seq_done), .cfg_done(cfg_done),
+        .i2c_nack(i2c_nack), .buf_ready(buf_ready), .pattern_sel(pattern_sel),
+        .cam_vsync(cam_vsync),
+        .tx(uart_tx)
+    );
 
 endmodule
 

@@ -95,6 +95,11 @@ LOCATE COMP "cam_mclk"  SITE "H3";  // gpio[16] (physical header pin 36)
 LOCATE COMP "cam_rst_n" SITE "R3";  // gpio[17] (physical header pin 11)
 LOCATE COMP "cam_pwdn"  SITE "N4";  // gpio[18] (physical header pin 12)
 
+// UART hardware-status debug output (115200 8N1) -- see uart_debug.v and
+// README.md "UART debug interface". Wire a USB-TTL adapter's RX pin here
+// (plus GND) and open it in PuTTY/minicom.
+LOCATE COMP "uart_tx" SITE "E4";  // gpio[19] (physical header pin 35)
+
 IOBUF PORT "cam_pclk"  IO_TYPE=LVCMOS33 PULLMODE=NONE;
 IOBUF PORT "cam_href"  IO_TYPE=LVCMOS33 PULLMODE=DOWN;
 IOBUF PORT "cam_vsync" IO_TYPE=LVCMOS33 PULLMODE=DOWN;
@@ -111,6 +116,15 @@ IOBUF PORT "cam_sda"   IO_TYPE=LVCMOS33 PULLMODE=UP DRIVE=4 OPENDRAIN=ON;
 IOBUF PORT "cam_mclk"  IO_TYPE=LVCMOS33 DRIVE=4;
 IOBUF PORT "cam_rst_n" IO_TYPE=LVCMOS33 DRIVE=4;
 IOBUF PORT "cam_pwdn"  IO_TYPE=LVCMOS33 DRIVE=4;
+IOBUF PORT "uart_tx"   IO_TYPE=LVCMOS33 DRIVE=4;
 
 FREQUENCY PORT "cam_pclk" 75 MHZ; // worst-case (1080p60-class sensor PCLK); tighten/relax to your sensor's actual PCLK
 FREQUENCY PORT "cam_mclk" 24 MHZ;
+
+// cam_vsync is used as a clock edge inside uart_debug.v's frame counter
+// (see its header comment) -- nextpnr auto-infers a clock domain for it
+// and, left unconstrained, guesses a conservative default. The real rate
+// is the video frame rate (~60Hz) -- several orders of magnitude below
+// any achievable Fmax on this part -- so this constraint exists purely
+// for documentation/STA-report clarity, not because it's remotely tight.
+FREQUENCY PORT "cam_vsync" 1 MHZ;

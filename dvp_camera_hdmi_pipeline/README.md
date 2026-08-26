@@ -23,14 +23,15 @@ paper design.
 4. [Clocking](#clocking)
 5. [Module reference](#module-reference)
 6. [Wiring the camera](#wiring-the-camera)
-7. [Adapting to your sensor](#adapting-to-your-sensor)
-8. [Building](#building)
-9. [Simulating](#simulating)
-10. [Verification](#verification)
-11. [Timing closure notes](#timing-closure-notes)
-12. [Bring-up checklist](#bring-up-checklist)
-13. [Known limitations / future work](#known-limitations--future-work)
-14. [License](#license)
+7. [UART debug interface](#uart-debug-interface)
+8. [Adapting to your sensor](#adapting-to-your-sensor)
+9. [Building](#building)
+10. [Simulating](#simulating)
+11. [Verification](#verification)
+12. [Timing closure notes](#timing-closure-notes)
+13. [Bring-up checklist](#bring-up-checklist)
+14. [Known limitations / future work](#known-limitations--future-work)
+15. [License](#license)
 
 ---
 
@@ -38,8 +39,8 @@ paper design.
 
 ```
 dvp_camera_hdmi_pipeline/
-├── rtl/                       14 synthesizable Verilog modules (see Module reference)
-├── tb/                        6 self-checking testbenches (all passing, see Verification)
+├── rtl/                       16 synthesizable Verilog modules (see Module reference)
+├── tb/                        8 self-checking testbenches (all passing, see Verification)
 ├── constraints/
 │   └── icepi_zero.lpf         Real pin/site constraints for the IcePi-Zero board
 ├── Makefile                   sim / synth / pnr / bit / prog targets
@@ -50,7 +51,7 @@ Two top-level designs, both built from the same shared RTL blocks:
 
 | Top level | Resolution(s) | Output | Needs |
 |---|---|---|---|
-| `dvp_camera_hdmi_top.v` | **1280×720@60Hz** and **1920×1080@30Hz** | native GPDI/TMDS (the board's onboard mini-HDMI-alike connector) | nothing extra — drives the connector directly; includes a 24MHz MCLK PLL + PWDN/RESET sequencer for the Waveshare OV5640 |
+| `dvp_camera_hdmi_top.v` | **1280×720@60Hz** (the only resolution this top level supports) | native GPDI/TMDS (the board's onboard mini-HDMI-alike connector) | nothing extra — drives the connector directly; includes a 24MHz MCLK PLL + PWDN/RESET sequencer for the Waveshare OV5640, and a UART debug output |
 | `dvp_camera_hdmi_top_ext.v` | **1920×1080@60Hz** (true 60Hz) | 24-bit parallel RGB + HSYNC/VSYNC/DE + pixel clock | an external HDMI/DVI transmitter IC (ADV7511/ADV7513, IT6613/IT66121, SiI9022-class); does not yet include the MCLK/power-sequencer additions, see [Known limitations](#known-limitations--future-work) |
 
 Both include:
@@ -86,18 +87,22 @@ run at (realistically ~350–400 MHz on a `-6` speed‑grade part; this is the
 same ceiling DDR3‑800 SDRAM controllers on ECP5 run into). **This is a real
 silicon limit, not a limitation of this RTL.**
 
-720p60 and 1080p30 both need only **74.25 MHz** pixel clock (yes — CEA‑861
-defines 1080p at 30/25/24 Hz using the *same* horizontal/vertical blanking
-totals as the 60/50/48 Hz modes, just at half the pixel clock), so their
-ECLK requirement is 371.25 MHz — comfortably inside the ECP5's real
-capability, and verified to place, route and close timing in this
-repository (see [Verification](#verification)).
+720p60 needs only **74.25 MHz** pixel clock, so its ECLK requirement is
+371.25 MHz — comfortably inside the ECP5's real capability, and verified to
+place, route and close timing in this repository (see
+[Verification](#verification)). (CEA‑861 also defines 1080p at 30/25/24 Hz
+using the *same* horizontal/vertical blanking totals as the 60/50/48 Hz
+modes, just at half the pixel clock, so 1080p30 would fit the same ECLK
+budget as 720p60 — an earlier revision of `dvp_camera_hdmi_top.v` supported
+both via a resolution parameter; that was dropped to keep the design fixed
+to a single, simpler-to-debug configuration. Re-adding 1080p30 would be a
+small change if you want it back — see the header comment history in
+`dvp_camera_hdmi_top.v`.)
 
 So, two honest options are provided instead of one design that would quietly
 not work on real hardware:
 
-1. **`dvp_camera_hdmi_top.v`** — native GPDI/TMDS output, for 720p60 (full
-   native frame rate) or 1080p30 (full native resolution, half frame rate)
+1. **`dvp_camera_hdmi_top.v`** — native GPDI/TMDS output, fixed at 720p60,
    directly out of the board's own connector. **Recommended default.**
 2. **`dvp_camera_hdmi_top_ext.v`** — true 1080p60, by running the pixel
    pipeline at the real 148.5 MHz‑class pixel clock and handing the
@@ -185,7 +190,7 @@ board's own published constraints file, pin `M1`).
 | `clk` (board osc) | 50 MHz | crystal | PLL reference |
 | `cam_mclk` | 24.000 MHz (exact — 50MHz divides evenly) | `clk_gen_mclk.v` (`EHXPLLL`) | camera XCLK/MCLK — required by sensors with no onboard crystal (e.g. OV5640); also clocks `cam_power_sequencer.v` |
 | `cam_pclk` | sensor-dependent (≤ ~155 MHz assumed) | camera sensor | DVP capture |
-| `clk_pixel` (720p60/1080p30 path) | 74.286 MHz (target 74.25, +0.048%) | `clk_gen_dvi.v` (`EHXPLLL`) | video timing, TMDS encode |
+| `clk_pixel` (720p60 path) | 74.286 MHz (target 74.25, +0.048%) | `clk_gen_dvi.v` (`EHXPLLL`) | video timing, TMDS encode |
 | `clk_eclk` | 371.429 MHz (target 371.25, +0.048%) | same PLL, `CLKOP` | TMDS serializer edge clock |
 | `u_ser.sclk` | = `clk_eclk`/2 ≈ 185.7 MHz | `CLKDIVF` | ODDRX2F SCLK |
 | `clk_pixel` (top_ext 1080p60 path) | 150.000 MHz (target 148.5, +1.01%; alt. 148.148 MHz, −0.24%, see `clk_gen_1080p60.v`) | `clk_gen_1080p60.v` | video timing, parallel RGB out |
@@ -224,8 +229,10 @@ All in `rtl/`:
 | `cam_power_sequencer.v` | PWDN/RESET power-up sequencing state machine (wait-for-MCLK → power-up → reset-release → settle → done) | `tb_cam_power_sequencer.v`: checks strict ordering (PWDN low before RESET release, RESET release before `seq_done`) and that each phase honours its configured minimum duration, 0 errors |
 | `i2c_master.v` | Polled I²C master (START/addr+W/reg-addr(8 or 16-bit)/data/STOP, ACK-checked) | `tb_i2c_master.v`: two parallel DUTs (`ADDR_BYTES=1` and `ADDR_BYTES=2`) each run a full transaction against an independent behavioral I²C slave model, all bytes and ACKs verified |
 | `cam_config_rom.v` | Walks a register table out through `i2c_master` | covered via full-design synthesis + P&R; **ships with an OV5640-specific table by default now, see below** |
-| `dvp_camera_hdmi_top.v` | Top level: native GPDI, 720p60/1080p30 — includes MCLK PLL + power sequencer, targets the OV5640 out of the box | full synthesis + P&R + timing closure, both resolutions |
-| `dvp_camera_hdmi_top_ext.v` | Top level: external-transmitter, true 1080p60 — **not yet updated with MCLK/power-sequencer/16-bit-I²C**, see [Known limitations](#known-limitations--future-work) | full synthesis + P&R + timing closure |
+| `uart_tx.v` | Generic 8N1 UART transmitter | `tb_uart_tx.v`: independently-written behavioral receiver checks bit framing/timing and byte value for 3 test bytes, 0 errors |
+| `uart_debug.v` | Streams a live hardware-status line (PLL/MCLK lock, I2C config progress, NACK count, buffer-ready, camera mode, live frame counter) to a UART terminal — see [UART debug interface](#uart-debug-interface) | `tb_uart_debug.v`: independently-typed expected banner + status line, byte-for-byte match against a captured UART receive stream, including a real frame-counter CDC crossing and NACK-counter edge-detect, 0 errors |
+| `dvp_camera_hdmi_top.v` | Top level: native GPDI, fixed 720p60 — includes MCLK PLL + power sequencer + UART debug, targets the OV5640 out of the box | full synthesis + P&R + timing closure |
+| `dvp_camera_hdmi_top_ext.v` | Top level: external-transmitter, true 1080p60 — **not yet updated with MCLK/power-sequencer/16-bit-I²C/UART debug**, see [Known limitations](#known-limitations--future-work) | full synthesis + P&R + timing closure |
 
 ---
 
@@ -255,6 +262,7 @@ list:
 | `cam_mclk`  | gpio[16] | 36 |
 | `cam_rst_n` | gpio[17] | 11 |
 | `cam_pwdn`  | gpio[18] | 12 |
+| `uart_tx`   | gpio[19] | 35 |
 
 Freely reassign these in `constraints/icepi_zero.lpf` to whatever's
 convenient for your camera breakout — nothing in the RTL cares which
@@ -301,6 +309,61 @@ interface may never come up reliably.
 
 ---
 
+## UART debug interface
+
+`dvp_camera_hdmi_top.v` streams a live, human-readable hardware-status line
+out of `uart_tx` (gpio[19], header pin 35) once per second, at **115200
+baud, 8 data bits, no parity, 1 stop bit (8N1)** — the same information the
+5 status LEDs give you, plus a live camera-frame counter, all readable in a
+terminal instead of interpreted by eye:
+
+```
+=== DVP Camera->HDMI Pipeline (720p60, OV5640) -- UART Debug ===
+PLL=1 MCLK=1 SEQ=1 CFG=1 NACK=0 BUF=1 MODE=C FRAMES=0x4B
+PLL=1 MCLK=1 SEQ=1 CFG=1 NACK=0 BUF=1 MODE=C FRAMES=0x4C
+PLL=1 MCLK=1 SEQ=1 CFG=1 NACK=0 BUF=1 MODE=C FRAMES=0x4D
+...
+```
+
+| Field | Meaning |
+|---|---|
+| `PLL` | pixel-clock PLL locked (mirrors `led[0]`) |
+| `MCLK` | camera MCLK PLL locked |
+| `SEQ` | `cam_power_sequencer` finished (PWDN/RESET sequencing done) |
+| `CFG` | `cam_config_rom` finished walking the I²C register table (mirrors `led[1]`) |
+| `NACK` | cumulative count of NACKed I²C transactions this run, one hex digit (saturates at `F`) — `0` means every register write ACKed |
+| `BUF` | CDC buffer pre-filled and ready — live video should be visible (mirrors `led[2]`) |
+| `MODE` | `C`(amera) or `P`(attern) — mirrors `led[4]`/`pattern_sel` |
+| `FRAMES` | hex count of camera VSYNC pulses seen since reset — proves the sensor is actually delivering frames, which the LEDs alone can't show (wraps at `0xFF`; it's a liveness indicator, not a precise frame count) |
+
+**Wiring:** you need a USB-to-TTL-serial adapter (FTDI FT232-based, CP2102,
+CH340, etc. — 3.3V logic level, *not* RS232 level, and *not* 5V):
+
+| Adapter pin | Connect to |
+|---|---|
+| RX | `uart_tx` — header pin 35 |
+| GND | any board GND (e.g. header pin 6, alongside the camera's GND) |
+
+You only need the adapter's RX and GND pins — this is transmit-only from
+the FPGA's side, nothing is received.
+
+**Viewing it in PuTTY** (Windows): plug in the USB-TTL adapter, check
+Device Manager for its COM port number, then in PuTTY: Connection type =
+**Serial**, Serial line = that COM port (e.g. `COM5`), Speed = **115200**,
+then under Connection → Serial confirm Data bits = 8, Stop bits = 1,
+Parity = None, Flow control = None. Click Open. You should see the banner
+once at power-up, then a refreshed status line every second.
+
+On Linux/macOS, `minicom -D /dev/ttyUSB0 -b 115200` (or `screen
+/dev/ttyUSB0 115200`) does the same thing.
+
+If nothing appears: check the adapter's RX is wired to the FPGA's TX
+(`uart_tx`) — not RX-to-RX, a common miswiring — and that the COM
+port/baud rate match exactly (a wrong baud rate produces garbled/no text,
+not an error message).
+
+---
+
 ## Adapting to your sensor
 
 `dvp_camera_hdmi_top.v` ships configured **for the Waveshare OV5640 module
@@ -333,9 +396,9 @@ design to a **different** sensor:
    power-up timing. If your sensor has its own crystal and defaults PWDN/
    RESET sensibly on power-up, these two modules (and the `cam_mclk`/
    `cam_rst_n`/`cam_pwdn` ports) can simply be left unconnected/removed.
-7. **Configure your sensor, out-of-band, to output exactly 1280×720@60 or
-   1920×1080@60/30** (whichever top level you're using) over its DVP
-   interface. This design does not include a scaler — it assumes the
+7. **Configure your sensor, out-of-band, to output exactly 1280×720@60**
+   (`dvp_camera_hdmi_top.v`) **or 1920×1080@60** (`dvp_camera_hdmi_top_ext.v`)
+   over its DVP interface. This design does not include a scaler — it assumes the
    camera's active-video window already matches the display resolution
    1:1. (Adding a line-buffer-based scaler is a natural extension point;
    see [Known limitations](#known-limitations--future-work).)
@@ -365,28 +428,14 @@ either build from source or grab the prebuilt
 which includes all four tools plus `openFPGALoader`).
 
 ```sh
-make sim            # run every testbench (should print PASS for all 5)
-make synth           # Yosys synthesis, 720p60/1080p30 top level
+make sim            # run every testbench (should print PASS for all 8)
+make synth           # Yosys synthesis, 720p60 top level (the only resolution this design supports)
 make pnr               # + nextpnr-ecp5 place&route + timing closure report
 make synth_ext          # Yosys synthesis, external-transmitter (true 1080p60) top level
 make pnr_ext              # + place&route (edit the LPF's hdmi_* section first, see Makefile)
 make bit                    # pack a .bit bitstream (needs ecppack)
 make prog                     # flash it (needs openFPGALoader)
 ```
-
-Building the **1080p30** variant of `dvp_camera_hdmi_top.v`: pass
-`RESOLUTION="1080P30"` as a module parameter override. From the CLI,
-`chparam -set RESOLUTION 1080P30` on a string parameter can be finicky
-across Yosys versions — the robust way (used during this project's own
-verification) is a two-line wrapper module:
-
-```verilog
-module top_1080p30_wrap (/* same ports as dvp_camera_hdmi_top */);
-    dvp_camera_hdmi_top #(.RESOLUTION("1080P30")) u_dut (/* ... */);
-endmodule
-```
-
-and point `synth_ecp5 -top` at the wrapper instead.
 
 ---
 
@@ -396,7 +445,7 @@ and point `synth_ecp5 -top` at the wrapper instead.
 make sim
 ```
 
-runs all five testbenches under Icarus Verilog and prints a `PASS`/`FAIL`
+runs all eight testbenches under Icarus Verilog and prints a `PASS`/`FAIL`
 line for each (see [Verification](#verification) for what they check). Each
 also writes a `.vcd` waveform you can open in GTKWave for inspection.
 
@@ -427,56 +476,51 @@ TB_VIDEO_TIMING_GEN:      PASS  (frame period & active-pixel-count exact match, 
 TB_DVP_PIXEL_CHAIN:       PASS  (RGB565 + YUYV422, exact pixel values)
 TB_I2C_MASTER:            PASS  (ADDR_BYTES=1 and ADDR_BYTES=2 modes, both against a behavioral I2C slave, all ACKed)
 TB_CAM_POWER_SEQUENCER:   PASS  (PWDN/RESET/seq_done ordering and minimum-duration checks, 0 errors)
+TB_UART_TX:               PASS  (bit framing/timing + byte value, independent behavioral receiver, 3 test bytes, 0 errors)
+TB_UART_DEBUG:            PASS  (banner + status-line content, frame-counter CDC, NACK-counter edge-detect, 0 errors)
 ```
 
-Run all six with `make check` — see [Building](#building).
+Run all eight with `make check` — see [Building](#building).
 
-**Synthesis (`yosys synth_ecp5`), all three top levels, 0 CHECK-pass
+**Synthesis (`yosys synth_ecp5`), both top levels, 0 CHECK-pass
 problems:**
 
 | Top level | LUT4 | FF | DP16KD (of 56) | EHXPLLL | Notes |
 |---|---|---|---|---|---|
-| `dvp_camera_hdmi_top` (720p60) | 798 | 545 | 6 | 2 | 3.3% LUT utilization; 2nd `EHXPLLL` is `clk_gen_mclk.v`'s 24MHz camera MCLK |
-| `dvp_camera_hdmi_top` (1080p30) | 760 | 553 | 12 | 2 | larger CDC buffer (8192 vs 4096 deep) |
-| `dvp_camera_hdmi_top_ext` (1080p60) | 398 | 311 | 12 | 1 | no TMDS gearbox needed; **not yet updated with MCLK/power-sequencer**, see [Known limitations](#known-limitations--future-work) |
+| `dvp_camera_hdmi_top` (720p60, only resolution supported) | 1098 | 669 | 6 | 2 | 4.5% LUT utilization; 2nd `EHXPLLL` is `clk_gen_mclk.v`'s 24MHz camera MCLK |
+| `dvp_camera_hdmi_top_ext` (1080p60) | 398 | 311 | 12 | 1 | no TMDS gearbox needed; **not yet updated with MCLK/power-sequencer/UART debug**, see [Known limitations](#known-limitations--future-work) |
 
 (Cell counts for `dvp_camera_hdmi_top` grew from the design's original
 720p60-only/8-bit-I²C form after adding `clk_gen_mclk.v` +
 `cam_power_sequencer.v` + the wider `ADDR_BYTES`-capable `i2c_master.v` +
-the larger 61-entry OV5640 `cam_config_rom.v` table — all still a small
-fraction of the LFE5U-25F's ~24,300 LUT4-equivalents and 56 DP16KD
-blocks.)
+the 61-entry OV5640 `cam_config_rom.v` table + `uart_tx.v`/`uart_debug.v` —
+all still a small fraction of the LFE5U-25F's ~24,300 LUT4-equivalents and
+56 DP16KD blocks. The 1080p30 configuration this table used to also list
+was removed — see [Why two different 1080p60 delivery paths](#why-two-different-1080p60-delivery-paths).)
 
 **Place & route + static timing analysis (`nextpnr-ecp5 --25k --package
 CABGA256 --speed 6`), against `constraints/icepi_zero.lpf`:**
 
 | Design | Clock domain | Target | Achieved | Result |
 |---|---|---|---|---|
-| 720p60 | `clk_pixel` | 74.29 MHz | 79.62 MHz (seed 5) | **PASS** |
-| 720p60 | `cam_pclk` | 75.00 MHz | 195.73 MHz | **PASS** |
-| 720p60 | `cam_mclk` | 24.00 MHz | 177.40 MHz | **PASS** |
-| 720p60 | TMDS `sclk` | 185.74 MHz | 199.64 MHz | **PASS** |
-| 1080p30 | `clk_pixel` | 74.29 MHz | 77.12 MHz (seed 5) | **PASS** |
-| 1080p30 | `cam_pclk` | 75.00 MHz | 186.50 MHz | **PASS** |
-| 1080p30 | `cam_mclk` | 24.00 MHz | 178.99 MHz | **PASS** |
-| 1080p30 | TMDS `sclk` | 185.74 MHz | 216.17 MHz | **PASS** |
+| 720p60 | `clk_pixel` | 74.29 MHz | 83.51 MHz (seed 2) | **PASS** |
+| 720p60 | `cam_pclk` | 75.00 MHz | 202.06 MHz | **PASS** |
+| 720p60 | `cam_mclk` | 24.00 MHz | 167.11 MHz | **PASS** |
+| 720p60 | `clk` (board osc, drives `uart_debug`) | 50.00 MHz | 123.20 MHz | **PASS** |
+| 720p60 | `cam_vsync` (frame-counter clock edge in `uart_debug`) | 1.00 MHz (documentation-only; real rate ≈60Hz) | 894.45 MHz | **PASS** |
+| 720p60 | TMDS `sclk` | 185.74 MHz | 204.16 MHz | **PASS** |
 | 1080p60 (ext) | `hdmi_pclk` | 150.01 MHz | 157.18 MHz (seed 6) | **PASS** |
 | 1080p60 (ext) | `cam_pclk` | 75.00 MHz | 187.06 MHz | **PASS** |
 
 (720p60 numbers re-verified directly against `make synth` + `make pnr`'s
-actual output. 1080p30 numbers verified via a temporary one-file wrapper
-instantiating `dvp_camera_hdmi_top` with `RESOLUTION="1080P30"` — see
-`make synth_1080p30`'s in-repo note on why the CLI `chparam` approach
-doesn't work directly, and build such a wrapper yourself if you need this
-configuration; the RTL itself is exactly what ships, this only affects how
-its numbers were collected here. `pnr` uses `--seed 5` (re-tuned after
-adding the camera-MCLK PLL, power sequencer and widened I²C logic — see
-"Timing closure notes" below); `pnr_ext` uses `--seed 6` — the ext top
-level is a different, unmodified netlist with its own independently-tuned
-best seed, checked with `--lpf-allow-unconstrained` since its `hdmi_*`
-pins aren't assigned real sites by default.)
+actual output. `pnr` uses `--seed 2` (re-tuned after adding
+`uart_tx.v`/`uart_debug.v` — see "Timing closure notes" below); `pnr_ext`
+uses `--seed 6` — the ext top level is a different, unmodified netlist
+with its own independently-tuned best seed, checked with
+`--lpf-allow-unconstrained` since its `hdmi_*` pins aren't assigned real
+sites by default.)
 
-All three designs fully place, route and close timing on the real
+Both designs fully place, route and close timing on the real
 `LFE5U-25F-6BG256C` part with the real board pin constraints (or, for the
 external-transmitter variant's `hdmi_*` bus, a free-placement timing check —
 see Makefile note on assigning those pins to your actual wiring).
@@ -512,7 +556,7 @@ assumed:
 timing-driven placer isn't perfectly deterministic across seeds/runs) —
 the same design measured anywhere from ~68 MHz to ~83 MHz on `clk_pixel`
 across different `--seed` values during testing. The Makefile currently
-pins `--seed 5`, empirically checked to give comfortable margin (~7%). If
+pins `--seed 2`, empirically checked to give comfortable margin (~12%). If
 you modify the RTL and a build reports FAIL, **try a few different
 `--seed N` values before concluding the design doesn't fit** — this is
 normal FPGA workflow, not a red flag. (Netlist cell ordering -- e.g. which
@@ -525,19 +569,24 @@ doing that during development briefly looked like a real regression until
 re-checking against the real Makefile target showed the original numbers
 still held exactly.)
 
-**This seed was re-tuned once already, and will likely need re-tuning
-again if you change the RTL.** `--seed 4` was the original pick (before
-`clk_gen_mclk.v`, `cam_power_sequencer.v`, and the widened
+**This seed has been re-tuned twice already, and will likely need
+re-tuning again if you change the RTL.** `--seed 4` was the original pick
+(before `clk_gen_mclk.v`, `cam_power_sequencer.v`, and the widened
 `ADDR_BYTES`-capable `i2c_master.v`/`cam_config_rom.v` were added for
 OV5640 support) and gave ~77.65 MHz with good margin at the time. Adding
 that logic shifted the netlist enough that `--seed 4` alone dropped to
 74.04 MHz — a hair under the 74.29 MHz target — while every other seed
-tried (1, 2, 3, 5–14) still passed comfortably (74.56–79.62 MHz on the
-real `make synth` output). This is the run-to-run variance described
-above, not a sign the design has gotten marginal — a fresh sweep just
-needed to be re-run after growing the netlist, exactly per the advice in
-the paragraph above. `--seed 5` was picked as the best margin found in
-that fresh sweep and confirmed reproducible across repeated runs.
+tried still passed comfortably, and `--seed 5` was picked as the best
+margin found in that sweep (79.62 MHz). Later, adding `uart_tx.v` +
+`uart_debug.v` (and dropping the unused 1080p30 `RESOLUTION` branch) grew
+the netlist again; `--seed 5` alone still passed but with a thinner
+margin, so a fresh sweep was re-run against the real `make synth` output
+(every seed 1–10 passed comfortably, 77.47–83.51 MHz), and `--seed 2` was
+picked as the new best margin, confirmed reproducible across repeated
+runs. This is the run-to-run variance described above working as
+intended, not a sign the design has gotten marginal — re-sweep after any
+netlist-shifting RTL change, exactly per the advice in the paragraph
+above.
 
 **Declare-before-use matters for portability, even though standard
 Verilog doesn't require it.** This repository's development environment's
@@ -561,33 +610,46 @@ instances remain.
 
 ## Bring-up checklist
 
-1. `make pnr` — confirm all three clock domains report **PASS**.
-2. Flash the bitstream with no camera connected. `led[0]` (PLL lock)
-   should light immediately.
-3. Hold `button[1]` (pattern-select) — you should see 8 colour bars plus a
+1. `make pnr` — confirm every clock domain reports **PASS** (see the
+   [Verification](#verification) table for the full list).
+2. (Optional, but recommended.) Wire up a USB-TTL adapter to `uart_tx` per
+   [UART debug interface](#uart-debug-interface) and have PuTTY/minicom
+   open before flashing. The status line gives you a live, readable view
+   of everything the LEDs show plus a frame counter, which makes the rest
+   of this checklist much faster to diagnose than reading LEDs alone.
+3. Flash the bitstream with no camera connected. `led[0]` (PLL lock)
+   should light immediately; the UART banner should print, followed by a
+   status line showing `PLL=1` and everything else `0`.
+4. Hold `button[1]` (pattern-select) — you should see 8 colour bars plus a
    grayscale ramp strip on the display. **This alone proves the entire
    PLL → video-timing → TMDS-encode → GPDI chain works**, independent of any
    camera hardware.
-4. Connect the camera, power up. `cam_mclk` should be running immediately
+5. Connect the camera, power up. `cam_mclk` should be running immediately
    (it only depends on `clk_gen_mclk.v`'s PLL lock, not on the camera).
    `cam_power_sequencer.v` then drives `cam_pwdn` low and, after the
    configured `RST_MS`/`SETTLE_MS` delays, releases `cam_rst_n` — I²C
    configuration only starts after that sequence completes
    (`cfg_go`/`seq_done`), so expect a short (tens of ms) pause after
-   power-up before `led[1]` reacts. `led[1]` (config done) should then
-   light once `cam_config_rom` finishes walking its register table — check
-   `led[3]` (I²C NACK) is *not* lit; if it is, check wiring/address/
-   pull-ups before debugging anything else. If `led[1]` never lights and
-   `led[3]` never lights either, suspect the power sequencing itself
-   (verify `cam_mclk`/`cam_rst_n`/`cam_pwdn` with a scope/logic analyzer
-   against the order in [Wiring the camera](#wiring-the-camera)) rather
-   than the I²C transaction.
-5. Release `button[1]`. `led[2]` (buffer ready) should light once the CDC
-   buffer has pre-filled, and live video should appear.
-6. If the image is present but has wrong colours, check `CAMERA_FORMAT`/
+   power-up before `led[1]`/`CFG=1` reacts. `led[1]` (config done) /
+   `CFG=1` should then light once `cam_config_rom` finishes walking its
+   register table — check `led[3]`/`NACK=0` (no NACKed transactions); if
+   `NACK` is nonzero, check wiring/address/pull-ups before debugging
+   anything else. If `CFG` never goes to `1` and `NACK` stays `0` too,
+   suspect the power sequencing itself (`SEQ` should read `1` once
+   `cam_power_sequencer.v` finishes — if it doesn't, verify
+   `cam_mclk`/`cam_rst_n`/`cam_pwdn` with a scope/logic analyzer against
+   the order in [Wiring the camera](#wiring-the-camera)) rather than the
+   I²C transaction itself.
+6. Release `button[1]`. `led[2]`/`BUF=1` should light once the CDC buffer
+   has pre-filled, and live video should appear. Watch `FRAMES` in the
+   UART output tick up — if it's incrementing but the display is still
+   wrong/blank, the problem is downstream of capture (formatting/register
+   configuration), not the DVP wiring; if `FRAMES` stays at `0x00`, the
+   problem is upstream (PCLK/HREF/VSYNC/data wiring or polarity).
+7. If the image is present but has wrong colours, check `CAMERA_FORMAT`/
    `BYTE_SWAP`. If it's present but rolls/tears, check the camera is
    actually configured for the exact resolution the chosen top level
-   expects (see [Adapting to your sensor](#adapting-to-your-sensor) step 4).
+   expects (see [Adapting to your sensor](#adapting-to-your-sensor) step 7).
 
 ---
 
@@ -601,14 +663,15 @@ instances remain.
   it against Waveshare's official demo code before relying on it. See
   [Adapting to your sensor](#adapting-to-your-sensor).
 - **`dvp_camera_hdmi_top_ext.v` doesn't yet have the MCLK PLL /
-  power-sequencer / 16-bit-I²C support** that `dvp_camera_hdmi_top.v` has
-  — it still uses the original 8-bit-only I²C addressing and has no
-  `cam_mclk`/`cam_rst_n`/`cam_pwdn` ports. If you need true 1080p60 (the
-  external-transmitter path) with the OV5640, port the same additions
-  from `dvp_camera_hdmi_top.v` across (the three new modules —
-  `clk_gen_mclk.v`, `cam_power_sequencer.v`, and the widened
-  `i2c_master.v`/`cam_config_rom.v` — are already generic and reusable
-  as-is; only the top-level instantiation/wiring needs duplicating).
+  power-sequencer / 16-bit-I²C / UART debug support** that
+  `dvp_camera_hdmi_top.v` has — it still uses the original 8-bit-only I²C
+  addressing and has no `cam_mclk`/`cam_rst_n`/`cam_pwdn`/`uart_tx` ports.
+  If you need true 1080p60 (the external-transmitter path) with the
+  OV5640, port the same additions from `dvp_camera_hdmi_top.v` across (the
+  five new modules — `clk_gen_mclk.v`, `cam_power_sequencer.v`,
+  `uart_tx.v`, `uart_debug.v`, and the widened `i2c_master.v`/
+  `cam_config_rom.v` — are already generic and reusable as-is; only the
+  top-level instantiation/wiring needs duplicating).
 - **PLL dividers are hand-derived** — cross-check with `ecppll` or Lattice
   Diamond before production use (see [Clocking](#clocking)).
 - **No audio.** This is a video-only DVI-class TMDS stream (HDMI-connector
