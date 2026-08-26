@@ -43,7 +43,7 @@
 `default_nettype none
 
 module cam_config_rom #(
-    parameter NUM_REGS = 60
+    parameter NUM_REGS = 61
 ) (
     input  wire       clk,
     input  wire        rst,
@@ -138,6 +138,19 @@ module cam_config_rom #(
         // instead of 8'h61 (or leave this as-is and set pixel_formatter.v's
         // BYTE_SWAP=1 instead -- either fixes the same underlying issue).
         table_rom[59] = {16'h4300, 8'h61};
+
+        // ---- ISP output-format mux select: RGB (not raw/Bayer passthrough) --
+        // 0x501F selects what the ISP pipeline actually hands to the DVP
+        // output stage: 0x00 = ISP bypass (raw Bayer), 0x01 = RGB, 0x02 =
+        // raw DPC, 0x03 = snapshot. 0x4300 above only sets RGB565's byte
+        // order/channel layout -- it has no effect unless the ISP is
+        // actually muxed to output RGB. Missing this register is one of
+        // the most common OV5640 bring-up mistakes: I2C ACKs every write,
+        // PCLK/HREF/VSYNC/data all toggle and look like a valid stream, but
+        // the pixel content itself is meaningless (commonly reads back as
+        // solid black) because the sensor is still in its raw/ISP-bypass
+        // default. Must come after the format-select register above.
+        table_rom[60] = {16'h501F, 8'h01};
 
         // ... extend NUM_REGS and this table further (AWB/gamma/lens-shading
         // tuning, mirror/flip, sharpness) once basic capture is confirmed.

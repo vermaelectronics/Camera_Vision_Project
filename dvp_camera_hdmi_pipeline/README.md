@@ -443,7 +443,7 @@ problems:**
 (Cell counts for `dvp_camera_hdmi_top` grew from the design's original
 720p60-only/8-bit-I²C form after adding `clk_gen_mclk.v` +
 `cam_power_sequencer.v` + the wider `ADDR_BYTES`-capable `i2c_master.v` +
-the larger 60-entry OV5640 `cam_config_rom.v` table — all still a small
+the larger 61-entry OV5640 `cam_config_rom.v` table — all still a small
 fraction of the LFE5U-25F's ~24,300 LUT4-equivalents and 56 DP16KD
 blocks.)
 
