@@ -552,24 +552,28 @@ CABGA256 --speed 6`), against `constraints/icepi_zero.lpf`:**
 
 | Design | Clock domain | Target | Achieved | Result |
 |---|---|---|---|---|
-| 720p60 | `clk_pixel` | 74.29 MHz | 81.71 MHz (seed 14) | **PASS** |
+| 720p60 | `clk_pixel` | 74.29 MHz | 82.55 MHz (seed 18) | **PASS** |
 | 720p60 | `cam_pclk` | 75.00 MHz | 178.41 MHz | **PASS** |
 | 720p60 | `cam_mclk` | 24.00 MHz | 175.38 MHz | **PASS** |
 | 720p60 | `clk` (board osc, drives `uart_debug`) | 50.00 MHz | 108.86 MHz | **PASS** |
 | 720p60 | `cam_vsync` (frame-counter clock edge in `uart_debug`) | 1.00 MHz (documentation-only; real rate ≈60Hz) | 894.45 MHz | **PASS** |
 | 720p60 | `cam_pixel_valid` (activity-indicator clock edge in `uart_debug`) | 12.00 MHz (nextpnr auto-inferred default — internal net, not a top-level port, so no LPF `FREQUENCY` constraint applies; real rate is the pixel rate, far above this) | 894.45 MHz | **PASS** |
-| 720p60 | TMDS `sclk` | 185.74 MHz | 210.57 MHz | **PASS** |
+| 720p60 | TMDS `sclk` | 185.74 MHz | 226.71 MHz | **PASS** |
 | 1080p60 (ext) | `hdmi_pclk` | 150.01 MHz | 157.18 MHz (seed 6) | **PASS** |
 | 1080p60 (ext) | `cam_pclk` | 75.00 MHz | 187.06 MHz | **PASS** |
 
-(720p60 numbers re-verified directly against `make synth` + `make pnr`'s
-actual output. `pnr` uses `--seed 14` (re-tuned after cross-checking
-`cam_config_rom.v`'s format/ISP-enable registers against Waveshare's
-vendor code and adding the module-LED control registers — see "Timing
-closure notes" below); `pnr_ext` uses `--seed 6` — the ext top level is a
-different, unmodified netlist with its own independently-tuned best seed,
-checked with `--lpf-allow-unconstrained` since its `hdmi_*` pins aren't
-assigned real sites by default.)
+(720p60 numbers above are from a real `oss-cad-suite` toolchain run
+(Yosys 0.68+106, `nextpnr-ecp5` current as of this writing) on the actual
+target hardware, pasted directly from a user's terminal output — not this
+project's own development-sandbox toolchain (an older apt-installed Yosys
+0.33), which is known to place/route the same `--seed N` differently (see
+"Timing closure notes" below for why). `pnr` uses `--seed 18` (re-tuned on
+the real toolchain after the seed 14 pick above turned out to be a
+razor-thin/borderline FAIL there — see "Timing closure notes"); `pnr_ext`
+uses `--seed 6` — the ext top level is a different, unmodified netlist
+with its own independently-tuned best seed, checked with
+`--lpf-allow-unconstrained` since its `hdmi_*` pins aren't assigned real
+sites by default.)
 
 Both designs fully place, route and close timing on the real
 `LFE5U-25F-6BG256C` part with the real board pin constraints (or, for the
@@ -607,7 +611,9 @@ assumed:
 timing-driven placer isn't perfectly deterministic across seeds/runs) —
 the same design measured anywhere from ~68 MHz to ~83 MHz on `clk_pixel`
 across different `--seed` values during testing. The Makefile currently
-pins `--seed 5`, empirically checked to give comfortable margin (~11%). If
+pins `--seed 18`, empirically checked to give comfortable margin
+(`clk_pixel` 82.55 MHz vs. 74.29 MHz target, ~11%; `sclk` 226.71 MHz vs.
+185.74 MHz target, ~22%) — see episode 7 below for how this was found. If
 you modify the RTL *or the LPF* and a build reports FAIL, **try a few
 different `--seed N` values before concluding the design doesn't fit** —
 this is normal FPGA workflow, not a red flag. (Netlist cell ordering --
@@ -622,7 +628,7 @@ that during development briefly looked like a real regression until
 re-checking against the real Makefile target showed the original numbers
 still held exactly.)
 
-**This seed has been re-tuned six times already, and will likely need
+**This seed has been re-tuned seven times already, and will likely need
 re-tuning again if you change the RTL or LPF.** `--seed 4` was the
 original pick (before `clk_gen_mclk.v`, `cam_power_sequencer.v`, and the
 widened `ADDR_BYTES`-capable `i2c_master.v`/`cam_config_rom.v` were added
@@ -653,10 +659,46 @@ Cross-checking `cam_config_rom.v`'s format/ISP-enable registers against
 Waveshare's vendor code and adding the module-LED control registers grew
 the table by 12 entries; `--seed 1` alone dropped to a razor-thin 74.67
 MHz (0.5% margin) on this new netlist, so a fresh sweep was run and
-landed on `--seed 14` (81.71 MHz). Each of these was the same run-to-run
+landed on `--seed 14` (81.71 MHz).
+
+**Episode 7 — toolchain-version variance, not just seed variance.** All
+six episodes above were swept and verified on this project's own
+development sandbox, whose `apt`-installed Yosys is version 0.33 — quite
+old. A user building this exact repo on a real, current `oss-cad-suite`
+install (Yosys 0.68+106, a current `nextpnr-ecp5`) ran `make pnr` with the
+`--seed 14` pick from episode 6 and hit a **FAIL**: `Max frequency for
+clock '$glbnet$u_ser.sclk': 185.70 MHz (FAIL at 185.74 MHz)` — a razor-thin
+0.02% miss. Nothing about the RTL, LPF, or netlist had changed; the
+*toolchain version* itself was the variable. Different Yosys/nextpnr-ecp5
+releases use different (and improving, over time) placement/routing
+heuristics, so a `--seed N` value swept on one version's placer is not
+guaranteed to reproduce on another's — the seed only pins the RNG *within*
+a given placer's algorithm, not the algorithm itself. (Separately: this
+FAIL also exposed that `make bit`'s `nextpnr-ecp5 ... | tee ...log`
+pipeline doesn't propagate nextpnr's exit code through `tee` to `make`, so
+a timing FAIL here did **not** stop `ecppack` from still packing a `.bit`
+file — flashing that specific bitstream would have been a mistake. Treat
+any `FAIL` line in `pnr`'s console output as a hard stop regardless of
+whether `make` itself reports an error, until this pipeline gotcha is
+fixed.) The user re-swept seeds 1–20 directly on their own real toolchain
+and pasted the complete results back; `--seed 18` was the best margin
+found (`sclk` 226.71 MHz, `clk_pixel` 82.55 MHz — both comfortably above
+target), confirmed reproducible with a second, independent `nextpnr-ecp5`
+run on the same machine (`sclk` 229.94/226.71 MHz and `clk_pixel`
+77.48/82.55 MHz across the two runs — both **PASS**, run-to-run variance
+within a single toolchain version being much smaller than variance across
+versions). The Makefile and the Verification table above now reflect
+`--seed 18`, sourced directly from that real-toolchain output. **The
+practical lesson: if you're building on a different `oss-cad-suite`/Yosys/
+nextpnr-ecp5 version than whatever produced the seed pinned in this repo
+at the time you're reading it, re-sweep seeds on your own toolchain before
+trusting a FAIL (or a thin PASS) as final** — this is a toolchain-portability
+issue, not evidence the design itself is marginal.
+
+Each of these episodes was the same run-to-run (and now, run-to-toolchain)
 variance described above working as intended, not a sign the design has
 gotten marginal — re-sweep after any netlist- or placement-shifting
-change, exactly per the advice in the
+change, or any toolchain-version change, exactly per the advice in the
 paragraph above.
 
 **Declare-before-use matters for portability, even though standard
