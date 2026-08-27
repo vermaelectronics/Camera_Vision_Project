@@ -9,6 +9,17 @@
 //               (set BYTE_SWAP=1 if your sensor sends the low byte first)
 //   "YUYV422" : 4 bytes / 2 pixels, sequence Y0 U0 Y1 V0 (BT.601 -> RGB)
 //
+// RB_SWAP (RGB565 only) swaps the *content* of the R and B channels after
+// assembly -- distinct from BYTE_SWAP, which only changes which of the two
+// DVP bytes is treated as "arrived first". Some sensor format-select
+// register values (see cam_config_rom.v's 0x4300) produce pixel data with
+// R and B already interchanged inside the 16-bit word itself, which no
+// amount of re-pairing the two bytes can undo -- confirmed on real
+// hardware: toggling BYTE_SWAP made no visible difference to a persistent
+// blue/purple color cast, which is exactly what a content-level R/B swap
+// looks like (white/near-white pixels are unaffected since R=G=B already;
+// every other, chromatic pixel shifts hue). RB_SWAP=1 fixes that case.
+//
 // All logic stays in the pclk (camera) clock domain -- this module simply
 // widens the byte stream to a pixel stream at the same clock.
 // ============================================================================
@@ -17,7 +28,8 @@
 
 module pixel_formatter #(
     parameter FORMAT     = "RGB565", // "RGB565" or "YUYV422"
-    parameter BYTE_SWAP  = 1'b0
+    parameter BYTE_SWAP  = 1'b0,
+    parameter RB_SWAP    = 1'b0      // RGB565 only -- see header comment above
 ) (
     input  wire        pclk,
     input  wire         rst,
@@ -45,9 +57,13 @@ module pixel_formatter #(
         wire [4:0] r5 = b0[7:3];
         wire [5:0] g6 = {b0[2:0], b1[7:5]};
         wire [4:0] b5 = b1[4:0];
-        wire [7:0] r8 = {r5, r5[4:2]};
-        wire [7:0] g8 = {g6, g6[5:4]};
-        wire [7:0] b8 = {b5, b5[4:2]};
+        wire [7:0] r8_raw = {r5, r5[4:2]};
+        wire [7:0] g8     = {g6, g6[5:4]};
+        wire [7:0] b8_raw = {b5, b5[4:2]};
+        // RB_SWAP exchanges the two *after* they've been expanded to 8 bits
+        // -- a pure channel-content swap, independent of BYTE_SWAP above.
+        wire [7:0] r8 = RB_SWAP ? b8_raw : r8_raw;
+        wire [7:0] b8 = RB_SWAP ? r8_raw : b8_raw;
 
         always @(posedge pclk) begin
             if (rst) begin

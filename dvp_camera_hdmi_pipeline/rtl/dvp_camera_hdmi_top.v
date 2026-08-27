@@ -25,7 +25,15 @@
 module dvp_camera_hdmi_top #(
     parameter CAMERA_FORMAT = "RGB565",   // "RGB565" or "YUYV422"
     parameter BYTE_SWAP     = 1'b0,
-    parameter HREF_POL      = 1'b1,
+    parameter RB_SWAP       = 1'b0,       // swap R/B *channel content* (not byte-transmission order --
+                                           // see BYTE_SWAP for that). Set to 1 if the image is otherwise
+                                           // correct (framing, motion, brightness) but red/blue are
+                                           // swapped -- e.g. warm scene content renders blue/purple while
+                                           // white/bright content stays roughly neutral. RGB565 path only.
+    parameter HREF_POL      = 1'b0,       // confirmed on real hardware (Waveshare OV5640 DVP module +
+                                           // IcePi-Zero): this polarity, not the originally-assumed 1'b1,
+                                           // is what gets the frame counter incrementing. VSYNC_POL=1'b1
+                                           // was already correct.
     parameter VSYNC_POL     = 1'b1,
     parameter I2C_DEV_ADDR7 = 7'h3C,      // default = OV5640 (Waveshare DVP module); 0x21 was the earlier generic placeholder
     parameter ADDR_BYTES    = 2           // 2 = 16-bit reg addressing (OV5640/OV5647-class); 1 = 8-bit (OV7670/OV2640-class)
@@ -160,7 +168,7 @@ module dvp_camera_hdmi_top #(
     wire cam_pixel_valid;
     wire [23:0] cam_rgb;
 
-    pixel_formatter #(.FORMAT(CAMERA_FORMAT), .BYTE_SWAP(BYTE_SWAP)) u_formatter (
+    pixel_formatter #(.FORMAT(CAMERA_FORMAT), .BYTE_SWAP(BYTE_SWAP), .RB_SWAP(RB_SWAP)) u_formatter (
         .pclk(cam_pclk), .rst(rst_cam),
         .byte_valid(byte_valid), .byte_data(byte_data),
         .line_start(line_start_cap), .frame_start(frame_start_cap),

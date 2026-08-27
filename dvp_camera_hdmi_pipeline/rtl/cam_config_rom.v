@@ -172,9 +172,18 @@ module cam_config_rom #(
 
         // ---- Format select: RGB565 over DVP --------------------------------
         // CONFIRMED against Waveshare's own ov5640_rgb565_reg_tbl: 0x6F,
-        // not the earlier-shipped 0x61. If colours still come out
-        // channel-swapped on your specific board, set pixel_formatter.v's
-        // BYTE_SWAP=1 instead of changing this.
+        // not the earlier-shipped 0x61. Real-hardware-tested: reverting to
+        // 0x61 does NOT fix a channel-swapped/color-cast image -- it
+        // regresses to streaky horizontal tearing/noise, a worse and more
+        // broken result than 0x6F's clean-but-wrong-hue output. Leave this
+        // at 0x6F. If colours come out channel-swapped (red/blue) on your
+        // specific board -- clean image otherwise, just wrong hue, with
+        // near-white content staying roughly neutral -- that's a
+        // content-level swap inside the pixel word itself, not a DVP byte-
+        // transmission-order issue: use pixel_formatter.v's RB_SWAP=1
+        // (NOT BYTE_SWAP, which was confirmed on real hardware to have no
+        // effect on this specific symptom -- toggling it produced an
+        // identical color cast either way).
         table_rom[63] = {16'h4300, 8'h6F};
 
         // ---- ISP output-format mux select: RGB (not raw/Bayer passthrough) --
