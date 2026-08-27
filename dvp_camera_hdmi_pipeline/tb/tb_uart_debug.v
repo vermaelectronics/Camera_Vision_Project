@@ -25,6 +25,7 @@ module tb_uart_debug;
     reg pll_locked = 0, mclk_locked = 0, cam_seq_done = 0, cfg_done = 0;
     reg i2c_nack = 0, buf_ready = 0, pattern_sel = 0;
     reg cam_vsync = 0;
+    reg [31:0] raw_bytes = 32'h00000000;
     wire tx;
 
     uart_debug #(
@@ -34,7 +35,7 @@ module tb_uart_debug;
         .pll_locked(pll_locked), .mclk_locked(mclk_locked),
         .cam_seq_done(cam_seq_done), .cfg_done(cfg_done),
         .i2c_nack(i2c_nack), .buf_ready(buf_ready), .pattern_sel(pattern_sel),
-        .cam_vsync(cam_vsync),
+        .cam_vsync(cam_vsync), .raw_bytes(raw_bytes),
         .tx(tx)
     );
 
@@ -62,9 +63,9 @@ module tb_uart_debug;
     reg [8*BANNER_LEN-1:0] EXPECTED_BANNER =
         "\r\n=== DVP Camera->HDMI Pipeline (720p60, OV5640) -- UART Debug ===\r\n";
 
-    localparam STATUS_LEN = 58;
+    localparam STATUS_LEN = 71;
     reg [8*STATUS_LEN-1:0] EXPECTED_STATUS =
-        "PLL=1 MCLK=1 SEQ=1 CFG=1 NACK=1 BUF=1 MODE=C FRAMES=0x05\r\n";
+        "PLL=1 MCLK=1 SEQ=1 CFG=1 NACK=1 BUF=1 MODE=C FRAMES=0x05 RAW=A5C3F02D\r\n";
 
     reg [7:0] got_byte;
     reg [7:0] exp_byte;
@@ -126,6 +127,7 @@ module tb_uart_debug;
                 cfg_done     = 1;
                 buf_ready    = 1;
                 pattern_sel  = 0; // camera mode -> 'C'
+                raw_bytes    = 32'hA5C3F02D;
 
                 // One NACKed transaction: pulse i2c_nack high then low,
                 // mirroring i2c_master.v's real behavior (set during a

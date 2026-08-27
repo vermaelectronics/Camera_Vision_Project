@@ -5,7 +5,7 @@
 // Sends a one-time startup banner, then a refreshed single-line status
 // report roughly once per second, e.g.:
 //
-//   PLL=1 MCLK=1 SEQ=1 CFG=1 NACK=0 BUF=1 MODE=C FRAMES=0x4B
+//   PLL=1 MCLK=1 SEQ=1 CFG=1 NACK=0 BUF=1 MODE=C FRAMES=0x4B RAW=A5C3F02D
 //
 //   PLL   = pixel-clock PLL locked
 //   MCLK  = camera MCLK PLL locked
@@ -19,6 +19,15 @@
 //           the sensor is actually delivering frames, which the 5 status
 //           LEDs alone can't show (wraps at 0xFF; that's fine, it's a
 //           liveness indicator, not a precise frame count)
+//   RAW   = the last 4 bytes actually captured off cam_d[7:0] (oldest byte
+//           first), refreshed live -- this is the ONLY field that shows
+//           real sensor data content directly, rather than a status flag
+//           derived from it. If this is stuck at a fixed value (0x00000000,
+//           0xFFFFFFFF, or any other constant that never changes across
+//           refreshes), the data bus isn't delivering real varying data --
+//           a wiring or sensor-not-streaming problem. If it visibly varies
+//           refresh to refresh, real bytes are arriving and any remaining
+//           image problem is in decode/format, not the data bus itself.
 //
 // This is exactly the same status information the top level's LEDs already
 // expose, plus a live frame counter -- richer, and readable in a terminal
@@ -53,6 +62,7 @@ module uart_debug #(
     input  wire buf_ready,
     input  wire pattern_sel,
     input  wire cam_vsync,    // raw, cam_pclk domain
+    input  wire [31:0] raw_bytes, // last 4 captured cam_d[7:0] bytes, cam_pclk domain, oldest first
 
     output wire tx
 );
@@ -75,6 +85,21 @@ module uart_debug #(
     wire nack_s = nack_sync[1];
     wire buf_s  = buf_sync[1];
     wire pat_s  = pat_sync[1];
+
+    // ---- resynchronize the raw byte snapshot into `clk` domain -----------
+    // Plain per-bit 2FF synchronization of a 32-bit bus is not glitch-free
+    // in general (different bits can resolve on different cycles, so a
+    // snapshot caught mid-transition could show a torn mix of an old and
+    // new value for one refresh). That's an acceptable, explicitly-chosen
+    // tradeoff here: RAW is a human-readable diagnostic display refreshed
+    // once per second, not something anything else in the design depends
+    // on -- a rare, single-refresh glitch self-corrects on the next tick
+    // and does not affect video output or any other logic.
+    reg [31:0] raw_sync1, raw_sync2;
+    always @(posedge clk) begin
+        raw_sync1 <= raw_bytes;
+        raw_sync2 <= raw_sync1;
+    end
 
     // ---- cumulative NACK count: edge-detect each new NACKed transaction --
     reg       nack_s_d1;
@@ -134,6 +159,7 @@ module uart_debug #(
     reg       snap_pll, snap_mclk, snap_seq, snap_cfg, snap_buf, snap_pat;
     reg [3:0] snap_nack;
     reg [7:0] snap_frame;
+    reg [31:0] snap_raw;
 
     // ---- character generators ---------------------------------------------
     function [7:0] hex_ascii;
@@ -160,9 +186,9 @@ module uart_debug #(
     localparam [8*BANNER_LEN-1:0] BANNER_STR =
         "\r\n=== DVP Camera->HDMI Pipeline (720p60, OV5640) -- UART Debug ===\r\n";
 
-    localparam integer STATUS_LEN = 58;
+    localparam integer STATUS_LEN = 71;
     localparam [8*STATUS_LEN-1:0] STATUS_TEMPLATE =
-        "PLL=0 MCLK=0 SEQ=0 CFG=0 NACK=0 BUF=0 MODE=C FRAMES=0x00\r\n";
+        "PLL=0 MCLK=0 SEQ=0 CFG=0 NACK=0 BUF=0 MODE=C FRAMES=0x00 RAW=00000000\r\n";
 
     function [7:0] banner_char;
         input [6:0] idx;
@@ -184,6 +210,14 @@ module uart_debug #(
                 7'd43: status_char = snap_pat ? "P" : "C";
                 7'd54: status_char = hex_ascii(snap_frame[7:4]);
                 7'd55: status_char = hex_ascii(snap_frame[3:0]);
+                7'd61: status_char = hex_ascii(snap_raw[31:28]);
+                7'd62: status_char = hex_ascii(snap_raw[27:24]);
+                7'd63: status_char = hex_ascii(snap_raw[23:20]);
+                7'd64: status_char = hex_ascii(snap_raw[19:16]);
+                7'd65: status_char = hex_ascii(snap_raw[15:12]);
+                7'd66: status_char = hex_ascii(snap_raw[11:8]);
+                7'd67: status_char = hex_ascii(snap_raw[7:4]);
+                7'd68: status_char = hex_ascii(snap_raw[3:0]);
                 default: status_char = STATUS_TEMPLATE[8*(STATUS_LEN-1-idx) +: 8];
             endcase
         end
@@ -214,7 +248,7 @@ module uart_debug #(
             tx_start <= 1'b0;
             snap_pll <= 1'b0; snap_mclk <= 1'b0; snap_seq <= 1'b0;
             snap_cfg <= 1'b0; snap_buf  <= 1'b0; snap_pat <= 1'b0;
-            snap_nack <= 4'h0; snap_frame <= 8'h00;
+            snap_nack <= 4'h0; snap_frame <= 8'h00; snap_raw <= 32'h0;
         end else begin
             tx_start <= 1'b0; // default: single-cycle pulse
 
@@ -247,6 +281,7 @@ module uart_debug #(
                         snap_buf   <= buf_s;
                         snap_pat   <= pat_s;
                         snap_frame <= frame_cnt;
+                        snap_raw   <= raw_sync2;
                         char_idx   <= 0;
                         state      <= S_STATUS_ISSUE;
                     end

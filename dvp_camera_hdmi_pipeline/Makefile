@@ -183,7 +183,7 @@ synth_ext: $(BUILD)
 # Place & route + static timing analysis against the real LFE5U-25F-6BG256C
 # ---------------------------------------------------------------------------
 pnr: synth
-	nextpnr-ecp5 --25k --package CABGA256 --speed 6 --seed 5 \
+	nextpnr-ecp5 --25k --package CABGA256 --speed 6 --seed 10 \
 	  --json $(BUILD)/$(TOP720)_720p60.json --lpf $(LPF) \
 	  --textcfg $(BUILD)/$(TOP720)_720p60.config \
 	  2>&1 | tee $(BUILD)/pnr_720p60.log

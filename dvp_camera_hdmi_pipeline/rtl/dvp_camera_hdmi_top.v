@@ -139,6 +139,15 @@ module dvp_camera_hdmi_top #(
         .line_start(line_start_cap), .frame_start(frame_start_cap)
     );
 
+    // Rolling window of the last 4 bytes actually captured off cam_d[7:0]
+    // (oldest byte in the high 8 bits), fed to uart_debug.v's RAW field --
+    // direct visibility into real sensor data content for hardware
+    // bring-up. See uart_debug.v's header comment for how to read it.
+    reg [31:0] raw_byte_window;
+    always @(posedge cam_pclk) begin
+        if (byte_valid) raw_byte_window <= {raw_byte_window[23:0], byte_data};
+    end
+
     wire cam_pixel_valid;
     wire [23:0] cam_rgb;
 
@@ -292,7 +301,7 @@ module dvp_camera_hdmi_top #(
         .pll_locked(pll_locked), .mclk_locked(mclk_locked),
         .cam_seq_done(cam_seq_done), .cfg_done(cfg_done),
         .i2c_nack(i2c_nack), .buf_ready(buf_ready), .pattern_sel(pattern_sel),
-        .cam_vsync(cam_vsync),
+        .cam_vsync(cam_vsync), .raw_bytes(raw_byte_window),
         .tx(uart_tx)
     );
 

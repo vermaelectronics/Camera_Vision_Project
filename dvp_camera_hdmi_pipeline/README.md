@@ -322,9 +322,9 @@ of interpreted by eye:
 
 ```
 === DVP Camera->HDMI Pipeline (720p60, OV5640) -- UART Debug ===
-PLL=1 MCLK=1 SEQ=1 CFG=1 NACK=0 BUF=1 MODE=C FRAMES=0x4B
-PLL=1 MCLK=1 SEQ=1 CFG=1 NACK=0 BUF=1 MODE=C FRAMES=0x4C
-PLL=1 MCLK=1 SEQ=1 CFG=1 NACK=0 BUF=1 MODE=C FRAMES=0x4D
+PLL=1 MCLK=1 SEQ=1 CFG=1 NACK=0 BUF=1 MODE=C FRAMES=0x4B RAW=A5C3F02D
+PLL=1 MCLK=1 SEQ=1 CFG=1 NACK=0 BUF=1 MODE=C FRAMES=0x4C RAW=91D07AE4
+PLL=1 MCLK=1 SEQ=1 CFG=1 NACK=0 BUF=1 MODE=C FRAMES=0x4D RAW=3B2C9F10
 ...
 ```
 
@@ -338,6 +338,7 @@ PLL=1 MCLK=1 SEQ=1 CFG=1 NACK=0 BUF=1 MODE=C FRAMES=0x4D
 | `BUF` | CDC buffer pre-filled and ready — live video should be visible (mirrors `led[2]`) |
 | `MODE` | `C`(amera) or `P`(attern) — mirrors `led[4]`/`pattern_sel` |
 | `FRAMES` | hex count of camera VSYNC pulses seen since reset — proves the sensor is actually delivering frames, which the LEDs alone can't show (wraps at `0xFF`; it's a liveness indicator, not a precise frame count) |
+| `RAW` | the last 4 bytes actually captured off `cam_d[7:0]` (oldest first), refreshed live -- the only field showing real sensor data content directly rather than a derived status flag. **Stuck at a fixed value (`00000000`, `FFFFFFFF`, or any other constant that never changes)** → the data bus isn't delivering real varying data (wiring or sensor-not-streaming problem). **Visibly varies refresh to refresh** → real bytes are arriving; any remaining image problem is downstream, in decode/format configuration, not the data bus itself. This is the single most useful field for diagnosing "image is garbage" symptoms, since it bypasses the whole decode pipeline and shows exactly what's on the wire. |
 
 **Wiring: none needed.** `uart_tx` is routed to the IcePi‑Zero's own
 onboard USB‑JTAG programmer chip's UART channel (`LOCATE COMP "uart_tx"
@@ -483,7 +484,7 @@ TB_DVP_PIXEL_CHAIN:       PASS  (RGB565 + YUYV422, exact pixel values)
 TB_I2C_MASTER:            PASS  (ADDR_BYTES=1 and ADDR_BYTES=2 modes, both against a behavioral I2C slave, all ACKed)
 TB_CAM_POWER_SEQUENCER:   PASS  (PWDN/RESET/seq_done ordering and minimum-duration checks, 0 errors)
 TB_UART_TX:               PASS  (bit framing/timing + byte value, independent behavioral receiver, 3 test bytes, 0 errors)
-TB_UART_DEBUG:            PASS  (banner + status-line content, frame-counter CDC, NACK-counter edge-detect, 0 errors)
+TB_UART_DEBUG:            PASS  (banner + status-line content, frame-counter CDC, NACK-counter edge-detect, raw-byte field, 0 errors)
 ```
 
 Run all eight with `make check` — see [Building](#building).
@@ -509,22 +510,22 @@ CABGA256 --speed 6`), against `constraints/icepi_zero.lpf`:**
 
 | Design | Clock domain | Target | Achieved | Result |
 |---|---|---|---|---|
-| 720p60 | `clk_pixel` | 74.29 MHz | 82.45 MHz (seed 5) | **PASS** |
-| 720p60 | `cam_pclk` | 75.00 MHz | 223.46 MHz | **PASS** |
-| 720p60 | `cam_mclk` | 24.00 MHz | 179.15 MHz | **PASS** |
-| 720p60 | `clk` (board osc, drives `uart_debug`) | 50.00 MHz | 131.11 MHz | **PASS** |
+| 720p60 | `clk_pixel` | 74.29 MHz | 79.06 MHz (seed 10) | **PASS** |
+| 720p60 | `cam_pclk` | 75.00 MHz | 180.28 MHz | **PASS** |
+| 720p60 | `cam_mclk` | 24.00 MHz | 184.06 MHz | **PASS** |
+| 720p60 | `clk` (board osc, drives `uart_debug`) | 50.00 MHz | 111.00 MHz | **PASS** |
 | 720p60 | `cam_vsync` (frame-counter clock edge in `uart_debug`) | 1.00 MHz (documentation-only; real rate ≈60Hz) | 894.45 MHz | **PASS** |
-| 720p60 | TMDS `sclk` | 185.74 MHz | 204.79 MHz | **PASS** |
+| 720p60 | TMDS `sclk` | 185.74 MHz | 218.10 MHz | **PASS** |
 | 1080p60 (ext) | `hdmi_pclk` | 150.01 MHz | 157.18 MHz (seed 6) | **PASS** |
 | 1080p60 (ext) | `cam_pclk` | 75.00 MHz | 187.06 MHz | **PASS** |
 
 (720p60 numbers re-verified directly against `make synth` + `make pnr`'s
-actual output. `pnr` uses `--seed 5` (re-tuned after moving `uart_tx`
-from a generic `gpio[]` site to the board's dedicated onboard-FTDI UART
-site — see "Timing closure notes" below); `pnr_ext` uses `--seed 6` — the
-ext top level is a different, unmodified netlist with its own
-independently-tuned best seed, checked with `--lpf-allow-unconstrained`
-since its `hdmi_*` pins aren't assigned real sites by default.)
+actual output. `pnr` uses `--seed 10` (re-tuned after adding the `RAW`
+raw-byte diagnostic field to `uart_debug.v` — see "Timing closure notes"
+below); `pnr_ext` uses `--seed 6` — the ext top level is a different,
+unmodified netlist with its own independently-tuned best seed, checked
+with `--lpf-allow-unconstrained` since its `hdmi_*` pins aren't assigned
+real sites by default.)
 
 Both designs fully place, route and close timing on the real
 `LFE5U-25F-6BG256C` part with the real board pin constraints (or, for the
@@ -577,7 +578,7 @@ that during development briefly looked like a real regression until
 re-checking against the real Makefile target showed the original numbers
 still held exactly.)
 
-**This seed has been re-tuned three times already, and will likely need
+**This seed has been re-tuned four times already, and will likely need
 re-tuning again if you change the RTL or LPF.** `--seed 4` was the
 original pick (before `clk_gen_mclk.v`, `cam_power_sequencer.v`, and the
 widened `ADDR_BYTES`-capable `i2c_master.v`/`cam_config_rom.v` were added
@@ -588,17 +589,19 @@ other seed tried still passed comfortably, and `--seed 5` was picked as
 the best margin found in that sweep (79.62 MHz). Adding `uart_tx.v` +
 `uart_debug.v` (and dropping the unused 1080p30 `RESOLUTION` branch) grew
 the netlist again, and a fresh sweep landed on `--seed 2` (83.51 MHz).
-Then, moving `uart_tx` from a generic `gpio[19]` header site to the
-board's dedicated onboard-FTDI UART site (`K15`, so the status output
-works over the same USB cable used for flashing, with no external
-adapter) shifted routing enough that `--seed 2` alone dropped to a
-thinner ~78 MHz margin; a fresh sweep against that exact LPF change
-landed back on `--seed 5` (82.45 MHz) -- a coincidental seed-number
-repeat from an earlier, unrelated sweep, not a sign anything reverted.
-Each of these was the same run-to-run variance described above working
-as intended, not a sign the design has gotten marginal — re-sweep after
-any netlist- or placement-shifting change, exactly per the advice in the
-paragraph above.
+Moving `uart_tx` from a generic `gpio[19]` header site to the board's
+dedicated onboard-FTDI UART site (`K15`, so the status output works over
+the same USB cable used for flashing, with no external adapter) shifted
+routing enough that `--seed 2` alone dropped to a thinner ~78 MHz margin;
+a fresh sweep against that exact LPF change landed on `--seed 5` (82.45
+MHz) -- a coincidental seed-number repeat from an earlier, unrelated
+sweep, not a sign anything reverted. Adding the `RAW` raw-byte diagnostic
+field to `uart_debug.v` (a 32-bit synchronizer plus 8 more hex digits of
+status-line logic) grew the netlist again, and a fresh sweep landed on
+`--seed 10` (79.06 MHz). Each of these was the same run-to-run variance
+described above working as intended, not a sign the design has gotten
+marginal — re-sweep after any netlist- or placement-shifting change,
+exactly per the advice in the paragraph above.
 
 **Declare-before-use matters for portability, even though standard
 Verilog doesn't require it.** This repository's development environment's
