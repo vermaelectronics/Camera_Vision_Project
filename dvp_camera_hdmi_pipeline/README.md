@@ -122,45 +122,66 @@ anyone, in any RTL.
 ## Architecture
 
 ```
- DVP camera                                            clk_pixel domain (74.25MHz-class)
- (its own PCLK  ┌──────────────┐   ┌────────────────┐  ┌──────────────────┐
-  domain)   ───▶│ dvp_capture  │──▶│ pixel_formatter │  │ video_timing_gen │──▶ hsync/vsync/de/x/y
-  HREF/VSYNC/D[]│ (byte stream)│   │ RGB565/YUYV422  │  └─────────┬────────┘
-                └──────────────┘   │   -> RGB888     │            │
-                                    └────────┬────────┘            ▼
-                                             │ cam_pixel_valid,   test_pattern_gen
-                                             │ cam_rgb[23:0]        (bring-up aid)
-                                             ▼                       │
-                                    ┌──────────────────┐             ▼
-                                    │ video_cdc_buffer  │────▶ pixel mux ──▶ pixel_rgb
-                                    │ (async_fifo-based)│                       │
-                                    │ camera clk ⇄ pixel │            ┌─────────┴─────────┐
-                                    │ clk, elastic       │            ▼                   ▼
-                                    └────────────────────┘   3x tmds_encoder      (top_ext: straight to
-                                                              (R,G,B, 2-stage      hdmi_d/hdmi_pclk/
-                                                               pipelined)          hdmi_hsync/vsync/de)
-                                                                       │
-                                                                       ▼
-                                                          tmds_serial_gearbox
-                                                          (ECLKSYNCB+CLKDIVF+
-                                                           ODDRX2F, async_fifo
-                                                           CDC into SCLK domain)
-                                                                       │
-                                                                       ▼
-                                                                  gpdi_dp[3:0]
+ DVP camera                                             clk_pixel domain (74.25MHz-class)
+ (its own PCLK   ┌──────────────┐   ┌─────────────────┐  ┌──────────────────┐
+  domain)    ───▶│ dvp_capture  │──▶│ pixel_formatter │  │ video_timing_gen │──▶ hsync/vsync/de/x/y
+  HREF/VSYNC/D[] │ (byte stream)│   │ RGB565/YUYV422  │  └─────────┬────────┘
+                 └──────────────┘   │   -> RGB888     │            │
+                                     └────────┬────────┘            ▼
+                                              │ cam_pixel_valid,   test_pattern_gen
+                                              │ cam_rgb[23:0]        (bring-up aid)
+                                              ▼                       │
+                                     ┌──────────────────┐             ▼
+                                     │ video_line_buffer│────▶ pixel mux ──▶ pixel_rgb
+                                     │ ("line FIFO": rows│                     │
+                                     │  claimed strictly │        ┌───────────┴───────────┐
+                                     │  in arrival order,│        ▼                        ▼
+                                     │  N_LINES-deep ring│  3x tmds_encoder      (top_ext: straight to
+                                     │  of dp_line_ram)  │  (R,G,B, 2-stage       hdmi_d/hdmi_pclk/
+                                     └──────────────────┘   pipelined)          hdmi_hsync/vsync/de)
+                                                                    │
+                                                                    ▼
+                                                       tmds_serial_gearbox
+                                                       (ECLKSYNCB+CLKDIVF+
+                                                        ODDRX2F, async_fifo
+                                                        CDC into SCLK domain)
+                                                                    │
+                                                                    ▼
+                                                               gpdi_dp[3:0]
 ```
+
+(`dvp_camera_hdmi_top_ext.v` still uses the older, one-cycle-latency
+`video_cdc_buffer.v` for this same bridge -- see [Known limitations](#known-limitations--future-work).)
 
 Key design decisions, and why:
 
-- **The camera↔pixel-clock crossing is a real, generic async FIFO**
-  (`async_fifo.v`, verified independently — see below), not a hand-derived
-  static phase assumption between unrelated clocks. The camera's own PCLK
-  and the FPGA's PLL-generated pixel clock are genuinely independent
-  oscillators; treating them as such is the only sound way to build this.
-  It degrades gracefully under any clock-rate mismatch: if the buffer runs
-  dry, the last pixel is held (a frozen line, not garbage); if it fills up,
-  new camera data is simply dropped (no corruption). See
-  `video_cdc_buffer.v`'s header comment for the full reasoning.
+- **The camera↔pixel-clock crossing is `video_line_buffer.v`, a "line
+  FIFO"**: whole rows, claimed by the display strictly in the order the
+  camera finished writing them -- never a raw pixel-order stream, and never
+  matched by comparing a row *number* between the two independent clock
+  domains. An earlier design (`video_cdc_buffer.v`, still used by
+  `dvp_camera_hdmi_top_ext.v`) bridged the two clocks as a flat
+  `async_fifo` of pixels in capture order, with literally nothing in the
+  design tying the display's read position to the camera's actual (row,
+  column) position -- and critically, `pixel_formatter.v`'s
+  `pixel_line_start`/`pixel_frame_start` outputs were never even wired to
+  anything. Because the camera's own internal line/frame blanking timing is
+  never configured to exactly match the display's fixed 1280x720@60 timing,
+  and the two clocks are genuinely free-running, that design's read/write
+  phase relationship inside the FIFO had nothing pinning it to real frame
+  boundaries and drifted continuously. **This was found on real hardware,
+  not caught in simulation first**: VSYNC/HREF framing correct, I²C
+  configuration NACK-free, pixel data actively streaming (confirmed via
+  `uart_debug.v`'s `ACT`/`RAW` fields) -- yet the displayed image showed no
+  recognizable structure at all, even pointed at a close, high-contrast
+  subject. `video_line_buffer.v` replaces it: a display pixel at (x,y)
+  always reads column x of whichever camera row most recently finished
+  being written -- horizontal alignment is *always* correct, and any
+  camera/display line-rate mismatch degrades into, at worst, occasional
+  whole-line repeats, never the old design's total spatial incoherence. See
+  `video_line_buffer.v`'s own header comment (including a "DESIGN HISTORY"
+  section covering three further, more subtle bugs simulation caught before
+  this ever reached real hardware) for the full reasoning.
 
 - **The TMDS-domain crossing (pixel clock → SCLK, a non-integer 2.5:1
   ratio) is *also* a real async FIFO**, for the same reason — even though
@@ -220,7 +241,9 @@ All in `rtl/`:
 | `video_timing_gen.v` | CEA-861 H/V timing generator, parametrized | `tb_video_timing_gen.v`: exact frame period & active-pixel count check |
 | `dvp_capture.v` | DVP bus front end (PCLK/HREF/VSYNC/D[7:0] → byte stream) | `tb_dvp_pixel_chain.v` |
 | `pixel_formatter.v` | RGB565 or YUYV422 (BT.601) → RGB888 | `tb_dvp_pixel_chain.v`: both formats, exact pixel values checked |
-| `video_cdc_buffer.v` | Camera-clock → pixel-clock elastic buffer (wraps `async_fifo`) | covered via full-design synthesis + P&R (see below) |
+| `dp_line_ram.v` | One video line of true dual-port RAM, independent read/write clocks | covered via `tb_video_line_buffer.v` (instantiated N_LINES times by that module) and full-design synthesis + P&R |
+| `video_line_buffer.v` | Camera-clock → pixel-clock "line FIFO": rows claimed by the display strictly in arrival order, replacing the older flat-pixel-order `video_cdc_buffer.v` in `dvp_camera_hdmi_top.v` — see [Architecture](#architecture) | `tb_video_line_buffer.v`: deterministic per-(row,col) pattern across a genuine CDC (two unrelated clock periods) with realistic near-matched line rates, interior columns bit-exact, 0 errors |
+| `video_cdc_buffer.v` | Camera-clock → pixel-clock elastic buffer (wraps `async_fifo`) — still used by `dvp_camera_hdmi_top_ext.v` only, see [Known limitations](#known-limitations--future-work) | covered via full-design synthesis + P&R (see below) |
 | `clk_gen_dvi.v` | `EHXPLLL` wrapper: 50MHz → 74.25MHz-class pixel + 371.25MHz-class ECLK | covered via full-design P&R |
 | `clk_gen_1080p60.v` | `EHXPLLL` wrapper: 50MHz → 148.5MHz-class pixel (no ECLK needed) | covered via full-design P&R |
 | `tmds_serial_gearbox.v` | ECP5 native TMDS serializer (`ECLKSYNCB`+`CLKDIVF`+`ODDRX2F`) | covered via full-design synthesis + P&R |
@@ -527,51 +550,67 @@ TB_I2C_MASTER:            PASS  (ADDR_BYTES=1 and ADDR_BYTES=2 modes, both again
 TB_CAM_POWER_SEQUENCER:   PASS  (PWDN/RESET/seq_done ordering and minimum-duration checks, 0 errors)
 TB_UART_TX:               PASS  (bit framing/timing + byte value, independent behavioral receiver, 3 test bytes, 0 errors)
 TB_UART_DEBUG:            PASS  (banner + status-line content, frame-counter CDC, NACK-counter edge-detect, raw-byte field, activity-indicator CDC + real cap_led pin check, 0 errors)
+TB_VIDEO_LINE_BUFFER:     PASS  (deterministic per-(row,col) pattern across a genuine CDC -- two unrelated clock periods, realistic near-matched line rates -- interior columns bit-exact, 0 errors)
 ```
 
-Run all eight with `make check` — see [Building](#building).
+Run all nine with `make check` — see [Building](#building).
 
 **Synthesis (`yosys synth_ecp5`), both top levels, 0 CHECK-pass
 problems:**
 
 | Top level | LUT4 | FF | DP16KD (of 56) | EHXPLLL | Notes |
 |---|---|---|---|---|---|
-| `dvp_camera_hdmi_top` (720p60, only resolution supported) | 1098 | 669 | 6 | 2 | 4.5% LUT utilization; 2nd `EHXPLLL` is `clk_gen_mclk.v`'s 24MHz camera MCLK |
+| `dvp_camera_hdmi_top` (720p60, only resolution supported) | 1666 | 893 | 12 | 2 | 6.9% LUT utilization; 2nd `EHXPLLL` is `clk_gen_mclk.v`'s 24MHz camera MCLK |
 | `dvp_camera_hdmi_top_ext` (1080p60) | 398 | 311 | 12 | 1 | no TMDS gearbox needed; **not yet updated with MCLK/power-sequencer/UART debug**, see [Known limitations](#known-limitations--future-work) |
 
 (Cell counts for `dvp_camera_hdmi_top` grew from the design's original
 720p60-only/8-bit-I²C form after adding `clk_gen_mclk.v` +
 `cam_power_sequencer.v` + the wider `ADDR_BYTES`-capable `i2c_master.v` +
-the 73-entry OV5640 `cam_config_rom.v` table + `uart_tx.v`/`uart_debug.v` —
-all still a small fraction of the LFE5U-25F's ~24,300 LUT4-equivalents and
-56 DP16KD blocks. The 1080p30 configuration this table used to also list
-was removed — see [Why two different 1080p60 delivery paths](#why-two-different-1080p60-delivery-paths).)
+the 73-entry OV5640 `cam_config_rom.v` table + `uart_tx.v`/`uart_debug.v`,
+and again after replacing `video_cdc_buffer.v` with `video_line_buffer.v`
+(the DP16KD jump from 6 to 12 is mostly `video_line_buffer.v`'s 4
+`dp_line_ram.v` instances, ~1280×24bit each) — all still a small fraction
+of the LFE5U-25F's ~24,300 LUT4-equivalents and 56 DP16KD blocks. The
+1080p30 configuration this table used to also list was removed — see [Why
+two different 1080p60 delivery paths](#why-two-different-1080p60-delivery-paths).)
 
 **Place & route + static timing analysis (`nextpnr-ecp5 --25k --package
 CABGA256 --speed 6`), against `constraints/icepi_zero.lpf`:**
 
 | Design | Clock domain | Target | Achieved | Result |
 |---|---|---|---|---|
-| 720p60 | `clk_pixel` | 74.29 MHz | 82.55 MHz (seed 18) | **PASS** |
-| 720p60 | `cam_pclk` | 75.00 MHz | 178.41 MHz | **PASS** |
-| 720p60 | `cam_mclk` | 24.00 MHz | 175.38 MHz | **PASS** |
-| 720p60 | `clk` (board osc, drives `uart_debug`) | 50.00 MHz | 108.86 MHz | **PASS** |
+| 720p60 | `clk_pixel` | 74.29 MHz | 92.07 MHz (seed 18) | **PASS** |
+| 720p60 | `cam_pclk` | 75.00 MHz | 93.89 MHz | **PASS** |
+| 720p60 | `cam_mclk` | 24.00 MHz | 185.74 MHz | **PASS** |
+| 720p60 | `clk` (board osc, drives `uart_debug`) | 50.00 MHz | 107.35 MHz | **PASS** |
 | 720p60 | `cam_vsync` (frame-counter clock edge in `uart_debug`) | 1.00 MHz (documentation-only; real rate ≈60Hz) | 894.45 MHz | **PASS** |
 | 720p60 | `cam_pixel_valid` (activity-indicator clock edge in `uart_debug`) | 12.00 MHz (nextpnr auto-inferred default — internal net, not a top-level port, so no LPF `FREQUENCY` constraint applies; real rate is the pixel rate, far above this) | 894.45 MHz | **PASS** |
-| 720p60 | TMDS `sclk` | 185.74 MHz | 226.71 MHz | **PASS** |
+| 720p60 | TMDS `sclk` | 185.74 MHz | 223.86 MHz | **PASS** |
 | 1080p60 (ext) | `hdmi_pclk` | 150.01 MHz | 157.18 MHz (seed 6) | **PASS** |
 | 1080p60 (ext) | `cam_pclk` | 75.00 MHz | 187.06 MHz | **PASS** |
 
-(720p60 numbers above are from a real `oss-cad-suite` toolchain run
-(Yosys 0.68+106, `nextpnr-ecp5` current as of this writing) on the actual
-target hardware, pasted directly from a user's terminal output — not this
-project's own development-sandbox toolchain (an older apt-installed Yosys
-0.33), which is known to place/route the same `--seed N` differently (see
-"Timing closure notes" below for why). `pnr` uses `--seed 18` (re-tuned on
-the real toolchain after the seed 14 pick above turned out to be a
-razor-thin/borderline FAIL there — see "Timing closure notes"); `pnr_ext`
-uses `--seed 6` — the ext top level is a different, unmodified netlist
-with its own independently-tuned best seed, checked with
+(720p60 numbers above are from THIS project's own development-sandbox
+toolchain (apt-installed Yosys 0.33), re-measured after
+`video_cdc_buffer.v` was replaced with `video_line_buffer.v` in
+`dvp_camera_hdmi_top.v` — a big enough netlist/timing change that the
+previous round's real-`oss-cad-suite`-toolchain numbers (Yosys 0.68+106,
+gathered from a user's real hardware in an earlier round, for the
+*previous* netlist) no longer apply and shouldn't be trusted for this one.
+`--seed 18` (unchanged from before this netlist change) still closes
+timing cleanly here with comfortable margin on every domain, including
+`cam_pclk` — which needed a real fix this round: the new
+`video_line_buffer.v` write-side back-pressure logic (see its own "DESIGN
+HISTORY" comment) initially put a 16-bit Gray-decode+compare chain
+straight into the per-pixel write path and dropped `cam_pclk` to a
+razor-thin FAIL (~74 vs 75 MHz); registering that check (it only needs to
+be fresh once per video line, not once per pixel) fixed it with room to
+spare. **This has not yet been re-verified against a real oss-cad-suite
+toolchain on real hardware** — do that (and re-sweep `--seed N` if it
+reports a FAIL there, exactly as documented in "Timing closure notes")
+before trusting these specific numbers for production, the same caveat
+this repository has needed every time the netlist changes meaningfully.
+`pnr_ext` uses `--seed 6` — the ext top level is a different, unmodified
+netlist with its own independently-tuned best seed, checked with
 `--lpf-allow-unconstrained` since its `hdmi_*` pins aren't assigned real
 sites by default.)
 
@@ -628,7 +667,7 @@ that during development briefly looked like a real regression until
 re-checking against the real Makefile target showed the original numbers
 still held exactly.)
 
-**This seed has been re-tuned seven times already, and will likely need
+**This seed has been re-tuned eight times already, and will likely need
 re-tuning again if you change the RTL or LPF.** `--seed 4` was the
 original pick (before `clk_gen_mclk.v`, `cam_power_sequencer.v`, and the
 widened `ADDR_BYTES`-capable `i2c_master.v`/`cam_config_rom.v` were added
@@ -695,11 +734,32 @@ at the time you're reading it, re-sweep seeds on your own toolchain before
 trusting a FAIL (or a thin PASS) as final** — this is a toolchain-portability
 issue, not evidence the design itself is marginal.
 
+**Episode 8 — a new clock domain failure, from a genuine combinational-depth
+bug, not placement variance.** Replacing `video_cdc_buffer.v` with
+`video_line_buffer.v` (see [Architecture](#architecture)) grew the netlist
+again and, on this sandbox's own toolchain, `--seed 18` alone dropped
+`cam_pclk` to a real **FAIL** (~74 vs. 75 MHz) — a *different* clock domain
+than any previous episode had ever touched. Unlike episodes 1–6 (placement
+variance) this one had a real root cause: `video_line_buffer.v`'s new
+write-side back-pressure logic fed a 16-bit Gray-decode-plus-compare chain
+straight into the same-cycle path that gates every pixel write, needlessly
+putting a check that only needs to be fresh once per video *line* in series
+with logic that runs once per *pixel*. Registering that check (one cycle of
+staleness on a signal with generous margin to spare) removed it from the
+critical path entirely and brought `cam_pclk` back to a comfortable PASS
+(93.89 MHz) with `--seed 18` unchanged — no re-sweep was needed once the
+actual combinational-depth problem was fixed. The lesson generalizes: a
+timing FAIL after adding logic to a clock domain that previously had
+comfortable margin is worth a first look at what got added to *that specific
+domain's* combinational depth before reaching for a seed sweep — a seed
+sweep fixes placement-variance FAILs, not a genuine new critical path.
+
 Each of these episodes was the same run-to-run (and now, run-to-toolchain)
 variance described above working as intended, not a sign the design has
 gotten marginal — re-sweep after any netlist- or placement-shifting
 change, or any toolchain-version change, exactly per the advice in the
-paragraph above.
+paragraph above (and check for an actual new critical path first, per
+episode 8, before assuming a sweep is even the right fix).
 
 **Declare-before-use matters for portability, even though standard
 Verilog doesn't require it.** This repository's development environment's

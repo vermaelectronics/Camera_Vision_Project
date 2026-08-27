@@ -48,6 +48,8 @@ RTL_SOURCES = \
 	rtl/dvp_capture.v \
 	rtl/pixel_formatter.v \
 	rtl/video_cdc_buffer.v \
+	rtl/dp_line_ram.v \
+	rtl/video_line_buffer.v \
 	rtl/clk_gen_dvi.v \
 	rtl/clk_gen_1080p60.v \
 	rtl/clk_gen_mclk.v \
@@ -79,7 +81,8 @@ TB_i2c_master             = rtl/i2c_master.v tb/tb_i2c_master.v
 TB_cam_power_sequencer   = rtl/cam_power_sequencer.v tb/tb_cam_power_sequencer.v
 TB_uart_tx                = rtl/uart_tx.v tb/tb_uart_tx.v
 TB_uart_debug              = rtl/uart_tx.v rtl/uart_debug.v tb/tb_uart_debug.v
-TB_NAMES = async_fifo tmds_encoder video_timing_gen dvp_pixel_chain i2c_master cam_power_sequencer uart_tx uart_debug
+TB_video_line_buffer        = rtl/dp_line_ram.v rtl/video_line_buffer.v tb/tb_video_line_buffer.v
+TB_NAMES = async_fifo tmds_encoder video_timing_gen dvp_pixel_chain i2c_master cam_power_sequencer uart_tx uart_debug video_line_buffer
 
 sim: $(foreach t,$(TB_NAMES),sim_$(t))
 
@@ -89,7 +92,7 @@ sim_%: $(BUILD)
 	vvp $(BUILD)/tb_$*.vvp
 
 # ---------------------------------------------------------------------------
-# `make check` -- runs all 8 testbenches, does NOT stop at the first failure
+# `make check` -- runs all 9 testbenches, does NOT stop at the first failure
 # (unlike `make sim`, which does -- a Makefile recipe line failing aborts
 # that target), collects every PASS/FAIL, prints one summary table at the
 # end, and exits non-zero if anything failed. This is the one command to
@@ -125,17 +128,18 @@ check: $(BUILD)
 	run_one cam_power_sequencer      $(TB_cam_power_sequencer); \
 	run_one uart_tx                    $(TB_uart_tx); \
 	run_one uart_debug                   $(TB_uart_debug); \
+	run_one video_line_buffer              $(TB_video_line_buffer); \
 	echo ""; \
 	echo "============================================================"; \
 	echo " SUMMARY"; \
 	echo "============================================================"; \
-	for n in async_fifo tmds_encoder video_timing_gen dvp_pixel_chain i2c_master cam_power_sequencer uart_tx uart_debug; do \
+	for n in async_fifo tmds_encoder video_timing_gen dvp_pixel_chain i2c_master cam_power_sequencer uart_tx uart_debug video_line_buffer; do \
 	  eval "r=\$$result_$$n"; \
 	  printf "  %-20s %s\n" "$$n" "$$r"; \
 	done; \
 	echo "============================================================"; \
 	if [ "$$overall" -eq 0 ]; then \
-	  echo " ALL 8 TESTBENCHES PASSED"; \
+	  echo " ALL 9 TESTBENCHES PASSED"; \
 	else \
 	  echo " AT LEAST ONE TESTBENCH FAILED -- see log above"; \
 	fi; \
@@ -150,8 +154,8 @@ check: $(BUILD)
 # variable, e.g.:
 #   make wave TB=tmds_encoder
 # Valid <name> values: async_fifo, tmds_encoder, video_timing_gen,
-# dvp_pixel_chain, i2c_master, cam_power_sequencer, uart_tx, uart_debug
-# (same names as the sim_<name> targets above).
+# dvp_pixel_chain, i2c_master, cam_power_sequencer, uart_tx, uart_debug,
+# video_line_buffer (same names as the sim_<name> targets above).
 # Icarus writes each testbench's .vcd to the directory `make` was invoked
 # from (the project root), not into $(BUILD) -- that's where GTKWave is
 # pointed below. Needs `gtkwave` on PATH (`apt install gtkwave`, or it's
@@ -161,7 +165,7 @@ wave_%: sim_%
 
 wave:
 	@if [ -z "$(TB)" ]; then \
-	  echo "usage: make wave TB=<async_fifo|tmds_encoder|video_timing_gen|dvp_pixel_chain|i2c_master|cam_power_sequencer|uart_tx|uart_debug>"; \
+	  echo "usage: make wave TB=<async_fifo|tmds_encoder|video_timing_gen|dvp_pixel_chain|i2c_master|cam_power_sequencer|uart_tx|uart_debug|video_line_buffer>"; \
 	  exit 1; \
 	fi
 	$(MAKE) wave_$(TB)

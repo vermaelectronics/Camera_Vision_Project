@@ -167,37 +167,26 @@ module dvp_camera_hdmi_top #(
 
     wire cam_pixel_valid;
     wire [23:0] cam_rgb;
+    wire cam_pixel_line_start, cam_pixel_frame_start;
 
     pixel_formatter #(.FORMAT(CAMERA_FORMAT), .BYTE_SWAP(BYTE_SWAP), .RB_SWAP(RB_SWAP)) u_formatter (
         .pclk(cam_pclk), .rst(rst_cam),
         .byte_valid(byte_valid), .byte_data(byte_data),
         .line_start(line_start_cap), .frame_start(frame_start_cap),
         .pixel_valid(cam_pixel_valid), .rgb(cam_rgb),
-        .pixel_line_start(), .pixel_frame_start()
+        .pixel_line_start(cam_pixel_line_start), .pixel_frame_start(cam_pixel_frame_start)
     );
 
     // ------------------------------------------------------------------
-    // Camera -> pixel-clock domain CDC buffer
-    // ------------------------------------------------------------------
-    wire [23:0] buf_rgb;
-    wire        buf_ready;
-    wire        out_de;
-
-    video_cdc_buffer #(
-        .DEPTH(4096),
-        .PREFILL_WORDS(2048)
-    ) u_cdc (
-        .cam_pclk(cam_pclk), .cam_rst(rst_cam),
-        .cam_pixel_valid(cam_pixel_valid), .cam_rgb(cam_rgb),
-        .out_pclk(clk_pixel), .out_rst(rst_pixel),
-        .out_de(out_de), .out_rgb(buf_rgb), .out_ready(buf_ready)
-    );
-
-    // ------------------------------------------------------------------
-    // Video timing generator (pixel-clock domain)
+    // Video timing generator (pixel-clock domain) -- moved ahead of the
+    // camera/display bridge below because video_line_buffer's read side
+    // needs its x/de outputs directly (a display line boundary is
+    // detected from de's own rising edge -- see video_line_buffer.v's
+    // header comment for why).
     // ------------------------------------------------------------------
     wire hsync, vsync;
     wire [15:0] x, y;
+    wire        out_de;
 
     video_timing_gen #(
         .H_ACTIVE(H_ACTIVE), .H_FRONT(H_FRONT), .H_SYNC(H_SYNC), .H_BACK(H_BACK),
@@ -207,6 +196,30 @@ module dvp_camera_hdmi_top #(
         .clk(clk_pixel), .rst(rst_pixel),
         .hsync(hsync), .vsync(vsync), .de(out_de), .frame_start(),
         .x(x), .y(y)
+    );
+
+    // ------------------------------------------------------------------
+    // Camera -> pixel-clock domain bridge, a "line FIFO" -- see
+    // video_line_buffer.v's header comment for why this replaced the old
+    // flat-FIFO video_cdc_buffer.v here (still used by
+    // dvp_camera_hdmi_top_ext.v -- see README.md "Known limitations").
+    // cam_pixel_frame_start is intentionally not consumed here -- see the
+    // module's header comment ("DESIGN HISTORY") for why row claims no
+    // longer need frame-boundary information at all.
+    // ------------------------------------------------------------------
+    wire [23:0] buf_rgb;
+    wire        buf_ready;
+
+    video_line_buffer #(
+        .WIDTH(H_ACTIVE),
+        .N_LINES(4)
+    ) u_linebuf (
+        .cam_pclk(cam_pclk), .cam_rst(rst_cam),
+        .cam_pixel_valid(cam_pixel_valid), .cam_rgb(cam_rgb),
+        .cam_line_start(cam_pixel_line_start),
+        .out_pclk(clk_pixel), .out_rst(rst_pixel),
+        .out_x(x), .out_de(out_de),
+        .out_rgb(buf_rgb), .out_ready(buf_ready)
     );
 
     // ------------------------------------------------------------------
@@ -221,26 +234,35 @@ module dvp_camera_hdmi_top #(
 
     // Pipeline register: this is REQUIRED for two independent reasons, not
     // just timing closure --
-    //  (1) async_fifo's rd_data (and hence buf_rgb) is itself a *registered*
-    //      read output with one cycle of latency from rd_en (=out_de) to
-    //      valid data, so buf_rgb for a given pixel only becomes valid on
-    //      the clock edge *after* the timing generator has already moved on
-    //      to the next pixel's (x,y,de). Registering hsync/vsync/de and
-    //      pattern_rgb by one cycle here re-aligns everything (registered
-    //      sync + registered pattern, vs. already-delayed-by-construction
-    //      buf_rgb) onto the same pixel.
+    //  (1) buf_rgb has TWO cycles of latency from (x,y,de) to valid data --
+    //      one from dp_line_ram's own registered read port, one more from
+    //      video_line_buffer's ring-slot mux/hold register (see that
+    //      module's "LATENCY" header comment) -- so buf_rgb for a given
+    //      pixel only becomes valid two clock edges after the timing
+    //      generator has already moved on to that pixel's (x,y,de).
+    //      Registering hsync/vsync/de and pattern_rgb by the SAME two
+    //      cycles here re-aligns everything onto the same pixel. (This was
+    //      only one stage before video_line_buffer.v replaced the older,
+    //      one-cycle-latency video_cdc_buffer.v here -- widened to match.)
     //  (2) it also breaks what would otherwise be one long combinational
     //      path from the timing generator's counters, through
     //      test_pattern_gen's comparator, straight into tmds_encoder's own
     //      internal 8b/10b logic -- verified against real STA (nextpnr-ecp5)
     //      to blow the 74.25MHz timing budget without this register.
+    reg        hsync_r1, vsync_r1, de_r1;
+    reg [23:0] pattern_rgb_r1;
     reg        hsync_r, vsync_r, de_r;
     reg [23:0] pattern_rgb_r;
     always @(posedge clk_pixel) begin
-        hsync_r       <= hsync;
-        vsync_r       <= vsync;
-        de_r          <= out_de;
-        pattern_rgb_r <= pattern_rgb;
+        hsync_r1       <= hsync;
+        vsync_r1       <= vsync;
+        de_r1          <= out_de;
+        pattern_rgb_r1 <= pattern_rgb;
+
+        hsync_r       <= hsync_r1;
+        vsync_r       <= vsync_r1;
+        de_r          <= de_r1;
+        pattern_rgb_r <= pattern_rgb_r1;
     end
 
     wire [23:0] pixel_rgb = pattern_sel ? pattern_rgb_r : buf_rgb;
