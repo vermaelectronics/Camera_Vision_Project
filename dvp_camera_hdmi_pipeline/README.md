@@ -306,13 +306,17 @@ camera is streaming, power the module from a separate 3.3V source and
 only share `GND` with the board.
 
 **The module's own onboard LED(s) (next to the lens on small breakouts
-like this one) are not in this table and cannot be controlled by this
-design.** They're fixed power-on indicators wired straight to the 3.3V
-rail with a resistor, right on the breakout PCB — no GPIO or sensor
-register connects to them, so nothing digital (I²C included) can turn
-them on or off. If you want a real "capture is happening" indicator, use
+like this one) aren't in the pin table above — they're not wired to the
+FPGA at all.** Confirmed via Waveshare's own official demo code for this
+module: they're wired to the OV5640 sensor's own GPIO pin, controlled
+entirely over I²C (registers `0x3016`/`0x301C`/`0x3019` — the same
+sequence their `OV5640_Flash_Lamp()` function uses). `cam_config_rom.v`
+turns it on once configuration completes — see its header comment for the
+full explanation and how to remove this if you don't want it lit. This is
+a **static** indicator (on once config succeeds, stays on) — for a
+**live, real-time** "capture is happening" indicator instead, use
 `cap_led` (a genuine FPGA output pin) or the UART debug output's `ACT`
-field instead — see [UART debug interface](#uart-debug-interface).
+field — see [UART debug interface](#uart-debug-interface).
 
 Do **not** tie `RESET`/`PWDN` to fixed levels or leave them floating —
 without `cam_power_sequencer.v` actively driving the documented
@@ -351,19 +355,29 @@ PLL=1 MCLK=1 SEQ=1 CFG=1 NACK=0 BUF=1 MODE=C FRAMES=0x4D ACT=1 RAW=3B2C9F10
 | `ACT` | capture-activity indicator: `1` whenever real pixels have been captured (`cam_pixel_valid` pulsing) recently, stretched to a visible duration (200ms default) so it reads as solidly lit during continuous capture. Also driven out to a real pin, `cap_led` — see below. |
 | `RAW` | the last 4 bytes actually captured off `cam_d[7:0]` (oldest first), refreshed live -- the only field showing real sensor data content directly rather than a derived status flag. **Stuck at a fixed value (`00000000`, `FFFFFFFF`, or any other constant that never changes)** → the data bus isn't delivering real varying data (wiring or sensor-not-streaming problem). **Visibly varies refresh to refresh** → real bytes are arriving; any remaining image problem is downstream, in decode/format configuration, not the data bus itself. This is the single most useful field for diagnosing "image is garbage" symptoms, since it bypasses the whole decode pipeline and shows exactly what's on the wire. |
 
-**A real "capture is happening" indicator, on an actual pin — `cap_led`
-(gpio[19], header pin 35).** This exists because a natural instinct is to
-look for LEDs already on the camera module itself for this — **don't**:
-on essentially every OV5640 breakout (including the small Waveshare
-module pictured in this repo's development), the LED(s) mounted next to
-the lens are fixed power-on indicators wired straight to the 3.3V rail
-with a resistor, right on the breakout PCB. They light the instant the
-module gets power and stay lit regardless of what the FPGA or I²C is
-doing — there is no GPIO or sensor register connected to them, so nothing
-digital (I²C included) can control them. `cap_led` is the real, working
-equivalent: wire an external LED (+ series resistor, to `GND`) to header
-pin 35 if you want a physical indicator — the same information is also in
-the UART's `ACT` field above with zero extra wiring at all.
+**Two different "activity" indicators exist in this design, and it's
+worth being clear about what each one actually is:**
+
+- **`cap_led` (gpio[19], header pin 35)** — a real FPGA output pin, lit
+  by genuine live pixel-capture activity (`cam_pixel_valid` pulsing,
+  stretched to stay visibly lit during continuous capture). This is a
+  true real-time indicator: it reflects what's happening *right now*.
+  Wire an external LED (+ series resistor, to `GND`) here if you want a
+  physical indicator away from the camera module itself — the same
+  information is also in the UART's `ACT` field with zero extra wiring.
+- **The camera module's own onboard LED**, on modules where it's wired
+  to the OV5640's GPIO pin (confirmed for the Waveshare module this
+  project targets, via their own official demo code's
+  `OV5640_Flash_Lamp()` function — see `cam_config_rom.v`'s header
+  comment). `cam_config_rom.v` turns it on with a one-shot register write
+  (`0x3016`/`0x301C`/`0x3019`) once configuration completes. This is a
+  **static** "camera configured successfully" indicator — it turns on
+  once and stays on — not a live per-frame activity light like `cap_led`.
+  Making it track real-time activity too would need an ongoing (not
+  one-shot) I²C write path, a materially bigger feature than a init-time
+  register write. If your specific module's LED isn't wired to the
+  sensor's GPIO pin, these three register writes are harmless no-ops for
+  you; delete them from `cam_config_rom.v` if you'd rather it stay off.
 
 **Wiring: none needed.** `uart_tx` is routed to the IcePi‑Zero's own
 onboard USB‑JTAG programmer chip's UART channel (`LOCATE COMP "uart_tx"
@@ -435,17 +449,20 @@ design to a **different** sensor:
    1:1. (Adding a line-buffer-based scaler is a natural extension point;
    see [Known limitations](#known-limitations--future-work).)
 
-**A word of caution on the shipped OV5640 table:** it's reproduced from
-general, widely-published/community knowledge of a typical OV5640
-DVP‑RGB565 1280×720 init sequence — it has **not** been hardware-verified
-against a real sensor in this development environment (no physical OV5640
-was available here). Cross-check it against Waveshare's own official demo
-code/register list for this exact module before relying on it, especially
-`0x4300` (RGB byte-order — try `0x6F` if red/blue channels look swapped)
-and the `0x3800`–`0x3821` output-window registers (most likely to need
-adjustment if the image is offset, mirrored, or the wrong size). See the
-extensive comments at the top of `cam_config_rom.v` for the full
-per-register rationale.
+**A word on the shipped OV5640 table's provenance:** its format-select and
+ISP-enable registers (`0x4300`, `0x501F`, `0x5000`, `0x5001`, `0x300E`,
+and a few others) are now cross-checked directly against Waveshare's own
+official demo code for this exact module (their real `ov5640.c`/
+`ov5640cfg.h`) — this caught a real bug (`0x4300` was `0x61`, a
+community-sourced guess; the vendor's own table uses `0x6F`) and added
+several ISP master-enable registers that were missing entirely. The
+PLL/analog/timing/output-window registers (`0x3800`–`0x3821`, most likely
+to still need adjustment if the image is offset, mirrored, or the wrong
+size) remain this project's own independently-derived 720p60 configuration
+— the vendor's own RGB565 table targets a different resolution/frame rate
+(1280×800 @ 15fps) than this design's 1280×720 @ 60fps, so those values
+weren't copied wholesale. See the extensive comments at the top of
+`cam_config_rom.v` for the full per-register provenance and rationale.
 
 ---
 
@@ -525,7 +542,7 @@ problems:**
 (Cell counts for `dvp_camera_hdmi_top` grew from the design's original
 720p60-only/8-bit-I²C form after adding `clk_gen_mclk.v` +
 `cam_power_sequencer.v` + the wider `ADDR_BYTES`-capable `i2c_master.v` +
-the 61-entry OV5640 `cam_config_rom.v` table + `uart_tx.v`/`uart_debug.v` —
+the 73-entry OV5640 `cam_config_rom.v` table + `uart_tx.v`/`uart_debug.v` —
 all still a small fraction of the LFE5U-25F's ~24,300 LUT4-equivalents and
 56 DP16KD blocks. The 1080p30 configuration this table used to also list
 was removed — see [Why two different 1080p60 delivery paths](#why-two-different-1080p60-delivery-paths).)
@@ -535,19 +552,20 @@ CABGA256 --speed 6`), against `constraints/icepi_zero.lpf`:**
 
 | Design | Clock domain | Target | Achieved | Result |
 |---|---|---|---|---|
-| 720p60 | `clk_pixel` | 74.29 MHz | 78.47 MHz (seed 1) | **PASS** |
-| 720p60 | `cam_pclk` | 75.00 MHz | 185.43 MHz | **PASS** |
-| 720p60 | `cam_mclk` | 24.00 MHz | 181.95 MHz | **PASS** |
-| 720p60 | `clk` (board osc, drives `uart_debug`) | 50.00 MHz | 110.39 MHz | **PASS** |
+| 720p60 | `clk_pixel` | 74.29 MHz | 81.71 MHz (seed 14) | **PASS** |
+| 720p60 | `cam_pclk` | 75.00 MHz | 178.41 MHz | **PASS** |
+| 720p60 | `cam_mclk` | 24.00 MHz | 175.38 MHz | **PASS** |
+| 720p60 | `clk` (board osc, drives `uart_debug`) | 50.00 MHz | 108.86 MHz | **PASS** |
 | 720p60 | `cam_vsync` (frame-counter clock edge in `uart_debug`) | 1.00 MHz (documentation-only; real rate ≈60Hz) | 894.45 MHz | **PASS** |
 | 720p60 | `cam_pixel_valid` (activity-indicator clock edge in `uart_debug`) | 12.00 MHz (nextpnr auto-inferred default — internal net, not a top-level port, so no LPF `FREQUENCY` constraint applies; real rate is the pixel rate, far above this) | 894.45 MHz | **PASS** |
-| 720p60 | TMDS `sclk` | 185.74 MHz | 211.51 MHz | **PASS** |
+| 720p60 | TMDS `sclk` | 185.74 MHz | 210.57 MHz | **PASS** |
 | 1080p60 (ext) | `hdmi_pclk` | 150.01 MHz | 157.18 MHz (seed 6) | **PASS** |
 | 1080p60 (ext) | `cam_pclk` | 75.00 MHz | 187.06 MHz | **PASS** |
 
 (720p60 numbers re-verified directly against `make synth` + `make pnr`'s
-actual output. `pnr` uses `--seed 1` (re-tuned after adding the `ACT`
-capture-activity field/`cap_led` output to `uart_debug.v` — see "Timing
+actual output. `pnr` uses `--seed 14` (re-tuned after cross-checking
+`cam_config_rom.v`'s format/ISP-enable registers against Waveshare's
+vendor code and adding the module-LED control registers — see "Timing
 closure notes" below); `pnr_ext` uses `--seed 6` — the ext top level is a
 different, unmodified netlist with its own independently-tuned best seed,
 checked with `--lpf-allow-unconstrained` since its `hdmi_*` pins aren't
@@ -604,7 +622,7 @@ that during development briefly looked like a real regression until
 re-checking against the real Makefile target showed the original numbers
 still held exactly.)
 
-**This seed has been re-tuned five times already, and will likely need
+**This seed has been re-tuned six times already, and will likely need
 re-tuning again if you change the RTL or LPF.** `--seed 4` was the
 original pick (before `clk_gen_mclk.v`, `cam_power_sequencer.v`, and the
 widened `ADDR_BYTES`-capable `i2c_master.v`/`cam_config_rom.v` were added
@@ -631,9 +649,14 @@ netlist once more and also added a new I/O pin, shifting placement enough
 that every seed's margin thinned noticeably (the sweep this time ranged
 73.99–78.47 MHz rather than the wider spread seen in earlier sweeps); a
 fresh sweep against this exact netlist landed on `--seed 1` (78.47 MHz).
-Each of these was the same run-to-run variance described above working
-as intended, not a sign the design has gotten marginal — re-sweep after
-any netlist- or placement-shifting change, exactly per the advice in the
+Cross-checking `cam_config_rom.v`'s format/ISP-enable registers against
+Waveshare's vendor code and adding the module-LED control registers grew
+the table by 12 entries; `--seed 1` alone dropped to a razor-thin 74.67
+MHz (0.5% margin) on this new netlist, so a fresh sweep was run and
+landed on `--seed 14` (81.71 MHz). Each of these was the same run-to-run
+variance described above working as intended, not a sign the design has
+gotten marginal — re-sweep after any netlist- or placement-shifting
+change, exactly per the advice in the
 paragraph above.
 
 **Declare-before-use matters for portability, even though standard
@@ -707,10 +730,18 @@ instances remain.
 - **No scaler.** The camera's active-video window must already match the
   display resolution. A line-buffer-based (or full frame-buffer, using the
   board's onboard SDRAM) scaler is a natural extension.
-- **`cam_config_rom.v`'s OV5640 register table hasn't been hardware-tested
-  against a real sensor** in this development environment — cross-check
-  it against Waveshare's official demo code before relying on it. See
-  [Adapting to your sensor](#adapting-to-your-sensor).
+- **`cam_config_rom.v`'s format-select and ISP-enable registers (0x4300,
+  0x501F, 0x5000, 0x5001, 0x300E, and others) are now cross-checked
+  against Waveshare's own official demo code** for this exact module
+  (their real `ov5640.c`/`ov5640cfg.h`) — this fixed a real bug (0x4300
+  was 0x61, a community guess; the vendor's own table uses 0x6F) and
+  added several ISP master-enable registers that were missing entirely.
+  The PLL/analog/timing/output-window registers are still this project's
+  own independently-derived values (the vendor's own RGB565 table targets
+  a different resolution/frame rate than this design's 720p60), so they
+  remain reproduced from general community knowledge, not vendor-sourced.
+  See [Adapting to your sensor](#adapting-to-your-sensor) and the header
+  comment in `cam_config_rom.v` for the full provenance breakdown.
 - **`dvp_camera_hdmi_top_ext.v` doesn't yet have the MCLK PLL /
   power-sequencer / 16-bit-I²C / UART debug support** that
   `dvp_camera_hdmi_top.v` has — it still uses the original 8-bit-only I²C

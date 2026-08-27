@@ -11,39 +11,69 @@
 // your sensor" (and switch i2c_master's ADDR_BYTES back to 1 if your part
 // uses 8-bit register addressing instead, e.g. OV7670/OV2640-class parts).
 //
-// IMPORTANT HONESTY NOTE: unlike the DVI timing/TMDS-encoding math
-// elsewhere in this project (verified by simulation and hand computation),
-// this register table cannot be verified the same way -- there is no
-// simulation model of real OV5640 silicon. It is reproduced from general
-// knowledge of the commonly-published/community OV5640 DVP-RGB565 init
-// sequence (a table that shows up, in similar form, across many public
-// OV5640 reference projects), NOT hardware-tested against a real sensor in
-// this session. Treat it as a strong, structurally-correct starting point
-// -- not a guaranteed-correct final sequence. Before relying on it:
-//   - Cross-check against Waveshare's own official demo code for this
-//     exact board (search their wiki for "OV5640 camera board") if
-//     anything doesn't work.
-//   - The two most likely things to need adjustment for YOUR board/copy of
-//     the sensor are marked below: the format byte-order register (0x4300
-//     -- if colours come out channel-swapped, try the alternate value
-//     noted there, or flip pixel_formatter.v's BYTE_SWAP parameter
-//     instead, which fixes the same class of issue), and the output-window
-//     registers (0x3808-0x3821 -- if the image is shifted, cropped
-//     wrong, or doesn't appear at all).
+// PROVENANCE UPDATE: the format-select and ISP-enable registers below
+// (0x4300, 0x501F, 0x440E, 0x5000, 0x5001, 0x3000, 0x3004, 0x300E, 0x302E,
+// 0x3002, 0x3006) have been cross-checked directly against Waveshare's own
+// official "OV5640 Camera Board (C) Code" demo (their real ov5640.c /
+// ov5640cfg.h, `ov5640_rgb565_reg_tbl` and `ov5640_init_reg_tbl`) -- these
+// are no longer general-community guesses, they match the vendor's own
+// working driver for this exact sensor. Two real, confirmed differences
+// from this table's earlier revision:
+//   - 0x4300 was 0x61 (a community-sourced guess); the vendor's RGB565
+//     table uses 0x6F. Fixed below.
+//   - 0x5000/0x5001 (ISP pipeline master enables -- 0x5001 in particular
+//     enables the color-matrix/CMX block that converts raw Bayer data into
+//     RGB) and 0x300E (MIPI-power-down/DVP-enable) were missing entirely.
+//     Their absence is a strong candidate for the "correct HREF/VSYNC
+//     framing and NACK-free I2C, but garbage pixel content" symptom seen
+//     during this project's real hardware bring-up -- without the ISP
+//     master-enable bits set, the pixel path can be live and correctly
+//     timed while still not actually demosaicing into valid RGB.
+//
+// The vendor's own RGB565 table targets a different resolution/frame rate
+// (1280x800 @ 15fps, PCLK 42MHz) than this design's 1280x720 @ 60fps, so
+// its PLL-divider and output-window register VALUES were not copied
+// wholesale -- this table keeps its own independently-derived,
+// timing-closure-verified 720p60 clock/window configuration (see
+// [Timing closure notes] in README.md) and only adopts the
+// format/ISP-enable registers that are resolution-independent.
+//
+// IMPORTANT HONESTY NOTE (unchanged for the rest of the table): unlike the
+// DVI timing/TMDS-encoding math elsewhere in this project (verified by
+// simulation and hand computation), most of this register table still
+// cannot be verified the same way -- there is no simulation model of real
+// OV5640 silicon, and the PLL/analog/timing/output-window registers below
+// remain reproduced from general community knowledge, not the vendor
+// source. Before relying on it further:
+//   - The output-window registers (0x3800-0x3821) are the next most
+//     likely thing to need adjustment if the image is shifted, cropped
+//     wrong, or doesn't appear at all.
 //   - Sensor "core"/analog tuning (AWB gains, lens-shading correction,
 //     gamma curve, sharpness/denoise) is deliberately NOT included below
 //     to keep this table to registers whose function is well-established
 //     -- the sensor's power-on analog defaults are generally sane enough
 //     to get a recognisable (if not colour/exposure-perfect) image with
-//     just clock/format/window configured correctly. Add tuning registers
-//     from OV5640's full datasheet/app-note register list once basic
-//     capture is confirmed working.
+//     just clock/format/window/ISP-enable configured correctly. Add
+//     tuning registers from OV5640's full datasheet/app-note register list
+//     once basic capture is confirmed working.
+//
+// Also included: the module's own onboard LED, turned on once
+// configuration completes (registers 0x3016/0x301C/0x3019 -- confirmed
+// via the vendor's own `OV5640_Flash_Lamp()` function, which uses this
+// exact register/value sequence). This is a STATIC "camera configured
+// successfully" indicator -- it turns on once and stays on, the same way
+// `OV5640_WR_Reg` calls in a one-shot init table always work. It does
+// NOT track live per-frame capture activity the way `cap_led`/the UART's
+// `ACT` field do; making it blink with real-time activity would need an
+// ongoing (not one-shot) I2C write path -- a materially bigger feature.
+// If you don't want the module's LED lit, delete the three
+// 0x3016/0x301C/0x3019 entries at the end of the table below.
 // ============================================================================
 `timescale 1ns / 1ps
 `default_nettype none
 
 module cam_config_rom #(
-    parameter NUM_REGS = 61
+    parameter NUM_REGS = 73
 ) (
     input  wire       clk,
     input  wire        rst,
@@ -117,40 +147,72 @@ module cam_config_rom #(
         table_rom[43] = {16'h3A1B, 8'h30};
         table_rom[44] = {16'h3A1E, 8'h26};
 
+        // ---- System block/clock enables -- confirmed against the vendor's
+        // own default init table; were missing entirely before. ------------
+        table_rom[45] = {16'h3000, 8'h00}; // enable blocks
+        table_rom[46] = {16'h3004, 8'hFF}; // enable clocks
+        table_rom[47] = {16'h300E, 8'h58}; // MIPI power down, DVP enable
+        table_rom[48] = {16'h302E, 8'h00};
+
         // ---- Output window: 1280x720 (see header note on this block) ------
-        table_rom[45] = {16'h3800, 8'h00}; // X_ADDR_START hi
-        table_rom[46] = {16'h3801, 8'h00}; // X_ADDR_START lo
-        table_rom[47] = {16'h3802, 8'h00}; // Y_ADDR_START hi
-        table_rom[48] = {16'h3803, 8'h00}; // Y_ADDR_START lo
-        table_rom[49] = {16'h3804, 8'h0A}; // X_ADDR_END hi
-        table_rom[50] = {16'h3805, 8'h3F}; // X_ADDR_END lo (0x0A3F = 2623)
-        table_rom[51] = {16'h3806, 8'h07}; // Y_ADDR_END hi
-        table_rom[52] = {16'h3807, 8'h9B}; // Y_ADDR_END lo (0x079B = 1947)
-        table_rom[53] = {16'h3808, 8'h05}; // DVP output width hi  (0x0500 = 1280)
-        table_rom[54] = {16'h3809, 8'h00}; // DVP output width lo
-        table_rom[55] = {16'h380A, 8'h02}; // DVP output height hi (0x02D0 = 720)
-        table_rom[56] = {16'h380B, 8'hD0}; // DVP output height lo
-        table_rom[57] = {16'h3814, 8'h31}; // X subsample increment
-        table_rom[58] = {16'h3815, 8'h31}; // Y subsample increment
+        table_rom[49] = {16'h3800, 8'h00}; // X_ADDR_START hi
+        table_rom[50] = {16'h3801, 8'h00}; // X_ADDR_START lo
+        table_rom[51] = {16'h3802, 8'h00}; // Y_ADDR_START hi
+        table_rom[52] = {16'h3803, 8'h00}; // Y_ADDR_START lo
+        table_rom[53] = {16'h3804, 8'h0A}; // X_ADDR_END hi
+        table_rom[54] = {16'h3805, 8'h3F}; // X_ADDR_END lo (0x0A3F = 2623)
+        table_rom[55] = {16'h3806, 8'h07}; // Y_ADDR_END hi
+        table_rom[56] = {16'h3807, 8'h9B}; // Y_ADDR_END lo (0x079B = 1947)
+        table_rom[57] = {16'h3808, 8'h05}; // DVP output width hi  (0x0500 = 1280)
+        table_rom[58] = {16'h3809, 8'h00}; // DVP output width lo
+        table_rom[59] = {16'h380A, 8'h02}; // DVP output height hi (0x02D0 = 720)
+        table_rom[60] = {16'h380B, 8'hD0}; // DVP output height lo
+        table_rom[61] = {16'h3814, 8'h31}; // X subsample increment
+        table_rom[62] = {16'h3815, 8'h31}; // Y subsample increment
 
         // ---- Format select: RGB565 over DVP --------------------------------
-        // If colours come out channel-swapped on your board, try 8'h6F here
-        // instead of 8'h61 (or leave this as-is and set pixel_formatter.v's
-        // BYTE_SWAP=1 instead -- either fixes the same underlying issue).
-        table_rom[59] = {16'h4300, 8'h61};
+        // CONFIRMED against Waveshare's own ov5640_rgb565_reg_tbl: 0x6F,
+        // not the earlier-shipped 0x61. If colours still come out
+        // channel-swapped on your specific board, set pixel_formatter.v's
+        // BYTE_SWAP=1 instead of changing this.
+        table_rom[63] = {16'h4300, 8'h6F};
 
         // ---- ISP output-format mux select: RGB (not raw/Bayer passthrough) --
         // 0x501F selects what the ISP pipeline actually hands to the DVP
-        // output stage: 0x00 = ISP bypass (raw Bayer), 0x01 = RGB, 0x02 =
-        // raw DPC, 0x03 = snapshot. 0x4300 above only sets RGB565's byte
-        // order/channel layout -- it has no effect unless the ISP is
-        // actually muxed to output RGB. Missing this register is one of
-        // the most common OV5640 bring-up mistakes: I2C ACKs every write,
-        // PCLK/HREF/VSYNC/data all toggle and look like a valid stream, but
-        // the pixel content itself is meaningless (commonly reads back as
-        // solid black) because the sensor is still in its raw/ISP-bypass
-        // default. Must come after the format-select register above.
-        table_rom[60] = {16'h501F, 8'h01};
+        // output stage: 0x00 = ISP bypass/YUV, 0x01 = RGB. Confirmed
+        // against the vendor's own ov5640_rgb565_reg_tbl. Must come after
+        // the format-select register above.
+        table_rom[64] = {16'h501F, 8'h01};
+
+        // ---- ISP pipeline master enables -- CONFIRMED against the vendor's
+        // own code, and were missing entirely before. 0x5001's CMX
+        // (color-matrix) bit is the block that actually converts raw
+        // Bayer sensor data into RGB -- without it enabled, the pixel
+        // path can be live and correctly timed while still not producing
+        // valid demosaiced color, exactly matching the "correct framing,
+        // garbage content" symptom seen during this project's hardware
+        // bring-up.
+        table_rom[65] = {16'h440E, 8'h00};
+        table_rom[66] = {16'h5000, 8'hA7}; // Lenc on, raw gamma on, BPC on, WPC on, CIP on
+        table_rom[67] = {16'h5001, 8'hA3}; // SDE on, Scaling on, CMX on, AWB on
+
+        // ---- Disable unused JPEG hardware -- matches the vendor's RGB565
+        // table; harmless either way since JPEG mode is never used here.
+        table_rom[68] = {16'h3002, 8'h1C};
+        table_rom[69] = {16'h3006, 8'hC3};
+
+        // ---- Module's own onboard LED -- turned on once config completes.
+        // Confirmed via the vendor's own OV5640_Flash_Lamp() function,
+        // which uses this exact register/value sequence (0x3016=0x02,
+        // 0x301C=0x02 enable/direction-configure the sensor's GPIO pin the
+        // LED is wired to; 0x3019=0x02 drives it high). This is a STATIC
+        // "camera configured successfully" indicator, not a live
+        // per-frame activity indicator -- see the header comment above and
+        // cap_led/the UART's ACT field for the real-time equivalent.
+        // Delete these 3 entries if you don't want the module's LED lit.
+        table_rom[70] = {16'h3016, 8'h02};
+        table_rom[71] = {16'h301C, 8'h02};
+        table_rom[72] = {16'h3019, 8'h02};
 
         // ... extend NUM_REGS and this table further (AWB/gamma/lens-shading
         // tuning, mirror/flip, sharpness) once basic capture is confirmed.
