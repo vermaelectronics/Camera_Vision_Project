@@ -25,18 +25,26 @@ module tb_uart_debug;
     reg pll_locked = 0, mclk_locked = 0, cam_seq_done = 0, cfg_done = 0;
     reg i2c_nack = 0, buf_ready = 0, pattern_sel = 0;
     reg cam_vsync = 0;
+    reg cam_pixel_valid = 0;
     reg [31:0] raw_bytes = 32'h00000000;
-    wire tx;
+    wire tx, cap_led;
 
+    // STRETCH_MS overridden small (real STRETCH_CYCLES uses the real
+    // CLK_FREQ_HZ=50MHz above, unscaled -- only BAUD/TICK_HZ are sped up
+    // for this testbench) so the activity indicator's stretch window is
+    // still comfortably longer than the ~146us it takes to reach the
+    // first status-line snapshot (banner ~136us + up to one more TICK_DIV
+    // period), without dragging simulation out unnecessarily.
     uart_debug #(
-        .CLK_FREQ_HZ(CLK_FREQ_HZ), .BAUD(BAUD), .TICK_HZ(TICK_HZ)
+        .CLK_FREQ_HZ(CLK_FREQ_HZ), .BAUD(BAUD), .TICK_HZ(TICK_HZ), .STRETCH_MS(1)
     ) dut (
         .clk(clk), .rst(rst),
         .pll_locked(pll_locked), .mclk_locked(mclk_locked),
         .cam_seq_done(cam_seq_done), .cfg_done(cfg_done),
         .i2c_nack(i2c_nack), .buf_ready(buf_ready), .pattern_sel(pattern_sel),
-        .cam_vsync(cam_vsync), .raw_bytes(raw_bytes),
-        .tx(tx)
+        .cam_vsync(cam_vsync), .cam_pixel_valid(cam_pixel_valid),
+        .raw_bytes(raw_bytes),
+        .tx(tx), .cap_led(cap_led)
     );
 
     integer errors = 0;
@@ -63,9 +71,9 @@ module tb_uart_debug;
     reg [8*BANNER_LEN-1:0] EXPECTED_BANNER =
         "\r\n=== DVP Camera->HDMI Pipeline (720p60, OV5640) -- UART Debug ===\r\n";
 
-    localparam STATUS_LEN = 71;
+    localparam STATUS_LEN = 77;
     reg [8*STATUS_LEN-1:0] EXPECTED_STATUS =
-        "PLL=1 MCLK=1 SEQ=1 CFG=1 NACK=1 BUF=1 MODE=C FRAMES=0x05 RAW=A5C3F02D\r\n";
+        "PLL=1 MCLK=1 SEQ=1 CFG=1 NACK=1 BUF=1 MODE=C FRAMES=0x05 ACT=1 RAW=A5C3F02D\r\n";
 
     reg [7:0] got_byte;
     reg [7:0] exp_byte;
@@ -129,15 +137,29 @@ module tb_uart_debug;
                 pattern_sel  = 0; // camera mode -> 'C'
                 raw_bytes    = 32'hA5C3F02D;
 
+                // One captured-pixel pulse -- exercises the same toggle+
+                // 2FF+edge-detect CDC path as cam_vsync, then the stretch
+                // timer should hold cap_led/ACT high through the (much
+                // later) first status-line snapshot.
+                #150 cam_pixel_valid = 1;
+                #150 cam_pixel_valid = 0;
+
                 // One NACKed transaction: pulse i2c_nack high then low,
                 // mirroring i2c_master.v's real behavior (set during a
                 // transaction, cleared only when the next one starts).
                 #200 i2c_nack = 1;
                 #200 i2c_nack = 0;
 
-                // Wait for the banner (68 bytes) + first status line (58
+                // Wait for the banner (68 bytes) + first status line (77
                 // bytes) to be fully captured.
                 wait (rx_count >= TOTAL_LEN);
+
+                // Real output pin check (not just the transmitted text) --
+                // cap_led should still be driven high at this point.
+                if (cap_led !== 1'b1) begin
+                    errors = errors + 1;
+                    $display("ERROR: cap_led not high after an activity pulse (real output pin)");
+                end
 
                 // ---- check the startup banner ----
                 for (i = 0; i < BANNER_LEN; i = i + 1) begin

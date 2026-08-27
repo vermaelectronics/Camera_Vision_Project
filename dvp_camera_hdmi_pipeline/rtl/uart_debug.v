@@ -5,7 +5,7 @@
 // Sends a one-time startup banner, then a refreshed single-line status
 // report roughly once per second, e.g.:
 //
-//   PLL=1 MCLK=1 SEQ=1 CFG=1 NACK=0 BUF=1 MODE=C FRAMES=0x4B RAW=A5C3F02D
+//   PLL=1 MCLK=1 SEQ=1 CFG=1 NACK=0 BUF=1 MODE=C FRAMES=0x4B ACT=1 RAW=A5C3F02D
 //
 //   PLL   = pixel-clock PLL locked
 //   MCLK  = camera MCLK PLL locked
@@ -19,6 +19,20 @@
 //           the sensor is actually delivering frames, which the 5 status
 //           LEDs alone can't show (wraps at 0xFF; that's fine, it's a
 //           liveness indicator, not a precise frame count)
+//   ACT   = capture activity indicator: lit whenever real pixels have been
+//           captured (cam_pixel_valid pulsing) recently -- stretched to a
+//           human-visible duration (see CAM_CLK_HZ_APPROX below), so it
+//           reads as solidly lit during continuous capture rather than an
+//           imperceptible flicker. Also driven out to a real output pin
+//           (`cap_led`, see the top level) if you want a physical LED
+//           instead of/alongside this text field -- the OV5640 module's
+//           own onboard LEDs (next to the lens) are NOT usable for this:
+//           on essentially every OV5640 breakout, those are fixed
+//           power-on indicators wired straight to the 3.3V rail with no
+//           GPIO/register connection at all, so nothing digital -- I2C
+//           included -- can control them. This ACT field/cap_led output
+//           is the real, working equivalent of what those fixed LEDs
+//           can't do.
 //   RAW   = the last 4 bytes actually captured off cam_d[7:0] (oldest byte
 //           first), refreshed live -- this is the ONLY field that shows
 //           real sensor data content directly, rather than a status flag
@@ -49,7 +63,8 @@
 module uart_debug #(
     parameter integer CLK_FREQ_HZ = 50_000_000,
     parameter integer BAUD        = 115200,
-    parameter integer TICK_HZ     = 1          // status-line refresh rate
+    parameter integer TICK_HZ     = 1,         // status-line refresh rate
+    parameter integer STRETCH_MS  = 200        // ACT/cap_led visible-on duration per activity pulse
 ) (
     input  wire clk,          // free-running domain (board oscillator)
     input  wire rst,
@@ -62,9 +77,11 @@ module uart_debug #(
     input  wire buf_ready,
     input  wire pattern_sel,
     input  wire cam_vsync,    // raw, cam_pclk domain
+    input  wire cam_pixel_valid,  // raw, cam_pclk domain -- pulses once per captured pixel
     input  wire [31:0] raw_bytes, // last 4 captured cam_d[7:0] bytes, cam_pclk domain, oldest first
 
-    output wire tx
+    output wire tx,
+    output wire cap_led       // lit while pixel capture is actively happening (stretched, see header)
 );
 
     // ---- resynchronize single-bit status signals into `clk` domain -------
@@ -135,6 +152,49 @@ module uart_debug #(
         end
     end
 
+    // ---- capture-activity indicator: cam_pixel_valid (cam_pclk domain) ---
+    // Same toggle+2FF+edge-detect CDC technique as the frame counter above.
+    // The stretch timer then runs entirely in the fixed `clk` domain (not
+    // cam_pclk, whose actual frequency varies by sensor and isn't known at
+    // compile time), so STRETCH_MS is an exact duration regardless of the
+    // camera's real pixel clock rate.
+    reg pixval_toggle = 1'b0;
+    always @(posedge cam_pixel_valid) pixval_toggle <= ~pixval_toggle;
+
+    reg [1:0] pvtog_sync;
+    reg       pvtog_sync_d1;
+    always @(posedge clk) begin
+        if (rst) begin
+            pvtog_sync    <= 2'b00;
+            pvtog_sync_d1 <= 1'b0;
+        end else begin
+            pvtog_sync    <= {pvtog_sync[0], pixval_toggle};
+            pvtog_sync_d1 <= pvtog_sync[1];
+        end
+    end
+    wire activity_pulse = (pvtog_sync[1] != pvtog_sync_d1);
+
+    localparam integer STRETCH_CYCLES = (CLK_FREQ_HZ / 1000) * STRETCH_MS;
+    localparam integer STRETCH_W = (STRETCH_CYCLES <= 1) ? 1 : $clog2(STRETCH_CYCLES);
+    reg [STRETCH_W-1:0] stretch_cnt;
+    reg                 act_led_r;
+    always @(posedge clk) begin
+        if (rst) begin
+            stretch_cnt <= 0;
+            act_led_r   <= 1'b0;
+        end else if (activity_pulse) begin
+            stretch_cnt <= STRETCH_CYCLES - 1;
+            act_led_r   <= 1'b1;
+        end else if (stretch_cnt != 0) begin
+            stretch_cnt <= stretch_cnt - 1'b1;
+            act_led_r   <= 1'b1;
+        end else begin
+            act_led_r   <= 1'b0;
+        end
+    end
+
+    assign cap_led = act_led_r;
+
     // ---- 1Hz (or TICK_HZ) status-line refresh tick ------------------------
     localparam integer TICK_DIV = CLK_FREQ_HZ / TICK_HZ;
     localparam integer TICK_W   = (TICK_DIV <= 1) ? 1 : $clog2(TICK_DIV);
@@ -156,7 +216,7 @@ module uart_debug #(
     // ---- snapshot latch: freezes one status line's values for the whole
     // ~5ms it takes to transmit, so the line can't show a torn mix of two
     // different moments' status.
-    reg       snap_pll, snap_mclk, snap_seq, snap_cfg, snap_buf, snap_pat;
+    reg       snap_pll, snap_mclk, snap_seq, snap_cfg, snap_buf, snap_pat, snap_act;
     reg [3:0] snap_nack;
     reg [7:0] snap_frame;
     reg [31:0] snap_raw;
@@ -186,9 +246,9 @@ module uart_debug #(
     localparam [8*BANNER_LEN-1:0] BANNER_STR =
         "\r\n=== DVP Camera->HDMI Pipeline (720p60, OV5640) -- UART Debug ===\r\n";
 
-    localparam integer STATUS_LEN = 71;
+    localparam integer STATUS_LEN = 77;
     localparam [8*STATUS_LEN-1:0] STATUS_TEMPLATE =
-        "PLL=0 MCLK=0 SEQ=0 CFG=0 NACK=0 BUF=0 MODE=C FRAMES=0x00 RAW=00000000\r\n";
+        "PLL=0 MCLK=0 SEQ=0 CFG=0 NACK=0 BUF=0 MODE=C FRAMES=0x00 ACT=0 RAW=00000000\r\n";
 
     function [7:0] banner_char;
         input [6:0] idx;
@@ -210,14 +270,15 @@ module uart_debug #(
                 7'd43: status_char = snap_pat ? "P" : "C";
                 7'd54: status_char = hex_ascii(snap_frame[7:4]);
                 7'd55: status_char = hex_ascii(snap_frame[3:0]);
-                7'd61: status_char = hex_ascii(snap_raw[31:28]);
-                7'd62: status_char = hex_ascii(snap_raw[27:24]);
-                7'd63: status_char = hex_ascii(snap_raw[23:20]);
-                7'd64: status_char = hex_ascii(snap_raw[19:16]);
-                7'd65: status_char = hex_ascii(snap_raw[15:12]);
-                7'd66: status_char = hex_ascii(snap_raw[11:8]);
-                7'd67: status_char = hex_ascii(snap_raw[7:4]);
-                7'd68: status_char = hex_ascii(snap_raw[3:0]);
+                7'd61: status_char = bit_ascii(snap_act);
+                7'd67: status_char = hex_ascii(snap_raw[31:28]);
+                7'd68: status_char = hex_ascii(snap_raw[27:24]);
+                7'd69: status_char = hex_ascii(snap_raw[23:20]);
+                7'd70: status_char = hex_ascii(snap_raw[19:16]);
+                7'd71: status_char = hex_ascii(snap_raw[15:12]);
+                7'd72: status_char = hex_ascii(snap_raw[11:8]);
+                7'd73: status_char = hex_ascii(snap_raw[7:4]);
+                7'd74: status_char = hex_ascii(snap_raw[3:0]);
                 default: status_char = STATUS_TEMPLATE[8*(STATUS_LEN-1-idx) +: 8];
             endcase
         end
@@ -249,6 +310,7 @@ module uart_debug #(
             snap_pll <= 1'b0; snap_mclk <= 1'b0; snap_seq <= 1'b0;
             snap_cfg <= 1'b0; snap_buf  <= 1'b0; snap_pat <= 1'b0;
             snap_nack <= 4'h0; snap_frame <= 8'h00; snap_raw <= 32'h0;
+            snap_act <= 1'b0;
         end else begin
             tx_start <= 1'b0; // default: single-cycle pulse
 
@@ -281,6 +343,7 @@ module uart_debug #(
                         snap_buf   <= buf_s;
                         snap_pat   <= pat_s;
                         snap_frame <= frame_cnt;
+                        snap_act   <= act_led_r;
                         snap_raw   <= raw_sync2;
                         char_idx   <= 0;
                         state      <= S_STATUS_ISSUE;

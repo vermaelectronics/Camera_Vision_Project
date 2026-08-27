@@ -58,6 +58,15 @@ module dvp_camera_hdmi_top #(
     // UART hardware-status debug output (115200 8N1) -- see uart_debug.v
     output wire         uart_tx,
 
+    // Real "image data is being captured" indicator -- lights up while
+    // pixel capture is actively happening (stretched to stay visibly lit
+    // during continuous capture, see uart_debug.v). Wire an external LED
+    // (+ series resistor) here if you want a physical indicator; the
+    // OV5640 module's own onboard LEDs next to the lens are NOT usable
+    // for this -- they're fixed power-on indicators on essentially every
+    // OV5640 breakout, with no GPIO/register connection at all.
+    output wire         cap_led,
+
     output wire [4:0]   led
 );
 
@@ -301,8 +310,9 @@ module dvp_camera_hdmi_top #(
         .pll_locked(pll_locked), .mclk_locked(mclk_locked),
         .cam_seq_done(cam_seq_done), .cfg_done(cfg_done),
         .i2c_nack(i2c_nack), .buf_ready(buf_ready), .pattern_sel(pattern_sel),
-        .cam_vsync(cam_vsync), .raw_bytes(raw_byte_window),
-        .tx(uart_tx)
+        .cam_vsync(cam_vsync), .cam_pixel_valid(cam_pixel_valid),
+        .raw_bytes(raw_byte_window),
+        .tx(uart_tx), .cap_led(cap_led)
     );
 
 endmodule
