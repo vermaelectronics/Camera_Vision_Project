@@ -38,13 +38,29 @@
 // [Timing closure notes] in README.md) and only adopts the
 // format/ISP-enable registers that are resolution-independent.
 //
-// IMPORTANT HONESTY NOTE (unchanged for the rest of the table): unlike the
-// DVI timing/TMDS-encoding math elsewhere in this project (verified by
-// simulation and hand computation), most of this register table still
-// cannot be verified the same way -- there is no simulation model of real
-// OV5640 silicon, and the PLL/analog/timing/output-window registers below
-// remain reproduced from general community knowledge, not the vendor
-// source. Before relying on it further:
+// SECOND PROVENANCE UPDATE: 0x380C-0x380F (HTS/VTS -- total line/frame
+// length including blanking) were MISSING ENTIRELY from every revision of
+// this table before now -- left running on the sensor's own power-on-
+// reset default timing, genuinely undefined relative to this design's
+// assumed 60Hz. Real-hardware root cause of a "black display, but PLL/
+// MCLK/I2C/capture/UART's live ACT+RAW fields all report healthy"
+// symptom: video_line_buffer.v's write-side back-pressure safely stalls
+// (rather than corrupts) when the camera's real row rate doesn't match
+// the display's, and an unconfigured HTS/VTS left that real rate
+// genuinely unknown -- easily far enough off to permanently stall the
+// buffer after its first few, likely still-underexposed rows. Fixed with
+// values cross-checked against the mainline Linux kernel's real,
+// in-production OV5640 driver (not a guess) -- see the register table's
+// own comment at 0x380C for the full reasoning, including the honest
+// tradeoff involved (that driver's 1280x720 mode is 30fps, not 60fps).
+//
+// IMPORTANT HONESTY NOTE (otherwise unchanged for the rest of the table):
+// unlike the DVI timing/TMDS-encoding math elsewhere in this project
+// (verified by simulation and hand computation), most of this register
+// table still cannot be verified the same way -- there is no simulation
+// model of real OV5640 silicon, and the PLL/analog/output-window
+// registers below remain reproduced from general community knowledge,
+// not the vendor source. Before relying on it further:
 //   - The output-window registers (0x3800-0x3821) are the next most
 //     likely thing to need adjustment if the image is shifted, cropped
 //     wrong, or doesn't appear at all.
@@ -73,7 +89,7 @@
 `default_nettype none
 
 module cam_config_rom #(
-    parameter NUM_REGS = 73
+    parameter NUM_REGS = 77
 ) (
     input  wire       clk,
     input  wire        rst,
@@ -167,8 +183,44 @@ module cam_config_rom #(
         table_rom[58] = {16'h3809, 8'h00}; // DVP output width lo
         table_rom[59] = {16'h380A, 8'h02}; // DVP output height hi (0x02D0 = 720)
         table_rom[60] = {16'h380B, 8'hD0}; // DVP output height lo
-        table_rom[61] = {16'h3814, 8'h31}; // X subsample increment
-        table_rom[62] = {16'h3815, 8'h31}; // Y subsample increment
+
+        // ---- HTS/VTS (line/frame total length, including blanking) --------
+        // NEVER SET BEFORE THIS -- a real gap this table shipped with since
+        // its very first revision, left running on the sensor's own power-
+        // on-reset default timing. Real-hardware root cause of a "black
+        // display, but everything else (I2C, PLL, MCLK, capture, UART's
+        // live ACT/RAW fields) reports healthy" symptom seen during this
+        // project's bring-up: video_line_buffer.v's write-side back-
+        // pressure logic (see its own DESIGN HISTORY item 3) safely stalls
+        // rather than corrupts data when the camera's real row-completion
+        // rate doesn't match the display's -- but an UNCONFIGURED HTS/VTS
+        // leaves that real rate genuinely undefined, and depending on the
+        // sensor's reset defaults it can end up so far from the display's
+        // 60Hz rate that the buffer permanently stalls after its first few
+        // (likely still-underexposed, pre-AEC-convergence) rows -- read as
+        // a frozen near-black frame forever, not a crash or corruption.
+        // Values below (HTS=1892=0x0764, VTS=1280=0x0500) are cross-checked
+        // against the mainline Linux kernel's real, in-production OV5640
+        // driver (drivers/media/i2c/ov5640.c, its 1280x720 mode's real
+        // ov5640_set_timings() output) -- NOT a guess. Honesty note: that
+        // driver's 1280x720 mode targets 30fps, not this design's original
+        // 60fps goal -- a real, known, and safe mismatch under this design
+        // specifically (video_line_buffer.v only needs to stall-protect
+        // against the camera running FASTER than the display; a camera
+        // running slower than the display just repeats the last claimed
+        // row gracefully, exactly the tested/documented degradation path)
+        // -- picked deliberately over an untested guess at true-60fps
+        // HTS/VTS values, since a verified, safe 30fps beats an unverified
+        // 60fps guess that could just as easily reproduce this same bug in
+        // the other, dangerous direction. Revisit for true 60fps once
+        // basic capture-to-display is confirmed working end-to-end.
+        table_rom[61] = {16'h380C, 8'h07}; // HTS hi (0x0764 = 1892)
+        table_rom[62] = {16'h380D, 8'h64}; // HTS lo
+        table_rom[63] = {16'h380E, 8'h05}; // VTS hi (0x0500 = 1280)
+        table_rom[64] = {16'h380F, 8'h00}; // VTS lo
+
+        table_rom[65] = {16'h3814, 8'h31}; // X subsample increment
+        table_rom[66] = {16'h3815, 8'h31}; // Y subsample increment
 
         // ---- Format select: RGB565 over DVP --------------------------------
         // CONFIRMED against Waveshare's own ov5640_rgb565_reg_tbl: 0x6F,
@@ -184,14 +236,14 @@ module cam_config_rom #(
         // (NOT BYTE_SWAP, which was confirmed on real hardware to have no
         // effect on this specific symptom -- toggling it produced an
         // identical color cast either way).
-        table_rom[63] = {16'h4300, 8'h6F};
+        table_rom[67] = {16'h4300, 8'h6F};
 
         // ---- ISP output-format mux select: RGB (not raw/Bayer passthrough) --
         // 0x501F selects what the ISP pipeline actually hands to the DVP
         // output stage: 0x00 = ISP bypass/YUV, 0x01 = RGB. Confirmed
         // against the vendor's own ov5640_rgb565_reg_tbl. Must come after
         // the format-select register above.
-        table_rom[64] = {16'h501F, 8'h01};
+        table_rom[68] = {16'h501F, 8'h01};
 
         // ---- ISP pipeline master enables -- CONFIRMED against the vendor's
         // own code, and were missing entirely before. 0x5001's CMX
@@ -201,14 +253,14 @@ module cam_config_rom #(
         // valid demosaiced color, exactly matching the "correct framing,
         // garbage content" symptom seen during this project's hardware
         // bring-up.
-        table_rom[65] = {16'h440E, 8'h00};
-        table_rom[66] = {16'h5000, 8'hA7}; // Lenc on, raw gamma on, BPC on, WPC on, CIP on
-        table_rom[67] = {16'h5001, 8'hA3}; // SDE on, Scaling on, CMX on, AWB on
+        table_rom[69] = {16'h440E, 8'h00};
+        table_rom[70] = {16'h5000, 8'hA7}; // Lenc on, raw gamma on, BPC on, WPC on, CIP on
+        table_rom[71] = {16'h5001, 8'hA3}; // SDE on, Scaling on, CMX on, AWB on
 
         // ---- Disable unused JPEG hardware -- matches the vendor's RGB565
         // table; harmless either way since JPEG mode is never used here.
-        table_rom[68] = {16'h3002, 8'h1C};
-        table_rom[69] = {16'h3006, 8'hC3};
+        table_rom[72] = {16'h3002, 8'h1C};
+        table_rom[73] = {16'h3006, 8'hC3};
 
         // ---- Module's own onboard LED -- turned on once config completes.
         // Confirmed via the vendor's own OV5640_Flash_Lamp() function,
@@ -219,9 +271,9 @@ module cam_config_rom #(
         // per-frame activity indicator -- see the header comment above and
         // the UART's ACT field for the real-time equivalent.
         // Delete these 3 entries if you don't want the module's LED lit.
-        table_rom[70] = {16'h3016, 8'h02};
-        table_rom[71] = {16'h301C, 8'h02};
-        table_rom[72] = {16'h3019, 8'h02};
+        table_rom[74] = {16'h3016, 8'h02};
+        table_rom[75] = {16'h301C, 8'h02};
+        table_rom[76] = {16'h3019, 8'h02};
 
         // ... extend NUM_REGS and this table further (AWB/gamma/lens-shading
         // tuning, mirror/flip, sharpness) once basic capture is confirmed.
