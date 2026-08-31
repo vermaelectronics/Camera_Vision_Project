@@ -51,7 +51,7 @@ Two top-level designs, both built from the same shared RTL blocks:
 
 | Top level | Resolution(s) | Output | Needs |
 |---|---|---|---|
-| `dvp_camera_hdmi_top.v` | **1280×720@60Hz** (the only resolution this top level supports) | native GPDI/TMDS (the board's onboard mini-HDMI-alike connector) | nothing extra — drives the connector directly; includes a 24MHz MCLK PLL + PWDN/RESET sequencer for the Waveshare OV5640, and a UART debug output |
+| `dvp_camera_hdmi_top.v` | **1280×720@60Hz HDMI output** (the only resolution this top level supports; with the shipped OV5640 config, *camera capture* itself is ~30fps — see [Known limitations](#known-limitations--future-work)) | native GPDI/TMDS (the board's onboard mini-HDMI-alike connector) | nothing extra — drives the connector directly; includes a 24MHz MCLK PLL + PWDN/RESET sequencer for the Waveshare OV5640, and a UART debug output |
 | `dvp_camera_hdmi_top_ext.v` | **1920×1080@60Hz** (true 60Hz) | 24-bit parallel RGB + HSYNC/VSYNC/DE + pixel clock | an external HDMI/DVI transmitter IC (ADV7511/ADV7513, IT6613/IT66121, SiI9022-class); does not yet include the MCLK/power-sequencer additions, see [Known limitations](#known-limitations--future-work) |
 
 Both include:
@@ -464,12 +464,20 @@ design to a **different** sensor:
    power-up timing. If your sensor has its own crystal and defaults PWDN/
    RESET sensibly on power-up, these two modules (and the `cam_mclk`/
    `cam_rst_n`/`cam_pwdn` ports) can simply be left unconnected/removed.
-7. **Configure your sensor, out-of-band, to output exactly 1280×720@60**
-   (`dvp_camera_hdmi_top.v`) **or 1920×1080@60** (`dvp_camera_hdmi_top_ext.v`)
-   over its DVP interface. This design does not include a scaler — it assumes the
-   camera's active-video window already matches the display resolution
-   1:1. (Adding a line-buffer-based scaler is a natural extension point;
-   see [Known limitations](#known-limitations--future-work).)
+7. **Configure your sensor, out-of-band, to output active video at
+   exactly 1280×720** (`dvp_camera_hdmi_top.v`) **or 1920×1080**
+   (`dvp_camera_hdmi_top_ext.v`) over its DVP interface — matching the
+   display's *pixel dimensions* exactly (this design does not include a
+   scaler, see [Known limitations](#known-limitations--future-work)) is
+   what actually matters; the *frame rate* your sensor lands on does not
+   need to match the display's 60Hz. `video_line_buffer.v`'s "line FIFO"
+   bridge (see [Architecture](#architecture)) tolerates a camera running
+   slower than the display gracefully (rows repeat visibly, nothing
+   breaks) — confirmed on the shipped OV5640 config itself, which only
+   achieves ~30fps at 1280×720 over 8-bit DVP (see [Known
+   limitations](#known-limitations--future-work)). Don't assume your
+   sensor can hit 60fps at your target resolution without checking its
+   own real bandwidth numbers first.
 
 **A word on the shipped OV5640 table's provenance:** its format-select and
 ISP-enable registers (`0x4300`, `0x501F`, `0x5000`, `0x5001`, `0x300E`,
@@ -876,42 +884,30 @@ instances remain.
 
 ## Known limitations / future work
 
-- **The camera captures at ~30fps, not 60fps, even though the HDMI output
-  is a genuine 720p60 signal throughout.** `cam_config_rom.v`'s PLL/
-  window/HTS-VTS registers (added/corrected to fix a real "healthy status,
-  black display" bug — see [Timing closure notes](#timing-closure-notes)
-  episode 9) now match Waveshare's own real, complete vendor block for
-  1280×720 RGB565 — and that real vendor firmware *also* computes to
-  ~30fps (PCLK 42MHz ÷ (HTS×VTS) ≈ 30.5fps), the same conclusion an
-  unrelated, independently-verified source (the Linux kernel's OV5640
-  driver) reaches for this same resolution/format/interface combination.
-  In practice this means `video_line_buffer.v` gracefully repeats each
-  captured row/frame roughly twice on the display (its documented, tested
-  degradation path for a camera slower than the display — see that
-  module's header) — visually, the picture updates at ~30Hz, not a full
-  60Hz.
-  **Two independent real sources landing on the same ~30fps ceiling for
-  this exact resolution/format/interface combo is a real signal, not a
-  coincidence of both picking a "safe" number**: 1280×720 RGB565 at 60fps
-  over 8-bit DVP needs roughly double the pixel bandwidth (~130–170
-  MHz-class PCLK once blanking overhead is included) of what either real
-  source actually runs — very high for typical 3.3V CMOS DVP signalling.
-  True 60fps capture at this exact resolution/format may not be
-  realistically achievable on this sensor/interface pairing at all. If you
-  need it anyway, the options, roughly in order of how much new,
-  unverified risk each carries:
-    1. **Accept ~30fps capture** (current state) — the HDMI signal itself
-       stays a correct 720p60 signal throughout; only how often the
-       picture visually updates is affected.
-    2. **Independently derive a genuine 60fps HTS/VTS/PLL set** for this
-       exact sensor — needs a real, verified source (not a guess); this
-       project's own established discipline is to never guess at
-       unverified timing values here, since a wrong one can reproduce the
-       exact permanent-stall/black-display bug episode 9 fixed.
-    3. **Drop capture resolution** (e.g. 640×480 or smaller, where 60fps
-       is a far more standard, commonly-supported DVP rate for this
-       sensor) and let a scaler (see the next bullet) bring it back up to
-       1280×720 for display.
+- **This design's spec is 1280×720 camera capture at ~30fps, displayed
+  over a genuine 720p60 HDMI signal.** This is a deliberate choice, not a
+  stopgap: Waveshare's own real vendor firmware for 1280×720 RGB565 over
+  8-bit DVP (the register block `cam_config_rom.v` now matches exactly —
+  PLL, window, and HTS/VTS all from that one real source together) itself
+  computes to ~30fps (PCLK 42MHz ÷ (HTS×VTS) ≈ 30.5fps), and an unrelated,
+  independently-verified source (the Linux kernel's OV5640 driver) reaches
+  the same ~30fps conclusion for this identical resolution/format/
+  interface combination. Two unrelated real, production sources landing on
+  the same ceiling is a real signal, not coincidence: 1280×720 RGB565 at
+  60fps over 8-bit DVP would need roughly double the pixel bandwidth
+  (~130–170 MHz-class PCLK once blanking overhead is included) of what
+  either real source actually runs — very high for typical 3.3V CMOS DVP
+  signalling, and not something this project chases further. In practice,
+  `video_line_buffer.v` gracefully repeats each captured row/frame roughly
+  twice on the display (its documented, tested degradation path for a
+  camera slower than the display — see that module's header): the picture
+  visually updates at ~30Hz, while the HDMI signal itself stays a
+  correctly-timed 720p60 throughout. If a future need for true 60fps
+  capture arises, the honest paths forward are an independently-*verified*
+  (never guessed) 60fps HTS/VTS/PLL set for this exact sensor, or dropping
+  capture resolution to something 60fps is standard for (e.g. 640×480) and
+  relying on a future scaler (see the next bullet) to bring it back up —
+  neither attempted here, both real, larger undertakings.
 - **No scaler.** The camera's active-video window must already match the
   display resolution. A line-buffer-based (or full frame-buffer, using the
   board's onboard SDRAM) scaler is a natural extension.
