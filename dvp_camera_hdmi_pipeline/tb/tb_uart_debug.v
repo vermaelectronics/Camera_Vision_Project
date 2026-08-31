@@ -27,7 +27,7 @@ module tb_uart_debug;
     reg cam_vsync = 0;
     reg cam_pixel_valid = 0;
     reg [31:0] raw_bytes = 32'h00000000;
-    wire tx, cap_led;
+    wire tx;
 
     // STRETCH_MS overridden small (real STRETCH_CYCLES uses the real
     // CLK_FREQ_HZ=50MHz above, unscaled -- only BAUD/TICK_HZ are sped up
@@ -44,7 +44,7 @@ module tb_uart_debug;
         .i2c_nack(i2c_nack), .buf_ready(buf_ready), .pattern_sel(pattern_sel),
         .cam_vsync(cam_vsync), .cam_pixel_valid(cam_pixel_valid),
         .raw_bytes(raw_bytes),
-        .tx(tx), .cap_led(cap_led)
+        .tx(tx)
     );
 
     integer errors = 0;
@@ -139,8 +139,8 @@ module tb_uart_debug;
 
                 // One captured-pixel pulse -- exercises the same toggle+
                 // 2FF+edge-detect CDC path as cam_vsync, then the stretch
-                // timer should hold cap_led/ACT high through the (much
-                // later) first status-line snapshot.
+                // timer should hold ACT high through the (much later)
+                // first status-line snapshot.
                 #150 cam_pixel_valid = 1;
                 #150 cam_pixel_valid = 0;
 
@@ -153,13 +153,6 @@ module tb_uart_debug;
                 // Wait for the banner (68 bytes) + first status line (77
                 // bytes) to be fully captured.
                 wait (rx_count >= TOTAL_LEN);
-
-                // Real output pin check (not just the transmitted text) --
-                // cap_led should still be driven high at this point.
-                if (cap_led !== 1'b1) begin
-                    errors = errors + 1;
-                    $display("ERROR: cap_led not high after an activity pulse (real output pin)");
-                end
 
                 // ---- check the startup banner ----
                 for (i = 0; i < BANNER_LEN; i = i + 1) begin

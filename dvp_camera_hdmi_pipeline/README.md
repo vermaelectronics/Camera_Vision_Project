@@ -253,7 +253,7 @@ All in `rtl/`:
 | `i2c_master.v` | Polled I²C master (START/addr+W/reg-addr(8 or 16-bit)/data/STOP, ACK-checked) | `tb_i2c_master.v`: two parallel DUTs (`ADDR_BYTES=1` and `ADDR_BYTES=2`) each run a full transaction against an independent behavioral I²C slave model, all bytes and ACKs verified |
 | `cam_config_rom.v` | Walks a register table out through `i2c_master` | covered via full-design synthesis + P&R; **ships with an OV5640-specific table by default now, see below** |
 | `uart_tx.v` | Generic 8N1 UART transmitter | `tb_uart_tx.v`: independently-written behavioral receiver checks bit framing/timing and byte value for 3 test bytes, 0 errors |
-| `uart_debug.v` | Streams a live hardware-status line (PLL/MCLK lock, I2C config progress, NACK count, buffer-ready, camera mode, live frame counter, capture-activity indicator, raw captured bytes) to a UART terminal, and drives a real `cap_led` output pin for the activity indicator — see [UART debug interface](#uart-debug-interface) | `tb_uart_debug.v`: independently-typed expected banner + status line, byte-for-byte match against a captured UART receive stream, including a real frame-counter CDC crossing, NACK-counter edge-detect, and a check of the real `cap_led` pin (not just the transmitted text), 0 errors |
+| `uart_debug.v` | Streams a live hardware-status line (PLL/MCLK lock, I2C config progress, NACK count, buffer-ready, camera mode, live frame counter, capture-activity indicator, raw captured bytes) to a UART terminal — no extra pins/LEDs needed — see [UART debug interface](#uart-debug-interface) | `tb_uart_debug.v`: independently-typed expected banner + status line, byte-for-byte match against a captured UART receive stream, including a real frame-counter CDC crossing and NACK-counter edge-detect, 0 errors |
 | `dvp_camera_hdmi_top.v` | Top level: native GPDI, fixed 720p60 — includes MCLK PLL + power sequencer + UART debug, targets the OV5640 out of the box | full synthesis + P&R + timing closure |
 | `dvp_camera_hdmi_top_ext.v` | Top level: external-transmitter, true 1080p60 — **not yet updated with MCLK/power-sequencer/16-bit-I²C/UART debug**, see [Known limitations](#known-limitations--future-work) | full synthesis + P&R + timing closure |
 
@@ -285,7 +285,6 @@ list:
 | `cam_mclk`  | gpio[16] | 36 |
 | `cam_rst_n` | gpio[17] | 11 |
 | `cam_pwdn`  | gpio[18] | 12 |
-| `cap_led`   | gpio[19] | 35 |
 
 (`uart_tx` isn't in this table — it's routed to the board's onboard
 USB-JTAG programmer chip, not the 40-pin header. See
@@ -337,9 +336,9 @@ sequence their `OV5640_Flash_Lamp()` function uses). `cam_config_rom.v`
 turns it on once configuration completes — see its header comment for the
 full explanation and how to remove this if you don't want it lit. This is
 a **static** indicator (on once config succeeds, stays on) — for a
-**live, real-time** "capture is happening" indicator instead, use
-`cap_led` (a genuine FPGA output pin) or the UART debug output's `ACT`
-field — see [UART debug interface](#uart-debug-interface).
+**live, real-time** "capture is happening" indicator instead, use the UART
+debug output's `ACT` field, no extra wiring needed — see [UART debug
+interface](#uart-debug-interface).
 
 Do **not** tie `RESET`/`PWDN` to fixed levels or leave them floating —
 without `cam_power_sequencer.v` actively driving the documented
@@ -375,19 +374,19 @@ PLL=1 MCLK=1 SEQ=1 CFG=1 NACK=0 BUF=1 MODE=C FRAMES=0x4D ACT=1 RAW=3B2C9F10
 | `BUF` | CDC buffer pre-filled and ready — live video should be visible (mirrors `led[2]`) |
 | `MODE` | `C`(amera) or `P`(attern) — mirrors `led[4]`/`pattern_sel` |
 | `FRAMES` | hex count of camera VSYNC pulses seen since reset — proves the sensor is actually delivering frames, which the LEDs alone can't show (wraps at `0xFF`; it's a liveness indicator, not a precise frame count) |
-| `ACT` | capture-activity indicator: `1` whenever real pixels have been captured (`cam_pixel_valid` pulsing) recently, stretched to a visible duration (200ms default) so it reads as solidly lit during continuous capture. Also driven out to a real pin, `cap_led` — see below. |
+| `ACT` | capture-activity indicator: `1` whenever real pixels have been captured (`cam_pixel_valid` pulsing) recently, stretched to a visible duration (200ms default) so it reads as solidly lit during continuous capture. Text-only, deliberately — no dedicated output pin, so no extra wiring needed to see it — see below. |
 | `RAW` | the last 4 bytes actually captured off `cam_d[7:0]` (oldest first), refreshed live -- the only field showing real sensor data content directly rather than a derived status flag. **Stuck at a fixed value (`00000000`, `FFFFFFFF`, or any other constant that never changes)** → the data bus isn't delivering real varying data (wiring or sensor-not-streaming problem). **Visibly varies refresh to refresh** → real bytes are arriving; any remaining image problem is downstream, in decode/format configuration, not the data bus itself. This is the single most useful field for diagnosing "image is garbage" symptoms, since it bypasses the whole decode pipeline and shows exactly what's on the wire. |
 
 **Two different "activity" indicators exist in this design, and it's
 worth being clear about what each one actually is:**
 
-- **`cap_led` (gpio[19], header pin 35)** — a real FPGA output pin, lit
-  by genuine live pixel-capture activity (`cam_pixel_valid` pulsing,
-  stretched to stay visibly lit during continuous capture). This is a
-  true real-time indicator: it reflects what's happening *right now*.
-  Wire an external LED (+ series resistor, to `GND`) here if you want a
-  physical indicator away from the camera module itself — the same
-  information is also in the UART's `ACT` field with zero extra wiring.
+- **The UART's `ACT` field** — a live, real-time indicator: `1` whenever
+  genuine pixel-capture activity (`cam_pixel_valid` pulsing) has happened
+  recently, stretched to stay visibly lit during continuous capture. This
+  is deliberately text-only — there is no dedicated output pin for it, so
+  no extra wiring/LED is needed to see it; it reflects what's happening
+  *right now*, readable straight off the same USB cable used to flash the
+  board.
 - **The camera module's own onboard LED**, on modules where it's wired
   to the OV5640's GPIO pin (confirmed for the Waveshare module this
   project targets, via their own official demo code's
@@ -395,9 +394,9 @@ worth being clear about what each one actually is:**
   comment). `cam_config_rom.v` turns it on with a one-shot register write
   (`0x3016`/`0x301C`/`0x3019`) once configuration completes. This is a
   **static** "camera configured successfully" indicator — it turns on
-  once and stays on — not a live per-frame activity light like `cap_led`.
+  once and stays on — not a live per-frame activity light like `ACT`.
   Making it track real-time activity too would need an ongoing (not
-  one-shot) I²C write path, a materially bigger feature than a init-time
+  one-shot) I²C write path, a materially bigger feature than an init-time
   register write. If your specific module's LED isn't wired to the
   sensor's GPIO pin, these three register writes are harmless no-ops for
   you; delete them from `cam_config_rom.v` if you'd rather it stay off.
@@ -549,7 +548,7 @@ TB_DVP_PIXEL_CHAIN:       PASS  (RGB565 + YUYV422, exact pixel values)
 TB_I2C_MASTER:            PASS  (ADDR_BYTES=1 and ADDR_BYTES=2 modes, both against a behavioral I2C slave, all ACKed)
 TB_CAM_POWER_SEQUENCER:   PASS  (PWDN/RESET/seq_done ordering and minimum-duration checks, 0 errors)
 TB_UART_TX:               PASS  (bit framing/timing + byte value, independent behavioral receiver, 3 test bytes, 0 errors)
-TB_UART_DEBUG:            PASS  (banner + status-line content, frame-counter CDC, NACK-counter edge-detect, raw-byte field, activity-indicator CDC + real cap_led pin check, 0 errors)
+TB_UART_DEBUG:            PASS  (banner + status-line content, frame-counter CDC, NACK-counter edge-detect, raw-byte field, activity-indicator CDC, 0 errors)
 TB_VIDEO_LINE_BUFFER:     PASS  (deterministic per-(row,col) pattern across a genuine CDC -- two unrelated clock periods, realistic near-matched line rates -- interior columns bit-exact, 0 errors)
 ```
 
@@ -579,13 +578,13 @@ CABGA256 --speed 6`), against `constraints/icepi_zero.lpf`:**
 
 | Design | Clock domain | Target | Achieved | Result |
 |---|---|---|---|---|
-| 720p60 | `clk_pixel` | 74.29 MHz | 92.07 MHz (seed 18) | **PASS** |
-| 720p60 | `cam_pclk` | 75.00 MHz | 93.89 MHz | **PASS** |
-| 720p60 | `cam_mclk` | 24.00 MHz | 185.74 MHz | **PASS** |
-| 720p60 | `clk` (board osc, drives `uart_debug`) | 50.00 MHz | 107.35 MHz | **PASS** |
+| 720p60 | `clk_pixel` | 74.29 MHz | 95.04 MHz (seed 18) | **PASS** |
+| 720p60 | `cam_pclk` | 75.00 MHz | 104.11 MHz | **PASS** |
+| 720p60 | `cam_mclk` | 24.00 MHz | 165.40 MHz | **PASS** |
+| 720p60 | `clk` (board osc, drives `uart_debug`) | 50.00 MHz | 111.38 MHz | **PASS** |
 | 720p60 | `cam_vsync` (frame-counter clock edge in `uart_debug`) | 1.00 MHz (documentation-only; real rate ≈60Hz) | 894.45 MHz | **PASS** |
 | 720p60 | `cam_pixel_valid` (activity-indicator clock edge in `uart_debug`) | 12.00 MHz (nextpnr auto-inferred default — internal net, not a top-level port, so no LPF `FREQUENCY` constraint applies; real rate is the pixel rate, far above this) | 894.45 MHz | **PASS** |
-| 720p60 | TMDS `sclk` | 185.74 MHz | 223.86 MHz | **PASS** |
+| 720p60 | TMDS `sclk` | 185.74 MHz | 226.71 MHz | **PASS** |
 | 1080p60 (ext) | `hdmi_pclk` | 150.01 MHz | 157.18 MHz (seed 6) | **PASS** |
 | 1080p60 (ext) | `cam_pclk` | 75.00 MHz | 187.06 MHz | **PASS** |
 
@@ -604,7 +603,12 @@ HISTORY" comment) initially put a 16-bit Gray-decode+compare chain
 straight into the per-pixel write path and dropped `cam_pclk` to a
 razor-thin FAIL (~74 vs 75 MHz); registering that check (it only needs to
 be fresh once per video line, not once per pixel) fixed it with room to
-spare. **This has not yet been re-verified against a real oss-cad-suite
+spare. Numbers above are re-measured again after removing the `cap_led`
+output pin (see [UART debug interface](#uart-debug-interface) — the UART's
+`ACT` field already covered the same information with no extra wiring, so
+the dedicated pin was redundant); margins improved slightly with one fewer
+I/O pin to place, and `--seed 18` still closes cleanly, no re-sweep
+needed. **This has not yet been re-verified against a real oss-cad-suite
 toolchain on real hardware** — do that (and re-sweep `--seed N` if it
 reports a FAIL there, exactly as documented in "Timing closure notes")
 before trusting these specific numbers for production, the same caveat

@@ -63,17 +63,14 @@ module dvp_camera_hdmi_top #(
     // native GPDI/TMDS output
     output wire [3:0]   gpdi_dp,      // [0]=Blue [1]=Green [2]=Red [3]=Clock
 
-    // UART hardware-status debug output (115200 8N1) -- see uart_debug.v
+    // UART hardware-status debug output (115200 8N1) -- see uart_debug.v.
+    // Its ACT field is the real-time "image data is being captured"
+    // indicator (no extra wiring/LED needed to see it) -- there is
+    // deliberately no dedicated output pin for this; see uart_debug.v's
+    // header comment for why one wasn't needed (the OV5640 module's own
+    // onboard LED, lit via cam_config_rom.v's I2C writes, already covers
+    // the "is it configured" question with zero extra hardware).
     output wire         uart_tx,
-
-    // Real "image data is being captured" indicator -- lights up while
-    // pixel capture is actively happening (stretched to stay visibly lit
-    // during continuous capture, see uart_debug.v). Wire an external LED
-    // (+ series resistor) here if you want a physical indicator; the
-    // OV5640 module's own onboard LEDs next to the lens are NOT usable
-    // for this -- they're fixed power-on indicators on essentially every
-    // OV5640 breakout, with no GPIO/register connection at all.
-    output wire         cap_led,
 
     output wire [4:0]   led
 );
@@ -342,7 +339,7 @@ module dvp_camera_hdmi_top #(
         .i2c_nack(i2c_nack), .buf_ready(buf_ready), .pattern_sel(pattern_sel),
         .cam_vsync(cam_vsync), .cam_pixel_valid(cam_pixel_valid),
         .raw_bytes(raw_byte_window),
-        .tx(uart_tx), .cap_led(cap_led)
+        .tx(uart_tx)
     );
 
 endmodule

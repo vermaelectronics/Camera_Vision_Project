@@ -103,14 +103,6 @@ LOCATE COMP "cam_pwdn"  SITE "N4";  // gpio[18] (physical header pin 12)
 // `make prog`/openFPGALoader. No external USB-TTL adapter needed.
 LOCATE COMP "uart_tx" SITE "K15";
 
-// Capture-activity indicator -- lights while pixel capture is actively
-// happening. See uart_debug.v/dvp_camera_hdmi_top.v header comments for
-// why the OV5640 module's own onboard LEDs can't be used for this. Wire
-// an external LED (+ series resistor to GND) here if you want a physical
-// indicator; the same information is also in the UART status line's ACT
-// field with no extra wiring at all.
-LOCATE COMP "cap_led" SITE "E4";  // gpio[19] (physical header pin 35)
-
 IOBUF PORT "cam_pclk"  IO_TYPE=LVCMOS33 PULLMODE=NONE;
 IOBUF PORT "cam_href"  IO_TYPE=LVCMOS33 PULLMODE=DOWN;
 IOBUF PORT "cam_vsync" IO_TYPE=LVCMOS33 PULLMODE=DOWN;
@@ -128,7 +120,6 @@ IOBUF PORT "cam_mclk"  IO_TYPE=LVCMOS33 DRIVE=4;
 IOBUF PORT "cam_rst_n" IO_TYPE=LVCMOS33 DRIVE=4;
 IOBUF PORT "cam_pwdn"  IO_TYPE=LVCMOS33 DRIVE=4;
 IOBUF PORT "uart_tx"   PULLMODE=UP IO_TYPE=LVCMOS33 DRIVE=4;
-IOBUF PORT "cap_led"   IO_TYPE=LVCMOS33 DRIVE=4;
 
 FREQUENCY PORT "cam_pclk" 75 MHZ; // worst-case (1080p60-class sensor PCLK); tighten/relax to your sensor's actual PCLK
 FREQUENCY PORT "cam_mclk" 24 MHZ;

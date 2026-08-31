@@ -63,8 +63,8 @@
 // exact register/value sequence). This is a STATIC "camera configured
 // successfully" indicator -- it turns on once and stays on, the same way
 // `OV5640_WR_Reg` calls in a one-shot init table always work. It does
-// NOT track live per-frame capture activity the way `cap_led`/the UART's
-// `ACT` field do; making it blink with real-time activity would need an
+// NOT track live per-frame capture activity the way the UART's `ACT`
+// field does; making it blink with real-time activity would need an
 // ongoing (not one-shot) I2C write path -- a materially bigger feature.
 // If you don't want the module's LED lit, delete the three
 // 0x3016/0x301C/0x3019 entries at the end of the table below.
@@ -217,7 +217,7 @@ module cam_config_rom #(
         // LED is wired to; 0x3019=0x02 drives it high). This is a STATIC
         // "camera configured successfully" indicator, not a live
         // per-frame activity indicator -- see the header comment above and
-        // cap_led/the UART's ACT field for the real-time equivalent.
+        // the UART's ACT field for the real-time equivalent.
         // Delete these 3 entries if you don't want the module's LED lit.
         table_rom[70] = {16'h3016, 8'h02};
         table_rom[71] = {16'h301C, 8'h02};

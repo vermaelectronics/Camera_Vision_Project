@@ -21,18 +21,17 @@
 //           liveness indicator, not a precise frame count)
 //   ACT   = capture activity indicator: lit whenever real pixels have been
 //           captured (cam_pixel_valid pulsing) recently -- stretched to a
-//           human-visible duration (see CAM_CLK_HZ_APPROX below), so it
-//           reads as solidly lit during continuous capture rather than an
-//           imperceptible flicker. Also driven out to a real output pin
-//           (`cap_led`, see the top level) if you want a physical LED
-//           instead of/alongside this text field -- the OV5640 module's
-//           own onboard LEDs (next to the lens) are NOT usable for this:
-//           on essentially every OV5640 breakout, those are fixed
-//           power-on indicators wired straight to the 3.3V rail with no
-//           GPIO/register connection at all, so nothing digital -- I2C
-//           included -- can control them. This ACT field/cap_led output
-//           is the real, working equivalent of what those fixed LEDs
-//           can't do.
+//           human-visible duration (see STRETCH_MS below), so it reads as
+//           solidly lit during continuous capture rather than an
+//           imperceptible flicker. This is deliberately text-only (no
+//           dedicated output pin) -- no extra wiring needed to see it. A
+//           separate, real per-frame activity indicator was considered
+//           unnecessary: the OV5640 module's own onboard LED is already a
+//           real, working, I2C-controllable indicator (registers
+//           0x3016/0x301C/0x3019, see cam_config_rom.v) -- it just isn't a
+//           live per-frame one (it's set once, when configuration
+//           completes, and stays on), which is exactly what this text
+//           field is for.
 //   RAW   = the last 4 bytes actually captured off cam_d[7:0] (oldest byte
 //           first), refreshed live -- this is the ONLY field that shows
 //           real sensor data content directly, rather than a status flag
@@ -64,7 +63,7 @@ module uart_debug #(
     parameter integer CLK_FREQ_HZ = 50_000_000,
     parameter integer BAUD        = 115200,
     parameter integer TICK_HZ     = 1,         // status-line refresh rate
-    parameter integer STRETCH_MS  = 200        // ACT/cap_led visible-on duration per activity pulse
+    parameter integer STRETCH_MS  = 200        // ACT visible-on duration per activity pulse
 ) (
     input  wire clk,          // free-running domain (board oscillator)
     input  wire rst,
@@ -80,8 +79,7 @@ module uart_debug #(
     input  wire cam_pixel_valid,  // raw, cam_pclk domain -- pulses once per captured pixel
     input  wire [31:0] raw_bytes, // last 4 captured cam_d[7:0] bytes, cam_pclk domain, oldest first
 
-    output wire tx,
-    output wire cap_led       // lit while pixel capture is actively happening (stretched, see header)
+    output wire tx
 );
 
     // ---- resynchronize single-bit status signals into `clk` domain -------
@@ -192,8 +190,6 @@ module uart_debug #(
             act_led_r   <= 1'b0;
         end
     end
-
-    assign cap_led = act_led_r;
 
     // ---- 1Hz (or TICK_HZ) status-line refresh tick ------------------------
     localparam integer TICK_DIV = CLK_FREQ_HZ / TICK_HZ;
