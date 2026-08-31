@@ -30,29 +30,57 @@
 //     master-enable bits set, the pixel path can be live and correctly
 //     timed while still not actually demosaicing into valid RGB.
 //
-// The vendor's own RGB565 table targets a different resolution/frame rate
-// (1280x800 @ 15fps, PCLK 42MHz) than this design's 1280x720 @ 60fps, so
-// its PLL-divider and output-window register VALUES were not copied
-// wholesale -- this table keeps its own independently-derived,
-// timing-closure-verified 720p60 clock/window configuration (see
-// [Timing closure notes] in README.md) and only adopts the
-// format/ISP-enable registers that are resolution-independent.
+// EARLIER (now superseded) claim: this comment used to say the vendor's
+// own RGB565 table targets "1280x800 @ 15fps" and so its PLL/window
+// values weren't copied wholesale, keeping this table's own independently
+// -derived 720p60 clock/window configuration instead. That claim was
+// WRONG -- a misread of a stale comment inside the vendor's own source
+// (`// 1280x800, 15fps` sits directly above register writes that actually
+// set DVPHO/DVPVO to 0x0500/0x02D0 = 1280x720, not 1280x800; the comment
+// itself appears to be a leftover from an earlier revision of their code).
+// See the THIRD PROVENANCE UPDATE below for what actually replaced it.
 //
-// SECOND PROVENANCE UPDATE: 0x380C-0x380F (HTS/VTS -- total line/frame
+// SECOND PROVENANCE UPDATE (now itself partly superseded by the THIRD,
+// below -- kept for history): 0x380C-0x380F (HTS/VTS -- total line/frame
 // length including blanking) were MISSING ENTIRELY from every revision of
-// this table before now -- left running on the sensor's own power-on-
-// reset default timing, genuinely undefined relative to this design's
-// assumed 60Hz. Real-hardware root cause of a "black display, but PLL/
-// MCLK/I2C/capture/UART's live ACT+RAW fields all report healthy"
+// this table before this update -- left running on the sensor's own
+// power-on-reset default timing, genuinely undefined relative to this
+// design's assumed 60Hz. Real-hardware root cause of a "black display,
+// but PLL/MCLK/I2C/capture/UART's live ACT+RAW fields all report healthy"
 // symptom: video_line_buffer.v's write-side back-pressure safely stalls
 // (rather than corrupts) when the camera's real row rate doesn't match
 // the display's, and an unconfigured HTS/VTS left that real rate
-// genuinely unknown -- easily far enough off to permanently stall the
-// buffer after its first few, likely still-underexposed rows. Fixed with
-// values cross-checked against the mainline Linux kernel's real,
-// in-production OV5640 driver (not a guess) -- see the register table's
-// own comment at 0x380C for the full reasoning, including the honest
-// tradeoff involved (that driver's 1280x720 mode is 30fps, not 60fps).
+// genuinely unknown. First fixed with HTS/VTS values cross-checked
+// against the mainline Linux kernel's real OV5640 driver, paired with
+// this table's own pre-existing (community-derived) PLL registers -- a
+// real, if lower-risk, source-mixing inconsistency the THIRD update below
+// removes.
+//
+// THIRD PROVENANCE UPDATE: replaced the PLL (0x3035/0x3036), output
+// window's Y_ADDR_END (0x3806/0x3807), and HTS/VTS (0x380C-0x380F) with
+// Waveshare's own real, complete, internally-consistent
+// `ov5640_rgb565_reg_tbl` block for 1280x720 RGB565 -- PLL, window, and
+// HTS/VTS all from the SAME verified vendor source together, not mixed
+// across sources. Also added several registers that block sets and this
+// table was missing entirely: 0x3824 (PCLK manual divider), 0x3618/
+// 0x3612/0x3709/0x370C (mode-specific analog overrides), 0x3813 (timing V
+// offset), 0x3A02/0x3A03/0x3A14/0x3A15 (50/60Hz max-exposure limits),
+// 0x3503 (explicit AEC/AGC enable), 0x4004 (BLC line number). See each
+// register's own comment below for exactly what changed and why.
+//
+// HONEST TRADEOFF, stated directly: Waveshare's own real vendor firmware
+// for 1280x720 RGB565 over 8-bit DVP ALSO computes to ~30fps, not 60fps
+// (PCLK 42MHz per their own comment, HTS=1528 * VTS=900 ->
+// 42e6/(1528*900) =~ 30.5fps) -- the same conclusion the (unrelated,
+// independently-verified) Linux kernel driver's 1280x720 mode reached.
+// Two independent real, production sources landing on ~30fps for this
+// exact resolution/format/interface combination is a real signal: 60fps
+// at this resolution/format needs roughly double the pixel bandwidth
+// (~130-170 MHz-class PCLK once blanking overhead is included) of what
+// either real source actually runs -- very high for typical 3.3V CMOS DVP
+// signalling. True 60fps capture at 1280x720 RGB565 over DVP may not be
+// realistically achievable on this sensor/interface pairing at all. See
+// README.md's Known Limitations for the options this leaves.
 //
 // IMPORTANT HONESTY NOTE (otherwise unchanged for the rest of the table):
 // unlike the DVI timing/TMDS-encoding math elsewhere in this project
@@ -89,7 +117,7 @@
 `default_nettype none
 
 module cam_config_rom #(
-    parameter NUM_REGS = 77
+    parameter NUM_REGS = 89
 ) (
     input  wire       clk,
     input  wire        rst,
@@ -116,111 +144,166 @@ module cam_config_rom #(
         table_rom[ 2] = {16'h3008, 8'h42}; // software power-up / normal operation
 
         // ---- System clock / PLL (sets the internal PCLK rate) -------------
+        // 0x3035/0x3036 CHANGED from this table's earlier, community-
+        // derived values (0x11/0x46) to Waveshare's own real, working
+        // ov5640_rgb565_reg_tbl values (0x41/0x69) -- see the HTS/VTS
+        // comment below for why: PLL and HTS/VTS must come from the SAME
+        // real source together, not mixed-and-matched, since the actual
+        // frame rate is PCLK/(HTS*VTS) and PCLK depends on these exact
+        // registers. 0x3824 (PCLK manual divider) is a genuinely new
+        // addition -- present in the vendor's real block, absent from
+        // every earlier revision of this table entirely.
         table_rom[ 3] = {16'h3103, 8'h03}; // system clock now from PLL
         table_rom[ 4] = {16'h3017, 8'hFF}; // FREX/VSYNC/HREF/PCLK/D[9:6] pad output enable
         table_rom[ 5] = {16'h3018, 8'hFF}; // D[5:0]/GPIO pad output enable
         table_rom[ 6] = {16'h3034, 8'h1A}; // PLL charge pump / bit-width control
-        table_rom[ 7] = {16'h3035, 8'h11}; // system clock divider
-        table_rom[ 8] = {16'h3036, 8'h46}; // PLL multiplier
+        table_rom[ 7] = {16'h3035, 8'h41}; // system clock divider (Waveshare RGB565 block)
+        table_rom[ 8] = {16'h3036, 8'h69}; // PLL multiplier (Waveshare RGB565 block)
         table_rom[ 9] = {16'h3037, 8'h13}; // PLL pre-divider / root divider
         table_rom[10] = {16'h3108, 8'h01}; // PCLK root divider
+        table_rom[11] = {16'h3824, 8'h04}; // PCLK manual divider (Waveshare RGB565 block; was missing entirely)
 
         // ---- Sensor core timing/analog (widely-cited "standard" values) ---
-        table_rom[11] = {16'h3630, 8'h36};
-        table_rom[12] = {16'h3631, 8'h0E};
-        table_rom[13] = {16'h3632, 8'hE2};
-        table_rom[14] = {16'h3633, 8'h12};
-        table_rom[15] = {16'h3621, 8'hE0};
-        table_rom[16] = {16'h3704, 8'hA0};
-        table_rom[17] = {16'h3703, 8'h5A};
-        table_rom[18] = {16'h3715, 8'h78};
-        table_rom[19] = {16'h3717, 8'h01};
-        table_rom[20] = {16'h370B, 8'h60};
-        table_rom[21] = {16'h3705, 8'h1A};
-        table_rom[22] = {16'h3905, 8'h02};
-        table_rom[23] = {16'h3906, 8'h10};
-        table_rom[24] = {16'h3901, 8'h0A};
-        table_rom[25] = {16'h3731, 8'h12};
-        table_rom[26] = {16'h3600, 8'h08};
-        table_rom[27] = {16'h3601, 8'h33};
-        table_rom[28] = {16'h302D, 8'h60};
-        table_rom[29] = {16'h3620, 8'h52};
-        table_rom[30] = {16'h371B, 8'h20};
-        table_rom[31] = {16'h3635, 8'h13};
-        table_rom[32] = {16'h3636, 8'h03};
-        table_rom[33] = {16'h3634, 8'h40};
-        table_rom[34] = {16'h3622, 8'h01};
+        table_rom[12] = {16'h3630, 8'h36};
+        table_rom[13] = {16'h3631, 8'h0E};
+        table_rom[14] = {16'h3632, 8'hE2};
+        table_rom[15] = {16'h3633, 8'h12};
+        table_rom[16] = {16'h3621, 8'hE0};
+        table_rom[17] = {16'h3704, 8'hA0};
+        table_rom[18] = {16'h3703, 8'h5A};
+        table_rom[19] = {16'h3715, 8'h78};
+        table_rom[20] = {16'h3717, 8'h01};
+        table_rom[21] = {16'h370B, 8'h60};
+        table_rom[22] = {16'h3705, 8'h1A};
+        table_rom[23] = {16'h3905, 8'h02};
+        table_rom[24] = {16'h3906, 8'h10};
+        table_rom[25] = {16'h3901, 8'h0A};
+        table_rom[26] = {16'h3731, 8'h12};
+        table_rom[27] = {16'h3600, 8'h08};
+        table_rom[28] = {16'h3601, 8'h33};
+        table_rom[29] = {16'h302D, 8'h60};
+        table_rom[30] = {16'h3620, 8'h52};
+        table_rom[31] = {16'h371B, 8'h20};
+        table_rom[32] = {16'h3635, 8'h13};
+        table_rom[33] = {16'h3636, 8'h03};
+        table_rom[34] = {16'h3634, 8'h40};
+        table_rom[35] = {16'h3622, 8'h01};
+
+        // ---- Mode-specific analog overrides -- these 4 registers are set
+        // DIFFERENTLY inside Waveshare's real ov5640_rgb565_reg_tbl than
+        // the generic init defaults above, and were missing from this
+        // table entirely before (silently left at whatever the generic
+        // defaults above left them at, not the vendor's real RGB565-mode
+        // values).
+        table_rom[36] = {16'h3618, 8'h00};
+        table_rom[37] = {16'h3612, 8'h29};
+        table_rom[38] = {16'h3709, 8'h52};
+        table_rom[39] = {16'h370C, 8'h03};
 
         // ---- AEC/AGC basics -------------------------------------------------
-        table_rom[35] = {16'h3A08, 8'h01};
-        table_rom[36] = {16'h3A09, 8'h27};
-        table_rom[37] = {16'h3A0A, 8'h00};
-        table_rom[38] = {16'h3A0B, 8'hF6};
-        table_rom[39] = {16'h3A0D, 8'h04};
-        table_rom[40] = {16'h3A0E, 8'h03};
-        table_rom[41] = {16'h3A0F, 8'h30};
-        table_rom[42] = {16'h3A10, 8'h28};
-        table_rom[43] = {16'h3A1B, 8'h30};
-        table_rom[44] = {16'h3A1E, 8'h26};
+        table_rom[40] = {16'h3A08, 8'h01};
+        table_rom[41] = {16'h3A09, 8'h27};
+        table_rom[42] = {16'h3A0A, 8'h00};
+        table_rom[43] = {16'h3A0B, 8'hF6};
+        table_rom[44] = {16'h3A0D, 8'h04};
+        table_rom[45] = {16'h3A0E, 8'h03};
+        table_rom[46] = {16'h3A0F, 8'h30};
+        table_rom[47] = {16'h3A10, 8'h28};
+        table_rom[48] = {16'h3A1B, 8'h30};
+        table_rom[49] = {16'h3A1E, 8'h26};
+
+        // ---- 50/60Hz max-exposure limits + explicit AEC/AGC enable --
+        // present in Waveshare's real RGB565 block, missing from this
+        // table entirely before. 0x3503=0x00 explicitly enables automatic
+        // AEC/AGC (vs. leaving it at whatever the power-on-reset default
+        // is) -- plausibly relevant to the "first captured rows read as
+        // black/underexposed" root cause this project traced its earlier
+        // real-hardware black-display bug to (see Timing closure notes
+        // episode 9): auto-exposure explicitly confirmed on, rather than
+        // assumed.
+        table_rom[50] = {16'h3A02, 8'h02}; // 60Hz max exposure hi
+        table_rom[51] = {16'h3A03, 8'hE0}; // 60Hz max exposure lo
+        table_rom[52] = {16'h3A14, 8'h02}; // 50Hz max exposure hi
+        table_rom[53] = {16'h3A15, 8'hE0}; // 50Hz max exposure lo
+        table_rom[54] = {16'h3503, 8'h00}; // AEC/AGC explicitly on
 
         // ---- System block/clock enables -- confirmed against the vendor's
         // own default init table; were missing entirely before. ------------
-        table_rom[45] = {16'h3000, 8'h00}; // enable blocks
-        table_rom[46] = {16'h3004, 8'hFF}; // enable clocks
-        table_rom[47] = {16'h300E, 8'h58}; // MIPI power down, DVP enable
-        table_rom[48] = {16'h302E, 8'h00};
+        table_rom[55] = {16'h3000, 8'h00}; // enable blocks
+        table_rom[56] = {16'h3004, 8'hFF}; // enable clocks
+        table_rom[57] = {16'h300E, 8'h58}; // MIPI power down, DVP enable
+        table_rom[58] = {16'h302E, 8'h00};
+        table_rom[59] = {16'h4004, 8'h02}; // BLC line number (Waveshare RGB565 block; was missing)
 
         // ---- Output window: 1280x720 (see header note on this block) ------
-        table_rom[49] = {16'h3800, 8'h00}; // X_ADDR_START hi
-        table_rom[50] = {16'h3801, 8'h00}; // X_ADDR_START lo
-        table_rom[51] = {16'h3802, 8'h00}; // Y_ADDR_START hi
-        table_rom[52] = {16'h3803, 8'h00}; // Y_ADDR_START lo
-        table_rom[53] = {16'h3804, 8'h0A}; // X_ADDR_END hi
-        table_rom[54] = {16'h3805, 8'h3F}; // X_ADDR_END lo (0x0A3F = 2623)
-        table_rom[55] = {16'h3806, 8'h07}; // Y_ADDR_END hi
-        table_rom[56] = {16'h3807, 8'h9B}; // Y_ADDR_END lo (0x079B = 1947)
-        table_rom[57] = {16'h3808, 8'h05}; // DVP output width hi  (0x0500 = 1280)
-        table_rom[58] = {16'h3809, 8'h00}; // DVP output width lo
-        table_rom[59] = {16'h380A, 8'h02}; // DVP output height hi (0x02D0 = 720)
-        table_rom[60] = {16'h380B, 8'hD0}; // DVP output height lo
+        // 0x3806/0x3807 (Y_ADDR_END) CHANGED from this table's earlier
+        // value (0x079B=1947) to Waveshare's real RGB565-mode value
+        // (0x06A9=1705) -- part of the same "use one real, internally-
+        // consistent source, not a mix" fix as the PLL/HTS/VTS changes
+        // here. 0x3813 (timing V offset) is a genuinely new addition.
+        table_rom[60] = {16'h3800, 8'h00}; // X_ADDR_START hi
+        table_rom[61] = {16'h3801, 8'h00}; // X_ADDR_START lo
+        table_rom[62] = {16'h3802, 8'h00}; // Y_ADDR_START hi
+        table_rom[63] = {16'h3803, 8'h00}; // Y_ADDR_START lo
+        table_rom[64] = {16'h3804, 8'h0A}; // X_ADDR_END hi
+        table_rom[65] = {16'h3805, 8'h3F}; // X_ADDR_END lo (0x0A3F = 2623)
+        table_rom[66] = {16'h3806, 8'h06}; // Y_ADDR_END hi (Waveshare RGB565 block)
+        table_rom[67] = {16'h3807, 8'hA9}; // Y_ADDR_END lo (0x06A9 = 1705)
+        table_rom[68] = {16'h3808, 8'h05}; // DVP output width hi  (0x0500 = 1280)
+        table_rom[69] = {16'h3809, 8'h00}; // DVP output width lo
+        table_rom[70] = {16'h380A, 8'h02}; // DVP output height hi (0x02D0 = 720)
+        table_rom[71] = {16'h380B, 8'hD0}; // DVP output height lo
+        table_rom[72] = {16'h3813, 8'h04}; // timing V offset (Waveshare RGB565 block; was missing)
 
         // ---- HTS/VTS (line/frame total length, including blanking) --------
-        // NEVER SET BEFORE THIS -- a real gap this table shipped with since
-        // its very first revision, left running on the sensor's own power-
-        // on-reset default timing. Real-hardware root cause of a "black
-        // display, but everything else (I2C, PLL, MCLK, capture, UART's
-        // live ACT/RAW fields) reports healthy" symptom seen during this
-        // project's bring-up: video_line_buffer.v's write-side back-
-        // pressure logic (see its own DESIGN HISTORY item 3) safely stalls
-        // rather than corrupts data when the camera's real row-completion
-        // rate doesn't match the display's -- but an UNCONFIGURED HTS/VTS
-        // leaves that real rate genuinely undefined, and depending on the
-        // sensor's reset defaults it can end up so far from the display's
-        // 60Hz rate that the buffer permanently stalls after its first few
-        // (likely still-underexposed, pre-AEC-convergence) rows -- read as
-        // a frozen near-black frame forever, not a crash or corruption.
-        // Values below (HTS=1892=0x0764, VTS=1280=0x0500) are cross-checked
-        // against the mainline Linux kernel's real, in-production OV5640
-        // driver (drivers/media/i2c/ov5640.c, its 1280x720 mode's real
-        // ov5640_set_timings() output) -- NOT a guess. Honesty note: that
-        // driver's 1280x720 mode targets 30fps, not this design's original
-        // 60fps goal -- a real, known, and safe mismatch under this design
-        // specifically (video_line_buffer.v only needs to stall-protect
-        // against the camera running FASTER than the display; a camera
-        // running slower than the display just repeats the last claimed
-        // row gracefully, exactly the tested/documented degradation path)
-        // -- picked deliberately over an untested guess at true-60fps
-        // HTS/VTS values, since a verified, safe 30fps beats an unverified
-        // 60fps guess that could just as easily reproduce this same bug in
-        // the other, dangerous direction. Revisit for true 60fps once
-        // basic capture-to-display is confirmed working end-to-end.
-        table_rom[61] = {16'h380C, 8'h07}; // HTS hi (0x0764 = 1892)
-        table_rom[62] = {16'h380D, 8'h64}; // HTS lo
-        table_rom[63] = {16'h380E, 8'h05}; // VTS hi (0x0500 = 1280)
-        table_rom[64] = {16'h380F, 8'h00}; // VTS lo
+        // NEVER SET BEFORE THIS UNTIL A PREVIOUS FIX -- a real gap this
+        // table shipped with since its very first revision, left running
+        // on the sensor's own power-on-reset default timing. Real-
+        // hardware root cause of a "black display, but everything else
+        // (I2C, PLL, MCLK, capture, UART's live ACT/RAW fields) reports
+        // healthy" symptom seen during this project's bring-up (see
+        // Timing closure notes episode 9 for the full account):
+        // video_line_buffer.v's write-side back-pressure logic (see its
+        // own DESIGN HISTORY item 3) safely stalls rather than corrupts
+        // data when the camera's real row-completion rate doesn't match
+        // the display's -- but an unconfigured HTS/VTS left that real
+        // rate genuinely undefined.
+        //
+        // THIS REVISION replaces that first fix's values (which mixed the
+        // Linux kernel driver's HTS/VTS with a DIFFERENT, community-
+        // derived PLL -- a real, if lower-risk, inconsistency) with
+        // Waveshare's own real, complete, internally-consistent
+        // ov5640_rgb565_reg_tbl block for this exact resolution: PLL
+        // (0x3035/0x3036 above), window (0x3806/0x3807/0x3813 above), and
+        // HTS/VTS all from the SAME verified source together.
+        //
+        // HONESTY NOTE, stated directly because it matters: Waveshare's
+        // own real vendor firmware for 1280x720 RGB565 over 8-bit DVP
+        // ALSO computes to ~30fps, not 60fps (PCLK 42MHz per their own
+        // comment, HTS=1528 * VTS=900 -> 42e6/(1528*900) =~ 30.5fps) --
+        // the SAME conclusion the (unrelated, independently-verified)
+        // Linux kernel driver's 1280x720 mode reached. Two independent
+        // real, production sources landing on ~30fps for this exact
+        // resolution/format/interface combination is a real signal, not
+        // a coincidence of both picking a "safe" number: 1280x720 RGB565
+        // at 60fps over 8-bit DVP needs roughly double the pixel
+        // bandwidth (~130-170 MHz-class PCLK once blanking overhead is
+        // included) of what either real source actually runs, which is
+        // very high for typical 3.3V CMOS DVP signalling. True 60fps
+        // capture at this exact resolution/format may not be realistically
+        // achievable on this sensor/interface pairing at all -- see
+        // README.md's Known Limitations for the options going forward
+        // (accept 30fps capture against a 60Hz display, drop resolution,
+        // or attempt an independently-derived higher-PCLK configuration
+        // with the real risk that entails, per this project's own
+        // established "don't guess at untested timing values" discipline).
+        table_rom[73] = {16'h380C, 8'h05}; // HTS hi (0x05F8 = 1528)
+        table_rom[74] = {16'h380D, 8'hF8}; // HTS lo
+        table_rom[75] = {16'h380E, 8'h03}; // VTS hi (0x0384 = 900)
+        table_rom[76] = {16'h380F, 8'h84}; // VTS lo
 
-        table_rom[65] = {16'h3814, 8'h31}; // X subsample increment
-        table_rom[66] = {16'h3815, 8'h31}; // Y subsample increment
+        table_rom[77] = {16'h3814, 8'h31}; // X subsample increment
+        table_rom[78] = {16'h3815, 8'h31}; // Y subsample increment
 
         // ---- Format select: RGB565 over DVP --------------------------------
         // CONFIRMED against Waveshare's own ov5640_rgb565_reg_tbl: 0x6F,
@@ -236,14 +319,14 @@ module cam_config_rom #(
         // (NOT BYTE_SWAP, which was confirmed on real hardware to have no
         // effect on this specific symptom -- toggling it produced an
         // identical color cast either way).
-        table_rom[67] = {16'h4300, 8'h6F};
+        table_rom[79] = {16'h4300, 8'h6F};
 
         // ---- ISP output-format mux select: RGB (not raw/Bayer passthrough) --
         // 0x501F selects what the ISP pipeline actually hands to the DVP
         // output stage: 0x00 = ISP bypass/YUV, 0x01 = RGB. Confirmed
         // against the vendor's own ov5640_rgb565_reg_tbl. Must come after
         // the format-select register above.
-        table_rom[68] = {16'h501F, 8'h01};
+        table_rom[80] = {16'h501F, 8'h01};
 
         // ---- ISP pipeline master enables -- CONFIRMED against the vendor's
         // own code, and were missing entirely before. 0x5001's CMX
@@ -253,14 +336,14 @@ module cam_config_rom #(
         // valid demosaiced color, exactly matching the "correct framing,
         // garbage content" symptom seen during this project's hardware
         // bring-up.
-        table_rom[69] = {16'h440E, 8'h00};
-        table_rom[70] = {16'h5000, 8'hA7}; // Lenc on, raw gamma on, BPC on, WPC on, CIP on
-        table_rom[71] = {16'h5001, 8'hA3}; // SDE on, Scaling on, CMX on, AWB on
+        table_rom[81] = {16'h440E, 8'h00};
+        table_rom[82] = {16'h5000, 8'hA7}; // Lenc on, raw gamma on, BPC on, WPC on, CIP on
+        table_rom[83] = {16'h5001, 8'hA3}; // SDE on, Scaling on, CMX on, AWB on
 
         // ---- Disable unused JPEG hardware -- matches the vendor's RGB565
         // table; harmless either way since JPEG mode is never used here.
-        table_rom[72] = {16'h3002, 8'h1C};
-        table_rom[73] = {16'h3006, 8'hC3};
+        table_rom[84] = {16'h3002, 8'h1C};
+        table_rom[85] = {16'h3006, 8'hC3};
 
         // ---- Module's own onboard LED -- turned on once config completes.
         // Confirmed via the vendor's own OV5640_Flash_Lamp() function,
@@ -271,9 +354,9 @@ module cam_config_rom #(
         // per-frame activity indicator -- see the header comment above and
         // the UART's ACT field for the real-time equivalent.
         // Delete these 3 entries if you don't want the module's LED lit.
-        table_rom[74] = {16'h3016, 8'h02};
-        table_rom[75] = {16'h301C, 8'h02};
-        table_rom[76] = {16'h3019, 8'h02};
+        table_rom[86] = {16'h3016, 8'h02};
+        table_rom[87] = {16'h301C, 8'h02};
+        table_rom[88] = {16'h3019, 8'h02};
 
         // ... extend NUM_REGS and this table further (AWB/gamma/lens-shading
         // tuning, mirror/flip, sharpness) once basic capture is confirmed.

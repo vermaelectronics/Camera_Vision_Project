@@ -473,27 +473,36 @@ design to a **different** sensor:
 
 **A word on the shipped OV5640 table's provenance:** its format-select and
 ISP-enable registers (`0x4300`, `0x501F`, `0x5000`, `0x5001`, `0x300E`,
-and a few others) are now cross-checked directly against Waveshare's own
+and a few others) are cross-checked directly against Waveshare's own
 official demo code for this exact module (their real `ov5640.c`/
 `ov5640cfg.h`) — this caught a real bug (`0x4300` was `0x61`, a
 community-sourced guess; the vendor's own table uses `0x6F`) and added
-several ISP master-enable registers that were missing entirely. The
-PLL/analog/output-window registers (`0x3800`–`0x3821`, most likely to
-still need adjustment if the image is offset, mirrored, or the wrong size)
-remain this project's own independently-derived 720p60 configuration — the
-vendor's own RGB565 table targets a different resolution/frame rate
-(1280×800 @ 15fps) than this design's 1280×720, so those values weren't
-copied wholesale. The one exception within that same register range:
-`0x380C`–`0x380F` (HTS/VTS, total line/frame length) *are* cross-checked
-against a real source — the mainline Linux kernel's OV5640 driver, not the
-Waveshare vendor code — added after a real-hardware bug (see [Timing
-closure notes](#timing-closure-notes) episode 9) traced to those registers
-being missing entirely. That source's 1280×720 mode targets **30fps, not
-60fps** — this design's camera *capture* rate is therefore 30fps even
-though the HDMI *output* stays a genuine 720p60 signal throughout (see
-episode 9 for why 30fps was picked deliberately over an unverified 60fps
-guess). See the extensive comments at the top of `cam_config_rom.v` for
-the full per-register provenance and rationale.
+several ISP master-enable registers that were missing entirely. **The
+PLL (`0x3035`/`0x3036`), output window (`0x3800`–`0x3821`), and HTS/VTS
+(`0x380C`–`0x380F`) are now also vendor-cross-checked** — an earlier
+revision of this note claimed the vendor's table targets 1280×800 and so
+these values were kept as this project's own independently-derived 720p60
+configuration instead; that claim was **wrong**, a misread of a stale
+comment inside the vendor's own source (their code's actual register
+writes set 1280×720, matching this design's own resolution exactly, right
+below a leftover `// 1280x800, 15fps` comment that doesn't match what the
+registers around it actually do). The current table uses Waveshare's real,
+complete, internally-consistent RGB565 block for 1280×720 — PLL, window,
+and HTS/VTS all from that one source together, not mixed across sources
+(an earlier fix-attempt had paired vendor HTS/VTS with this project's own,
+different PLL registers — a real, if lower-risk, inconsistency now
+removed).
+**Honest tradeoff, stated directly: even Waveshare's own real vendor
+firmware for 1280×720 RGB565 over 8-bit DVP computes to ~30fps, not
+60fps** (PCLK 42MHz ÷ (HTS×VTS) ≈ 30.5fps per their own numbers) — the
+same conclusion the (unrelated, independently-verified) Linux kernel's
+OV5640 driver reaches for this same resolution/format/interface
+combination. This design's camera *capture* rate is therefore ~30fps even
+though the HDMI *output* stays a genuine 720p60 signal throughout — see
+[Known limitations](#known-limitations--future-work) for why true 60fps
+capture may not be realistically achievable here at all, and the options
+if you need it anyway. See the extensive comments at the top of
+`cam_config_rom.v` for the full per-register provenance and rationale.
 
 ---
 
@@ -568,7 +577,7 @@ problems:**
 
 | Top level | LUT4 | FF | DP16KD (of 56) | EHXPLLL | Notes |
 |---|---|---|---|---|---|
-| `dvp_camera_hdmi_top` (720p60, only resolution supported) | 1628 | 893 | 12 | 2 | 6.7% LUT utilization; 2nd `EHXPLLL` is `clk_gen_mclk.v`'s 24MHz camera MCLK |
+| `dvp_camera_hdmi_top` (720p60, only resolution supported) | 1603 | 893 | 12 | 2 | 6.6% LUT utilization; 2nd `EHXPLLL` is `clk_gen_mclk.v`'s 24MHz camera MCLK |
 | `dvp_camera_hdmi_top_ext` (1080p60) | 398 | 311 | 12 | 1 | no TMDS gearbox needed; **not yet updated with MCLK/power-sequencer/UART debug**, see [Known limitations](#known-limitations--future-work) |
 
 (Cell counts for `dvp_camera_hdmi_top` grew from the design's original
@@ -587,13 +596,13 @@ CABGA256 --speed 6`), against `constraints/icepi_zero.lpf`:**
 
 | Design | Clock domain | Target | Achieved | Result |
 |---|---|---|---|---|
-| 720p60 | `clk_pixel` | 74.29 MHz | 84.19 MHz (seed 18) | **PASS** |
-| 720p60 | `cam_pclk` | 75.00 MHz | 107.90 MHz | **PASS** |
-| 720p60 | `cam_mclk` | 24.00 MHz | 185.29 MHz | **PASS** |
-| 720p60 | `clk` (board osc, drives `uart_debug`) | 50.00 MHz | 109.05 MHz | **PASS** |
+| 720p60 | `clk_pixel` | 74.29 MHz | 109.34 MHz (seed 18) | **PASS** |
+| 720p60 | `cam_pclk` | 75.00 MHz | 101.63 MHz | **PASS** |
+| 720p60 | `cam_mclk` | 24.00 MHz | 184.98 MHz | **PASS** |
+| 720p60 | `clk` (board osc, drives `uart_debug`) | 50.00 MHz | 109.34 MHz | **PASS** |
 | 720p60 | `cam_vsync` (frame-counter clock edge in `uart_debug`) | 1.00 MHz (documentation-only; real rate ≈30Hz now — see [Timing closure notes](#timing-closure-notes) episode 9 on why the camera itself no longer targets 60fps) | 894.45 MHz | **PASS** |
 | 720p60 | `cam_pixel_valid` (activity-indicator clock edge in `uart_debug`) | 12.00 MHz (nextpnr auto-inferred default — internal net, not a top-level port, so no LPF `FREQUENCY` constraint applies; real rate is the pixel rate, far above this) | 894.45 MHz | **PASS** |
-| 720p60 | TMDS `sclk` | 185.74 MHz | 212.36 MHz | **PASS** |
+| 720p60 | TMDS `sclk` | 185.74 MHz | 204.71 MHz | **PASS** |
 | 1080p60 (ext) | `hdmi_pclk` | 150.01 MHz | 157.18 MHz (seed 6) | **PASS** |
 | 1080p60 (ext) | `cam_pclk` | 75.00 MHz | 187.06 MHz | **PASS** |
 
@@ -617,10 +626,11 @@ output pin (see [UART debug interface](#uart-debug-interface) — the UART's
 `ACT` field already covered the same information with no extra wiring, so
 the dedicated pin was redundant); margins improved slightly with one fewer
 I/O pin to place, and `--seed 18` still closes cleanly, no re-sweep
-needed. Numbers above are re-measured once more after adding the
-previously-missing HTS/VTS registers to `cam_config_rom.v` (see [Timing
-closure notes](#timing-closure-notes) episode 9) — a tiny ROM-size growth
-(4 more register-write entries), `--seed 18` still closes cleanly, no
+needed. Numbers above are re-measured once more after replacing
+`cam_config_rom.v`'s PLL/window/HTS-VTS registers with Waveshare's own
+real, internally-consistent 1280×720 RGB565 block (see [Timing closure
+notes](#timing-closure-notes) episode 9) — a modest ROM-size growth (12
+more register-write entries), `--seed 18` still closes cleanly, no
 re-sweep needed there either. **This has not yet been re-verified against
 a real oss-cad-suite
 toolchain on real hardware** — do that (and re-sweep `--seed N` if it
@@ -866,21 +876,42 @@ instances remain.
 
 ## Known limitations / future work
 
-- **The camera captures at 30fps, not 60fps, even though the HDMI output
-  is a genuine 720p60 signal throughout.** `cam_config_rom.v`'s HTS/VTS
-  registers (added to fix a real "healthy status, black display" bug —
-  see [Timing closure notes](#timing-closure-notes) episode 9) are
-  cross-checked against a real 30fps-targeting driver, not this design's
-  original 60fps goal. In practice this means `video_line_buffer.v`
-  gracefully repeats each captured row/frame roughly twice on the display
-  (its documented, tested degradation path for a camera slower than the
-  display — see that module's header) — visually, the picture updates at
-  ~30Hz, not a full 60Hz. Re-deriving true 60fps HTS/VTS values for this
-  exact sensor/PLL configuration (not just copying a verified-but-slower
-  known-good pair, which is what was done here) is the natural next step,
-  but needs a real, verified source for the exact values — see
-  `cam_config_rom.v`'s own comment at `0x380C` for why an unverified guess
-  was deliberately avoided.
+- **The camera captures at ~30fps, not 60fps, even though the HDMI output
+  is a genuine 720p60 signal throughout.** `cam_config_rom.v`'s PLL/
+  window/HTS-VTS registers (added/corrected to fix a real "healthy status,
+  black display" bug — see [Timing closure notes](#timing-closure-notes)
+  episode 9) now match Waveshare's own real, complete vendor block for
+  1280×720 RGB565 — and that real vendor firmware *also* computes to
+  ~30fps (PCLK 42MHz ÷ (HTS×VTS) ≈ 30.5fps), the same conclusion an
+  unrelated, independently-verified source (the Linux kernel's OV5640
+  driver) reaches for this same resolution/format/interface combination.
+  In practice this means `video_line_buffer.v` gracefully repeats each
+  captured row/frame roughly twice on the display (its documented, tested
+  degradation path for a camera slower than the display — see that
+  module's header) — visually, the picture updates at ~30Hz, not a full
+  60Hz.
+  **Two independent real sources landing on the same ~30fps ceiling for
+  this exact resolution/format/interface combo is a real signal, not a
+  coincidence of both picking a "safe" number**: 1280×720 RGB565 at 60fps
+  over 8-bit DVP needs roughly double the pixel bandwidth (~130–170
+  MHz-class PCLK once blanking overhead is included) of what either real
+  source actually runs — very high for typical 3.3V CMOS DVP signalling.
+  True 60fps capture at this exact resolution/format may not be
+  realistically achievable on this sensor/interface pairing at all. If you
+  need it anyway, the options, roughly in order of how much new,
+  unverified risk each carries:
+    1. **Accept ~30fps capture** (current state) — the HDMI signal itself
+       stays a correct 720p60 signal throughout; only how often the
+       picture visually updates is affected.
+    2. **Independently derive a genuine 60fps HTS/VTS/PLL set** for this
+       exact sensor — needs a real, verified source (not a guess); this
+       project's own established discipline is to never guess at
+       unverified timing values here, since a wrong one can reproduce the
+       exact permanent-stall/black-display bug episode 9 fixed.
+    3. **Drop capture resolution** (e.g. 640×480 or smaller, where 60fps
+       is a far more standard, commonly-supported DVP rate for this
+       sensor) and let a scaler (see the next bullet) bring it back up to
+       1280×720 for display.
 - **No scaler.** The camera's active-video window must already match the
   display resolution. A line-buffer-based (or full frame-buffer, using the
   board's onboard SDRAM) scaler is a natural extension.
