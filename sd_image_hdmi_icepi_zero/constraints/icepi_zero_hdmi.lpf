@@ -3,23 +3,32 @@
 //
 // Every LOCATE/IOBUF entry below is copied verbatim from the board
 // owner's real master LPF (provided in this session) - clk, button[],
-// sd_*, led[0:3], and the gpdi_dp[]/gpdi_dn[] HDMI pairs are all real,
-// confirmed ball assignments, not guesses. This file only includes the
-// subset of the master LPF's pins that sd_image_hdmi_top.v actually
-// uses (see that file's own header comment) - the master LPF also
-// defines usb_tx/rx, gpio[0:27], pi_*, sd_dat[]/sd_cmd/sd_det (SD-bus-
-// native aliases of the same physical balls this design already
-// constrains via sd_miso/sd_mosi/sd_csn/sd_clk), a 5th LED, a 2nd
-// button, gpdi_cec/sck/sda/util/hpd (HDMI CEC/DDC, unused - this design
-// has no EDID/CEC support), usb_dp/dn, sdram_*, flash_*, and tp[] -
-// none of which this design's top-level module declares as ports, so
-// they're intentionally left out here.
+// sd_*, led[0:3], and the gpdi_dp[] HDMI pins are all real, confirmed
+// ball assignments, not guesses. This file only includes the subset of
+// the master LPF's pins that sd_image_hdmi_top.v actually uses (see
+// that file's own header comment) - the master LPF also defines
+// usb_tx/rx, gpio[0:27], pi_*, sd_dat[]/sd_cmd/sd_det (SD-bus-native
+// aliases of the same physical balls this design already constrains
+// via sd_miso/sd_mosi/sd_csn/sd_clk), a 5th LED, a 2nd button,
+// gpdi_cec/sck/sda/util/hpd (HDMI CEC/DDC, unused - this design has no
+// EDID/CEC support), usb_dp/dn, sdram_*, flash_*, and tp[] - none of
+// which this design's top-level module declares as ports, so they're
+// intentionally left out here.
 //
 // The HDMI section was PLACEHOLDER ("XXn" invalid site names) in every
 // earlier revision of this file - this revision replaces that with the
-// board's real gpdi_dp[]/gpdi_dn[] pins, confirmed by the master LPF's
-// own IO_TYPE=LVCMOS33D (Lattice's explicit-both-pins differential I/O
-// standard), which matches this design's OLVDS-based hdmi_out.v.
+// board's real gpdi_dp[] pins, confirmed IO_TYPE=LVCMOS33D
+// (pseudo-differential: RTL drives one net per channel, the ECP5 I/O
+// hardware auto-generates the complementary signal on the paired
+// physical pad, so gpdi_dn[]'s sites need no separate constraint here -
+// they aren't a design port). This replaced an earlier true-
+// differential OLVDS approach (explicit gpdi_dp[]/gpdi_dn[] port pairs,
+// separately constrained) after real nextpnr-ecp5 runs failed
+// placement ("cannot place differential IO at location PIOB"/"PIOD")
+// on gpdi_dn[0]/gpdi_dn[1]'s sites - matches this repo's other two
+// working HDMI projects (dvp_camera_hdmi_pipeline,
+// icepi_zero_bringup/03_sdcard_hdmi_image), which use this same
+// single-port LVCMOS33D approach successfully.
 
 SYSCONFIG CONFIG_IOVOLTAGE=3.3 COMPRESS_CONFIG=ON MCCLK_FREQ=62
     MASTER_SPI_PORT=ENABLE SLAVE_SPI_PORT=DISABLE SLAVE_PARALLEL_PORT=DISABLE;
@@ -87,23 +96,23 @@ IOBUF  PORT "led[3]" IO_TYPE=LVCMOS33 PULLMODE=DOWN DRIVE=4;
 
 // ---------------------------------------------------------------------
 // HDMI (GPDI connector) - real ball assignments, confirmed by the
-// board owner's master LPF. gpdi_dp/dn[3] = TMDS clock pair;
-// gpdi_dp/dn[0..2] = TMDS data pairs (blue/green/red), matching
-// sd_image_hdmi_top.v's own port-to-channel mapping exactly.
+// board owner's master LPF. gpdi_dp[3] = TMDS clock; gpdi_dp[0..2] =
+// TMDS data channels (blue/green/red), matching sd_image_hdmi_top.v's
+// own port-to-channel mapping exactly.
+//
+// gpdi_dp[] only, no gpdi_dn[] LOCATE/IOBUF: IO_TYPE=LVCMOS33D is
+// pseudo-differential - the design drives only the "p" pad from RTL,
+// and the ECP5 I/O hardware auto-generates the complementary signal on
+// gpdi_dn[]'s paired physical pad by itself, so that pad needs no
+// separate constraint (it isn't a design port at all - see
+// sd_image_hdmi_top.v's port list). This is the same pattern this
+// repo's other two working HDMI projects' LPFs use.
 // ---------------------------------------------------------------------
 LOCATE COMP "gpdi_dp[0]" SITE "R13"; // Blue
 IOBUF  PORT "gpdi_dp[0]" IO_TYPE=LVCMOS33D DRIVE=4;
-LOCATE COMP "gpdi_dn[0]" SITE "T14";
-IOBUF  PORT "gpdi_dn[0]" IO_TYPE=LVCMOS33D DRIVE=4;
 LOCATE COMP "gpdi_dp[1]" SITE "R15"; // Green
 IOBUF  PORT "gpdi_dp[1]" IO_TYPE=LVCMOS33D DRIVE=4;
-LOCATE COMP "gpdi_dn[1]" SITE "T15";
-IOBUF  PORT "gpdi_dn[1]" IO_TYPE=LVCMOS33D DRIVE=4;
 LOCATE COMP "gpdi_dp[2]" SITE "P16"; // Red
 IOBUF  PORT "gpdi_dp[2]" IO_TYPE=LVCMOS33D DRIVE=4;
-LOCATE COMP "gpdi_dn[2]" SITE "R16";
-IOBUF  PORT "gpdi_dn[2]" IO_TYPE=LVCMOS33D DRIVE=4;
 LOCATE COMP "gpdi_dp[3]" SITE "R12"; // Clock
 IOBUF  PORT "gpdi_dp[3]" IO_TYPE=LVCMOS33D DRIVE=4;
-LOCATE COMP "gpdi_dn[3]" SITE "T13";
-IOBUF  PORT "gpdi_dn[3]" IO_TYPE=LVCMOS33D DRIVE=4;

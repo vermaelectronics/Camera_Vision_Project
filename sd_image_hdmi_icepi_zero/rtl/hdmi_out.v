@@ -30,10 +30,15 @@ module hdmi_out (
     output wire [14:0]  fb_rd_addr,
     input  wire [15:0]  fb_rd_data,
 
-    output wire hdmi_clk_p,   hdmi_clk_n,
-    output wire hdmi_d0_p,    hdmi_d0_n,   // blue
-    output wire hdmi_d1_p,    hdmi_d1_n,   // green
-    output wire hdmi_d2_p,    hdmi_d2_n    // red
+    // Single-ended from RTL's perspective: these drive gpdi_dp[] pads
+    // constrained IO_TYPE=LVCMOS33D in the LPF, which makes the ECP5 I/O
+    // hardware generate the complementary signal on the paired physical
+    // pad by itself (pseudo-differential) - see the "gpdi_dn[]" note
+    // below the OLVDS block that used to be here.
+    output wire hdmi_clk,
+    output wire hdmi_d0,   // blue
+    output wire hdmi_d1,   // green
+    output wire hdmi_d2    // red
 );
 
     // ---- stage 0: timing ---------------------------------------------
@@ -90,26 +95,24 @@ module hdmi_out (
     tmds_serializer u_ser_d1  (.shift_clk(shift_clk), .rst(rst), .tmds_word(tmds_g),              .serial_out(serial_d1));
     tmds_serializer u_ser_d2  (.shift_clk(shift_clk), .rst(rst), .tmds_word(tmds_r),              .serial_out(serial_d2));
 
-`ifdef SIMULATION
-    // No true differential buffer model in open simulation - expose a
-    // simple single-ended/inverted pair purely so a testbench can probe
-    // the bitstream. Not representative of real TMDS electrical levels.
-    assign hdmi_clk_p = serial_clk; assign hdmi_clk_n = ~serial_clk;
-    assign hdmi_d0_p  = serial_d0;  assign hdmi_d0_n  = ~serial_d0;
-    assign hdmi_d1_p  = serial_d1;  assign hdmi_d1_n  = ~serial_d1;
-    assign hdmi_d2_p  = serial_d2;  assign hdmi_d2_n  = ~serial_d2;
-`else
-    // OLVDS: ECP5 true-LVDS differential output buffer, the standard
-    // way to drive TMDS-style signaling from ECP5 general-purpose I/O
-    // (there is no dedicated HDMI PHY on this device). Verify this is
-    // the exact primitive/library name your Diamond version expects -
-    // some library versions/board reference designs use ELVDS_OBUF
-    // instead; check Diamond's IP/primitive browser if OLVDS doesn't
-    // elaborate.
-    OLVDS obuf_clk (.A(serial_clk), .Z(hdmi_clk_p), .ZN(hdmi_clk_n));
-    OLVDS obuf_d0  (.A(serial_d0),  .Z(hdmi_d0_p),  .ZN(hdmi_d0_n));
-    OLVDS obuf_d1  (.A(serial_d1),  .Z(hdmi_d1_p),  .ZN(hdmi_d1_n));
-    OLVDS obuf_d2  (.A(serial_d2),  .Z(hdmi_d2_p),  .ZN(hdmi_d2_n));
-`endif
+    // Pseudo-differential output: drive one net per channel and let the
+    // LPF's IO_TYPE=LVCMOS33D constraint (see constraints/icepi_zero_hdmi.lpf)
+    // make the ECP5 I/O hardware generate the complementary signal on the
+    // paired physical pad automatically. No OLVDS/true-LVDS primitive
+    // needed - and no separate simulation-only shim either, since there's
+    // now only one real net per channel in both sim and synthesis.
+    //
+    // This replaced an earlier true-differential OLVDS implementation
+    // (two explicit RTL ports per channel, Z/ZN) after real nextpnr-ecp5
+    // place-and-route runs failed with "cannot place differential IO at
+    // location PIOB"/"PIOD": this board's gpdi_dn[0]/gpdi_dn[1] pads sit
+    // on Bel types Trellis's ECP5-25F database doesn't support true-LVDS
+    // output on. This repo's other two HDMI projects
+    // (dvp_camera_hdmi_pipeline, icepi_zero_bringup/03_sdcard_hdmi_image)
+    // already use this same single-port LVCMOS33D approach successfully.
+    assign hdmi_clk = serial_clk;
+    assign hdmi_d0  = serial_d0;
+    assign hdmi_d1  = serial_d1;
+    assign hdmi_d2  = serial_d2;
 
 endmodule

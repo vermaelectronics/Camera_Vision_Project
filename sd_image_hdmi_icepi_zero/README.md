@@ -16,14 +16,16 @@ top-level application with its own build.
    `constraints/icepi_zero_hdmi.lpf` is copied directly from the board
    owner's real master LPF (provided in this session) — `clk`,
    `button[0:1]`, `sd_clk`/`sd_mosi`/`sd_miso`/`sd_csn`, `led[0:3]`, and
-   the `gpdi_dp[]`/`gpdi_dn[]` HDMI pairs are all confirmed ball
-   locations, not guesses. Earlier revisions of this file used
-   deliberately-invalid `SITE "XXn"` placeholders for the HDMI pairs
-   specifically because that data wasn't available yet — it now is, and
+   the `gpdi_dp[]` HDMI pins are all confirmed ball locations, not
+   guesses. Earlier revisions of this file used deliberately-invalid
+   `SITE "XXn"` placeholders for the HDMI pins specifically because
+   that data wasn't available yet — it now is, and
    `sd_image_hdmi_top.v`'s HDMI/reset ports were renamed to
-   `gpdi_dp[3:0]`/`gpdi_dn[3:0]`/`button[1:0]` to match the master
-   LPF's own naming exactly (an LPF's `LOCATE COMP` entries must match
-   real net/port names in the design, so this wasn't just cosmetic).
+   `gpdi_dp[3:0]`/`button[1:0]` to match the master LPF's own naming
+   exactly (an LPF's `LOCATE COMP` entries must match real net/port
+   names in the design, so this wasn't just cosmetic). `gpdi_dn[]` is
+   not a design port at all — see "A real place-and-route finding, now
+   fixed" below.
 
 Two things in this design are still **not verified against real hardware or
 an authoritative reference**, and are clearly marked at their source —
@@ -95,7 +97,7 @@ is out of scope for this deliverable.
                     +--> video_timing (640x480@~59.5Hz VESA-style timing)
                     +--> framebuffer read (160x120, 4x replicated)
                     +--> tmds_encoder x3 (R/G/B)
-                    +--> tmds_serializer x4 (R/G/B/clock) --> OLVDS --> HDMI connector
+                    +--> tmds_serializer x4 (R/G/B/clock) --> gpdi_dp[] (LVCMOS33D pseudo-diff) --> HDMI connector
 ```
 
 Two independent PLLs, both fed directly from the 50 MHz oscillator (not
@@ -176,10 +178,10 @@ framebuffer pixels matched exactly.
 | `button[1:0]` | in | `button[0]` = reset, ball C4; `button[1]` = ball C5, unused by this design |
 | `sd_clk`/`sd_mosi`/`sd_miso`/`sd_csn` | SD SPI | P15/N16/P14/M14 |
 | `led[3:0]` | out | E13/D14/E12/C13 |
-| `gpdi_dp[3]`/`gpdi_dn[3]` | out | TMDS clock differential pair — R12/T13 |
-| `gpdi_dp[0]`/`gpdi_dn[0]` | out | TMDS data 0 (blue) differential pair — R13/T14 |
-| `gpdi_dp[1]`/`gpdi_dn[1]` | out | TMDS data 1 (green) differential pair — R15/T15 |
-| `gpdi_dp[2]`/`gpdi_dn[2]` | out | TMDS data 2 (red) differential pair — P16/R16 |
+| `gpdi_dp[3]` | out | TMDS clock, LVCMOS33D pseudo-diff — R12 |
+| `gpdi_dp[0]` | out | TMDS data 0 (blue), LVCMOS33D pseudo-diff — R13 |
+| `gpdi_dp[1]` | out | TMDS data 1 (green), LVCMOS33D pseudo-diff — R15 |
+| `gpdi_dp[2]` | out | TMDS data 2 (red), LVCMOS33D pseudo-diff — P16 |
 
 All pin numbers above are copied directly from the board owner's real
 master LPF (provided in this session) — confirmed ball assignments,
@@ -282,12 +284,15 @@ Two things worth knowing before running these:
   With that in place, **synthesis succeeds cleanly**: 0 CHECK-pass
   problems, 4778 cells (2 EHXPLLL, 19 DP16KD, 4 ODDRX1F, 4 TRELLIS_IO).
 
-### A real place-and-route finding: `gpdi_dn[0]`/`gpdi_dn[1]`'s sites aren't differential-capable
+### A real place-and-route finding, now fixed: `gpdi_dn[0]`/`gpdi_dn[1]`'s sites weren't differential-capable
 
-`make pnr` places and routes successfully — **all three clock domains
-close timing with real margin** (`sys_clk` 88MHz vs. 20MHz target,
-`pix_clk` 52MHz vs. 25MHz target, `shift_clk` 157MHz vs. 125MHz target)
-— but then fails at a final legality check:
+Earlier revisions of this project drove each GPDI channel as a true
+differential pair via the ECP5's `OLVDS` primitive, with `gpdi_dp[N]`/
+`gpdi_dn[N]` as two separate, explicitly-placed RTL ports. `make pnr`
+placed and routed successfully — **all three clock domains closed
+timing with real margin** (`sys_clk` 88MHz vs. 20MHz target, `pix_clk`
+52MHz vs. 25MHz target, `shift_clk` 157MHz vs. 125MHz target) — but
+then failed at a final legality check:
 
 ```
 Info: pin 'gpdi_dn[3]$tr_io' constrained to Bel 'X72/Y44/PIOB'.
@@ -297,39 +302,51 @@ Info: pin 'gpdi_dn[0]$tr_io' constrained to Bel 'X72/Y41/PIOD'.
 ERROR: cannot place differential IO at location PIOD
 ```
 
-`gpdi_dn[2]`/`gpdi_dn[3]` (sites R16/T13) land on `PIOB` pads, which
+`gpdi_dn[2]`/`gpdi_dn[3]` (sites R16/T13) landed on `PIOB` pads, which
 Project Trellis's own ECP5-25F database allows for true differential
-(`OLVDS`) output. `gpdi_dn[0]`/`gpdi_dn[1]` (sites T14/T15) land on
-`PIOD` pads, which it doesn't — this is nextpnr correctly refusing an
-illegal placement, not a bug in the Makefile or a tooling gap; it's a
-real mismatch between this design's `hdmi_out.v` (which drives each
-GPDI channel as a true differential pair via the ECP5's `OLVDS`
-primitive, with `gpdi_dp[N]`/`gpdi_dn[N]` as two separate, explicitly-
-placed RTL ports) and this specific board/package's actual pad
-capabilities at the `gpdi_dn[0]`/`gpdi_dn[1]` sites given in
-`constraints/icepi_zero_hdmi.lpf`.
+(`OLVDS`) output. `gpdi_dn[0]`/`gpdi_dn[1]` (sites T14/T15) landed on
+`PIOD` pads, which it doesn't — nextpnr correctly refusing an illegal
+placement, not a bug in the Makefile or a tooling gap; a real mismatch
+between the old `hdmi_out.v` and this specific board/package's actual
+pad capabilities at those two sites. On a different nextpnr-ecp5 build
+the same underlying mismatch surfaced as `cannot place differential IO
+at location PIOB` instead (a different Bel, same structural cause) —
+confirming it wasn't specific to one placement seed or tool version.
 
-**A proven, working alternative exists in this same repository**: the
-sibling `dvp_camera_hdmi_pipeline` and `icepi_zero_bringup/
-03_sdcard_hdmi_image` projects drive the identical GPDI header (same
-board, same `LFE5U-25F-6BG256C` package, overlapping `gpdi_dp[]`
-sites) using single-ended `LVCMOS33D` — one RTL port per channel
-(`gpdi_dp[N]` only, no `gpdi_dn[N]` port at all), which is the ECP5's
-*pseudo*-differential mode: the pad's own hardware-paired complement
-pin is driven automatically from the single `gpdi_dp[N]` net, with no
-second port to explicitly place. Both of those projects synthesize
-*and* place-and-route cleanly with real timing margin on this exact
-chip. Retargeting `hdmi_out.v` from `OLVDS` (true differential, two
-explicit ports) to that single-port `LVCMOS33D` style is a real,
-concrete fix path — not attempted here, since it's a genuine RTL/pin-
-interface change to this project's HDMI output stage, not a build-
-tooling change, and shouldn't be made silently.
+**Fixed**: retargeted `hdmi_out.v` from `OLVDS` (true differential, two
+explicit ports per channel) to single-ended `LVCMOS33D` — one RTL port
+per channel (`gpdi_dp[N]` only, no `gpdi_dn[N]` port at all), the
+ECP5's *pseudo*-differential mode: the pad's own hardware-paired
+complement pin is driven automatically from the single `gpdi_dp[N]`
+net, with no second port to explicitly place or constrain. This is the
+exact approach this repo's sibling `dvp_camera_hdmi_pipeline` and
+`icepi_zero_bringup/03_sdcard_hdmi_image` projects already use
+successfully on the identical GPDI header (same board, same
+`LFE5U-25F-6BG256C` package, overlapping `gpdi_dp[]` sites). Changed:
+`hdmi_out.v`'s output ports (`hdmi_clk`/`hdmi_d0`/`hdmi_d1`/`hdmi_d2`,
+single-ended, no more `OLVDS` instantiation or a separate simulation
+shim — the same net now serves both sim and synthesis),
+`sd_image_hdmi_top.v`'s port list (`gpdi_dp[3:0]` only) and instance
+connections, and `constraints/icepi_zero_hdmi.lpf` (dropped the
+`gpdi_dn[]` `LOCATE`/`IOBUF` lines entirely — that pad isn't a design
+port under this scheme, so it needs no separate constraint).
+
+**Verified**: `make synth` still succeeds cleanly (0 CHECK-pass
+problems, 4784 cells). `make pnr` now completes with "Program finished
+normally" and no differential-IO error — all four `gpdi_dp[]` pins
+place on ordinary `PIOA`/`PIOC` Bels, and all three clock domains still
+close timing (83MHz/51MHz/170MHz vs. 20MHz/25MHz/125MHz targets). All
+four testbenches (`sim-timing`/`sim-tmds`/`sim-img`/`sim-top`) still
+PASS unchanged.
 
 ## Simulation
 
 All testbenches use `iverilog`/`vvp`, with `` `define SIMULATION `` selecting
 behavioral stand-ins for the ECP5-specific primitives (`EHXPLLL`,
-`ODDRX1F`, `OLVDS`) that have no generic open-source simulation model.
+`ODDRX1F`) that have no generic open-source simulation model. HDMI
+output (`gpdi_dp[]`) needs no such stand-in: it's a single-ended net
+driven by a plain `assign` in both sim and synthesis (see "A real
+place-and-route finding, now fixed" above).
 
 ```bash
 # Video timing generator (VESA 640x480@60 counts)
@@ -432,7 +449,7 @@ this project reuses), the additional steps specific to this project:
    `sd_uart_top`'s step 3, but for the second PLL).
 2. Verify `led[2]` lights once an IMAGE.RAW is on the card — confirms
    the whole SD/FAT/image-load path independent of HDMI.
-3. Probe `gpdi_dp[3]`/`gpdi_dn[3]` with a scope/logic analyzer — expect
+3. Probe `gpdi_dp[3]` with a scope/logic analyzer — expect
    a clean ~25 MHz square wave
    (the pixel clock, not the 125 MHz shift clock — see the warning
    about the TMDS clock channel's frequency above, a detail worth
