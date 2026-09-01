@@ -260,18 +260,27 @@ Two things worth knowing before running these:
   the entire hierarchy over that much simulated time) — expect it to
   take real time and memory for GTKWave to load. The other three
   testbenches' `.vcd` files are all under 100MB.
-- **Synthesis needed one addition**: `rtl/lattice_scuba_stubs.v` (new)
-  provides `VHI`/`VLO`, the fixed-logic-tie primitives Lattice Diamond's
-  Clarity Designer emits alongside a generated PLL wrapper (both
-  `icepi_clk_wiz_sys.v` and `icepi_clk_wiz_video.v` reference them) —
-  they're part of Diamond's own synthesis library, not the open-source
-  Project Trellis ECP5 primitive set, so `synth_ecp5` fails immediately
-  without them. Synthesizing them as plain constant-driving modules is
-  the standard fix for bringing Diamond/Clarity-Designer output into
-  Yosys/nextpnr-ecp5 — costs zero real logic (Yosys's own constant
-  propagation collapses each instantiation away). With that in place,
-  **synthesis succeeds cleanly**: 0 CHECK-pass problems, 4778 cells
-  (2 EHXPLLL, 19 DP16KD, 4 ODDRX1F, 4 TRELLIS_IO).
+- **Synthesis needed one fix, and it's version-dependent**: both PLL
+  wrappers (`icepi_clk_wiz_sys.v`, `icepi_clk_wiz_video.v`, Lattice
+  Diamond/Clarity Designer output) tie two internal nets, `scuba_vhi`/
+  `scuba_vlo`, to fixed logic 1/0. The generated RTL originally did this
+  by instantiating `VHI`/`VLO`, Diamond's own fixed-logic-tie primitive
+  modules — not part of the open-source Project Trellis ECP5 primitive
+  set, so `synth_ecp5` fails immediately ("Module `\VLO' ... is not part
+  of the design") unless something defines them. The first fix tried
+  here was a small stub file providing `VHI`/`VLO` as plain
+  constant-driving modules — that works on some OSS CAD Suite builds,
+  but **fails on others** that already bundle their own `VHI`/`VLO`
+  inside `synth_ecp5`'s ECP5 cell library
+  (`share/yosys/lattice/cells_sim_ecp5.v` → `common_sim.vh`): a
+  same-named stub module read in separately then collides with that
+  built-in one (`ERROR: Re-definition of module `\VLO'!`). The robust,
+  build-independent fix actually shipped is simpler: don't instantiate
+  a module named `VHI`/`VLO` at all — just `assign scuba_vhi = 1'b1;` /
+  `assign scuba_vlo = 1'b0;` directly in both PLL wrapper files. No
+  primitive name, no possible collision, on any OSS CAD Suite build.
+  With that in place, **synthesis succeeds cleanly**: 0 CHECK-pass
+  problems, 4778 cells (2 EHXPLLL, 19 DP16KD, 4 ODDRX1F, 4 TRELLIS_IO).
 
 ### A real place-and-route finding: `gpdi_dn[0]`/`gpdi_dn[1]`'s sites aren't differential-capable
 

@@ -82,9 +82,13 @@ module icepi_clk_wiz_sys (
     wire scuba_vhi;
     wire scuba_vlo;
 
-    VHI scuba_vhi_inst (.Z(scuba_vhi));
-
-    VLO scuba_vlo_inst (.Z(scuba_vlo));
+    // Tied directly instead of instantiating VHI/VLO primitive modules:
+    // some OSS CAD Suite builds already define VHI/VLO inside synth_ecp5's
+    // own ECP5 cell library (share/yosys/lattice/cells_sim_ecp5.v), which
+    // collides ("Re-definition of module") with a same-named stub module
+    // read in separately. A plain tie has no name to collide on any build.
+    assign scuba_vhi = 1'b1;
+    assign scuba_vlo = 1'b0;
 
     defparam PLLInst_0.PLLRST_ENA = "DISABLED" ;
     defparam PLLInst_0.INTFB_WAKE = "DISABLED" ;

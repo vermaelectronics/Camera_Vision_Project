@@ -24,15 +24,16 @@ TOP    = sd_image_hdmi_top
 LPF    = constraints/icepi_zero_hdmi.lpf
 BUILD  = build
 
-# lattice_scuba_stubs.v (VHI/VLO) is needed for synthesis only -- both PLL
-# wrappers are Diamond/Clarity-Designer output that references those two
-# Diamond-only tie primitives. Simulation never needs it (see that file's
-# header comment), so it's appended only where RTL_SOURCES feeds synth/pnr.
+# Both PLL wrappers are Diamond/Clarity-Designer output; their scuba_vhi/
+# scuba_vlo ties are now plain `assign` statements (see icepi_clk_wiz_sys.v /
+# icepi_clk_wiz_video.v) rather than VHI/VLO primitive instantiations, so no
+# separate stub source is needed here -- some OSS CAD Suite builds already
+# define VHI/VLO inside synth_ecp5's own ECP5 cell library, and a same-named
+# stub module read in separately collided with that on those builds.
 RTL_SOURCES = rtl/icepi_clk_wiz_sys.v rtl/icepi_clk_wiz_video.v rtl/clk_reset_gen.v \
               rtl/spi_master.v rtl/sd_spi_init.v rtl/sd_block_read.v rtl/fat_reader.v \
               rtl/img_loader.v rtl/framebuffer.v rtl/video_timing.v rtl/tmds_encoder.v \
-              rtl/tmds_serializer.v rtl/hdmi_out.v rtl/status_led.v rtl/sd_image_hdmi_top.v \
-              rtl/lattice_scuba_stubs.v
+              rtl/tmds_serializer.v rtl/hdmi_out.v rtl/status_led.v rtl/sd_image_hdmi_top.v
 
 .PHONY: all check clean synth pnr bit prog \
         sim-timing sim-tmds sim-img sim-top \
