@@ -34,7 +34,7 @@ module tb_sd_image_hdmi_top_smoke;
     wire sd_clk, sd_mosi, sd_csn;
     wire sd_miso;
     wire [3:0] led;
-    wire [3:0] gpdi_dp;
+    wire [3:0] gpdi_dp, gpdi_dn;
 
     sd_image_hdmi_top dut (
         .clk        (clk),
@@ -44,7 +44,8 @@ module tb_sd_image_hdmi_top_smoke;
         .sd_miso    (sd_miso),
         .sd_csn     (sd_csn),
         .led        (led),
-        .gpdi_dp    (gpdi_dp)
+        .gpdi_dp    (gpdi_dp),
+        .gpdi_dn    (gpdi_dn)
     );
 
     // -----------------------------------------------------------------

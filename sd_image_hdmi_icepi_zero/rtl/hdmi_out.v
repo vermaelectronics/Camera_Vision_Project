@@ -30,15 +30,13 @@ module hdmi_out (
     output wire [14:0]  fb_rd_addr,
     input  wire [15:0]  fb_rd_data,
 
-    // Single-ended from RTL's perspective: these drive gpdi_dp[] pads
-    // constrained IO_TYPE=LVCMOS33D in the LPF, which makes the ECP5 I/O
-    // hardware generate the complementary signal on the paired physical
-    // pad by itself (pseudo-differential) - see the "gpdi_dn[]" note
-    // below the OLVDS block that used to be here.
-    output wire hdmi_clk,
-    output wire hdmi_d0,   // blue
-    output wire hdmi_d1,   // green
-    output wire hdmi_d2    // red
+    // 8 independent single-ended LVCMOS33 pins (4 "p" + 4 "n"), each its
+    // own plain output - not a hardware differential pair of any kind.
+    // See the big comment above the output assigns below for why.
+    output wire hdmi_clk_p, hdmi_clk_n,
+    output wire hdmi_d0_p,  hdmi_d0_n,   // blue
+    output wire hdmi_d1_p,  hdmi_d1_n,   // green
+    output wire hdmi_d2_p,  hdmi_d2_n    // red
 );
 
     // ---- stage 0: timing ---------------------------------------------
@@ -88,31 +86,54 @@ module hdmi_out (
     // that's 1's in bits 9-5 and 0's in bits 4-0.
     localparam [9:0] TMDS_CLOCK_PATTERN = 10'b1111100000;
 
-    wire serial_clk, serial_d0, serial_d1, serial_d2;
-
-    tmds_serializer u_ser_clk (.shift_clk(shift_clk), .rst(rst), .tmds_word(TMDS_CLOCK_PATTERN), .serial_out(serial_clk));
-    tmds_serializer u_ser_d0  (.shift_clk(shift_clk), .rst(rst), .tmds_word(tmds_b),              .serial_out(serial_d0));
-    tmds_serializer u_ser_d1  (.shift_clk(shift_clk), .rst(rst), .tmds_word(tmds_g),              .serial_out(serial_d1));
-    tmds_serializer u_ser_d2  (.shift_clk(shift_clk), .rst(rst), .tmds_word(tmds_r),              .serial_out(serial_d2));
-
-    // Pseudo-differential output: drive one net per channel and let the
-    // LPF's IO_TYPE=LVCMOS33D constraint (see constraints/icepi_zero_hdmi.lpf)
-    // make the ECP5 I/O hardware generate the complementary signal on the
-    // paired physical pad automatically. No OLVDS/true-LVDS primitive
-    // needed - and no separate simulation-only shim either, since there's
-    // now only one real net per channel in both sim and synthesis.
+    // 8 independent single-ended OB pins, no differential relationship
+    // in logic at all - not a true ECP5 differential pad pair (OLVDS)
+    // and not the pseudo-diff LVCMOS33D pairing mode either. This is
+    // the third and final GPDI scheme tried for this design, in order:
+    //   1. OLVDS true-differential (two explicit ports, Z/ZN) - failed
+    //      real nextpnr-ecp5 place-and-route: "cannot place
+    //      differential IO at location PIOB"/"PIOD", because
+    //      gpdi_dn[0]/gpdi_dn[1]'s sites aren't true-diff-capable Bels
+    //      per Trellis's ECP5-25F database.
+    //   2. LVCMOS33D single-port pseudo-differential (gpdi_dp[] only,
+    //      hardware auto-pairs the complement pad) - passed nextpnr-ecp5
+    //      cleanly (verified in this repo), but real Lattice Diamond PAR
+    //      on the same board hit the same class of failure from the
+    //      other direction: "Differential comp ... is not placed on a
+    //      true pad of the true/complementary pair" once independent
+    //      per-pin drive was introduced.
+    //   3. This one - plain LVCMOS33 (no "D" suffix) on all 8 pins,
+    //      confirmed working by a real Lattice Diamond PAR + bitstream
+    //      build on real IcePi Zero hardware: since neither Diamond nor
+    //      nextpnr needs to verify a true silicon-bonded diff pair for
+    //      a plain single-ended IO_TYPE, this works regardless of which
+    //      physical pads are or aren't true-diff-capable - the most
+    //      portable of the three options. See constraints/
+    //      icepi_zero_hdmi.lpf's HDMI section for the matching LPF side.
     //
-    // This replaced an earlier true-differential OLVDS implementation
-    // (two explicit RTL ports per channel, Z/ZN) after real nextpnr-ecp5
-    // place-and-route runs failed with "cannot place differential IO at
-    // location PIOB"/"PIOD": this board's gpdi_dn[0]/gpdi_dn[1] pads sit
-    // on Bel types Trellis's ECP5-25F database doesn't support true-LVDS
-    // output on. This repo's other two HDMI projects
-    // (dvp_camera_hdmi_pipeline, icepi_zero_bringup/03_sdcard_hdmi_image)
-    // already use this same single-port LVCMOS33D approach successfully.
-    assign hdmi_clk = serial_clk;
-    assign hdmi_d0  = serial_d0;
-    assign hdmi_d1  = serial_d1;
-    assign hdmi_d2  = serial_d2;
+    // Each "_n" channel gets its OWN tmds_serializer instance, fed the
+    // bitwise-inverted 10-bit parallel symbol (~tmds_word), rather than
+    // inverting the "_p" instance's serial_out net after the fact. That
+    // matters on real hardware: a first attempt at post-hoc inversion
+    // (assign hdmi_d2_n = ~serial_d2;) failed real nextpnr-ecp5 packing
+    // with "ODDRX1F ... Q output must be connected only to a top level
+    // output" - the ECP5's ODDRX1F DDR primitive's Q net may drive
+    // nothing but the pad it's packed with, so any extra fanout (even a
+    // single inverter) off that net is illegal. Inverting the parallel
+    // data BEFORE its own independent DDR register, instead of the
+    // serial bit AFTER one, keeps every ODDRX1F's Q on its own
+    // dedicated single-fanout path to its own output pin, satisfying
+    // that constraint - and matches what Diamond's LSE synthesizer
+    // itself produced for the same design (separate serial_*_p/serial_*_n
+    // signals in its post-synthesis netlist, not one inverted into the
+    // other).
+    tmds_serializer u_ser_clk_p (.shift_clk(shift_clk), .rst(rst), .tmds_word( TMDS_CLOCK_PATTERN), .serial_out(hdmi_clk_p));
+    tmds_serializer u_ser_clk_n (.shift_clk(shift_clk), .rst(rst), .tmds_word(~TMDS_CLOCK_PATTERN), .serial_out(hdmi_clk_n));
+    tmds_serializer u_ser_d0_p  (.shift_clk(shift_clk), .rst(rst), .tmds_word( tmds_b),              .serial_out(hdmi_d0_p));
+    tmds_serializer u_ser_d0_n  (.shift_clk(shift_clk), .rst(rst), .tmds_word(~tmds_b),              .serial_out(hdmi_d0_n));
+    tmds_serializer u_ser_d1_p  (.shift_clk(shift_clk), .rst(rst), .tmds_word( tmds_g),              .serial_out(hdmi_d1_p));
+    tmds_serializer u_ser_d1_n  (.shift_clk(shift_clk), .rst(rst), .tmds_word(~tmds_g),              .serial_out(hdmi_d1_n));
+    tmds_serializer u_ser_d2_p  (.shift_clk(shift_clk), .rst(rst), .tmds_word( tmds_r),              .serial_out(hdmi_d2_p));
+    tmds_serializer u_ser_d2_n  (.shift_clk(shift_clk), .rst(rst), .tmds_word(~tmds_r),              .serial_out(hdmi_d2_n));
 
 endmodule

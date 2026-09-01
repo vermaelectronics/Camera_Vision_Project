@@ -15,23 +15,22 @@
 // sd_cd_n / card-detect does not exist in this design, matching the
 // sd_uart_top project: SD init starts unconditionally on reset release.
 //
-// Port names below (button[], gpdi_dp[]) match the board's real master
-// LPF exactly (board-owner-provided in this session) - LOCATE COMP
-// entries in an LPF must match actual net/port names in the design, so
-// these are no longer this project's own naming choice. button[0] is
-// the reset button (button[1] is a second board button, unused by this
-// design, left as an unread input). gpdi_dp[3] is the TMDS clock;
-// gpdi_dp[0..2] are the TMDS data channels (blue/green/red
-// respectively).
+// Port names below (button[], gpdi_dp[]/gpdi_dn[]) match the board's
+// real master LPF exactly (board-owner-provided in this session) -
+// LOCATE COMP entries in an LPF must match actual net/port names in
+// the design, so these are no longer this project's own naming choice.
+// button[0] is the reset button (button[1] is a second board button,
+// unused by this design, left as an unread input). gpdi_dp/dn[3] is
+// the TMDS clock; gpdi_dp/dn[0..2] are the TMDS data channels
+// (blue/green/red respectively).
 //
-// gpdi_dp[] only, no gpdi_dn[]: pseudo-differential LVCMOS33D output
-// (see constraints/icepi_zero_hdmi.lpf and hdmi_out.v) - RTL drives one
-// net per channel, and the ECP5 I/O hardware generates the
-// complementary signal on the paired physical pad by itself. This
-// replaced an earlier true-differential OLVDS approach (explicit
-// gpdi_dp[]/gpdi_dn[] port pairs) after real nextpnr-ecp5 runs failed
-// placement ("cannot place differential IO at location PIOB"/"PIOD")
-// on this board's gpdi_dn[0]/gpdi_dn[1] pads.
+// gpdi_dp[]/gpdi_dn[] are 8 independent single-ended LVCMOS33 pins, not
+// a hardware differential pair of any kind (see hdmi_out.v's own header
+// comment for the full 3-scheme history and why this final one is the
+// most portable): each "n" pin is just the bitwise complement of its
+// "p" sibling, driven by its own plain output. Confirmed working by a
+// real Lattice Diamond PAR + bitstream build on real IcePi Zero
+// hardware.
 module sd_image_hdmi_top (
     input  wire       clk,         // 50 MHz board oscillator
     input  wire [1:0] button,      // button[0] = reset, active-low (pulled up); button[1] unused
@@ -43,7 +42,7 @@ module sd_image_hdmi_top (
 
     output wire [3:0] led,
 
-    output wire [3:0] gpdi_dp   // [3]=TMDS clock, [0]=blue, [1]=green, [2]=red
+    output wire [3:0] gpdi_dp, gpdi_dn   // [3]=TMDS clock, [0]=blue, [1]=green, [2]=red
 );
 
     wire button0_n = button[0];
@@ -271,10 +270,10 @@ module sd_image_hdmi_top (
         .fb_loaded   (img_loaded_s1),
         .fb_rd_addr  (fb_rd_addr_w),
         .fb_rd_data  (fb_rd_data_w),
-        .hdmi_clk    (gpdi_dp[3]),
-        .hdmi_d0     (gpdi_dp[0]),
-        .hdmi_d1     (gpdi_dp[1]),
-        .hdmi_d2     (gpdi_dp[2])
+        .hdmi_clk_p  (gpdi_dp[3]), .hdmi_clk_n (gpdi_dn[3]),
+        .hdmi_d0_p   (gpdi_dp[0]), .hdmi_d0_n  (gpdi_dn[0]),
+        .hdmi_d1_p   (gpdi_dp[1]), .hdmi_d1_n  (gpdi_dn[1]),
+        .hdmi_d2_p   (gpdi_dp[2]), .hdmi_d2_n  (gpdi_dn[2])
     );
 
     // -----------------------------------------------------------------
