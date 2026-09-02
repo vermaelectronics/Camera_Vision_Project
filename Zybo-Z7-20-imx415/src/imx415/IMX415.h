@@ -34,11 +34,14 @@
  * built against - "IMX415 CAM R1", a small 22-pin-FPC breakout board
  * connected to a Zybo Z7-20's Pcam MIPI connector via a Raspberry-Pi-style
  * "Standard-Mini" adapter cable:
- *   - I2C address 0x1A (7-bit): confirmed three independent ways - an
- *     explicit note on the schematic, the sensor's SLAMODE0/SLAMODE1 slave
- *     -address truth table in the datasheet, and the board's own
- *     resistor strapping (both address-select pins pulled low, no pull-ups
- *     populated).
+ *   - I2C address: the schematic's silkscreened note and its resistor
+ *     strapping both pointed at 0x1A (SLAMODE0/SLAMODE1 both low), but on
+ *     the actual assembled board SLAMODE0/SLAMODE1 measure HIGH - per the
+ *     datasheet's SLAMODE0/SLAMODE1 slave-address truth table that's
+ *     0110111b = 0x37 (7-bit), not 0x1A. Real hardware measurement wins
+ *     over the schematic's nominal strapping (board rework, an unstuffed/
+ *     restuffed resistor, or a revision difference from the schematic are
+ *     all plausible explanations) - dev_address_ below is 0x37.
  *   - MIPI lanes: the sensor package is wired for all 4 CSI-2 lanes on this
  *     board, but per the datasheet "In 2 Lane mode, data is output from
  *     Lane1 and Lane2" - and the Raspberry-Pi-style 15-pin "Mini" connector
@@ -664,12 +667,15 @@ private:
 private:
 	I2C_Client& iic_;
 	GPIO_Client& gpio_;
-	// 7-bit I2C address - confirmed against mainline Linux device-tree
-	// examples for the IMX415 (sony,imx415 @ 0x1a). Some vendor breakout
-	// boards may strap an alternate address - if init() throws
+	// 7-bit I2C address. 0x1A (SLAMODE0/SLAMODE1 both low) is what mainline
+	// Linux device-tree examples use and what this board's schematic/
+	// resistor strapping nominally suggests - but on the actual assembled
+	// "IMX415 CAM R1" board, SLAMODE0/SLAMODE1 measure HIGH, which per the
+	// datasheet's slave-address truth table gives 0x37 instead. Measured
+	// hardware wins over the schematic here. If init() throws
 	// HardwareError::WRONG_ID with an all-zero or all-one readback, suspect
 	// an addressing/wiring problem rather than the ID mismatch itself.
-	uint8_t dev_address_ = 0x1A;
+	uint8_t dev_address_ = 0x37;
 	unsigned int const retry_count_ = 10;
 };
 

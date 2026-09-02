@@ -22,11 +22,18 @@ the earlier photos of it plugged into a Zybo Z7-20 via a Raspberry-Pi-style
 "Standard-Mini" adapter cable into the board's Pcam MIPI connector. That
 resolved almost everything §0 used to flag as an assumption:
 
-* **I2C address 0x1A** — confirmed three independent ways: an explicit note
-  on the schematic itself, cross-checked against the datasheet's
-  SLAMODE0/SLAMODE1 slave-address truth table, and cross-checked against the
-  board's own resistor strapping (both address-select pins pulled low via
-  10kΩ, no pull-up populated). This is not a guess.
+* **I2C address is 0x37, not 0x1A.** The schematic's silkscreened note and
+  its resistor strapping (both address-select pins pulled low) both pointed
+  at 0x1A, and I trusted that in earlier passes. **You then measured the
+  actual assembled board and found SLAMODE0/SLAMODE1 are both HIGH** —
+  per the datasheet's SLAMODE0/SLAMODE1 slave-address truth table, that's
+  `0110111`b = **0x37** (7-bit), a completely different address than the
+  schematic implied. Real hardware measurement overrides schematic
+  inference here — `IMX415::dev_address_` in `IMX415.h` is now `0x37`.
+  (Plausible explanations for the mismatch: a board rework, a differently
+  -stuffed resistor than the schematic shows, or this unit being a
+  different revision than the schematic — I can't tell which from here,
+  and it doesn't change what to do about it.)
 * **2-lane operation is confirmed correct**, and *why* is now concrete
   rather than inferred from connector-standard folklore: this board's 22-pin
   FPC connector carries all 4 of the sensor's CSI-2 lanes, but per the
@@ -468,7 +475,7 @@ chip-ID-mismatch message over serial — see §8.
 | Symptom | Likely cause |
 |---|---|
 | `HardwareError::WRONG_ID` from `init()`, especially if it *never* passes no matter what | **Start with §5's reset-wiring gap** — the sensor's actual reset line may simply never be released. Probe `TP3` on the camera board while `reset()` runs to confirm. |
-| `HardwareError::WRONG_ID`, other causes | Wrong I2C address (shouldn't be it — see §0), INCK not present (check the oscillator, §0), or a genuinely dead sensor. A chip ID read back as `0x000` or `0xFFF` usually means "nothing answered," consistent with the reset-wiring gap above. |
+| `HardwareError::WRONG_ID`, other causes | I2C address now uses the measured 0x37 (see §0) rather than the schematic's nominal 0x1A, so this shouldn't be it anymore — but if you rework/restrap SLAMODE0/1 later, re-measure rather than assuming. Otherwise: INCK not present (check the oscillator, §0), or a genuinely dead sensor. A chip ID read back as `0x000` or `0xFFF` usually means "nothing answered," consistent with the reset-wiring gap above. |
 | `HardwareError::IIC_NACK` on register read/write | Bus contention, or sensor asleep/unpowered/held in reset. |
 | Chip-ID check passes, but the CSI-2/D-PHY receiver never locks (no image data at all) | **Most likely the D-PHY line-rate mismatch from §3** — this bitstream's only timing-closed rate is 420Mbps/lane; the IMX415 modes here run 720/1440Mbps/lane against an unmodified bitstream. Reconstrain `timing.xdc` and re-implement before expecting either mode to lock. |
 | Chip-ID check passes but streaming/timing seems off | Try `REG_SYS_MODE = 0x3034` instead of `0x3033` — see §2's note on the datasheet's internal inconsistency for that one register. |
