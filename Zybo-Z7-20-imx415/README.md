@@ -37,13 +37,13 @@ resolved almost everything §0 used to flag as an assumption:
 * **INCK is generated on the camera board itself**, not derived from the
   Zybo: an always-on active oscillator (Kyocera part `X1G0048010002`, wired
   straight to the 1.8V rail with its enable pin tied high — no host control
-  at all) feeds the sensor's INCK pin directly. I could not confirm this
-  exact part's frequency from Kyocera's public data in this environment;
-  `INCK_HZ` still defaults to the best-effort 24MHz (one of only 5
-  frequencies the datasheet says the sensor supports at all, and the most
-  common choice for this class of board). **Check the frequency printed on
-  the oscillator package itself** (it's the small 4-pin component labeled
-  Y1 near the connector) to close this out for certain.
+  at all) feeds the sensor's INCK pin directly. **You confirmed it's 24MHz**
+  (one of only 5 frequencies the datasheet says the sensor supports at
+  all). `IMX415_cfg::INCK_HZ` in `IMX415.h` is set to this. That also meant
+  the driver's original "720 or 891 Mbps/lane" pairing was wrong for this
+  board — 891Mbps has no 24MHz option in the datasheet at all — so the two
+  lane-rate modes are now **720 and 1440 Mbps/lane**, both genuinely valid
+  at 24MHz. See §2.
 * **A real, concrete, likely bring-up blocker was found**: this board's
   connector separates `CAM_RST` (which actually drives the sensor's reset
   pin) from `CAM_GPIO` (which, on this board, connects to nothing but a bare
@@ -64,7 +64,7 @@ inconsistency found (in Sony's own document, not in this port).
 |--------------------------------------------------------|----------------------------------------------------------------|-----|
 | `src/ov5640/OV5640.h`, `OV5640.cpp`                     | `src/imx415/IMX415.h`, `IMX415.cpp`                             | New driver class, register map, and register *values* — see §2 |
 | `src/main.cc` — includes `ov5640/OV5640.h`, instantiates `OV5640 cam(...)` | `src/main.cc` — includes `imx415/IMX415.h`, instantiates `IMX415 cam(...)` | Swap the driver actually used by the app |
-| Menu: **a. Change Resolution** (720p/1080p15/1080p30) | Menu: **a. Change MIPI Lane Rate** (720/891 Mbps per lane) | The IMX415 has one native readout size (full sensor array) — see §2. There's no sensor-side resolution to pick, only the lane rate the same fixed-size frame is clocked out at. |
+| Menu: **a. Change Resolution** (720p/1080p15/1080p30) | Menu: **a. Change MIPI Lane Rate** (720/1440 Mbps per lane) | The IMX415 has one native readout size (full sensor array) — see §2. There's no sensor-side resolution to pick, only the lane rate the same fixed-size frame is clocked out at. |
 | Menu: **b. Change Liquid Lens Focus** | **removed** | That's the Pcam 5C's variable-focus liquid-lens IC, a separate chip on *that* board. Your "IMX415 CAM R1" module has a fixed M12 lens, not a liquid lens. |
 | Menu: **d. Change Image Format (Raw or RGB)**, **h. Change AWB Settings** | **removed** | Both are OV5640-internal-ISP features (Bayer→RGB conversion, auto white balance). The IMX415 has no on-sensor ISP at all — see §4, this is a bigger deal than just "fewer menu options." |
 | Menu: **e/f** (write/read sensor register) | kept, renumbered **b/c** | Still very useful for IMX415 bring-up/debug. |
@@ -88,12 +88,25 @@ clock-configuration tables into `IMX415.h`, as plain numeric configuration
 data.
 
 **Since then, with the official Sony IMX415-AAQR-C datasheet you provided in
-hand, I cross-checked every register/value pair used here (the 720Mbps and
-891Mbps clock-configuration and D-PHY-timing tables) against the datasheet's
-own "INCK Setting" section, byte-for-byte. Every value matches exactly**,
-confirming the Linux-driver port was accurate — this is no longer just "a
-shipping driver's values," it's independently verified against Sony's
-primary source.
+hand, I cross-checked every register/value pair used here (the 720Mbps,
+891Mbps and 1440Mbps clock-configuration and D-PHY-timing tables) against
+the datasheet's own "INCK Setting" section, byte-for-byte. Every value
+matches exactly**, confirming the Linux-driver port was accurate — this is
+no longer just "a shipping driver's values," it's independently verified
+against Sony's primary source. (891Mbps ended up not being usable on this
+board once the INCK was confirmed — see below — but the cross-check stands
+as evidence the port itself is correct, not just the two values actually
+wired up.)
+
+**You confirmed the board's INCK is 24MHz.** That closes out the last
+board-specific unknown from §0 — but it also means the driver's original
+"720 or 891 Mbps/lane" pairing was wrong for this board: per the datasheet's
+own INCK-Setting tables, **891Mbps/lane has no 24MHz option at all** (only
+27/37.125/74.25MHz). The two lane-rate modes are now **720Mbps and
+1440Mbps**, both genuinely valid at 24MHz per the datasheet, and both
+cross-checked the same way. The 891Mbps tables are kept in `IMX415_cfg` as
+reference material (useful if you ever pair this driver with a
+27/37.125/74.25MHz-INCK board) but are no longer wired into `set_mode()`.
 
 **One inconsistency turned up, in the datasheet itself, not in this port**:
 its master "Register Map" section places `SYS_MODE` at address `0x3033`
@@ -121,10 +134,9 @@ This also clarified two things the first version of this port got wrong:
   (The sensor hardware *does* also support a window-cropping mode and
   2/2-line binning per the datasheet — this driver just doesn't implement
   them, matching the upstream Linux driver's scope.) What *is* selectable
-  is the **MIPI lane rate** (720 or 891 Mbps/lane are both fully specified
-  and now datasheet-verified; 1440 Mbps/lane also exists but needs a faster
-  D-PHY, so I didn't wire it up here) and the **lane count** (2 or 4 — see
-  §0 for why 2 is correct for this board).
+  is the **MIPI lane rate** (720 or 1440 Mbps/lane, both confirmed valid at
+  this board's 24MHz INCK and both datasheet-verified — see above) and the
+  **lane count** (2 or 4 — see §0 for why 2 is correct for this board).
 * **There's a real, documented chip-ID register**: `SENSOR_INFO` at
   `0x3F12` (16-bit), masked `0xFFF`, expected `0x514`. `IMX415::init()`
   checks this (matching the OV5640 driver's own ID-check pattern) instead
@@ -134,9 +146,8 @@ This also clarified two things the first version of this port got wrong:
 
 | Item | Where | Status |
 |---|---|---|
-| **INCK (XVCLK) frequency** | `IMX415_cfg::INCK_HZ` in `IMX415.h` | The board generates this itself from an always-on oscillator (see §0) — defaults to **24 MHz** as a best-effort default (unconfirmed; check the part's markings). If it's actually one of the other 4 datasheet-supported frequencies, `set_mode()` needs the matching `cfg_clk_*` table from `IMX415_cfg` swapped in (several are already included: 720Mbps@24/72MHz, 891Mbps@27/37.125/74.25MHz). |
 | **Sensor reset wiring (`CAM_RST` vs `CAM_GPIO`)** | `IMX415::reset()` in `IMX415.h` | Likely gap, not yet fixed in code — see §5, this is the top bring-up risk. |
-| **Vivado D-PHY/CSI-2 RX IP configuration** | Hardware design (not in this software export) | Still unconfirmed whether it's built for 720 or 891 Mbps/lane, or something else entirely — see §3. |
+| **Vivado D-PHY/CSI-2 RX IP configuration** | Hardware design (not in this software export) | Still unconfirmed whether it's built for 720 or 1440 Mbps/lane, or something else entirely — see §3. 1440Mbps in particular is a real step up from the OV5640-era IP's ballpark. |
 
 None of these being wrong will damage the sensor — worst case is no image,
 garbled data, or an I2C NACK.
@@ -148,8 +159,8 @@ the **OV5640's** MIPI characteristics (2-lane, RAW10, ≤336MHz-class MIPI
 clock) and 1920×1080-and-below HDMI output timing. For the IMX415:
 
 1. **Confirm/reconfigure the `MIPI_D_PHY_RX`/`MIPI_CSI_2_RX` IP** in Vivado
-   for the lane rate you select in `IMX415.h` (720 or 891 Mbps/lane, 2-lane
-   by default). If it doesn't match, the CSI-2 receiver simply won't lock —
+   for the lane rate you select in `IMX415.h` (720 or 1440 Mbps/lane,
+   2-lane by default). If it doesn't match, the CSI-2 receiver simply won't lock —
    the sensor will still respond fine over I2C, but no valid pixel data will
    arrive.
 2. **Confirm the AXI4-Stream width** feeding the `AXI_VDMA` write channel
@@ -297,8 +308,9 @@ Please press the key corresponding to the desired option:
   d. Change Gamma Correction Factor Value
 ```
 
-* **a** → `1` for 720 Mbps/lane or `2` for 891 Mbps/lane (both 2-lane; both
-  full 3864×2192 RAW10 — see §2).
+* **a** → `1` for 720 Mbps/lane or `2` for 1440 Mbps/lane (both 2-lane,
+  both @ this board's confirmed 24MHz INCK, both full 3864×2192 RAW10 —
+  see §2).
 * **b** / **c** → poke/peek any IMX415 register directly over I2C. Good for
   confirming bring-up: e.g. read `3F12`/`3F13` and check you get `0x514`
   masked with `0xFFF`, or watch `STANDBY` (`3000`) toggle.
@@ -319,9 +331,6 @@ chip-ID-mismatch message over serial — see §8.
   is a real, likely gap, not yet fixed in code (fixing it needs a spare
   Zybo GPIO wired to the camera board, which isn't something I can do from
   software alone).
-* **INCK frequency is still a best-effort default** (24MHz) — the board
-  generates it locally from an oscillator whose exact frequency I couldn't
-  confirm — see §0.
 * **No AWB/AE/color-processing** — no ISP on the sensor to configure (see
   §4); if you add a demosaic path you'll likely want auto-exposure/AWB
   logic downstream of it too, which isn't included here.

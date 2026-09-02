@@ -19,10 +19,10 @@
  *
  * ...and have since been cross-checked byte-for-byte against Sony's own
  * official IMX415-AAQR-C datasheet ("INCK Setting" section, Data rate:
- * 720Mbps/lane and 891Mbps/lane tables) - every register/value pair used
- * below for those two lane rates matches the datasheet exactly. The one
- * discrepancy found: the datasheet's master "Register Map" section (and the
- * Linux driver) place SYS_MODE at 0x3033, while the datasheet's own "INCK
+ * 720Mbps/lane, 891Mbps/lane and 1440Mbps/lane tables) - every register/
+ * value pair used below matches the datasheet exactly. The one discrepancy
+ * found: the datasheet's master "Register Map" section (and the Linux
+ * driver) place SYS_MODE at 0x3033, while the datasheet's own "INCK
  * Setting" summary tables say 0x3034 for the same register - an apparent
  * internal inconsistency in Sony's document. This driver uses 0x3033 (2
  * independent sources agree). If bring-up gets past the chip-ID check but
@@ -47,22 +47,28 @@
  *   - INCK: generated on-board by an always-on active oscillator (Kyocera
  *     X1G0048010002, enabled directly from the 1.8V rail, no host control)
  *     feeding the sensor's INCK pin directly - NOT derived from the Zybo.
- *     Its exact frequency could not be confirmed from Kyocera's public part
- *     data in this environment; INCK_HZ defaults to 24MHz (one of the
- *     datasheet's 5 supported frequencies, and the most common choice for
- *     this class of board) as a best-effort default - check the frequency
- *     printed on the oscillator package itself, or Kyocera's site directly,
- *     to confirm.
+ *     CONFIRMED to be 24MHz. Note this constrains which lane rates are even
+ *     valid: per the datasheet's "INCK Setting" tables, only 720Mbps/lane
+ *     and 1440Mbps/lane support a 24MHz INCK at all (891/1485/1782/2079/
+ *     2376Mbps only list 27/37.125/74.25MHz options - no 24MHz row exists
+ *     for them). That's why the two modes wired up below are 720Mbps and
+ *     1440Mbps, not 720Mbps and 891Mbps as an earlier version of this file
+ *     had (which would have been silently wrong for this board: applying a
+ *     27MHz-calibrated clock table while actually being fed 24MHz).
  *   - Reset wiring: see the "IMPORTANT - sensor reset wiring" note on
- *     reset() below - this is the single most likely hardware gap on this
- *     specific board/cable combination.
+ *     reset() below - this is the single most likely remaining hardware
+ *     gap on this specific board/cable combination.
  *
  * What's still genuinely unresolved:
- *   - the exact INCK frequency (see above),
  *   - whether the Zybo's single Pcam GPIO pin actually reaches this board's
  *     CAM_RST net through the adapter cable (see reset() below),
  *   - whether this hardware platform's MIPI_D_PHY_RX/MIPI_CSI_2_RX IP cores
  *     were generated for the lane rate you select here (see README.md §3).
+ *     1440Mbps/lane is a real step up from the OV5640-era IP's ~672Mbps
+ *     ballpark, and per the datasheet the sensor transmits an MIPI D-PHY
+ *     "initial deskew burst" at or above 1440Mbps/lane (mandatory per the
+ *     MIPI Alliance D-PHY spec at that speed) - make sure your D-PHY RX IP
+ *     tolerates that if you pick this mode.
  *
  * IMPORTANT: unlike the OV5640, the IMX415 has ONE native readout mode
  * implemented here: a full-pixel-array raw Bayer scan at 3864x2192
@@ -100,7 +106,7 @@ namespace IMX415_cfg {
 	using config_word_t = struct { uint16_t addr; uint8_t data; };
 	// Lane RATE is what's selectable here - there is no per-resolution mode,
 	// see the file header comment above.
-	using mode_t = enum { MODE_2LANE_720MBPS = 0, MODE_2LANE_891MBPS, MODE_END };
+	using mode_t = enum { MODE_2LANE_720MBPS = 0, MODE_2LANE_1440MBPS, MODE_END };
 
 	// =========================================================================
 	// Helpers to express a multi-byte Sony CCI register (as used by the
@@ -122,9 +128,10 @@ namespace IMX415_cfg {
 	// =========================================================================
 	// Board-specific operating point - CONFIRM against your carrier board.
 	// =========================================================================
-	// XVCLK/INCK the sensor is actually fed. 24MHz is the most common default
-	// on generic IMX415 breakout boards; change to 72000000 (or extend the
-	// clk-params table below per the upstream driver) if yours differs.
+	// XVCLK/INCK the sensor is actually fed. CONFIRMED at 24MHz for the
+	// "IMX415 CAM R1" board this was built against (see the file header
+	// comment). Change this (and pick a matching cfg_clk_* table in
+	// set_mode() below) if you're using a different board.
 	uint32_t const INCK_HZ = 24000000;
 	// 2-lane matches the 15-pin FPC / Pcam MIPI connector this board uses.
 	// Set to 4 only if you've confirmed (schematic/vendor docs) your module
@@ -238,7 +245,8 @@ namespace IMX415_cfg {
 
 	// -------------------------------------------------------------------------
 	// MIPI D-PHY timing tables, one per lane rate (verbatim port of
-	// imx415_linkrate_720mbps[] / imx415_linkrate_891mbps[]).
+	// imx415_linkrate_720mbps[] / imx415_linkrate_891mbps[] /
+	// imx415_linkrate_1440mbps[], cross-checked against the datasheet).
 	// -------------------------------------------------------------------------
 	config_word_t const cfg_dphy_720mbps_[] =
 	{
@@ -263,6 +271,23 @@ namespace IMX415_cfg {
 		IMX415_REG16(REG_THSTRAIL,    0x003F),
 		IMX415_REG16(REG_THSEXIT,     0x005F),
 		IMX415_REG16(REG_TLPX,        0x002F),
+	};
+	// 891Mbps/lane only supports INCK = 27/37.125/74.25MHz per the datasheet
+	// (no 24MHz option exists for it) - kept above as reference for other
+	// boards, but NOT wired into set_mode() below since this board's INCK is
+	// confirmed 24MHz. cfg_dphy_1440mbps_ is used instead - see the file
+	// header comment.
+	config_word_t const cfg_dphy_1440mbps_[] =
+	{
+		IMX415_REG16(REG_TCLKPOST,    0x009F),
+		IMX415_REG16(REG_TCLKPREPARE, 0x0057),
+		IMX415_REG16(REG_TCLKTRAIL,   0x0057),
+		IMX415_REG16(REG_TCLKZERO,    0x0187),
+		IMX415_REG16(REG_THSPREPARE,  0x005F),
+		IMX415_REG16(REG_THSZERO,     0x00A7),
+		IMX415_REG16(REG_THSTRAIL,    0x005F),
+		IMX415_REG16(REG_THSEXIT,     0x0097),
+		IMX415_REG16(REG_TLPX,        0x004F),
 	};
 
 	// -------------------------------------------------------------------------
@@ -345,13 +370,46 @@ namespace IMX415_cfg {
 		IMX415_REG8 (REG_INCKSEL7,    0x1),
 		IMX415_REG16(REG_TXCLKESC_FREQ, 0x1290),
 	};
+	// 1440 Mbps/lane @ INCK = 24MHz - this board's confirmed operating point
+	// for the "faster" mode (see the file header comment on why 891Mbps was
+	// replaced with 1440Mbps here).
+	config_word_t const cfg_clk_1440mbps_24mhz_[] =
+	{
+		IMX415_REG16(REG_BCWAIT_TIME, 0x054),
+		IMX415_REG16(REG_CPWAIT_TIME, 0x03B),
+		IMX415_REG8 (REG_SYS_MODE,    0x8),
+		IMX415_REG8 (REG_INCKSEL1,    0x00),
+		IMX415_REG8 (REG_INCKSEL2,    0x23),
+		IMX415_REG16(REG_INCKSEL3,    0x0B4),
+		IMX415_REG16(REG_INCKSEL4,    0x0FC),
+		IMX415_REG8 (REG_INCKSEL5,    0x23),
+		IMX415_REG8 (REG_INCKSEL6,    0x1),
+		IMX415_REG8 (REG_INCKSEL7,    0x0),
+		IMX415_REG16(REG_TXCLKESC_FREQ, 0x0600),
+	};
+	// 1440 Mbps/lane @ INCK = 72MHz (reference for other boards)
+	config_word_t const cfg_clk_1440mbps_72mhz_[] =
+	{
+		IMX415_REG16(REG_BCWAIT_TIME, 0x0F8),
+		IMX415_REG16(REG_CPWAIT_TIME, 0x0B0),
+		IMX415_REG8 (REG_SYS_MODE,    0x8),
+		IMX415_REG8 (REG_INCKSEL1,    0x00),
+		IMX415_REG8 (REG_INCKSEL2,    0x28),
+		IMX415_REG16(REG_INCKSEL3,    0x0A0),
+		IMX415_REG16(REG_INCKSEL4,    0x0E0),
+		IMX415_REG8 (REG_INCKSEL5,    0x28),
+		IMX415_REG8 (REG_INCKSEL6,    0x1),
+		IMX415_REG8 (REG_INCKSEL7,    0x0),
+		IMX415_REG16(REG_TXCLKESC_FREQ, 0x1200),
+	};
 
 	// Real per-(lane rate, lane count) minimum HMAX register value (fastest
 	// supported line time - "hmax_min" in the upstream driver), indexed
 	// [0]=2-lane [1]=4-lane. Used as the streaming HMAX (matches the
 	// upstream driver's default/minimum hblank control value).
 	uint32_t const HMAX_MIN_720MBPS[2] = { 2032, 1066 };
-	uint32_t const HMAX_MIN_891MBPS[2] = { 2200, 1100 };
+	uint32_t const HMAX_MIN_891MBPS[2] = { 2200, 1100 }; // reference only - see cfg_dphy_891mbps_ note
+	uint32_t const HMAX_MIN_1440MBPS[2] = { 1066, 533 };
 	// Default streaming VMAX (minimum blanking - matches the upstream
 	// driver's default vblank control value).
 	uint32_t const VMAX_DEFAULT = PIXEL_ARRAY_HEIGHT + PIXEL_ARRAY_VBLANK_MIN; // 2250
@@ -463,10 +521,11 @@ public:
 			return ERR_LOGICAL;
 
 		// Pick the D-PHY timing table + clock-config table + HMAX_MIN entry
-		// for the requested lane rate. Only INCK_HZ == 24MHz (720Mbps) /
-		// 27MHz (891Mbps) are wired up here, matching this file's
-		// INCK_HZ/NUM_DATA_LANES defaults - if you changed those, pick a
-		// different cfg_clk_*/HMAX_MIN_* pair from IMX415_cfg above.
+		// for the requested lane rate. Both modes here are calibrated for
+		// INCK_HZ == 24MHz (confirmed for this board - see the file header
+		// comment) and 2-lane - if you changed NUM_DATA_LANES/INCK_HZ, pick
+		// a different cfg_clk_*/HMAX_MIN_* pair from IMX415_cfg above (note
+		// 891Mbps has no 24MHz option at all per the datasheet).
 		IMX415_cfg::config_word_t const* dphy_cfg = nullptr;
 		size_t dphy_size = 0;
 		IMX415_cfg::config_word_t const* clk_cfg = nullptr;
@@ -482,12 +541,12 @@ public:
 			clk_size = SIZEOF_ARRAY(IMX415_cfg::cfg_clk_720mbps_24mhz_);
 			hmax = IMX415_cfg::HMAX_MIN_720MBPS[0]; // [0] = 2-lane
 			break;
-		case IMX415_cfg::mode_t::MODE_2LANE_891MBPS:
-			dphy_cfg = IMX415_cfg::cfg_dphy_891mbps_;
-			dphy_size = SIZEOF_ARRAY(IMX415_cfg::cfg_dphy_891mbps_);
-			clk_cfg = IMX415_cfg::cfg_clk_891mbps_27mhz_; // INCK_HZ = 27MHz
-			clk_size = SIZEOF_ARRAY(IMX415_cfg::cfg_clk_891mbps_27mhz_);
-			hmax = IMX415_cfg::HMAX_MIN_891MBPS[0]; // [0] = 2-lane
+		case IMX415_cfg::mode_t::MODE_2LANE_1440MBPS:
+			dphy_cfg = IMX415_cfg::cfg_dphy_1440mbps_;
+			dphy_size = SIZEOF_ARRAY(IMX415_cfg::cfg_dphy_1440mbps_);
+			clk_cfg = IMX415_cfg::cfg_clk_1440mbps_24mhz_; // INCK_HZ = 24MHz
+			clk_size = SIZEOF_ARRAY(IMX415_cfg::cfg_clk_1440mbps_24mhz_);
+			hmax = IMX415_cfg::HMAX_MIN_1440MBPS[0]; // [0] = 2-lane
 			break;
 		default:
 			return ERR_LOGICAL;

@@ -75,10 +75,10 @@ void pipeline_mode_change(AXI_VDMA<ScuGicInterruptController>& vdma_driver, IMX4
 		// IMPORTANT: this project's MIPI_CSI_2_RX / MIPI_D_PHY_RX IP cores
 		// (in system_wrapper) were generated for the OV5640's 2-lane, RAW10,
 		// up-to-336Mbps/lane MIPI output. Confirm the IP's configured lane
-		// count/data rate matches the `mode` you pass below (720 or 891
-		// Mbps/lane, 2-lane by default in IMX415.h) - if it doesn't, the
-		// CSI-2/D-PHY receiver core will not lock and no image data will
-		// arrive, even though the sensor is streaming correctly. See
+		// count/data rate matches the `mode` you pass below (720 or
+		// 1440 Mbps/lane, 2-lane by default in IMX415.h) - if it doesn't,
+		// the CSI-2/D-PHY receiver core will not lock and no image data
+		// will arrive, even though the sensor is streaming correctly. See
 		// README.md §3.
 		cam.init();
 	}
@@ -144,9 +144,9 @@ int main()
 		switch(read_char0) {
 
 		case 'a':
-			xil_printf("\r\n  Please press the key corresponding to the desired lane rate:");
+			xil_printf("\r\n  Please press the key corresponding to the desired lane rate (both @ INCK=24MHz):");
 			xil_printf("\r\n    1. 720 Mbps/lane (2-lane) - closer to what the inherited OV5640-era D-PHY IP was built for");
-			xil_printf("\r\n    2. 891 Mbps/lane (2-lane) - faster, more likely to need the D-PHY IP rebuilt (see README.md)");
+			xil_printf("\r\n    2. 1440 Mbps/lane (2-lane) - faster, more likely to need the D-PHY IP rebuilt (see README.md)");
 			read_char1 = getchar();
 			getchar();
 			xil_printf("\r\nRead: %d", read_char1);
@@ -156,7 +156,7 @@ int main()
 				xil_printf("Lane rate change done.\r\n");
 				break;
 			case '2':
-				pipeline_mode_change(vdma_driver, cam, IMX415_cfg::mode_t::MODE_2LANE_891MBPS);
+				pipeline_mode_change(vdma_driver, cam, IMX415_cfg::mode_t::MODE_2LANE_1440MBPS);
 				xil_printf("Lane rate change done.\r\n");
 				break;
 			default:
