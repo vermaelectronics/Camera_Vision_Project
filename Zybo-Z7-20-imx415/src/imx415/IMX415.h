@@ -6,25 +6,43 @@
  * that originally shipped with the Zybo Z7-20 + Pcam 5C reference design.
  *
  * ---------------------------------------------------------------------------
- * READ THIS BEFORE FLASHING REAL HARDWARE
+ * WHERE THESE REGISTER VALUES COME FROM
  * ---------------------------------------------------------------------------
- * Unlike the OV5640, the IMX415 is a "dumb" raw Bayer sensor: it has no
- * internal ISP, no auto white balance engine, and no documented chip-ID
- * register pair. Several numeric fields below (marked "TODO / VERIFY") are
- * placeholders that depend on:
- *   - the exact INCK (input clock) frequency your carrier board feeds the
- *     sensor (XVCLK pin),
- *   - the MIPI lane count wired out on your board (2-lane or 4-lane),
- *   - the desired MIPI output data rate (Mbps/lane),
- *   - the "black-box" analog/timing register block Sony publishes per
- *     INCK/data-rate/lane/bit-depth combination in the official IMX415
- *     register-setting application note.
+ * Register addresses, the sensor's "magic"/undocumented tuning table, the
+ * per-lane-rate MIPI D-PHY timing tables, and the per-(lane rate, INCK)
+ * clock-configuration tables below are ported from the mainline Linux
+ * kernel's real, maintained IMX415 driver:
  *
- * These values are NOT independently derivable from public information and
- * are intentionally left as clearly-marked placeholders rather than invented
- * numbers presented as fact. See ../../README.md, section
- * "Values you must confirm before first power-up", for exactly what to fill
- * in and where Sony/vendor documentation defines it.
+ *     drivers/media/i2c/imx415.c  (Linux kernel, GPL-2.0-only,
+ *     Copyright (C) 2023 WolfVision GmbH; upstream at
+ *     https://github.com/torvalds/linux/blob/master/drivers/media/i2c/imx415.c)
+ *
+ * That's a different, much stronger footing than a datasheet-derived guess:
+ * these are the literal register/value pairs a shipping, maintained Linux
+ * driver writes to real IMX415 hardware. They are ported here as plain
+ * numeric configuration data (register addresses and values), the same way
+ * embedded projects routinely port init tables between drivers/languages.
+ *
+ * What's still genuinely board-specific and NOT resolved by the above (see
+ * README.md, "Values you must confirm before first power-up"):
+ *   - your board's exact XVCLK/INCK oscillator frequency (this file
+ *     defaults to 24 MHz - very common on generic breakout boards - with
+ *     72 MHz as an easy alternative; see INCK_HZ below),
+ *   - the MIPI lane count actually wired out on your board (this file
+ *     defaults to 2-lane, matching the 15-pin FPC / Raspberry-Pi-style
+ *     camera connector layout most IMX415 breakout boards - including the
+ *     Zybo Z7's Pcam MIPI connector - use, which historically only routes
+ *     2 CSI-2 data lanes),
+ *   - whether this hardware platform's MIPI_D_PHY_RX/MIPI_CSI_2_RX IP cores
+ *     were generated for the lane rate you select here (see README.md §3).
+ *
+ * IMPORTANT: unlike the OV5640, the IMX415 has ONE native readout mode: a
+ * full-pixel-array raw Bayer scan at 3864x2192 (RAW10). There is no sensor
+ * -side "1080p crop" or "4K crop" mode - WINMODE stays 0 (all-pixel
+ * readout) always. What you *can* select is the MIPI lane rate (which
+ * changes how fast that same 3864x2192 frame can be clocked out, i.e. your
+ * achievable frame rate) and the lane count. See README.md for what this
+ * means for HDMI preview on the stock hardware platform.
  * ---------------------------------------------------------------------------
  */
 
@@ -42,7 +60,6 @@
 #include "../hdmi/VideoOutput.h"
 
 #define SIZEOF_ARRAY(x) sizeof(x)/sizeof(x[0])
-#define MAP_ENUM_TO_CFG(en, cfg) en, cfg, SIZEOF_ARRAY(cfg)
 
 namespace digilent {
 
@@ -50,103 +67,267 @@ typedef enum {OK=0, ERR_LOGICAL, ERR_GENERAL} Errc;
 
 namespace IMX415_cfg {
 	using config_word_t = struct { uint16_t addr; uint8_t data; };
-	using mode_t = enum { MODE_1080P_1920_1080_30fps = 0, MODE_4K_3840_2160_30fps, MODE_END };
-	using config_modes_t = struct { mode_t mode; config_word_t const* cfg; size_t cfg_size; };
-	using lane_mode_t = enum { LANES_2 = 0, LANES_4 };
-	using bit_depth_t = enum { BITDEPTH_10 = 0, BITDEPTH_12 };
+	// Lane RATE is what's selectable here - there is no per-resolution mode,
+	// see the file header comment above.
+	using mode_t = enum { MODE_2LANE_720MBPS = 0, MODE_2LANE_891MBPS, MODE_END };
 
 	// =========================================================================
-	// USER-CONFIGURABLE SENSOR STRAPPING / CLOCKING
+	// Helpers to express a multi-byte Sony CCI register (as used by the
+	// mainline driver's CCI_REG16_LE/CCI_REG24_LE) as consecutive single-byte
+	// {addr, data} writes, little-endian - i.e. exactly what the real driver's
+	// regmap does under the hood. This keeps every table below a literal,
+	// auditable transcription of the upstream driver's register/value pairs.
+	// =========================================================================
+	#define IMX415_REG8(addr, val) \
+		{ (uint16_t)(addr), (uint8_t)((val) & 0xFF) }
+	#define IMX415_REG16(addr, val) \
+		{ (uint16_t)(addr), (uint8_t)((val) & 0xFF) }, \
+		{ (uint16_t)((addr)+1), (uint8_t)(((val) >> 8) & 0xFF) }
+	#define IMX415_REG24(addr, val) \
+		{ (uint16_t)(addr), (uint8_t)((val) & 0xFF) }, \
+		{ (uint16_t)((addr)+1), (uint8_t)(((val) >> 8) & 0xFF) }, \
+		{ (uint16_t)((addr)+2), (uint8_t)(((val) >> 16) & 0xFF) }
+
+	// =========================================================================
+	// Board-specific operating point - CONFIRM against your carrier board.
+	// =========================================================================
+	// XVCLK/INCK the sensor is actually fed. 24MHz is the most common default
+	// on generic IMX415 breakout boards; change to 72000000 (or extend the
+	// clk-params table below per the upstream driver) if yours differs.
+	uint32_t const INCK_HZ = 24000000;
+	// 2-lane matches the 15-pin FPC / Pcam MIPI connector this board uses.
+	// Set to 4 only if you've confirmed (schematic/vendor docs) your module
+	// wires out 4 data lanes AND rebuilt the D-PHY/CSI-2 RX IP for it.
+	uint32_t const NUM_DATA_LANES = 2;
+
+	// Registers (names/addresses match drivers/media/i2c/imx415.c)
+	uint16_t const REG_MODE        = 0x3000; // STANDBY: 0=operating, 1=standby
+	uint16_t const REG_XMSTA       = 0x3002; // 0=start master streaming, 1=stop
+	uint16_t const REG_BCWAIT_TIME = 0x3008; // 16-bit
+	uint16_t const REG_CPWAIT_TIME = 0x300A; // 16-bit
+	uint16_t const REG_WINMODE     = 0x301C; // 0 = all-pixel readout (only supported mode)
+	uint16_t const REG_ADDMODE     = 0x3022; // 0 = no analog binning
+	uint16_t const REG_REVERSE     = 0x3030; // h/v flip
+	uint16_t const REG_ADBIT       = 0x3031; // 0 = RAW10
+	uint16_t const REG_MDBIT       = 0x3032; // 0 = RAW10
+	uint16_t const REG_SYS_MODE    = 0x3033;
+	uint16_t const REG_OUTSEL      = 0x30C0; // 0x22 = VSYNC on XVS, low on XHS
+	uint16_t const REG_DRV         = 0x30C1;
+	uint16_t const REG_VMAX        = 0x3024; // 24-bit: total frame lines
+	uint16_t const REG_HMAX        = 0x3028; // 16-bit: total line length / 12
+	uint16_t const REG_SHR0        = 0x3050; // 24-bit: shutter (exposure)
+	uint16_t const REG_INCKSEL1    = 0x3115;
+	uint16_t const REG_INCKSEL2    = 0x3116;
+	uint16_t const REG_INCKSEL3    = 0x3118; // 16-bit
+	uint16_t const REG_INCKSEL4    = 0x311A; // 16-bit
+	uint16_t const REG_INCKSEL5    = 0x311E;
+	uint16_t const REG_SENSOR_INFO = 0x3F12; // 16-bit, chip ID (masked 0xFFF)
+	uint16_t const REG_LANEMODE    = 0x4001; // 16-bit: 1=2-lane, 3=4-lane
+	uint16_t const REG_TXCLKESC_FREQ = 0x4004; // 16-bit
+	uint16_t const REG_INCKSEL6    = 0x400C;
+	uint16_t const REG_TCLKPOST    = 0x4018; // 16-bit
+	uint16_t const REG_TCLKPREPARE = 0x401A; // 16-bit
+	uint16_t const REG_TCLKTRAIL   = 0x401C; // 16-bit
+	uint16_t const REG_TCLKZERO    = 0x401E; // 16-bit
+	uint16_t const REG_THSPREPARE  = 0x4020; // 16-bit
+	uint16_t const REG_THSZERO     = 0x4022; // 16-bit
+	uint16_t const REG_THSTRAIL    = 0x4024; // 16-bit
+	uint16_t const REG_THSEXIT     = 0x4026; // 16-bit
+	uint16_t const REG_TLPX        = 0x4028; // 16-bit
+	uint16_t const REG_INCKSEL7    = 0x4074;
+
+	uint16_t const SENSOR_INFO_MASK = 0x0FFF;
+	uint16_t const CHIP_ID          = 0x0514;
+	uint32_t const LANEMODE_2LANE   = 1;
+	uint32_t const LANEMODE_4LANE   = 3;
+
+	// Sensor's raw pixel array (fixed - not a per-mode setting).
+	uint32_t const PIXEL_ARRAY_WIDTH  = 3864;
+	uint32_t const PIXEL_ARRAY_HEIGHT = 2192;
+	uint32_t const PIXEL_ARRAY_VBLANK_MIN = 58;
+	uint32_t const HMAX_MULTIPLIER    = 12;
+
 	// -------------------------------------------------------------------------
-	// Fill these in per your carrier board and the IMX415 datasheet Table
-	// "INCK_SEL setting" / "DATARATE_SEL setting". Common Sony IMX4xx boards
-	// use a 24MHz or 27MHz XVCLK; confirm yours with a scope/schematic before
-	// trusting these defaults.
-	// =========================================================================
-	uint8_t const INCK_SEL          = 0x04; // TODO/VERIFY: encoding for your XVCLK frequency
-	uint8_t const DATARATE_SEL      = 0x03; // TODO/VERIFY: encoding for your target Mbps/lane
-	uint8_t const LANE_SEL_4LANE    = 0x03; // TODO/VERIFY: exact CSI lane-count bitfield (4-lane)
-	uint8_t const LANE_SEL_2LANE    = 0x01; // TODO/VERIFY: exact CSI lane-count bitfield (2-lane)
-	// RAW10 is selected by default (not RAW12) so the pixel width matches the
-	// AXI4-Stream / VDMA word packing this hardware platform's MIPI CSI-2 RX
-	// and D-PHY RX IP were originally generated for around the OV5640's RAW10
-	// output. Switching to RAW12 requires re-generating those IP cores in
-	// Vivado for a 12-bit AXI4-Stream data width - see README.md.
-	uint8_t const BIT_DEPTH_SEL     = 0x00; // 0 = RAW10, 1 = RAW12 (ADBIT/MDBIT)
-
-	// Registers common to Sony "IMX" family raw sensors (address+meaning is
-	// stable across IMX219/IMX290/IMX327/IMX415-class parts; confirmed against
-	// the publicly documented control-register map).
-	uint16_t const REG_STANDBY   = 0x3000; // bit0: 1 = standby, 0 = operating
-	uint16_t const REG_XMSTA     = 0x3002; // 0 = start master streaming, 1 = stop
-	uint16_t const REG_WINMODE   = 0x3018;
-	uint16_t const REG_WDMODE    = 0x301A; // 0 = linear (no DOL-HDR)
-	uint16_t const REG_ADDMODE   = 0x301B; // pixel binning
-	uint16_t const REG_THIN_V_EN = 0x301C;
-	uint16_t const REG_INCK_SEL  = 0x3014;
-	uint16_t const REG_DATARATE  = 0x3015;
-	uint16_t const REG_ADBIT     = 0x3022;
-	uint16_t const REG_MDBIT     = 0x3023;
-	uint16_t const REG_LANE_SEL  = 0x3A01;
-	uint16_t const REG_VMAX_L    = 0x3028; // frame length (rows), 3 bytes little-endian
-	uint16_t const REG_VMAX_M    = 0x3029;
-	uint16_t const REG_VMAX_H    = 0x302A;
-	uint16_t const REG_HMAX_L    = 0x302C; // line length (INCK cycles), 2 bytes little-endian
-	uint16_t const REG_HMAX_H    = 0x302D;
-
-	config_word_t const cfg_common_init_[] =
+	// Global init table: documented control registers + Sony's "magic"
+	// undocumented analog/timing tuning registers, applied once regardless of
+	// lane rate/INCK. Verbatim port of imx415_init_table[] from the upstream
+	// driver referenced above.
+	// -------------------------------------------------------------------------
+	config_word_t const cfg_init_table_[] =
 	{
-		{REG_WINMODE,   0x00},          // full readout, no cropping window
-		{REG_WDMODE,    0x00},          // linear mode, no DOL-HDR
-		{REG_ADDMODE,   0x00},          // no analog pixel binning
-		{REG_THIN_V_EN, 0x00},          // full vertical resolution (no line thinning)
-		{REG_INCK_SEL,  INCK_SEL},
-		{REG_DATARATE,  DATARATE_SEL},
-		{REG_ADBIT,     BIT_DEPTH_SEL},
-		{REG_MDBIT,     BIT_DEPTH_SEL},
-		{REG_LANE_SEL,  LANE_SEL_4LANE},
-		// -----------------------------------------------------------------
-		// >>> INSERT THE SONY "RECOMMENDED SETTING" REGISTER BLOCK HERE <<<
-		// Sony's IMX415 register-setting application note supplies roughly
-		// 100 additional analog-tuning/timing registers (0x3xxx-0x3Cxx
-		// range) that are selected as a fixed table for a given
-		// INCK/DATARATE_SEL/lane-count/bit-depth combination. These are not
-		// meaningfully guessable and are intentionally NOT included here -
-		// copy them verbatim from the application note (or from the
-		// mainline Linux kernel imx415.c driver's init tables, which use
-		// the same register set) for your exact configuration.
-		// See README.md, section "Values you must confirm before first
-		// power-up", for the full checklist.
-		// -----------------------------------------------------------------
+		// all-pixel readout mode, no flip
+		IMX415_REG8(REG_WINMODE, 0x00),
+		IMX415_REG8(REG_ADDMODE, 0x00),
+		IMX415_REG8(REG_REVERSE, 0x00),
+		// RAW 10-bit mode
+		IMX415_REG8(REG_ADBIT, 0x00),
+		IMX415_REG8(REG_MDBIT, 0x00),
+		// output VSYNC on XVS and low on XHS
+		IMX415_REG8(REG_OUTSEL, 0x22),
+		IMX415_REG8(REG_DRV,    0x00),
+
+		// Sony "magic" registers - undocumented, fixed tuning values.
+		IMX415_REG8(0x32D4, 0x21), IMX415_REG8(0x32EC, 0xA1),
+		IMX415_REG8(0x3452, 0x7F), IMX415_REG8(0x3453, 0x03),
+		IMX415_REG8(0x358A, 0x04), IMX415_REG8(0x35A1, 0x02),
+		IMX415_REG8(0x36BC, 0x0C), IMX415_REG8(0x36CC, 0x53),
+		IMX415_REG8(0x36CD, 0x00), IMX415_REG8(0x36CE, 0x3C),
+		IMX415_REG8(0x36D0, 0x8C), IMX415_REG8(0x36D1, 0x00),
+		IMX415_REG8(0x36D2, 0x71), IMX415_REG8(0x36D4, 0x3C),
+		IMX415_REG8(0x36D6, 0x53), IMX415_REG8(0x36D7, 0x00),
+		IMX415_REG8(0x36D8, 0x71), IMX415_REG8(0x36DA, 0x8C),
+		IMX415_REG8(0x36DB, 0x00), IMX415_REG8(0x3724, 0x02),
+		IMX415_REG8(0x3726, 0x02), IMX415_REG8(0x3732, 0x02),
+		IMX415_REG8(0x3734, 0x03), IMX415_REG8(0x3736, 0x03),
+		IMX415_REG8(0x3742, 0x03), IMX415_REG8(0x3862, 0xE0),
+		IMX415_REG8(0x38CC, 0x30), IMX415_REG8(0x38CD, 0x2F),
+		IMX415_REG8(0x395C, 0x0C), IMX415_REG8(0x3A42, 0xD1),
+		IMX415_REG8(0x3A4C, 0x77), IMX415_REG8(0x3AE0, 0x02),
+		IMX415_REG8(0x3AEC, 0x0C), IMX415_REG8(0x3B00, 0x2E),
+		IMX415_REG8(0x3B06, 0x29), IMX415_REG8(0x3B98, 0x25),
+		IMX415_REG8(0x3B99, 0x21), IMX415_REG8(0x3B9B, 0x13),
+		IMX415_REG8(0x3B9C, 0x13), IMX415_REG8(0x3B9D, 0x13),
+		IMX415_REG8(0x3B9E, 0x13), IMX415_REG8(0x3BA1, 0x00),
+		IMX415_REG8(0x3BA2, 0x06), IMX415_REG8(0x3BA3, 0x0B),
+		IMX415_REG8(0x3BA4, 0x10), IMX415_REG8(0x3BA5, 0x14),
+		IMX415_REG8(0x3BA6, 0x18), IMX415_REG8(0x3BA7, 0x1A),
+		IMX415_REG8(0x3BA8, 0x1A), IMX415_REG8(0x3BA9, 0x1A),
+		IMX415_REG8(0x3BAC, 0xED), IMX415_REG8(0x3BAD, 0x01),
+		IMX415_REG8(0x3BAE, 0xF6), IMX415_REG8(0x3BAF, 0x02),
+		IMX415_REG8(0x3BB0, 0xA2), IMX415_REG8(0x3BB1, 0x03),
+		IMX415_REG8(0x3BB2, 0xE0), IMX415_REG8(0x3BB3, 0x03),
+		IMX415_REG8(0x3BB4, 0xE0), IMX415_REG8(0x3BB5, 0x03),
+		IMX415_REG8(0x3BB6, 0xE0), IMX415_REG8(0x3BB7, 0x03),
+		IMX415_REG8(0x3BB8, 0xE0), IMX415_REG8(0x3BBA, 0xE0),
+		IMX415_REG8(0x3BBC, 0xDA), IMX415_REG8(0x3BBE, 0x88),
+		IMX415_REG8(0x3BC0, 0x44), IMX415_REG8(0x3BC2, 0x7B),
+		IMX415_REG8(0x3BC4, 0xA2), IMX415_REG8(0x3BC8, 0xBD),
+		IMX415_REG8(0x3BCA, 0xBD),
 	};
 
-	// 1920x1080 windowed readout, RAW10, ~30fps.
-	// VMAX/HMAX below are PLACEHOLDERS - recompute for your actual INCK and
-	// DATARATE_SEL using the timing formulas in the IMX415 datasheet
-	// ("Frame rate" chapter). Do not trust these for exact frame timing.
-	config_word_t const cfg_1080p_30fps_[] =
+	// -------------------------------------------------------------------------
+	// MIPI D-PHY timing tables, one per lane rate (verbatim port of
+	// imx415_linkrate_720mbps[] / imx415_linkrate_891mbps[]).
+	// -------------------------------------------------------------------------
+	config_word_t const cfg_dphy_720mbps_[] =
 	{
-		{REG_VMAX_L, 0x65}, {REG_VMAX_M, 0x04}, {REG_VMAX_H, 0x00}, // VMAX  TODO/VERIFY
-		{REG_HMAX_L, 0x30}, {REG_HMAX_H, 0x11},                     // HMAX  TODO/VERIFY
+		IMX415_REG16(REG_TCLKPOST,    0x006F),
+		IMX415_REG16(REG_TCLKPREPARE, 0x002F),
+		IMX415_REG16(REG_TCLKTRAIL,   0x002F),
+		IMX415_REG16(REG_TCLKZERO,    0x00BF),
+		IMX415_REG16(REG_THSPREPARE,  0x002F),
+		IMX415_REG16(REG_THSZERO,     0x0057),
+		IMX415_REG16(REG_THSTRAIL,    0x002F),
+		IMX415_REG16(REG_THSEXIT,     0x004F),
+		IMX415_REG16(REG_TLPX,        0x0027),
+	};
+	config_word_t const cfg_dphy_891mbps_[] =
+	{
+		IMX415_REG16(REG_TCLKPOST,    0x007F),
+		IMX415_REG16(REG_TCLKPREPARE, 0x0037),
+		IMX415_REG16(REG_TCLKTRAIL,   0x0037),
+		IMX415_REG16(REG_TCLKZERO,    0x00F7),
+		IMX415_REG16(REG_THSPREPARE,  0x003F),
+		IMX415_REG16(REG_THSZERO,     0x006F),
+		IMX415_REG16(REG_THSTRAIL,    0x003F),
+		IMX415_REG16(REG_THSEXIT,     0x005F),
+		IMX415_REG16(REG_TLPX,        0x002F),
 	};
 
-	// 3840x2160 full-resolution readout, RAW10, ~30fps.
-	// CAPTURE-ONLY on the stock Pcam-5C hardware platform: the existing VTC/
-	// clocking-wizard IP in system_wrapper only has HDMI output timing for
-	// up to 1080p60 (see hdmi/VideoOutput.h). Frames DMA into DDR correctly
-	// at 4K, but there is no live HDMI preview until a 4K output timing is
-	// added in Vivado. See README.md.
-	config_word_t const cfg_4k_30fps_[] =
+	// -------------------------------------------------------------------------
+	// Clock-configuration tables, one per (lane rate, INCK) pair (verbatim
+	// port of the matching entries in imx415_clk_params[]). Add more entries
+	// here (from the upstream driver) if your INCK isn't one of these.
+	// -------------------------------------------------------------------------
+	// 720 Mbps/lane @ INCK = 24MHz
+	config_word_t const cfg_clk_720mbps_24mhz_[] =
 	{
-		{REG_VMAX_L, 0x65}, {REG_VMAX_M, 0x04}, {REG_VMAX_H, 0x00}, // VMAX  TODO/VERIFY
-		{REG_HMAX_L, 0x98}, {REG_HMAX_H, 0x08},                     // HMAX  TODO/VERIFY
+		IMX415_REG16(REG_BCWAIT_TIME, 0x054),
+		IMX415_REG16(REG_CPWAIT_TIME, 0x03B),
+		IMX415_REG8 (REG_SYS_MODE,    0x9),
+		IMX415_REG8 (REG_INCKSEL1,    0x00),
+		IMX415_REG8 (REG_INCKSEL2,    0x23),
+		IMX415_REG16(REG_INCKSEL3,    0x0B4),
+		IMX415_REG16(REG_INCKSEL4,    0x0FC),
+		IMX415_REG8 (REG_INCKSEL5,    0x23),
+		IMX415_REG8 (REG_INCKSEL6,    0x0),
+		IMX415_REG8 (REG_INCKSEL7,    0x1),
+		IMX415_REG16(REG_TXCLKESC_FREQ, 0x0600),
+	};
+	// 720 Mbps/lane @ INCK = 72MHz
+	config_word_t const cfg_clk_720mbps_72mhz_[] =
+	{
+		IMX415_REG16(REG_BCWAIT_TIME, 0x0F8),
+		IMX415_REG16(REG_CPWAIT_TIME, 0x0B0),
+		IMX415_REG8 (REG_SYS_MODE,    0x9),
+		IMX415_REG8 (REG_INCKSEL1,    0x00),
+		IMX415_REG8 (REG_INCKSEL2,    0x28),
+		IMX415_REG16(REG_INCKSEL3,    0x0A0),
+		IMX415_REG16(REG_INCKSEL4,    0x0E0),
+		IMX415_REG8 (REG_INCKSEL5,    0x28),
+		IMX415_REG8 (REG_INCKSEL6,    0x0),
+		IMX415_REG8 (REG_INCKSEL7,    0x1),
+		IMX415_REG16(REG_TXCLKESC_FREQ, 0x1200),
+	};
+	// 891 Mbps/lane @ INCK = 27MHz
+	config_word_t const cfg_clk_891mbps_27mhz_[] =
+	{
+		IMX415_REG16(REG_BCWAIT_TIME, 0x05D),
+		IMX415_REG16(REG_CPWAIT_TIME, 0x042),
+		IMX415_REG8 (REG_SYS_MODE,    0x5),
+		IMX415_REG8 (REG_INCKSEL1,    0x00),
+		IMX415_REG8 (REG_INCKSEL2,    0x23),
+		IMX415_REG16(REG_INCKSEL3,    0x0C6),
+		IMX415_REG16(REG_INCKSEL4,    0x0E7),
+		IMX415_REG8 (REG_INCKSEL5,    0x23),
+		IMX415_REG8 (REG_INCKSEL6,    0x0),
+		IMX415_REG8 (REG_INCKSEL7,    0x1),
+		IMX415_REG16(REG_TXCLKESC_FREQ, 0x06C0),
+	};
+	// 891 Mbps/lane @ INCK = 37.125MHz
+	config_word_t const cfg_clk_891mbps_37_125mhz_[] =
+	{
+		IMX415_REG16(REG_BCWAIT_TIME, 0x07F),
+		IMX415_REG16(REG_CPWAIT_TIME, 0x05B),
+		IMX415_REG8 (REG_SYS_MODE,    0x5),
+		IMX415_REG8 (REG_INCKSEL1,    0x00),
+		IMX415_REG8 (REG_INCKSEL2,    0x24),
+		IMX415_REG16(REG_INCKSEL3,    0x0C0),
+		IMX415_REG16(REG_INCKSEL4,    0x0E0),
+		IMX415_REG8 (REG_INCKSEL5,    0x24),
+		IMX415_REG8 (REG_INCKSEL6,    0x0),
+		IMX415_REG8 (REG_INCKSEL7,    0x1),
+		IMX415_REG16(REG_TXCLKESC_FREQ, 0x0948),
+	};
+	// 891 Mbps/lane @ INCK = 74.25MHz
+	config_word_t const cfg_clk_891mbps_74_25mhz_[] =
+	{
+		IMX415_REG16(REG_BCWAIT_TIME, 0x0FF),
+		IMX415_REG16(REG_CPWAIT_TIME, 0x0B6),
+		IMX415_REG8 (REG_SYS_MODE,    0x5),
+		IMX415_REG8 (REG_INCKSEL1,    0x00),
+		IMX415_REG8 (REG_INCKSEL2,    0x28),
+		IMX415_REG16(REG_INCKSEL3,    0x0C0),
+		IMX415_REG16(REG_INCKSEL4,    0x0E0),
+		IMX415_REG8 (REG_INCKSEL5,    0x28),
+		IMX415_REG8 (REG_INCKSEL6,    0x0),
+		IMX415_REG8 (REG_INCKSEL7,    0x1),
+		IMX415_REG16(REG_TXCLKESC_FREQ, 0x1290),
 	};
 
-	config_modes_t const modes[] =
-	{
-			{ MAP_ENUM_TO_CFG(MODE_1080P_1920_1080_30fps, cfg_1080p_30fps_) },
-			{ MAP_ENUM_TO_CFG(MODE_4K_3840_2160_30fps, cfg_4k_30fps_) },
-	};
+	// Real per-(lane rate, lane count) minimum HMAX register value (fastest
+	// supported line time - "hmax_min" in the upstream driver), indexed
+	// [0]=2-lane [1]=4-lane. Used as the streaming HMAX (matches the
+	// upstream driver's default/minimum hblank control value).
+	uint32_t const HMAX_MIN_720MBPS[2] = { 2032, 1066 };
+	uint32_t const HMAX_MIN_891MBPS[2] = { 2200, 1100 };
+	// Default streaming VMAX (minimum blanking - matches the upstream
+	// driver's default vblank control value).
+	uint32_t const VMAX_DEFAULT = PIXEL_ARRAY_HEIGHT + PIXEL_ARRAY_VBLANK_MIN; // 2250
+
+	#undef IMX415_REG8
+	#undef IMX415_REG16
+	#undef IMX415_REG24
 }
 
 class IMX415 {
@@ -162,27 +343,35 @@ public:
 
 	void init()
 	{
-		// The IMX415 does not expose a documented chip/product-ID register
-		// pair the way the OV5640 does (0x300A/0x300B). As a communication
-		// sanity check we instead put the sensor into standby and read the
-		// STANDBY register back, confirming the I2C transaction is ACKed and
-		// the bit we wrote reads back correctly.
-		writeReg(IMX415_cfg::REG_STANDBY, 0x01); // STANDBY = 1
+		// Real chip-ID check (mainline driver: imx415_identify_model()).
+		// The IMX415's SENSOR_INFO register can only be read while the
+		// sensor is OUT of standby, so wake it up first.
+		writeReg(IMX415_cfg::REG_MODE, 0x00); // MODE = operating
+		usleep(80000); // datasheet-informed: allow >63us (driver uses 80ms to be safe)
 
-		uint8_t standby_rb = 0;
-		readReg(IMX415_cfg::REG_STANDBY, standby_rb);
-		if ((standby_rb & 0x01) != 0x01)
+		uint8_t info_l = 0, info_h = 0;
+		readReg(IMX415_cfg::REG_SENSOR_INFO, info_l);
+		readReg(IMX415_cfg::REG_SENSOR_INFO + 1, info_h);
+		uint16_t chip_id = (uint16_t)(((uint16_t)info_h << 8) | info_l) & IMX415_cfg::SENSOR_INFO_MASK;
+
+		// Always return to standby afterwards, whether the ID matched or not
+		// (mirrors imx415_identify_model()'s `done:` path).
+		writeReg(IMX415_cfg::REG_MODE, 0x01); // MODE = standby
+
+		if (chip_id != IMX415_cfg::CHIP_ID)
 		{
 			char msg[100];
 			snprintf(msg, sizeof(msg),
-					"IMX415 not responding correctly on I2C (STANDBY read-back = 0x%02x, expected bit0=1)\r\n",
-					standby_rb);
-			throw HardwareError(HardwareError::NO_RESPONSE, msg);
+					"IMX415 chip ID mismatch: got 0x%03x, expected 0x%03x\r\n",
+					chip_id, IMX415_cfg::CHIP_ID);
+			throw HardwareError(HardwareError::WRONG_ID, msg);
 		}
 
-		writeConfig(IMX415_cfg::cfg_common_init_, SIZEOF_ARRAY(IMX415_cfg::cfg_common_init_));
+		// Global init table (documented control regs + Sony's "magic" analog
+		// tuning table). Safe to apply while in standby.
+		writeConfig(IMX415_cfg::cfg_init_table_, SIZEOF_ARRAY(IMX415_cfg::cfg_init_table_));
 
-		// Stay in standby until a resolution/mode is selected via set_mode(),
+		// Stay in standby until a lane-rate/mode is selected via set_mode(),
 		// mirroring the OV5640 driver's "power up, but stay powered down
 		// until pipeline_mode_change() picks a mode" behavior in main.cc.
 	}
@@ -195,12 +384,21 @@ public:
 		// IMX415 breakout boards expose XCLR (reset, active-low) and/or a
 		// separate power-enable pin. If your board wires these separately,
 		// extend GPIO_Client with a second bit and drive both here in the
-		// order your board's power-up sequence requires (rails/clock stable
-		// BEFORE releasing XCLR). See README.md, "Wiring & GPIO notes".
+		// order your board's power-up sequence requires. See README.md,
+		// "Wiring & GPIO notes".
+		//
+		// Timing: the mainline driver only waits ~1us after releasing reset
+		// before enabling the clock, then 100-200us before the first I2C
+		// transaction - much shorter than the busy-wait below can guarantee
+		// (it's an uncalibrated instruction-count loop, like the original
+		// OV5640 driver's, not a real timer). We keep a generous margin
+		// since we can't measure real time here; swap in the Xilinx
+		// standalone BSP's calibrated usleep() (sleep.h) for accurate,
+		// much shorter timing if you want a faster power-up.
 		gpio_.clearBit(gpio_.Bits::CAM_GPIO0);
 		usleep(1000000);
 		gpio_.setBit(gpio_.Bits::CAM_GPIO0);
-		usleep(1000000); // conservative delay for internal regulators/PLL references to settle
+		usleep(1000000);
 
 		return OK;
 	}
@@ -210,17 +408,54 @@ public:
 		if (mode >= IMX415_cfg::mode_t::MODE_END)
 			return ERR_LOGICAL;
 
-		// Enter standby before changing readout/timing registers, matching
-		// the OV5640 driver's software-power-down-around-mode-change pattern.
-		writeReg(IMX415_cfg::REG_STANDBY, 0x01);
+		// Pick the D-PHY timing table + clock-config table + HMAX_MIN entry
+		// for the requested lane rate. Only INCK_HZ == 24MHz (720Mbps) /
+		// 27MHz (891Mbps) are wired up here, matching this file's
+		// INCK_HZ/NUM_DATA_LANES defaults - if you changed those, pick a
+		// different cfg_clk_*/HMAX_MIN_* pair from IMX415_cfg above.
+		IMX415_cfg::config_word_t const* dphy_cfg = nullptr;
+		size_t dphy_size = 0;
+		IMX415_cfg::config_word_t const* clk_cfg = nullptr;
+		size_t clk_size = 0;
+		uint32_t hmax = 0;
 
-		auto cfg_mode = &IMX415_cfg::modes[mode];
-		writeConfig(cfg_mode->cfg, cfg_mode->cfg_size);
+		switch (mode)
+		{
+		case IMX415_cfg::mode_t::MODE_2LANE_720MBPS:
+			dphy_cfg = IMX415_cfg::cfg_dphy_720mbps_;
+			dphy_size = SIZEOF_ARRAY(IMX415_cfg::cfg_dphy_720mbps_);
+			clk_cfg = IMX415_cfg::cfg_clk_720mbps_24mhz_; // INCK_HZ = 24MHz
+			clk_size = SIZEOF_ARRAY(IMX415_cfg::cfg_clk_720mbps_24mhz_);
+			hmax = IMX415_cfg::HMAX_MIN_720MBPS[0]; // [0] = 2-lane
+			break;
+		case IMX415_cfg::mode_t::MODE_2LANE_891MBPS:
+			dphy_cfg = IMX415_cfg::cfg_dphy_891mbps_;
+			dphy_size = SIZEOF_ARRAY(IMX415_cfg::cfg_dphy_891mbps_);
+			clk_cfg = IMX415_cfg::cfg_clk_891mbps_27mhz_; // INCK_HZ = 27MHz
+			clk_size = SIZEOF_ARRAY(IMX415_cfg::cfg_clk_891mbps_27mhz_);
+			hmax = IMX415_cfg::HMAX_MIN_891MBPS[0]; // [0] = 2-lane
+			break;
+		default:
+			return ERR_LOGICAL;
+		}
 
-		// Leave standby and start master-mode streaming.
-		writeReg(IMX415_cfg::REG_STANDBY, 0x00); // STANDBY = 0
-		usleep(20000); // datasheet-recommended settle time between STANDBY=0 and XMSTA=0
-		writeReg(IMX415_cfg::REG_XMSTA, 0x00);   // XMSTA = 0 (start)
+		// Enter standby before changing lane-rate/timing registers, matching
+		// the OV5640 driver's software-power-down-around-mode-change pattern
+		// (and safe per the upstream driver: these registers are written
+		// from imx415_setup(), called before stream-on).
+		writeReg(IMX415_cfg::REG_MODE, 0x01); // MODE = standby
+
+		writeConfig(dphy_cfg, dphy_size);
+		writeConfig(clk_cfg, clk_size);
+		writeReg16(IMX415_cfg::REG_LANEMODE, IMX415_cfg::LANEMODE_2LANE);
+		writeReg24(IMX415_cfg::REG_VMAX, IMX415_cfg::VMAX_DEFAULT);
+		writeReg16(IMX415_cfg::REG_HMAX, hmax);
+
+		// Leave standby and start master-mode streaming
+		// (mirrors imx415_stream_on(): wakeup() then XMSTA=start).
+		writeReg(IMX415_cfg::REG_MODE, 0x00); // MODE = operating
+		usleep(80000);
+		writeReg(IMX415_cfg::REG_XMSTA, 0x00); // XMSTA = start
 
 		return OK;
 	}
@@ -228,8 +463,7 @@ public:
 	// NOTE: intentionally no set_awb()/set_isp_format() here. The IMX415 has
 	// no internal ISP - it always outputs raw Bayer data. AWB/gain/format
 	// conversion must happen downstream (in the FPGA fabric or in software),
-	// not on the sensor itself. See README.md for what this implies for the
-	// existing Gamma-correction IP core, which still works unchanged.
+	// not on the sensor itself.
 
 	~IMX415() { }
 
@@ -276,10 +510,26 @@ public:
 		}
 	}
 
+	// 16/24-bit little-endian Sony CCI register writes (CCI_REG16_LE /
+	// CCI_REG24_LE in the mainline driver): consecutive byte addresses,
+	// least-significant byte first - same convention as IMX415_REG16/REG24
+	// used to build the config_word_t tables above.
+	void writeReg16(uint16_t reg_addr, uint32_t val)
+	{
+		writeReg(reg_addr,     (uint8_t)(val & 0xFF));
+		writeReg(reg_addr + 1, (uint8_t)((val >> 8) & 0xFF));
+	}
+	void writeReg24(uint16_t reg_addr, uint32_t val)
+	{
+		writeReg(reg_addr,     (uint8_t)(val & 0xFF));
+		writeReg(reg_addr + 1, (uint8_t)((val >> 8) & 0xFF));
+		writeReg(reg_addr + 2, (uint8_t)((val >> 16) & 0xFF));
+	}
+
 	class HardwareError : public std::runtime_error
 	{
 	public:
-		using Errc = enum {NO_RESPONSE = 1, IIC_NACK};
+		using Errc = enum {WRONG_ID = 1, IIC_NACK};
 		HardwareError(Errc errc, char const* msg) : std::runtime_error(msg), errc_(errc) {}
 		Errc errc() const { return errc_; }
 	private:
@@ -301,10 +551,11 @@ private:
 private:
 	I2C_Client& iic_;
 	GPIO_Client& gpio_;
-	// 7-bit I2C address. 0x1A is the commonly documented IMX415 address;
-	// some vendor breakout boards strap an alternate address - confirm
-	// against your board's schematic, or use an I2C bus scan, if init()
-	// throws HardwareError::NO_RESPONSE.
+	// 7-bit I2C address - confirmed against mainline Linux device-tree
+	// examples for the IMX415 (sony,imx415 @ 0x1a). Some vendor breakout
+	// boards may strap an alternate address - if init() throws
+	// HardwareError::WRONG_ID with an all-zero or all-one readback, suspect
+	// an addressing/wiring problem rather than the ID mismatch itself.
 	uint8_t dev_address_ = 0x1A;
 	unsigned int const retry_count_ = 10;
 };

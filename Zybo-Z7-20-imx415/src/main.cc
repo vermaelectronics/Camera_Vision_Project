@@ -28,9 +28,38 @@
 
 using namespace digilent;
 
-void pipeline_mode_change(AXI_VDMA<ScuGicInterruptController>& vdma_driver, IMX415& cam, VideoOutput& vid, Resolution res, IMX415_cfg::mode_t mode)
+// The IMX415 has exactly ONE native readout size, IMX415_cfg::PIXEL_ARRAY_
+// WIDTH x PIXEL_ARRAY_HEIGHT (3864x2192, RAW10) - there is no sensor-side
+// "1080p"/"4K" crop mode like the OV5640 had (see IMX415.h). Only the MIPI
+// lane rate is selectable via `mode`.
+//
+// IMPORTANT - read before expecting a picture on the HDMI output:
+// The OV5640/Pcam-5C pipeline this project was adapted from worked over
+// direct MIPI->VDMA->HDMI passthrough (no FPGA-side image processing)
+// because the OV5640 has an ON-SENSOR ISP that converts Bayer data to
+// ready-to-display RGB565 before it ever leaves the sensor (see the OV5640
+// driver's ISP_FORMAT_MUX_CONTROL/RGB565 registers). The IMX415 has NO
+// on-sensor ISP - it only ever outputs raw, undemosaiced Bayer data. Piping
+// that directly to the existing VTC/HDMI-TX path the way this project does
+// will NOT produce a viewable color picture, regardless of lane count,
+// data rate, or resolution matching - you'll get scrambled/grainy raw
+// Bayer noise on screen. A real live preview needs either a Bayer-
+// demosaic/ISP IP core added in the FPGA fabric between the CSI-2 RX and
+// the VDMA write side, or capturing to DDR and demosaicing in software.
+// See README.md §3 and §8.
+//
+// Because of that (and because 3864x2192 doesn't match any entry in
+// hdmi/VideoOutput.h's timing table, and its pixel rate is well beyond what
+// this hardware platform's clocking wizard/HDMI TX were built for - see
+// README.md), this function deliberately does NOT wire up the VTC/HDMI
+// output stage. It brings up the sensor and the VDMA WRITE side only, so
+// captured raw Bayer frames land in DDR at MEM_BASE_ADDR where you can
+// inspect them with a debugger/memory viewer. Re-enable vid.*/
+// vdma_driver.*Read() once you've added real demosaic/output-timing support
+// in Vivado.
+void pipeline_mode_change(AXI_VDMA<ScuGicInterruptController>& vdma_driver, IMX415& cam, IMX415_cfg::mode_t mode)
 {
-	//Bring up input pipeline back-to-front
+	//Bring up input (capture) pipeline back-to-front
 	{
 		vdma_driver.resetWrite();
 		MIPI_CSI_2_RX_mWriteReg(XPAR_MIPI_CSI_2_RX_0_S_AXI_LITE_BASEADDR, CR_OFFSET, (CR_RESET_MASK & ~CR_ENABLE_MASK));
@@ -39,17 +68,18 @@ void pipeline_mode_change(AXI_VDMA<ScuGicInterruptController>& vdma_driver, IMX4
 	}
 
 	{
-		vdma_driver.configureWrite(timing[static_cast<int>(res)].h_active, timing[static_cast<int>(res)].v_active);
-		Xil_Out32(GAMMA_BASE_ADDR, 3); // Set Gamma correction factor to 1/1.8
+		vdma_driver.configureWrite(IMX415_cfg::PIXEL_ARRAY_WIDTH, IMX415_cfg::PIXEL_ARRAY_HEIGHT);
+		Xil_Out32(GAMMA_BASE_ADDR, 3); // Set Gamma correction factor to 1/1.8 (unused without an HDMI/ISP path, harmless to leave configured)
 		// TODO CSI-2 / D-PHY config here.
 		//
 		// IMPORTANT: this project's MIPI_CSI_2_RX / MIPI_D_PHY_RX IP cores
 		// (in system_wrapper) were generated for the OV5640's 2-lane, RAW10,
-		// up-to-336Mbps/lane MIPI output. The IMX415 typically runs 4 lanes
-		// at a higher data rate. If your hardware platform was NOT rebuilt
-		// for the IMX415's actual lane count / data rate, the CSI-2/D-PHY
-		// receiver core below will not lock and no image data will arrive,
-		// even though the sensor is streaming correctly. See README.md.
+		// up-to-336Mbps/lane MIPI output. Confirm the IP's configured lane
+		// count/data rate matches the `mode` you pass below (720 or 891
+		// Mbps/lane, 2-lane by default in IMX415.h) - if it doesn't, the
+		// CSI-2/D-PHY receiver core will not lock and no image data will
+		// arrive, even though the sensor is streaming correctly. See
+		// README.md §3.
 		cam.init();
 	}
 
@@ -63,21 +93,8 @@ void pipeline_mode_change(AXI_VDMA<ScuGicInterruptController>& vdma_driver, IMX4
 		// happen downstream (FPGA fabric or host-side software).
 	}
 
-	//Bring up output pipeline back-to-front
-	{
-		vid.reset();
-		vdma_driver.resetRead();
-	}
-
-	{
-		vid.configure(res);
-		vdma_driver.configureRead(timing[static_cast<int>(res)].h_active, timing[static_cast<int>(res)].v_active);
-	}
-
-	{
-		vid.enable();
-		vdma_driver.enableRead();
-	}
+	// Output (HDMI) pipeline intentionally not brought up here - see the
+	// function header comment above.
 }
 
 int main()
@@ -92,12 +109,16 @@ int main()
 	AXI_VDMA<ScuGicInterruptController> vdma_driver(VDMA_DEVID, MEM_BASE_ADDR, irpt_ctl,
 			VDMA_MM2S_IRPT_ID,
 			VDMA_S2MM_IRPT_ID);
+	// Constructed (brings the HDMI clock domain up) but intentionally not
+	// configured/enabled - see the pipeline_mode_change() comment above for
+	// why there's no live HDMI preview of the IMX415's raw output yet.
 	VideoOutput vid(XPAR_VTC_0_DEVICE_ID, XPAR_VIDEO_DYNCLK_DEVICE_ID);
+	(void)vid;
 
-	pipeline_mode_change(vdma_driver, cam, vid, Resolution::R1920_1080_60_PP, IMX415_cfg::mode_t::MODE_1080P_1920_1080_30fps);
+	pipeline_mode_change(vdma_driver, cam, IMX415_cfg::mode_t::MODE_2LANE_720MBPS);
 
 
-	xil_printf("Video init done.\r\n");
+	xil_printf("Video init done. Capturing to DDR at 0x%08x (see README.md - no HDMI preview yet).\r\n", MEM_BASE_ADDR);
 
 
 	uint8_t read_char0 = 0;
@@ -111,7 +132,7 @@ int main()
 	while (1) {
 		xil_printf("\r\n\r\n\r\nIMX415 MAIN OPTIONS\r\n");
 		xil_printf("\r\nPlease press the key corresponding to the desired option:");
-		xil_printf("\r\n  a. Change Resolution");
+		xil_printf("\r\n  a. Change MIPI Lane Rate (sensor always outputs full 3864x2192 RAW10)");
 		xil_printf("\r\n  b. Write a Register Inside the Image Sensor");
 		xil_printf("\r\n  c. Read a Register Inside the Image Sensor");
 		xil_printf("\r\n  d. Change Gamma Correction Factor Value\r\n\r\n");
@@ -123,27 +144,20 @@ int main()
 		switch(read_char0) {
 
 		case 'a':
-			xil_printf("\r\n  Please press the key corresponding to the desired resolution:");
-			xil_printf("\r\n    1. 1920 x 1080, 30fps (live HDMI preview)");
-			xil_printf("\r\n    2. 3840 x 2160, 30fps (DDR capture only - see README, no HDMI preview on stock hardware)");
+			xil_printf("\r\n  Please press the key corresponding to the desired lane rate:");
+			xil_printf("\r\n    1. 720 Mbps/lane (2-lane) - closer to what the inherited OV5640-era D-PHY IP was built for");
+			xil_printf("\r\n    2. 891 Mbps/lane (2-lane) - faster, more likely to need the D-PHY IP rebuilt (see README.md)");
 			read_char1 = getchar();
 			getchar();
 			xil_printf("\r\nRead: %d", read_char1);
 			switch(read_char1) {
 			case '1':
-				pipeline_mode_change(vdma_driver, cam, vid, Resolution::R1920_1080_60_PP, IMX415_cfg::mode_t::MODE_1080P_1920_1080_30fps);
-				xil_printf("Resolution change done.\r\n");
+				pipeline_mode_change(vdma_driver, cam, IMX415_cfg::mode_t::MODE_2LANE_720MBPS);
+				xil_printf("Lane rate change done.\r\n");
 				break;
 			case '2':
-				// NOTE: vid still uses the 1080p HDMI timing here - there is
-				// no 4K entry in hdmi/VideoOutput.h's timing table on the
-				// stock hardware platform. Frames captured to DDR are full
-				// 3840x2160, but the HDMI preview will show a 1080p crop of
-				// the incoming stream, not a scaled full frame. Add a 4K
-				// timing_t entry and rebuild the video clock generator IP to
-				// get a true 4K HDMI preview - see README.md.
-				pipeline_mode_change(vdma_driver, cam, vid, Resolution::R1920_1080_60_PP, IMX415_cfg::mode_t::MODE_4K_3840_2160_30fps);
-				xil_printf("Resolution change done. (DDR capture at 4K - see console note in main.cc / README.md)\r\n");
+				pipeline_mode_change(vdma_driver, cam, IMX415_cfg::mode_t::MODE_2LANE_891MBPS);
+				xil_printf("Lane rate change done.\r\n");
 				break;
 			default:
 				xil_printf("\r\n  Selection is outside the available options! Please retry...");
