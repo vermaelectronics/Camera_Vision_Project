@@ -10,28 +10,53 @@ application (the `src/` tree you get when you export a Vitis "system
 project" for the ARM Cortex-A9 on the Zynq-7000). I did **not** — and, given
 only this software export, **could not** — regenerate the FPGA bitstream
 (`system_wrapper.bit`) or the Vivado hardware design that the original
-project was built against. Read **§3 "Hardware side"** and **§4 "The
-raw-sensor problem"** below before you power anything up.
+project was built against. Read **§0** (a likely reset-wiring gap on your
+specific board), **§3 "Hardware side"**, and **§4 "The raw-sensor
+problem"** below before you power anything up.
 
-## 0. Your hardware, as photographed
+## 0. Your hardware — now confirmed from the datasheet + schematic
 
-From the photos: a Zybo Z7 board (HDMI RX populated ⇒ the Z7-20 variant this
-project targets) with a Raspberry-Pi-style camera ribbon ("Standard-Mini,
-200mm") running from the board's **Pcam MIPI connector** (the 15-pin FPC
-header next to the SD-card slot / between HDMI TX and HDMI RX) to a small
-carrier board silkscreened **"IMX415 CAM R1"** with an 8MP M12 lens fitted.
+You provided the Sony **IMX415-AAQR-C datasheet** and the **schematic for
+the "IMX415 CAM R1" board** (`SCH_IMX415_MIPI_FFC_CAM_REV1.pdf`), on top of
+the earlier photos of it plugged into a Zybo Z7-20 via a Raspberry-Pi-style
+"Standard-Mini" adapter cable into the board's Pcam MIPI connector. That
+resolved almost everything §0 used to flag as an assumption:
 
-That's a genuinely useful data point: the Zybo's Pcam MIPI connector is the
-same 15-pin FPC connector standard as the original Raspberry Pi camera
-connector, which **only ever routes 2 CSI-2 data lanes**. So your module is
-almost certainly wired for **2-lane** operation — which is what this
-driver now defaults to (see §2). That doesn't resolve the lane-*rate*
-(Mbps/lane) or INCK-frequency questions in §3, but it does substantially
-de-risk the lane-*count* question I couldn't previously answer. I don't know
-which specific vendor sells the "IMX415 CAM R1" board, so I can't pull its
-exact INCK crystal value or a vendor-supplied register list — if you have a
-product page, datasheet, or vendor example code for it, that would let us
-replace the remaining assumptions in §3 with confirmed values.
+* **I2C address 0x1A** — confirmed three independent ways: an explicit note
+  on the schematic itself, cross-checked against the datasheet's
+  SLAMODE0/SLAMODE1 slave-address truth table, and cross-checked against the
+  board's own resistor strapping (both address-select pins pulled low via
+  10kΩ, no pull-up populated). This is not a guess.
+* **2-lane operation is confirmed correct**, and *why* is now concrete
+  rather than inferred from connector-standard folklore: this board's 22-pin
+  FPC connector carries all 4 of the sensor's CSI-2 lanes, but per the
+  datasheet, "In 2 Lane mode, data is output from Lane1 and Lane2" —  and
+  the 15-pin "Mini" connector standard the Zybo's Pcam header uses only ever
+  carries 2 of those lanes through. `NUM_DATA_LANES = 2` in `IMX415.h` is
+  correct for this cable/connector combination.
+* **INCK is generated on the camera board itself**, not derived from the
+  Zybo: an always-on active oscillator (Kyocera part `X1G0048010002`, wired
+  straight to the 1.8V rail with its enable pin tied high — no host control
+  at all) feeds the sensor's INCK pin directly. I could not confirm this
+  exact part's frequency from Kyocera's public data in this environment;
+  `INCK_HZ` still defaults to the best-effort 24MHz (one of only 5
+  frequencies the datasheet says the sensor supports at all, and the most
+  common choice for this class of board). **Check the frequency printed on
+  the oscillator package itself** (it's the small 4-pin component labeled
+  Y1 near the connector) to close this out for certain.
+* **A real, concrete, likely bring-up blocker was found**: this board's
+  connector separates `CAM_RST` (which actually drives the sensor's reset
+  pin) from `CAM_GPIO` (which, on this board, connects to nothing but a bare
+  test point). The Zybo's single existing Pcam GPIO pin conventionally
+  reaches the connector's `CAM_GPIO` position, not `CAM_RST` — meaning the
+  driver's existing `reset()` may well be toggling a pin that goes nowhere
+  on this board, leaving the sensor's actual reset line floating. See §5 —
+  this is now the single most likely reason bring-up would fail, more
+  likely than any lane/timing issue.
+
+All of `IMX415.h`'s register *values* were also independently cross-checked
+byte-for-byte against the datasheet in §2 below — see there for the one
+inconsistency found (in Sony's own document, not in this port).
 
 ## 1. What actually changed
 
@@ -53,51 +78,64 @@ replace the remaining assumptions in §3 with confirmed values.
 
 The first version of this port used placeholder register values with
 explicit `TODO/VERIFY` markers, because I didn't want to present guessed
-numbers as trustworthy. Since then I found something much better: the
+numbers as trustworthy. I then found something much better — the
 **mainline Linux kernel has a real, maintained IMX415 driver**,
 [`drivers/media/i2c/imx415.c`](https://github.com/torvalds/linux/blob/master/drivers/media/i2c/imx415.c)
-(GPL-2.0-only, © 2023 WolfVision GmbH). `IMX415.h` in this project now ports
-its actual register addresses, its ~76-entry "magic"/undocumented analog
-tuning table, its per-lane-rate MIPI D-PHY timing tables, and its
-per-(lane-rate, INCK) clock-configuration tables — as plain numeric
-configuration data, the same way embedded projects routinely port init
-tables between drivers/languages. This is a categorically stronger basis
-than a datasheet-derived guess: it's what a shipping driver actually writes
-to real IMX415 hardware.
+(GPL-2.0-only, © 2023 WolfVision GmbH) — and ported its actual register
+addresses, its ~76-entry "magic"/undocumented analog tuning table, its
+per-lane-rate MIPI D-PHY timing tables, and its per-(lane-rate, INCK)
+clock-configuration tables into `IMX415.h`, as plain numeric configuration
+data.
 
-What this clarified, correcting assumptions in the first version of this
-port:
+**Since then, with the official Sony IMX415-AAQR-C datasheet you provided in
+hand, I cross-checked every register/value pair used here (the 720Mbps and
+891Mbps clock-configuration and D-PHY-timing tables) against the datasheet's
+own "INCK Setting" section, byte-for-byte. Every value matches exactly**,
+confirming the Linux-driver port was accurate — this is no longer just "a
+shipping driver's values," it's independently verified against Sony's
+primary source.
 
-* **The IMX415 has exactly one native readout mode**: a full-pixel-array
-  raw Bayer scan at **3864×2192, RAW10** (`WINMODE` stays 0 — "all-pixel
-  readout" — always; there's no sensor-side crop/binning mode). There is no
-  real "1080p mode" or "4K mode" to select, unlike what the first version of
-  this README implied. What *is* selectable is the **MIPI lane rate**
-  (720 or 891 Mbps/lane are both fully specified in the upstream driver;
-  1440 Mbps/lane also exists but needs a faster D-PHY, so I didn't wire it
-  up here) and the **lane count** (2 or 4).
+**One inconsistency turned up, in the datasheet itself, not in this port**:
+its master "Register Map" section places `SYS_MODE` at address `0x3033`
+(matching the Linux driver), but its own "INCK Setting" summary tables say
+`0x3034` for the same register — eight times, consistently, in that one
+section. This driver uses `0x3033` (two independent sources agree over
+one). If bring-up gets past the chip-ID check but timing looks wrong,
+try `0x3034` as a troubleshooting step — see the comment on `REG_SYS_MODE`
+in `IMX415.h`.
+
+I also pulled Sony's official **Power-on Sequence** timing table (exact
+minimums: `XCLR` held low ≥500ns after power stable, ≥1µs before `INCK`
+needs to be running, ≥20µs before the first I2C transaction, ≥24ms after
+leaving standby before the image stabilizes) into the code comments in
+`IMX415.h`'s `reset()`/`init()`, replacing the earlier version's vaguer
+"the Linux driver empirically uses ~80ms" phrasing with Sony's actual
+numbers.
+
+This also clarified two things the first version of this port got wrong:
+
+* **The IMX415 has exactly one native readout mode implemented here**: a
+  full-pixel-array raw Bayer scan at **3864×2192, RAW10** (`WINMODE` stays
+  0 — "all-pixel readout" — always). There is no real "1080p mode" or "4K
+  mode" to select, unlike what the first version of this README implied.
+  (The sensor hardware *does* also support a window-cropping mode and
+  2/2-line binning per the datasheet — this driver just doesn't implement
+  them, matching the upstream Linux driver's scope.) What *is* selectable
+  is the **MIPI lane rate** (720 or 891 Mbps/lane are both fully specified
+  and now datasheet-verified; 1440 Mbps/lane also exists but needs a faster
+  D-PHY, so I didn't wire it up here) and the **lane count** (2 or 4 — see
+  §0 for why 2 is correct for this board).
 * **There's a real, documented chip-ID register**: `SENSOR_INFO` at
-  `0x3F12` (16-bit), masked `0xFFF`, expected `0x514`. `IMX415::init()` now
+  `0x3F12` (16-bit), masked `0xFFF`, expected `0x514`. `IMX415::init()`
   checks this (matching the OV5640 driver's own ID-check pattern) instead
   of the earlier version's indirect standby-readback heuristic.
-* **Real power-up/reset timing**: the upstream driver only needs ~1µs after
-  releasing reset before enabling the clock, then 100–200µs before the
-  first I2C transaction, and 80ms after leaving standby before further
-  access. `IMX415::reset()`/`init()`/`set_mode()` are annotated with these
-  real numbers (the busy-wait loop itself is still uncalibrated — see the
-  code comment on swapping in the Xilinx BSP's real `usleep()`).
-* **I2C address 0x1A is confirmed** (mainline device-tree examples use
-  `sony,imx415 @ 0x1a`), not just carried over as a guess.
 
-### What's still genuinely unresolved (see §3)
-
-Porting the register *values* correctly doesn't resolve board-specific
-*parameters* those values are conditioned on:
+### What's still genuinely unresolved
 
 | Item | Where | Status |
 |---|---|---|
-| **INCK (XVCLK) frequency** | `IMX415_cfg::INCK_HZ` in `IMX415.h` | Defaults to **24 MHz** (a common generic-breakout-board default) with the matching real clock-config table wired up for the 720 Mbps mode; a 27 MHz table is wired up for the 891 Mbps mode. If your "IMX415 CAM R1" board's crystal is different, `set_mode()` needs the matching `cfg_clk_*` table from `IMX415_cfg` swapped in (several are already included: 720Mbps@24/72MHz, 891Mbps@27/37.125/74.25MHz — add more from the upstream driver if needed). |
-| **MIPI lane count** | `IMX415_cfg::NUM_DATA_LANES`, `LANEMODE_2LANE`/`4LANE` in `IMX415.h` | Defaults to **2-lane**, which §0 suggests is likely correct for your board's connector, but isn't independently confirmed. |
+| **INCK (XVCLK) frequency** | `IMX415_cfg::INCK_HZ` in `IMX415.h` | The board generates this itself from an always-on oscillator (see §0) — defaults to **24 MHz** as a best-effort default (unconfirmed; check the part's markings). If it's actually one of the other 4 datasheet-supported frequencies, `set_mode()` needs the matching `cfg_clk_*` table from `IMX415_cfg` swapped in (several are already included: 720Mbps@24/72MHz, 891Mbps@27/37.125/74.25MHz). |
+| **Sensor reset wiring (`CAM_RST` vs `CAM_GPIO`)** | `IMX415::reset()` in `IMX415.h` | Likely gap, not yet fixed in code — see §5, this is the top bring-up risk. |
 | **Vivado D-PHY/CSI-2 RX IP configuration** | Hardware design (not in this software export) | Still unconfirmed whether it's built for 720 or 891 Mbps/lane, or something else entirely — see §3. |
 
 None of these being wrong will damage the sensor — worst case is no image,
@@ -172,14 +210,48 @@ you to discover it after chasing phantom lane-count bugs.
 
 ## 5. Wiring & GPIO notes
 
-* The Pcam 5C connector drove the OV5640's power-down/reset with a single PS
-  GPIO line (`PS_GPIO`'s `CAM_GPIO0`, EMIO pin 54 in `imx415/PS_GPIO.h`).
-  `IMX415::reset()` reuses that exact same single-GPIO toggle sequence.
-* If your "IMX415 CAM R1" board exposes separate power-enable and
-  `XCLR`/reset pins, or needs power/clock stable *before* `XCLR` is
-  released, extend `GPIO_Client::Bits` in `GPIO_Client.h` with a second bit,
-  wire it to a second EMIO/MIO pin in `PS_GPIO.h`, and drive both in the
-  correct order inside `IMX415::reset()`.
+### The reset-wiring gap (read this first — likely bring-up blocker)
+
+The Pcam 5C connector drove the OV5640's power-down/reset with a single PS
+GPIO line (`PS_GPIO`'s `CAM_GPIO0`, EMIO pin 54 in `imx415/PS_GPIO.h`), and
+`IMX415::reset()` still reuses that exact same single-GPIO toggle sequence.
+That was fine for the Pcam 5C/OV5640, but the "IMX415 CAM R1" board's own
+schematic shows something the Pcam 5C didn't have to deal with:
+
+* Its 22-pin FPC connector carries **two separate** signals in the position
+  a standard Raspberry-Pi-style camera connector normally has: `CAM_GPIO`
+  (pin 5) and `CAM_RST` (pin 6).
+* **`CAM_RST` is the one that matters** — it connects, through a 4.7kΩ
+  series resistor and with no pull resistor, straight to the sensor's
+  `XCLR`/reset pin.
+* **`CAM_GPIO` connects to nothing but a bare test point (`TP3`)** on this
+  board — it's unused.
+* Everything else the sensor needs (power-supply sequencing in the
+  datasheet-required 1.1V→1.8V→2.9V order, and the `INCK` clock) happens
+  **automatically** on this board via an on-board RC network and an
+  always-on oscillator respectively — neither needs a GPIO from the host.
+
+The Zybo's single existing Pcam GPIO pin conventionally maps to a
+Raspberry-Pi-standard connector's `CAM_GPIO` position, not `CAM_RST`. If
+that holds true through your Standard-Mini adapter cable — which I can't
+confirm without the Zybo's own Pcam-connector schematic or the cable's pin
+map, neither of which I have — then **`IMX415::reset()` is currently
+toggling a pin that goes nowhere on this board, and the sensor's actual
+reset line is left floating** (no pull resistor either way, so its state at
+power-up is genuinely undefined). That would explain a chip-ID check that
+never passes, with everything else (I2C bus, power, clock) actually fine.
+
+**To check**: probe `TP3` (silkscreened on the camera board) with a
+scope/multimeter while `reset()` runs — if it toggles in sync, the gap is
+confirmed. **To fix**: wire a spare Zybo GPIO/PMOD pin directly to the
+camera board's `CAM_RST` net (there's a resistor `R16` right at the
+connector you can tap, or the connector pin 6 itself), then extend
+`GPIO_Client::Bits` in `GPIO_Client.h` with a second bit, wire it to that
+second EMIO/MIO pin in `PS_GPIO.h`, and drive it (instead of, or alongside,
+`CAM_GPIO0`) inside `IMX415::reset()`.
+
+### Other notes
+
 * No liquid-lens/motorized-focus I2C device is assumed (your module has a
   fixed M12 lens per the photos). If a future module of yours does have
   one, you can reintroduce a `writeRegLiquid()`-style method following the
@@ -241,30 +313,47 @@ chip-ID-mismatch message over serial — see §8.
 * **No FPGA/bitstream changes** — see §3.
 * **No live HDMI preview** — see §4; this needs new FPGA demosaic IP or a
   software debayer step, not a config fix.
-* **INCK frequency and lane count are still assumptions**, not confirmed
-  for your specific "IMX415 CAM R1" board — see §0 and §2.
+* **`IMX415::reset()` doesn't yet drive `CAM_RST` explicitly** — it still
+  only toggles the single GPIO inherited from the Pcam 5C/OV5640 driver,
+  which may not reach this board's actual reset line at all — see §5. This
+  is a real, likely gap, not yet fixed in code (fixing it needs a spare
+  Zybo GPIO wired to the camera board, which isn't something I can do from
+  software alone).
+* **INCK frequency is still a best-effort default** (24MHz) — the board
+  generates it locally from an oscillator whose exact frequency I couldn't
+  confirm — see §0.
 * **No AWB/AE/color-processing** — no ISP on the sensor to configure (see
   §4); if you add a demosaic path you'll likely want auto-exposure/AWB
   logic downstream of it too, which isn't included here.
 * **No test-pattern-generator control** — the OV5640 driver had a
   `set_test()` color-bar helper; the IMX415 does have TPG registers
-  (`TPG_EN_DUOUT`/`TPG_PATSEL_DUOUT` at `0x30E4`/`0x30E6` per the upstream
-  driver) but I didn't wire up a menu option for it here — straightforward
-  to add following the same pattern as `writeReg`/`writeConfig`.
+  (`TPG_EN_DUOUT`/`TPG_PATSEL_DUOUT` at `0x30E4`/`0x30E6` per the datasheet)
+  but I didn't wire up a menu option for it here — straightforward to add
+  following the same pattern as `writeReg`/`writeConfig`.
 
 ## 9. Troubleshooting quick-reference
 
 | Symptom | Likely cause |
 |---|---|
-| `HardwareError::WRONG_ID` from `init()` | Wrong I2C address, sensor not powered, `reset()` sequencing wrong for your board, INCK not present, or a genuinely different/dead sensor. A chip ID read back as `0x000` or `0xFFF` usually means "nothing answered," not "wrong sensor." |
-| `HardwareError::IIC_NACK` on register read/write | Bus contention, wrong address, or sensor asleep/unpowered. |
+| `HardwareError::WRONG_ID` from `init()`, especially if it *never* passes no matter what | **Start with §5's reset-wiring gap** — the sensor's actual reset line may simply never be released. Probe `TP3` on the camera board while `reset()` runs to confirm. |
+| `HardwareError::WRONG_ID`, other causes | Wrong I2C address (shouldn't be it — see §0), INCK not present (check the oscillator, §0), or a genuinely dead sensor. A chip ID read back as `0x000` or `0xFFF` usually means "nothing answered," consistent with the reset-wiring gap above. |
+| `HardwareError::IIC_NACK` on register read/write | Bus contention, or sensor asleep/unpowered/held in reset. |
+| Chip-ID check passes but streaming/timing seems off | Try `REG_SYS_MODE = 0x3034` instead of `0x3033` — see §2's note on the datasheet's internal inconsistency for that one register. |
 | Everything initializes and the register menu works, but you never see anything meaningful on HDMI | Expected on the stock hardware — see §4. This isn't a bug to chase; there's no image pipeline wired to HDMI in this version at all. |
 | Want to confirm frames are actually landing in DDR | Use a debugger memory view at `MEM_BASE_ADDR` (`DDR_BASE_ADDR + 0x0A000000`) after streaming starts, or add your own readback code — there's no on-screen path yet to eyeball it. |
 
 ## 10. References
 
-* Sony IMX415 mainline Linux driver (source of the register data in
-  `IMX415.h`): [`drivers/media/i2c/imx415.c`](https://github.com/torvalds/linux/blob/master/drivers/media/i2c/imx415.c),
+* Sony **IMX415-AAQR-C datasheet** (you provided this) — primary source for
+  the register map, the "INCK Setting" clock-configuration tables, the
+  Power-on Sequence timing, and the SLAMODE0/1 I2C-address table used to
+  cross-check §2 and §0's claims.
+* **`SCH_IMX415_MIPI_FFC_CAM_REV1.pdf`** (you provided this) — schematic for
+  the "IMX415 CAM R1" carrier board; source for §0/§5's I2C-address
+  strapping, MIPI lane wiring, oscillator, and `CAM_RST`/`CAM_GPIO` findings.
+* Sony IMX415 mainline Linux driver (original source of the register data
+  in `IMX415.h`, later cross-checked against the datasheet above):
+  [`drivers/media/i2c/imx415.c`](https://github.com/torvalds/linux/blob/master/drivers/media/i2c/imx415.c),
   GPL-2.0-only, © 2023 WolfVision GmbH.
 * Original Digilent reference design this was adapted from: **Zybo Z7-20 +
   Pcam 5C** (OV5640) Vitis bare-metal application — see Digilent's
