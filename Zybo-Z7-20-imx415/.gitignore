@@ -1,0 +1,9 @@
+# Vitis build output for this application project (regenerated on build)
+Debug/
+Release/
+*.log
+*.d
+*.o
+*.elf
+*.elf.size
+.log/
