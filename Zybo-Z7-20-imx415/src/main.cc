@@ -30,33 +30,50 @@ using namespace digilent;
 
 // The IMX415 has exactly ONE native readout size, IMX415_cfg::PIXEL_ARRAY_
 // WIDTH x PIXEL_ARRAY_HEIGHT (3864x2192, RAW10) - there is no sensor-side
-// "1080p"/"4K" crop mode like the OV5640 had (see IMX415.h). Only the MIPI
-// lane rate is selectable via `mode`.
+// "1080p"/"4K" crop mode implemented in this driver (see IMX415.h). Only
+// the MIPI lane rate is selectable via `mode`.
 //
 // IMPORTANT - read before expecting a picture on the HDMI output:
-// The OV5640/Pcam-5C pipeline this project was adapted from worked over
-// direct MIPI->VDMA->HDMI passthrough (no FPGA-side image processing)
-// because the OV5640 has an ON-SENSOR ISP that converts Bayer data to
-// ready-to-display RGB565 before it ever leaves the sensor (see the OV5640
-// driver's ISP_FORMAT_MUX_CONTROL/RGB565 registers). The IMX415 has NO
-// on-sensor ISP - it only ever outputs raw, undemosaiced Bayer data. Piping
-// that directly to the existing VTC/HDMI-TX path the way this project does
-// will NOT produce a viewable color picture, regardless of lane count,
-// data rate, or resolution matching - you'll get scrambled/grainy raw
-// Bayer noise on screen. A real live preview needs either a Bayer-
-// demosaic/ISP IP core added in the FPGA fabric between the CSI-2 RX and
-// the VDMA write side, or capturing to DDR and demosaicing in software.
-// See README.md §3 and §8.
+// An earlier version of this file assumed your hardware platform was the
+// bare capture-only pipeline (MIPI RX -> VDMA -> VTC -> HDMI, no FPGA-side
+// image processing) that the exported .xsa from the original IDE zip
+// showed - which would need a demosaic core added before it could show a
+// real picture from a raw sensor. If your actual Vivado design instead
+// matches the "Zybo-Z7-20-pcam-5c" block design with an AXI_BayerToRGB
+// core already wired MIPI_CSI_2_RX -> AXI_BayerToRGB -> AXI_GammaCorrection
+// -> VDMA, that demosaic step already exists in hardware - the raw-Bayer-
+// noise problem doesn't apply to you. Two things still do, though, and
+// this function still plays it safe until you've confirmed them:
 //
-// Because of that (and because 3864x2192 doesn't match any entry in
-// hdmi/VideoOutput.h's timing table, and its pixel rate is well beyond what
-// this hardware platform's clocking wizard/HDMI TX were built for - see
-// README.md), this function deliberately does NOT wire up the VTC/HDMI
-// output stage. It brings up the sensor and the VDMA WRITE side only, so
-// captured raw Bayer frames land in DDR at MEM_BASE_ADDR where you can
-// inspect them with a debugger/memory viewer. Re-enable vid.*/
-// vdma_driver.*Read() once you've added real demosaic/output-timing support
-// in Vivado.
+//   1. AXI_BayerToRGB's Bayer/CFA phase was very likely set up for the
+//      OV5640's RAW output order (its raw-mode register comment says
+//      "BGBG/GRGR", i.e. BGGR) - if the IMX415's actual CFA order is
+//      different (commonly RGGB for this generation of Sony sensor, but
+//      NOT independently confirmed here - check the datasheet's pixel
+//      array / color filter section), colors will come out swapped/wrong
+//      until the phase is corrected. Check AXI_BayerToRGB's Vivado
+//      "Customize IP" dialog or driver for a runtime phase-select register
+//      before assuming a hardware rebuild is needed.
+//   2. The sensor's native 3864x2192 frame doesn't match any entry in
+//      hdmi/VideoOutput.h's timing table, and its pixel rate (3864*2192*
+//      fps) is well beyond what this design's video_dynclk/DVIClocking
+//      chain was ever asked to produce for the OV5640 (max ~148.5MHz,
+//      1080p60-class). A live preview at native resolution needs either a
+//      new VTC timing entry + reconfigured clocking (Vivado), sensor-side
+//      window cropping to a size that already fits (WINMODE=4h per the
+//      datasheet - not implemented in this driver), or VDMA-level
+//      cropping of the capture buffer for display (would need
+//      imx415/AXI_VDMA.h extended with an independent stride, which this
+//      version does not do - the write and read channels below still
+//      assume the same width/height, like the original OV5640 code did).
+//
+// Given both of those are real unknowns for your specific hardware, this
+// function still only brings up the sensor and the VDMA WRITE side, so
+// frames land in DDR at MEM_BASE_ADDR (already demosaiced RGB if
+// AXI_BayerToRGB is really in your pipeline) where you can inspect them
+// with a debugger/memory viewer. Once you've confirmed the CFA phase and
+// picked one of the resolution-matching options above, re-enable vid.*/
+// vdma_driver.*Read() here to get a live picture. See README.md §3/§4.
 void pipeline_mode_change(AXI_VDMA<ScuGicInterruptController>& vdma_driver, IMX415& cam, IMX415_cfg::mode_t mode)
 {
 	//Bring up input (capture) pipeline back-to-front
@@ -73,13 +90,22 @@ void pipeline_mode_change(AXI_VDMA<ScuGicInterruptController>& vdma_driver, IMX4
 		// TODO CSI-2 / D-PHY config here.
 		//
 		// IMPORTANT: this project's MIPI_CSI_2_RX / MIPI_D_PHY_RX IP cores
-		// (in system_wrapper) were generated for the OV5640's 2-lane, RAW10,
-		// up-to-336Mbps/lane MIPI output. Confirm the IP's configured lane
-		// count/data rate matches the `mode` you pass below (720 or
-		// 1440 Mbps/lane, 2-lane by default in IMX415.h) - if it doesn't,
-		// the CSI-2/D-PHY receiver core will not lock and no image data
-		// will arrive, even though the sensor is streaming correctly. See
-		// README.md §3.
+		// (in system_wrapper) were generated for the OV5640's 2-lane MIPI
+		// output. 2-lane is confirmed by the block design itself (dphy_data_
+		// hs_p/n are 2-bit ports) - the lane *rate* the D-PHY IP was
+		// characterized/generated for is not visible in a block diagram and
+		// still needs checking in its Vivado "Customize IP" settings. The
+		// one real clue available: this exact OV5640 codebase never
+		// configured the sensor above ~672-700Mbps/lane-equivalent (its
+		// fastest mode names itself "336M_MIPI", i.e. a ~336MHz MIPI clock).
+		// That's a real hint the D-PHY RX IP in THIS design may not be
+		// validated past that range - which is why MODE_2LANE_720MBPS
+		// (below) is the default rather than the faster MODE_2LANE_1440MBPS.
+		// Try 720Mbps/lane first; only reach for 1440Mbps once you've
+		// confirmed the D-PHY IP's configured/supported line rate covers it.
+		// If the rate doesn't match, the CSI-2/D-PHY receiver core will
+		// simply not lock and no image data will arrive, even though the
+		// sensor is streaming correctly. See README.md §3.
 		cam.init();
 	}
 

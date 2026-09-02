@@ -11,8 +11,8 @@ project" for the ARM Cortex-A9 on the Zynq-7000). I did **not** — and, given
 only this software export, **could not** — regenerate the FPGA bitstream
 (`system_wrapper.bit`) or the Vivado hardware design that the original
 project was built against. Read **§0** (a likely reset-wiring gap on your
-specific board), **§3 "Hardware side"**, and **§4 "The raw-sensor
-problem"** below before you power anything up.
+specific board), **§3 "Hardware side"**, and **§4 "Demosaic and
+resolution"** below before you power anything up.
 
 ## 0. Your hardware — now confirmed from the datasheet + schematic
 
@@ -53,6 +53,13 @@ resolved almost everything §0 used to flag as an assumption:
   on this board, leaving the sensor's actual reset line floating. See §5 —
   this is now the single most likely reason bring-up would fail, more
   likely than any lane/timing issue.
+* **Your actual Vivado hardware design is not the bare capture-only
+  pipeline** I originally analyzed from the `.xsa` bundled in the first IDE
+  zip. You confirmed it's the real Zybo-Z7-20-pcam-5c block design, which
+  already includes an `AXI_BayerToRGB` demosaic core between the CSI-2 RX
+  and `AXI_GammaCorrection`. That changes a genuinely important piece of
+  earlier guidance — see §4, which I've corrected accordingly rather than
+  just appending a note.
 
 All of `IMX415.h`'s register *values* were also independently cross-checked
 byte-for-byte against the datasheet in §2 below — see there for the one
@@ -66,10 +73,10 @@ inconsistency found (in Sony's own document, not in this port).
 | `src/main.cc` — includes `ov5640/OV5640.h`, instantiates `OV5640 cam(...)` | `src/main.cc` — includes `imx415/IMX415.h`, instantiates `IMX415 cam(...)` | Swap the driver actually used by the app |
 | Menu: **a. Change Resolution** (720p/1080p15/1080p30) | Menu: **a. Change MIPI Lane Rate** (720/1440 Mbps per lane) | The IMX415 has one native readout size (full sensor array) — see §2. There's no sensor-side resolution to pick, only the lane rate the same fixed-size frame is clocked out at. |
 | Menu: **b. Change Liquid Lens Focus** | **removed** | That's the Pcam 5C's variable-focus liquid-lens IC, a separate chip on *that* board. Your "IMX415 CAM R1" module has a fixed M12 lens, not a liquid lens. |
-| Menu: **d. Change Image Format (Raw or RGB)**, **h. Change AWB Settings** | **removed** | Both are OV5640-internal-ISP features (Bayer→RGB conversion, auto white balance). The IMX415 has no on-sensor ISP at all — see §4, this is a bigger deal than just "fewer menu options." |
+| Menu: **d. Change Image Format (Raw or RGB)**, **h. Change AWB Settings** | **removed** | Both were OV5640-internal-ISP features (Bayer→RGB conversion, auto white balance) controlled purely by I2C register writes to the sensor. The IMX415 has no on-sensor ISP, so there's nothing to write — the equivalent functionality (demosaic) now lives in your FPGA's `AXI_BayerToRGB` core instead — see §4. |
 | Menu: **e/f** (write/read sensor register) | kept, renumbered **b/c** | Still very useful for IMX415 bring-up/debug. |
-| Menu: **g** (gamma factor) | kept, renumbered **d** | Drives the FPGA's `AXI_GammaCorrection` core, not the sensor — unrelated to which camera is attached (though currently not wired to anything meaningful — see §4). |
-| Live HDMI preview wired up in `pipeline_mode_change()` | **HDMI output intentionally disabled** in `pipeline_mode_change()`; only the sensor→DDR capture path is brought up | See §4 — this isn't a config bug to fix, it's a real architectural gap (missing Bayer demosaic) that needs new FPGA IP. |
+| Menu: **g** (gamma factor) | kept, renumbered **d** | Drives the FPGA's `AXI_GammaCorrection` core, not the sensor — unrelated to which camera is attached. Same core as before, still directly usable once a real image is flowing through it. |
+| Live HDMI preview wired up in `pipeline_mode_change()` | **HDMI output not enabled by default** in `pipeline_mode_change()`; only the sensor→DDR capture path is brought up | Not because demosaic is missing (your hardware already has it — see §4) but because the sensor's native resolution doesn't fit the existing HDMI timing/clocking, and the `AXI_BayerToRGB` Bayer-phase setting needs confirming first. |
 | `ov5640/PS_IIC.h`, `PS_GPIO.h`, `I2C_Client.h`, `GPIO_Client.h`, `ScuGicInterruptController.h`, `AXI_VDMA.h` | copied to `imx415/` **unchanged**, only the folder moved | Generic Zynq PS peripheral drivers (I2C, GPIO, interrupt controller, VDMA) — not sensor-specific. |
 | `hdmi/VideoOutput.h`, `platform/*`, `lscript.ld`, `Xilinx.spec` | unchanged | Generic HDMI-timing / Zynq PS bring-up / linker infrastructure, independent of sensor choice. |
 | `.project` / `.cproject` | renamed to `Zybo-Z7-20-imx415`, cleaned of stale absolute developer paths | — |
@@ -154,70 +161,113 @@ garbled data, or an I2C NACK.
 
 ## 3. Hardware side — what you still need to do
 
-This project's `system_wrapper.bit` bitstream was originally built around
-the **OV5640's** MIPI characteristics (2-lane, RAW10, ≤336MHz-class MIPI
-clock) and 1920×1080-and-below HDMI output timing. For the IMX415:
+**Which hardware design applies to you matters a lot here, and there are
+two candidates:**
 
-1. **Confirm/reconfigure the `MIPI_D_PHY_RX`/`MIPI_CSI_2_RX` IP** in Vivado
-   for the lane rate you select in `IMX415.h` (720 or 1440 Mbps/lane,
-   2-lane by default). If it doesn't match, the CSI-2 receiver simply won't lock —
-   the sensor will still respond fine over I2C, but no valid pixel data will
-   arrive.
-2. **Confirm the AXI4-Stream width** feeding the `AXI_VDMA` write channel
+1. The `.xsa`/bitstream actually bundled in the original Vitis IDE zip you
+   first gave me — a bare capture-only pipeline (`MIPI_D_PHY_RX →
+   MIPI_CSI_2_RX → AXI_VDMA → VTC → HDMI TX`, no image processing IP at
+   all). Its `xparameters.h` lists only `MIPI_D_PHY_RX_0`, `MIPI_CSI_2_RX_0`,
+   `AXI_VDMA_0`, `VIDEO_DYNCLK`, `AXI_GAMMACORRECTION_0`, `VTC_0`.
+2. **Your actual Vivado source project** (block design you shared): `MIPI_
+   CSI_2_RX_0 → AXI_BayerToRGB_1 → AXI_GammaCorrection_0 → AXI_VDMA →
+   [DDR] → AXI_VDMA → v_axi4s_vid_out_0 → rgb2dvi_0 → HDMI`, plus
+   `DVIClocking_0` alongside the clocking-wizard (`video_dynclk`). This is
+   the one you confirmed is real and what you're building from.
+
+Since **#2 is your actual hardware**, treat the rest of this section (and
+§4) as being about that design, not #1.
+
+1. **Confirm/reconfigure the `MIPI_D_PHY_RX`/`MIPI_CSI_2_RX` IP's line
+   rate** in Vivado for whichever `mode` you select in `IMX415.h` (720 or
+   1440 Mbps/lane; 2-lane is settled — see below). The block diagram
+   confirms lane *count* directly: `dphy_data_hs_p[1:0]`/`dphy_data_hs_n
+   [1:0]` are explicitly 2-bit ports on `MIPI_D_PHY_RX_0`. Lane *rate* is a
+   Vivado IP-customization parameter, not visible in a block diagram — you
+   still need to check it. One real clue: this exact OV5640 codebase never
+   configured the sensor above roughly 672–700Mbps/lane-equivalent (its
+   fastest mode literally calls itself `"336M_MIPI"` — a ~336MHz MIPI
+   clock). That's a hint the D-PHY RX IP in this design may not be
+   validated past that range, which is why `main.cc` defaults to
+   `MODE_2LANE_720MBPS` rather than the faster 1440Mbps mode — treat
+   1440Mbps as something to try only after confirming the IP's actual
+   supported rate covers it.
+2. **Check `AXI_BayerToRGB_1`'s Bayer/CFA phase.** It was almost certainly
+   set up for the OV5640's RAW output order — its raw-mode register
+   comment literally says `"BGBG/GRGR"` (BGGR). The IMX415's actual CFA
+   order needs confirming against the datasheet's pixel-array/color-filter
+   section (I have not independently confirmed it here; RGGB is common for
+   this generation of Sony sensor but that's not the same as confirmed).
+   If the phase doesn't match, expect swapped/wrong colors, not
+   demosaic failure outright — check whether `AXI_BayerToRGB` exposes a
+   runtime phase-select register over its `AXI_Slave_Interface` before
+   assuming you need to resynthesize.
+3. **Confirm the AXI4-Stream width** feeding `AXI_BayerToRGB`'s input
    matches RAW10 (this driver keeps `ADBIT`/`MDBIT` at RAW10 to match what
-   the OV5640-era IP was generated for).
-3. Re-export the hardware platform (**File → Export → Export Hardware**,
+   the OV5640-era IP was generated for), and that its RGB output width is
+   what `AXI_GammaCorrection`/`AXI_VDMA` downstream expect.
+4. Re-export the hardware platform (**File → Export → Export Hardware**,
    include bitstream) and re-associate this application's `system_wrapper`
    platform project with the new export.
-4. See **§4** below before spending time on HDMI output timing — there's a
-   more fundamental gap to close first.
-5. Double-check your IMX415 module's power-up sequencing (rail order,
+5. See **§4** below on resolution/timing before expecting a full-resolution
+   live picture — there's still a real gap there, just a narrower one than
+   before.
+6. Double-check your IMX415 module's power-up sequencing (rail order,
    reset/XCLR timing) against its vendor documentation if you have any —
    see §5.
 
 If your goal right now is just to validate **I2C bring-up and the chip-ID
-check**, you can do that on the existing OV5640-era hardware platform
-without touching Vivado at all.
+check**, you can do that regardless of which hardware variant is
+programmed, without touching Vivado at all.
 
-## 4. The raw-sensor problem (read this before chasing HDMI output)
+## 4. Demosaic and resolution — what's actually still missing
 
-This is the most important correction from the first version of this port.
+**Correction from earlier in this project:** I previously said the raw-
+sensor/no-demosaic problem was unconditional — "regardless of lane count,
+data rate, or resolution, you'll get scrambled Bayer noise." That was true
+for hardware variant #1 above (no image-processing IP at all), but **your
+actual design already has a demosaic block** (`AXI_BayerToRGB_1`, feeding
+`AXI_GammaCorrection_0`, both already wired between the CSI-2 RX and the
+VDMA write side). If that's genuinely what gets synthesized, the "no ISP
+anywhere in the system" framing doesn't apply to you — the FPGA is already
+doing the OV5640-internal-ISP's job, generically, for whatever raw sensor
+feeds it. What's demosaiced and gamma-corrected lands in DDR, not raw
+Bayer data.
 
-The original OV5640/Pcam-5C design pipes the sensor's MIPI output straight
-through `MIPI_D_PHY_RX → MIPI_CSI_2_RX → AXI_VDMA → VTC → HDMI TX`, with
-**no image-processing IP in the FPGA at all**. That only produces a real
-picture because the **OV5640 has an internal ISP** that demosaics its Bayer
-sensor data into ready-to-display RGB565 *before it ever leaves the chip*
-(see the OV5640 driver's `{0x4300, 0x6f}` RGB565 / `ISP_FORMAT_MUX_CONTROL`
-registers — this project's original menu even had a "Raw or RGB" option
-controlling exactly that on-sensor conversion).
+**What's still genuinely unresolved for a working picture, specific to
+your design:**
 
-**The IMX415 has no internal ISP.** It only ever outputs raw, undemosaiced
-Bayer data (RAW10). Feeding that directly into the same passthrough
-pipeline — regardless of whether you get the lane count, data rate, and
-resolution all correct — will not produce a viewable color picture. You'll
-get a scrambled, grainy, roughly-monochrome-looking Bayer-pattern texture on
-screen, not a photo.
+1. **The Bayer-phase question from §3** — wrong phase reads as wrong
+   colors, not as noise, so don't mistake a working-but-miscolored image
+   for a broken pipeline.
+2. **Resolution/pixel-clock mismatch.** The IMX415's native 3864×2192
+   frame doesn't match any entry in `hdmi/VideoOutput.h`'s timing table,
+   and its pixel rate (3864×2192×fps) is well beyond what `video_dynclk`/
+   `DVIClocking_0` were ever asked to produce for the OV5640 (max
+   ~148.5MHz, 1080p60-class). This is a real, separate gap from demosaic,
+   and it's why `main.cc`'s `pipeline_mode_change()` still doesn't bring up
+   the VTC/HDMI read side by default. Closing it needs one of:
+   * A new VTC timing entry + reconfigured clocking in Vivado for the
+     sensor's actual (much higher) pixel rate, for a true native-resolution
+     preview, **or**
+   * Sensor-side window cropping (the datasheet documents `WINMODE=4h`,
+     "Window Cropping mode" — not implemented in this driver, which
+     matches the mainline Linux driver's all-pixel-readout-only scope) to
+     get the sensor itself outputting something that already fits the
+     existing 1080p-class timing, **or**
+   * Extending `imx415/AXI_VDMA.h` to decouple the write side's buffer
+     stride (must match the sensor's full native width) from a smaller
+     read-side active window (a cropped live-preview region) — a real,
+     buildable capability, but not implemented here: it needs careful
+     changes to the per-frame address/stride math in `configureRead()`,
+     and I didn't want to ship that unverified against real hardware in
+     this pass. `configureWrite()`/`configureRead()` still assume the same
+     width/height for both channels, like the original OV5640 code did.
 
-Because of this (and because 3864×2192's pixel rate is well beyond what this
-hardware platform's clocking wizard/HDMI TX were sized for — see §3),
-`main.cc`'s `pipeline_mode_change()` **deliberately does not bring up the
-VTC/HDMI output stage** in this version. It brings up the sensor and the
-VDMA **write** (capture-to-DDR) side only. Live HDMI preview needs one of:
-
-* **Add a Bayer-demosaic/ISP IP core in the FPGA fabric** between the CSI-2
-  RX output and the VDMA write side (Xilinx's Video/Imaging IP library has
-  a demosaic core; you'd typically also want gamma/CSC after it — the
-  existing `AXI_GammaCorrection` core could potentially be reused
-  downstream of a demosaic block), **or**
-* Capture raw frames to DDR (which this version does) and **demosaic in
-  software** (on the Cortex-A9, or by pulling the buffer off over
-  JTAG/debugger and demosaicing on a host PC) rather than expecting a live
-  preview at all.
-
-Either path is a real hardware/software project in its own right, well
-beyond a register-table port — I'm flagging it clearly rather than leaving
-you to discover it after chasing phantom lane-count bugs.
+I'm intentionally not picking one of those three for you — which is right
+depends on things only you can see (how flexible your Vivado design is,
+whether a 1080p-scale preview is good enough, whether you'd rather write
+new HDL or new C++). Happy to build out whichever one you want next.
 
 ## 5. Wiring & GPIO notes
 
@@ -314,26 +364,36 @@ Please press the key corresponding to the desired option:
 * **b** / **c** → poke/peek any IMX415 register directly over I2C. Good for
   confirming bring-up: e.g. read `3F12`/`3F13` and check you get `0x514`
   masked with `0xFFF`, or watch `STANDBY` (`3000`) toggle.
-* **d** → cycles the FPGA gamma-correction IP core's factor. Currently not
-  wired to anything downstream of a working image path — see §4.
+* **d** → cycles the FPGA gamma-correction IP core's factor. Feeds directly
+  into whatever `AXI_BayerToRGB` demosaics — see §4 for what's still
+  unconfirmed about that path (Bayer phase, resolution/timing) before it
+  produces a full live picture.
 
 A `HardwareError` thrown from `init()`/`set_mode()` prints an I2C-NACK or
 chip-ID-mismatch message over serial — see §8.
 
 ## 8. Known limitations / explicitly out of scope here
 
-* **No FPGA/bitstream changes** — see §3.
-* **No live HDMI preview** — see §4; this needs new FPGA demosaic IP or a
-  software debayer step, not a config fix.
+* **No FPGA/bitstream changes made here** — see §3. (Your hardware, unlike
+  what I originally assumed, already has the demosaic IP it needs — what's
+  outstanding is verification/configuration, not new IP design.)
+* **HDMI output not enabled by default** — see §4. Two real unknowns stand
+  between this and a live picture: `AXI_BayerToRGB`'s Bayer-phase setting,
+  and the sensor's native resolution not fitting the existing HDMI
+  timing/clocking. Neither is a demosaic-IP gap anymore.
 * **`IMX415::reset()` doesn't yet drive `CAM_RST` explicitly** — it still
   only toggles the single GPIO inherited from the Pcam 5C/OV5640 driver,
   which may not reach this board's actual reset line at all — see §5. This
   is a real, likely gap, not yet fixed in code (fixing it needs a spare
   Zybo GPIO wired to the camera board, which isn't something I can do from
   software alone).
-* **No AWB/AE/color-processing** — no ISP on the sensor to configure (see
-  §4); if you add a demosaic path you'll likely want auto-exposure/AWB
-  logic downstream of it too, which isn't included here.
+* **No AWB/AE/color-processing** — the IMX415 has no ISP to configure for
+  this, and I don't know whether your `AXI_BayerToRGB`/`AXI_GammaCorrection`
+  chain includes any (nothing in the block diagram suggests statistics/
+  feedback logic). If you want real auto-exposure/AWB, that's additional
+  work — either an FPGA statistics+gain-control addition, or a software
+  loop on the PS adjusting sensor gain/exposure registers (`GAIN_PCG_0`,
+  `SHR0`) using the existing I2C infrastructure.
 * **No test-pattern-generator control** — the OV5640 driver had a
   `set_test()` color-bar helper; the IMX415 does have TPG registers
   (`TPG_EN_DUOUT`/`TPG_PATSEL_DUOUT` at `0x30E4`/`0x30E6` per the datasheet)
@@ -348,7 +408,8 @@ chip-ID-mismatch message over serial — see §8.
 | `HardwareError::WRONG_ID`, other causes | Wrong I2C address (shouldn't be it — see §0), INCK not present (check the oscillator, §0), or a genuinely dead sensor. A chip ID read back as `0x000` or `0xFFF` usually means "nothing answered," consistent with the reset-wiring gap above. |
 | `HardwareError::IIC_NACK` on register read/write | Bus contention, or sensor asleep/unpowered/held in reset. |
 | Chip-ID check passes but streaming/timing seems off | Try `REG_SYS_MODE = 0x3034` instead of `0x3033` — see §2's note on the datasheet's internal inconsistency for that one register. |
-| Everything initializes and the register menu works, but you never see anything meaningful on HDMI | Expected on the stock hardware — see §4. This isn't a bug to chase; there's no image pipeline wired to HDMI in this version at all. |
+| Everything initializes and the register menu works, but you never see anything meaningful on HDMI | Expected — this version doesn't enable the HDMI read side at all yet (see §4), so there's nothing to chase there until you do. |
+| HDMI is enabled (after your own changes) and shows a picture, but colors look wrong/swapped | Classic Bayer-phase mismatch — see §3/§4's note on `AXI_BayerToRGB`'s CFA phase setting, most likely still configured for the OV5640's BGGR order. |
 | Want to confirm frames are actually landing in DDR | Use a debugger memory view at `MEM_BASE_ADDR` (`DDR_BASE_ADDR + 0x0A000000`) after streaming starts, or add your own readback code — there's no on-screen path yet to eyeball it. |
 
 ## 10. References
@@ -360,6 +421,13 @@ chip-ID-mismatch message over serial — see §8.
 * **`SCH_IMX415_MIPI_FFC_CAM_REV1.pdf`** (you provided this) — schematic for
   the "IMX415 CAM R1" carrier board; source for §0/§5's I2C-address
   strapping, MIPI lane wiring, oscillator, and `CAM_RST`/`CAM_GPIO` findings.
+* **Your Zybo-Z7-20-pcam-5c Vivado block design** (you shared screenshots
+  of this) — source for §3/§4's `AXI_BayerToRGB`/`AXI_GammaCorrection`/
+  `rgb2dvi`/`DVIClocking` pipeline topology and the confirmed 2-lane D-PHY
+  port widths. I don't have this project's actual source files (IP
+  sources, `.xsa`, or `xparameters.h`) — only the block-diagram images — so
+  base addresses and exact register maps for `AXI_BayerToRGB` in particular
+  are not something I can give you directly yet.
 * Sony IMX415 mainline Linux driver (original source of the register data
   in `IMX415.h`, later cross-checked against the datasheet above):
   [`drivers/media/i2c/imx415.c`](https://github.com/torvalds/linux/blob/master/drivers/media/i2c/imx415.c),
