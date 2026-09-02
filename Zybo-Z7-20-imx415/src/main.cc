@@ -89,23 +89,40 @@ void pipeline_mode_change(AXI_VDMA<ScuGicInterruptController>& vdma_driver, IMX4
 		Xil_Out32(GAMMA_BASE_ADDR, 3); // Set Gamma correction factor to 1/1.8 (unused without an HDMI/ISP path, harmless to leave configured)
 		// TODO CSI-2 / D-PHY config here.
 		//
-		// IMPORTANT: this project's MIPI_CSI_2_RX / MIPI_D_PHY_RX IP cores
-		// (in system_wrapper) were generated for the OV5640's 2-lane MIPI
-		// output. 2-lane is confirmed by the block design itself (dphy_data_
-		// hs_p/n are 2-bit ports) - the lane *rate* the D-PHY IP was
-		// characterized/generated for is not visible in a block diagram and
-		// still needs checking in its Vivado "Customize IP" settings. The
-		// one real clue available: this exact OV5640 codebase never
-		// configured the sensor above ~672-700Mbps/lane-equivalent (its
-		// fastest mode names itself "336M_MIPI", i.e. a ~336MHz MIPI clock).
-		// That's a real hint the D-PHY RX IP in THIS design may not be
-		// validated past that range - which is why MODE_2LANE_720MBPS
-		// (below) is the default rather than the faster MODE_2LANE_1440MBPS.
-		// Try 720Mbps/lane first; only reach for 1440Mbps once you've
-		// confirmed the D-PHY IP's configured/supported line rate covers it.
-		// If the rate doesn't match, the CSI-2/D-PHY receiver core will
-		// simply not lock and no image data will arrive, even though the
-		// sensor is streaming correctly. See README.md §3.
+		// IMPORTANT - D-PHY line rate, now CONFIRMED from the real Vivado
+		// project's own source (src/constraints/timing.xdc):
+		//
+		//   # MIPI D-PHY data rate 420Mbps/lane = 210 MHz HS_Clk
+		//   create_clock -period 4.761 -name dphy_hs_clock_p ...
+		//
+		// That's the ONLY rate this bitstream's timing closure was ever
+		// verified against - it's what the OV5640's actual default boot
+		// mode uses (MODE_1080P_1920_1080_30fps, whose own comment in
+		// OV5640.h says "MIPISCLK=420", i.e. the same 420Mbps/lane). A
+		// faster OV5640 mode exists in that driver's config table (named
+		// "336M_MIPI", ~672Mbps/lane) but is dead code - never wired to
+		// main.cc's menu, never re-verified in the XDC after being added.
+		// Digilent's own MIPI_D_PHY_RX IP user guide separately states the
+		// core "has been tested in dual-lane configuration with 1344 Mbps
+		// total data rate" (672Mbps/lane) - a documented upper reference
+		// point, but still not what THIS project's constraints reflect.
+		//
+		// NEITHER of this driver's two IMX415 modes (720/1440 Mbps/lane -
+		// the only ones valid at this board's confirmed 24MHz INCK) matches
+		// 420Mbps/lane. Selecting either one against the unmodified
+		// bitstream means running the D-PHY RX faster than its timing was
+		// ever closed for - it may simply not lock, or (worse) may
+		// intermittently mis-sample data that looks plausible but is wrong.
+		// Before trusting either mode: update the dphy_hs_clock_p
+		// create_clock period in timing.xdc for your chosen rate (period_ns
+		// = 1000 / (Mbps_per_lane / 2) - 2.778ns for 720Mbps/lane, 1.389ns
+		// for 1440Mbps/lane) and re-run implementation to confirm timing
+		// closure. 720Mbps/lane is the smaller jump from the 420Mbps
+		// validated point (and is within shouting distance of Digilent's
+		// own 672Mbps-tested figure above), which is why MODE_2LANE_720MBPS
+		// is the default below rather than MODE_2LANE_1440MBPS - "default"
+		// here means "less likely to fail timing closure," not "confirmed
+		// working." See README.md §3.
 		cam.init();
 	}
 
