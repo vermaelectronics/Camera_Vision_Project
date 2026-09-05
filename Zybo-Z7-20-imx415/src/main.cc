@@ -57,24 +57,34 @@ using namespace digilent;
 //      not the full PIXEL_ARRAY_WIDTH x PIXEL_ARRAY_HEIGHT (3864x2192) -
 //      `configureWrite()` below already reflects this.
 //
-// What's left, all optional (live HDMI preview only, not needed for
-// DDR-only capture):
-//   The cropped 2040x2192 frame still doesn't match any entry in
-//   hdmi/VideoOutput.h's timing table. But per this project's own
-//   `timing.xdc` ("Maximum targeted pixel clock frequency for dynamic
-//   video clock generator is 148.5 MHz"), `video_dynclk` is a
-//   runtime-reconfigurable clock generator (DRP-driven, AXI-Lite
-//   controlled) - so once a target resolution/rate is picked, AXI_VDMA's
-//   read side, the VTC, and v_axi4s_vid_out_0 can likely all be
-//   reconfigured at runtime (each has its own AXI-Lite config port) with
-//   no further Vivado change, as long as the pixel clock stays under that
-//   148.5MHz ceiling. None of that is implemented here yet.
+// Live HDMI preview - now implemented, optional in the sense that nothing
+// above required it, but wired up and on by default here:
+//   The cropped 2040x2192 frame didn't match any entry in
+//   hdmi/VideoOutput.h's timing table, so a new one was added -
+//   Resolution::R2040_2192_24_NP, timed with the VESA CVT standard
+//   formula (verified with the `cvt` reference tool: `cvt 2040 2192 24`)
+//   at 23.96Hz, pixel clock 143.75MHz - under this project's own
+//   `timing.xdc`-documented 148.5MHz ceiling for `video_dynclk`
+//   ("Maximum targeted pixel clock frequency for dynamic video clock
+//   generator is 148.5 MHz"), with ~4.75MHz of margin. 25Hz's CVT timing
+//   for this resolution is already 150MHz, over that ceiling - hence
+//   24Hz, not a rounder-looking 25 or 30.
+//   `video_dynclk` is a runtime-reconfigurable clock generator (DRP-
+//   driven, via VideoOutput::configure()'s direct XClk_Wiz_WriteReg()
+//   calls - the same mechanism already used for this project's other
+//   three resolutions), and VTC's timing is likewise set at runtime via
+//   XVtc_SetGeneratorTiming() - no Vivado/XDC change for either. VDMA's
+//   read side takes its resolution as a runtime argument
+//   (configureRead()) the same way the write side already does.
+//   v_axi4s_vid_out_0 needed no separate configuration - nothing in this
+//   project's original OV5640-era HDMI-working code ever configured it
+//   independently of VTC.
 //
-// This function still only brings up the sensor and the VDMA WRITE side,
-// so frames land in DDR at MEM_BASE_ADDR (already demosaiced RGB, per
-// AXI_BayerToRGB) where you can inspect them with a debugger/memory
-// viewer. Re-enable vid.*/vdma_driver.*Read() here once you've picked a
-// live-preview resolution/timing.
+// This function still only brings up the sensor and the VDMA WRITE side -
+// the output/HDMI side is brought up once in main(), not per lane-rate
+// switch, since resolution doesn't depend on MIPI lane rate and
+// re-locking the video clock on every menu-driven mode change would be
+// wasteful (and could visibly glitch the display) for no reason.
 void pipeline_mode_change(AXI_VDMA<ScuGicInterruptController>& vdma_driver, IMX415& cam, IMX415_cfg::mode_t mode)
 {
 	//Bring up input (capture) pipeline back-to-front
@@ -141,8 +151,8 @@ void pipeline_mode_change(AXI_VDMA<ScuGicInterruptController>& vdma_driver, IMX4
 		// happen downstream (FPGA fabric or host-side software).
 	}
 
-	// Output (HDMI) pipeline intentionally not brought up here - see the
-	// function header comment above.
+	// Output (HDMI) pipeline is brought up once in main(), not here - see
+	// the function header comment above for why.
 }
 
 int main()
@@ -157,16 +167,27 @@ int main()
 	AXI_VDMA<ScuGicInterruptController> vdma_driver(VDMA_DEVID, MEM_BASE_ADDR, irpt_ctl,
 			VDMA_MM2S_IRPT_ID,
 			VDMA_S2MM_IRPT_ID);
-	// Constructed (brings the HDMI clock domain up) but intentionally not
-	// configured/enabled - see the pipeline_mode_change() comment above for
-	// why there's no live HDMI preview of the IMX415's raw output yet.
 	VideoOutput vid(XPAR_VTC_0_DEVICE_ID, XPAR_VIDEO_DYNCLK_DEVICE_ID);
-	(void)vid;
 
 	pipeline_mode_change(vdma_driver, cam, IMX415_cfg::mode_t::MODE_2LANE_720MBPS);
 
+	// Output (HDMI) pipeline - brought up once here, not per lane-rate
+	// switch (see pipeline_mode_change()'s header comment for why).
+	// Resolution matches the sensor's cropped capture size exactly -
+	// Resolution::R2040_2192_24_NP, added to hdmi/VideoOutput.h - so VDMA's
+	// read side is configured identically to how its write side already
+	// is, just enabling the second (MM2S) channel on the same frame
+	// buffers.
+	{
+		vdma_driver.resetRead();
+		vid.reset();
+		vid.configure(Resolution::R2040_2192_24_NP);
+		vdma_driver.configureRead(IMX415_cfg::CROP_WIDTH, IMX415_cfg::PIXEL_ARRAY_HEIGHT);
+		vdma_driver.enableRead();
+		vid.enable();
+	}
 
-	xil_printf("Video init done. Capturing to DDR at 0x%08x (see README.md - no HDMI preview yet).\r\n", MEM_BASE_ADDR);
+	xil_printf("Video init done. Capturing to DDR at 0x%08x and live on HDMI at 2040x2192@24Hz.\r\n", MEM_BASE_ADDR);
 
 
 	uint8_t read_char0 = 0;

@@ -26,7 +26,17 @@ enum class Resolution
 {
 	R1920_1080_60_PP = 0,
 	R1280_720_60_PP,
-	R640_480_60_NN
+	R640_480_60_NN,
+	// IMX415's cropped capture size (IMX415_cfg::CROP_WIDTH x
+	// PIXEL_ARRAY_HEIGHT). Not a VESA/CEA standard resolution - timing
+	// generated with the VESA CVT standard formula (verified with the
+	// `cvt` reference tool: `cvt 2040 2192 24`), normal (non-reduced)
+	// blanking, since CVT-RB requires a multiple of 60Hz and this is the
+	// highest even-ish rate that stays under this project's documented
+	// 148.5MHz video_dynclk ceiling (24Hz -> 143.75MHz; 25Hz's CVT timing
+	// is already 150MHz, over that ceiling). See README.md for how this
+	// pixel clock's MMCM factors were derived.
+	R2040_2192_24_NP
 };
 
 typedef struct
@@ -44,7 +54,10 @@ typedef struct
 timing_t const timing[] = {
 		{Resolution::R1920_1080_60_PP, 1920, 88, 44, 148, timing_t::POS, 1080, 4, 5, 36, timing_t::POS, 148500000},
 		{Resolution::R1280_720_60_PP, 1280, 110, 40, 220, timing_t::POS, 720, 5, 5, 20, timing_t::POS, 74250000},
-		{Resolution::R640_480_60_NN, 640, 16, 96, 48, timing_t::NEG, 480, 10, 2, 33, timing_t::NEG, 25000000}
+		{Resolution::R640_480_60_NN, 640, 16, 96, 48, timing_t::NEG, 480, 10, 2, 33, timing_t::NEG, 25000000},
+		// 2040x2192 23.96Hz (CVT), pclk 143.75MHz - `cvt 2040 2192 24`:
+		//   Modeline "2040x2192_24.00" 143.75 2040 2160 2368 2696 2192 2195 2205 2225 -hsync +vsync
+		{Resolution::R2040_2192_24_NP, 2040, 120, 208, 328, timing_t::NEG, 2192, 3, 10, 20, timing_t::POS, 143750000}
 };
 
 class VideoOutput
@@ -112,6 +125,19 @@ public:
 		case 25000000:
 			//Factors for 125 MHz
 			mul = 10.0; divclk = 1; clkout_div0 = 8.0;
+			break;
+		case 143750000:
+			// Factors for 718.75 MHz (5x143.75MHz). CLKIN is 100MHz -
+			// confirmed by back-solving the three cases above (each
+			// independently gives CLKIN=100MHz: 742.5*5/37.125,
+			// 371.25*2.5*4/37.125, 125*8/10 all equal 100). VCO here is
+			// 718.75MHz, exact: 100 * (14.375/2) = 718.75, clkout_div0=1.0
+			// passes it straight through. That's below all three VCO
+			// values used above (742.5/928.125/1000MHz) but still clears
+			// the 7-series MMCM's general ~600MHz VCO floor - worth a
+			// first-light check like everything else in this pass, not
+			// a guarantee.
+			mul = 14.375; divclk = 2; clkout_div0 = 1.0;
 			break;
 		}
 		Xil_AssertVoid(mul < 256.0); //one byte limit for integer part

@@ -85,9 +85,9 @@ inconsistency found (in Sony's own document, not in this port).
 | Menu: **d. Change Image Format (Raw or RGB)**, **h. Change AWB Settings** | **removed** | Both were OV5640-internal-ISP features (Bayer→RGB conversion, auto white balance) controlled purely by I2C register writes to the sensor. The IMX415 has no on-sensor ISP, so there's nothing to write — the equivalent functionality (demosaic) now lives in your FPGA's `AXI_BayerToRGB` core instead — see §4. |
 | Menu: **e/f** (write/read sensor register) | kept, renumbered **b/c** | Still very useful for IMX415 bring-up/debug. |
 | Menu: **g** (gamma factor) | kept, renumbered **d** | Drives the FPGA's `AXI_GammaCorrection` core, not the sensor — unrelated to which camera is attached. Same core as before, still directly usable once a real image is flowing through it. |
-| Live HDMI preview wired up in `pipeline_mode_change()` | **HDMI output not enabled by default** in `pipeline_mode_change()`; only the sensor→DDR capture path is brought up | Not because demosaic is missing (your hardware already has it — see §4). All three hardware-side gaps (D-PHY timing, Bayer-phase, line-buffer width) are now fixed (§3) — HDMI is off simply because matching a live-preview resolution/timing to the cropped 2040×2192 frame is separate, optional work that isn't implemented here yet. |
+| Live HDMI preview wired up in `pipeline_mode_change()` | **Live HDMI preview wired up in `main()`** instead, brought up once rather than inside `pipeline_mode_change()` | Resolution doesn't depend on MIPI lane rate, so it doesn't need re-locking the video clock on every menu-driven mode change. See §4 for the new `Resolution::R2040_2192_24_NP` timing this needed. |
 | `ov5640/PS_IIC.h`, `PS_GPIO.h`, `I2C_Client.h`, `GPIO_Client.h`, `ScuGicInterruptController.h`, `AXI_VDMA.h` | copied to `imx415/` **unchanged**, only the folder moved | Generic Zynq PS peripheral drivers (I2C, GPIO, interrupt controller, VDMA) — not sensor-specific. |
-| `hdmi/VideoOutput.h`, `platform/*`, `lscript.ld`, `Xilinx.spec` | unchanged | Generic HDMI-timing / Zynq PS bring-up / linker infrastructure, independent of sensor choice. |
+| `hdmi/VideoOutput.h`, `platform/*`, `lscript.ld`, `Xilinx.spec` | `VideoOutput.h` gained one new `Resolution` entry (§4); the rest unchanged | Generic HDMI-timing / Zynq PS bring-up / linker infrastructure, independent of sensor choice — `VideoOutput.h`'s existing table-driven design just needed a new row for IMX415's non-standard cropped resolution. |
 | `.project` / `.cproject` | renamed to `Zybo-Z7-20-imx415`, cleaned of stale absolute developer paths | — |
 
 ## 2. Where the IMX415 register data comes from (important)
@@ -362,35 +362,51 @@ chasing live HDMI:**
    ~47% of every line is corrupted regardless of whether those two are
    correct, and it's easy to misattribute that corruption to one of
    them instead.
-2. **Resolution/pixel-clock mismatch — optional, live-HDMI-only, and
-   mostly software given the crop above.** The now-cropped 2040×2192
-   frame still doesn't match any entry in `hdmi/VideoOutput.h`'s timing
-   table. But this project's own `timing.xdc` states the real ceiling
-   directly: *"Maximum targeted pixel clock frequency for dynamic video
-   clock generator is 148.5 MHz"* — and `video_dynclk` is explicitly
-   built as a **runtime-reconfigurable** clock generator (DRP-driven,
-   AXI-Lite controlled), not a fixed one. That means once you've picked
-   a resolution within that ceiling (2040×2192 already qualifies at
-   modest frame rates), none of this needs a Vivado change:
-   * **AXI_VDMA** — `imx415/AXI_VDMA.h`'s `configureRead(h_res, v_res)`/
-     `configureWrite(h_res, v_res)` already take frame size as a runtime
-     argument. Just call them with the cropped dimensions.
-   * **VTC** — new timing generics (active size, sync widths, porches)
-     written at runtime over its own AXI-Lite control port.
-   * **AXI4S Video Out** (`v_axi4s_vid_out_0`) — same: runtime size
-     config over its own AXI-Lite port.
-   * **`video_dynclk`** — new target pixel-clock frequency, also runtime,
-     via its DRP/AXI-Lite interface, as long as it stays ≤148.5MHz.
+2. **Resolution/pixel-clock mismatch — optional, live-HDMI-only, and now
+   implemented. ✅ Done, entirely in software.** The cropped 2040×2192
+   frame didn't match any entry in `hdmi/VideoOutput.h`'s timing table,
+   so a new one was added: `Resolution::R2040_2192_24_NP`, timed with
+   the VESA CVT standard formula (verified with the `cvt` reference
+   tool — `cvt 2040 2192 24` — not hand-derived) at **23.96Hz, pixel
+   clock 143.75MHz**. This project's own `timing.xdc` states the real
+   ceiling directly: *"Maximum targeted pixel clock frequency for
+   dynamic video clock generator is 148.5 MHz"* — 143.75MHz clears it
+   with ~4.75MHz to spare. (25Hz's CVT timing for this exact resolution
+   is already 150MHz — over the ceiling — which is why this lands on
+   24Hz rather than a rounder-looking 25 or 30.) `video_dynclk` is
+   explicitly built as a **runtime-reconfigurable** clock generator
+   (DRP-driven, AXI-Lite controlled), not a fixed one, so none of this
+   needed a Vivado change:
+   * **AXI_VDMA** — `imx415/AXI_VDMA.h`'s `configureRead(h_res, v_res)`
+     now called with `CROP_WIDTH`/`PIXEL_ARRAY_HEIGHT`, the same pair
+     already used for `configureWrite()`.
+   * **VTC** — new timing (front/back porch, sync widths, polarity) set
+     at runtime via `XVtc_SetGeneratorTiming()` inside
+     `VideoOutput::configure()` — the exact mechanism this file already
+     used for its other three resolutions.
+   * **`video_dynclk`** — new MMCM factors (`mul=14.375`, `divclk=2`,
+     `clkout_div0=1.0`, landing on a 718.75MHz VCO — 5× the 143.75MHz
+     pixel clock, since the MMCM's `CLKOUT0` feeds the DVI serializer
+     at 5× before a BUFR divides it back down) written via
+     `XClk_Wiz_WriteReg()`, the same dynamic-reconfiguration calls
+     `VideoOutput.h` already made for its other three resolutions. The
+     100MHz `video_dynclk` reference input and the 5× relationship were
+     both derived by back-solving the three existing cases, not
+     assumed — see `VideoOutput.h`'s comment on this new case for the
+     arithmetic.
+   * **AXI4S Video Out** (`v_axi4s_vid_out_0`) — turned out to need
+     nothing at all: nothing in this project's original OV5640-era
+     HDMI-working code ever configured it independently of VTC, so
+     there was nothing to add here either.
 
-   A Vivado/XDC change is only needed if you want to go *above* that
-   148.5MHz ceiling — unlikely for any resolution built from a
-   ≤2048px-wide crop. None of this is implemented in this driver yet
-   (no HDMI-side code exists here at all), but it's a C++/register-write
-   task once you get to it, not a new Vivado design.
+   A Vivado/XDC change would only be needed to go *above* that
+   148.5MHz ceiling — not the case here. `main()` now brings this up
+   once, right after the first `pipeline_mode_change()` call, rather
+   than inside that function — resolution doesn't depend on MIPI lane
+   rate, so redoing the clock lock on every menu-driven lane-rate
+   switch would be wasteful and could visibly glitch the display.
 
-Point 1 is done in this build; point 2 remains genuinely optional — pursue
-it only if you want live HDMI, and only once you're capturing a correct
-picture in DDR.
+Both points are done in this build.
 
 ## 5. Wiring & GPIO notes
 
@@ -463,10 +479,11 @@ second EMIO/MIO pin in `PS_GPIO.h`, and drive it (instead of, or alongside,
 ## 7. Using it
 
 On boot the app brings up the sensor at **720 Mbps/lane, 2-lane**, captures
-to DDR at `MEM_BASE_ADDR`, and prints:
+to DDR at `MEM_BASE_ADDR`, brings up live HDMI at 2040×2192@24Hz, and
+prints:
 
 ```
-Video init done. Capturing to DDR at 0x0a000000 (see README.md - no HDMI preview yet).
+Video init done. Capturing to DDR at 0x0a000000 and live on HDMI at 2040x2192@24Hz.
 ```
 
 Then a serial menu repeats:
@@ -509,12 +526,12 @@ chip-ID-mismatch message over serial — see §8.
   reaches that block. See §3 point 3 for the exact registers, and for
   the VHDL-widening alternative if you'd rather resynthesize instead of
   crop.
-* **HDMI output not enabled by default** — see §4. All three original
-  gaps (D-PHY timing, Bayer phase, line-buffer width) are now closed.
-  What remains is optional: matching a chosen resolution's timing/pixel-
-  clock for live preview specifically — mostly a runtime software task
-  given the crop above, bounded by the 148.5MHz ceiling this project's
-  own `timing.xdc` documents.
+* **HDMI output is enabled by default now** — see §4. All three
+  original hardware-side gaps (D-PHY timing, Bayer phase, line-buffer
+  width) plus the resolution/pixel-clock mismatch are closed. `main()`
+  brings up `Resolution::R2040_2192_24_NP` (2040×2192 @ 23.96Hz,
+  143.75MHz pixel clock) once, right after the sensor/capture side is
+  brought up.
 * **`IMX415::reset()` doesn't yet drive `CAM_RST` explicitly** — it still
   only toggles the single GPIO inherited from the Pcam 5C/OV5640 driver,
   which may not reach this board's actual reset line at all — see §5. This
@@ -544,8 +561,9 @@ chip-ID-mismatch message over serial — see §8.
 | Chip-ID check passes, but the CSI-2/D-PHY receiver never locks (no image data at all) | If you're on a fresh/unmodified bitstream: this bitstream's only originally-timing-closed rate was 420Mbps/lane against 720/1440Mbps/lane IMX415 modes — see §3 point 1. If you've already reconstrained and re-implemented for 720Mbps/lane (as this project now has) and it still doesn't lock, double-check the `-waveform` argument on `dphy_hs_clock_p` was updated to match the new period, not just the period itself — a stale waveform value doesn't stop the build, but it does make the timing report unreliable. |
 | Image data flows and looks mostly right, but the right ~40-50% of every line is corrupted/repeating/garbled | **This is the `AXI_BayerToRGB` line-buffer width limit from §3 point 3, not a D-PHY or Bayer-phase problem.** The block's line buffer is fixed at 2048px; IMX415's native width is 3864px, so the tail of every line overwrites the buffer addresses its own head just wrote. Fix with a sensor-side crop or the VHDL line-buffer widening — don't chase this as a timing or phase issue, it's neither. |
 | Chip-ID check passes but streaming/timing seems off | Try `REG_SYS_MODE = 0x3034` instead of `0x3033` — see §2's note on the datasheet's internal inconsistency for that one register. |
-| Everything initializes and the register menu works, but you never see anything meaningful on HDMI | Expected — this version doesn't enable the HDMI read side at all yet (see §4), so there's nothing to chase there until you do. |
-| HDMI is enabled (after your own changes), the D-PHY locks, and a picture shows but colors look like fine false-color checkerboarding, not a simple tint | The Bayer-phase fix from §3 point 2 (`xor "01"` in `AssignOutputs`) either hasn't been applied yet, or the sensor's crop window has moved off full-array default (the fix assumes pixel (0,0) delivered over MIPI is the sensor's true native (0,0)). |
+| HDMI shows nothing, or a blank/black screen, at 2040×2192@24Hz | Check the monitor actually accepts this exact custom timing — it's not a VESA/CEA standard mode, so some displays/scalers may reject it outright even with a mathematically valid signal. Confirm `video_dynclk` reports lock (`XClk_Wiz_ReadReg(...,0x4) & 0x1`, polled inside `VideoOutput::configure()`) before assuming the timing itself is wrong. |
+| HDMI shows a picture but it's torn, rolling, or mis-timed | Double-check the new `Resolution::R2040_2192_24_NP` row in `hdmi/VideoOutput.h` against this README's §4 values (`h_fp=120, h_sync=208, h_bp=328, v_fp=3, v_sync=10, v_bp=20`) — a transcription slip in any one of those fields will misalign sync relative to active video. |
+| The D-PHY locks and a picture shows on HDMI, but colors look like fine false-color checkerboarding, not a simple tint | The Bayer-phase fix from §3 point 2 (`xor "01"` in `AssignOutputs`) either hasn't been applied yet, or the sensor's crop window has moved off full-array default (the fix assumes pixel (0,0) delivered over MIPI is the sensor's true native (0,0)). |
 | Want to confirm frames are actually landing in DDR | Use a debugger memory view at `MEM_BASE_ADDR` (`DDR_BASE_ADDR + 0x0A000000`) after streaming starts, or add your own readback code — there's no on-screen path yet to eyeball it. Remember the packed 10-bit-per-channel/32-bit-word format from §3 point 3 if you parse it yourself. |
 
 ## 10. References
