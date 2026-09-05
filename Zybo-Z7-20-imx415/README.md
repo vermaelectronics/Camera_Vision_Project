@@ -85,7 +85,7 @@ inconsistency found (in Sony's own document, not in this port).
 | Menu: **d. Change Image Format (Raw or RGB)**, **h. Change AWB Settings** | **removed** | Both were OV5640-internal-ISP features (Bayer→RGB conversion, auto white balance) controlled purely by I2C register writes to the sensor. The IMX415 has no on-sensor ISP, so there's nothing to write — the equivalent functionality (demosaic) now lives in your FPGA's `AXI_BayerToRGB` core instead — see §4. |
 | Menu: **e/f** (write/read sensor register) | kept, renumbered **b/c** | Still very useful for IMX415 bring-up/debug. |
 | Menu: **g** (gamma factor) | kept, renumbered **d** | Drives the FPGA's `AXI_GammaCorrection` core, not the sensor — unrelated to which camera is attached. Same core as before, still directly usable once a real image is flowing through it. |
-| Live HDMI preview wired up in `pipeline_mode_change()` | **HDMI output not enabled by default** in `pipeline_mode_change()`; only the sensor→DDR capture path is brought up | Not because demosaic is missing (your hardware already has it — see §4). D-PHY timing and the `AXI_BayerToRGB` Bayer-phase mismatch are now fixed and implemented (§3), but `AXI_BayerToRGB`'s 2048px line-buffer width limit vs IMX415's 3864px native width isn't yet — see §3 point 3 — and it blocks a correct capture on any path, so HDMI stays off until that's resolved regardless of resolution/timing. |
+| Live HDMI preview wired up in `pipeline_mode_change()` | **HDMI output not enabled by default** in `pipeline_mode_change()`; only the sensor→DDR capture path is brought up | Not because demosaic is missing (your hardware already has it — see §4). All three hardware-side gaps (D-PHY timing, Bayer-phase, line-buffer width) are now fixed (§3) — HDMI is off simply because matching a live-preview resolution/timing to the cropped 2040×2192 frame is separate, optional work that isn't implemented here yet. |
 | `ov5640/PS_IIC.h`, `PS_GPIO.h`, `I2C_Client.h`, `GPIO_Client.h`, `ScuGicInterruptController.h`, `AXI_VDMA.h` | copied to `imx415/` **unchanged**, only the folder moved | Generic Zynq PS peripheral drivers (I2C, GPIO, interrupt controller, VDMA) — not sensor-specific. |
 | `hdmi/VideoOutput.h`, `platform/*`, `lscript.ld`, `Xilinx.spec` | unchanged | Generic HDMI-timing / Zynq PS bring-up / linker infrastructure, independent of sensor choice. |
 | `.project` / `.cproject` | renamed to `Zybo-Z7-20-imx415`, cleaned of stale absolute developer paths | — |
@@ -243,38 +243,58 @@ answer to both is more work than "just check a setting":
    four `when` branches, same AXI handshaking, same line-buffer logic.
    This assumes the sensor's crop window stays at full-array default so
    pixel (0,0) delivered over MIPI lines up with the datasheet's native
-   (0,0) — true for the current driver, which doesn't set any crop
-   registers (see point 3 below, which is about to change that).
-3. **`AXI_BayerToRGB`'s line-buffer width limit — CONFIRMED, NOT YET
-   FIXED. This is the one still blocking a correct capture, on every
-   path, not just HDMI.** Its own header comment says it plainly:
-   `Maximum resolution: 2048 x <any value> pixels`. That's backed by the
-   RTL, not just the comment: `sCntColumns` and `sLineBufferCrntAddr` are
-   both `UNSIGNED(10 downto 0)` (11 bits, 0–2047), and `LineBufferInst`
-   instantiates `LineBuffer.vhd`'s RAM with `kLineBufferWidth => 2048` to
-   match. IMX415's native width is **3864px** — 1816px past that limit.
-   Since this block sits ahead of the VDMA write side, this corrupts the
-   DDR-captured frame too: at column 2048 the 11-bit counter wraps to 0
-   while the real line still has 1816 columns left, so the tail of every
-   line overwrites the line-buffer addresses its own head just wrote.
+   (0,0) — true given point 3's fix, since the crop below is horizontal
+   only and IMX415's window-cropping origin still lines up with the
+   datasheet's native (0,0).
+3. **`AXI_BayerToRGB`'s line-buffer width limit — CONFIRMED and FIXED,
+   via a sensor-side register crop. ✅ Done.** Its own header comment
+   says it plainly: `Maximum resolution: 2048 x <any value> pixels`.
+   That's backed by the RTL, not just the comment: `sCntColumns` and
+   `sLineBufferCrntAddr` are both `UNSIGNED(10 downto 0)` (11 bits,
+   0–2047), and `LineBufferInst` instantiates `LineBuffer.vhd`'s RAM with
+   `kLineBufferWidth => 2048` to match. IMX415's native width is
+   **3864px** — 1816px past that limit. Since this block sits ahead of
+   the VDMA write side, this would corrupt the DDR-captured frame too:
+   at column 2048 the 11-bit counter wraps to 0 while the real line
+   still has 1816 columns left, so the tail of every line overwrites the
+   line-buffer addresses its own head just wrote.
 
-   Two independent fixes, pick one (not both):
-   * **Sensor-side crop (lower risk, no Vivado resynthesis of this
-     block):** add a horizontal window crop to `IMX415.h`'s mode setup —
-     width ≤2048px via the datasheet's `PIX_HST`/`PIX_HWIDTH` window-
-     cropping registers — before `AXI_BayerToRGB` ever sees the stream.
-     Not yet in this driver's register tables.
-   * **Widen the block itself (real RTL change, full alternative to the
-     crop):** in `LineBuffer.vhd`, widen `pWriteAddr`/`pReadAddr` from
-     `STD_LOGIC_VECTOR(10 downto 0)` to `(11 downto 0)` and bump the
-     generic default to `4096`; in `AXI_BayerToRGB.vhd`, widen
-     `sCntColumns`, `sLineBufferWriteAddr`, `sLineBufferReadAddr`, and
-     `sLineBufferCrntAddr` from 11 to 12 bits, and change
-     `LineBufferInst`'s `generic map(kLineBufferWidth => 2048)` to
-     `4096`. Leave `sCntLines` alone — it's only ever read as its bit-0
-     parity, which stays correct through overflow regardless of width.
-     Nothing else in either file changes, and neither file's AXI4-Stream
-     port list changes, so nothing upstream or downstream needs touching.
+   Two independent fixes existed; **this driver now implements the
+   sensor-side crop:**
+   * **Sensor-side crop (chosen — no Vivado resynthesis of this
+     block):** `IMX415.h` now sets `REG_WINMODE=0x04` (Window Cropping
+     mode, was `0x00`/all-pixel) plus `REG_PIX_HST=912`/
+     `REG_PIX_HWIDTH=2040` (`IMX415_cfg::CROP_HSTART`/`CROP_WIDTH`) —
+     centering a 2040px-wide crop (the largest multiple of 24, the
+     register's own hardware constraint, that's still ≤2048px) in the
+     3864px array. `main.cc`'s `vdma_driver.configureWrite()` was
+     updated to match — it now passes `CROP_WIDTH`, not
+     `PIXEL_ARRAY_WIDTH`, since that's what the sensor actually streams
+     once cropped. `PIXEL_ARRAY_WIDTH` itself is untouched — it still
+     correctly describes the sensor's true physical array size, just no
+     longer what you tell VDMA. Vertical is left uncropped (full
+     2192-line height; `PIX_VST`/`PIX_VWIDTH` are simply never written,
+     staying at their power-on defaults) — there's no equivalent height
+     limit, and the datasheet's `VMAX ≥ (PIX_VWIDTH/2)+46 = 2238`
+     restriction for full height was already satisfied by the existing
+     `VMAX_DEFAULT` (2250) before this change.
+   * **Widen the block itself instead (real RTL change, full
+     alternative — not what this driver does, but valid if you'd rather
+     keep the sensor at full resolution):** in `LineBuffer.vhd`, widen
+     `pWriteAddr`/`pReadAddr` from `STD_LOGIC_VECTOR(10 downto 0)` to
+     `(11 downto 0)` and bump the generic default to `4096`; in
+     `AXI_BayerToRGB.vhd`, widen `sCntColumns`, `sLineBufferWriteAddr`,
+     `sLineBufferReadAddr`, and `sLineBufferCrntAddr` from 11 to 12
+     bits, and change `LineBufferInst`'s
+     `generic map(kLineBufferWidth => 2048)` to `4096`. Leave
+     `sCntLines` alone — it's only ever read as its bit-0 parity, which
+     stays correct through overflow regardless of width. Nothing else
+     in either file changes, and neither file's AXI4-Stream port list
+     changes, so nothing upstream or downstream needs touching. If you
+     go this route instead, revert `IMX415.h`'s `REG_WINMODE`/
+     `PIX_HST`/`PIX_HWIDTH` writes back to full-array (`WINMODE=0x00`,
+     drop the two new register writes) and change `main.cc` back to
+     `PIXEL_ARRAY_WIDTH`.
      Needs a full resynthesis of `AXI_BayerToRGB_1` (real hardware
      change, not just a constraint), though the resource cost is trivial
      on this device (a few KB of BRAM).
@@ -321,36 +341,37 @@ doing the OV5640-internal-ISP's job, generically, for whatever raw sensor
 feeds it. What lands in DDR is demosaiced RGB (packed 10-bit/channel, per
 §3 point 3), not raw Bayer data — once the gaps below are closed.
 
-**Status update: two of the original three gaps are now closed.** D-PHY
-line rate (§3 point 1) and the Bayer-phase mismatch (§3 point 2) are both
-confirmed, fixed, and re-implemented — see §3 for exactly what changed in
-each. **One new, more urgent gap replaced the third**, and one genuinely
-optional item remains for anyone chasing live HDMI:
+**Status update: all three original gaps are now closed** (D-PHY line
+rate, the Bayer-phase mismatch, and the line-buffer width limit that
+replaced the original third item — see §3 points 1–3 for exactly what
+changed in each). **One genuinely optional item remains for anyone
+chasing live HDMI:**
 
 1. **`AXI_BayerToRGB`'s line-buffer width limit (§3 point 3) — the one
-   that actually gates a correct capture right now, on every path,
-   DDR-only included.** Not something either of the two fixes above
-   could have caught, since it's independent of both timing and phase —
-   the block's line buffer is hard-limited to 2048 pixels wide, and
-   IMX415's native width is 3864. Fix with either a sensor-side crop
-   (register write, no resynthesis) or widening the block's own line
-   buffer to 12-bit addressing (real RTL change, full alternative to the
-   crop) — see §3 point 3 for the exact diff either way. **Do this
-   before judging the two fixes above from a captured frame** — without
-   it, the right ~47% of every line is corrupted regardless of whether
-   the D-PHY timing or Bayer phase is correct, and it's easy to
-   misattribute that corruption to one of those instead.
+   that actually gates a correct capture on every path, DDR-only
+   included. ✅ Fixed, via a sensor-side crop.** Not something either
+   of the other two fixes could have caught, since it's independent of
+   both timing and phase — the block's line buffer is hard-limited to
+   2048 pixels wide, and IMX415's native width is 3864. `IMX415.h` now
+   crops the sensor to 2040×2192 (`IMX415_cfg::CROP_WIDTH`/
+   `PIXEL_ARRAY_HEIGHT`) — see §3 point 3 for the exact register writes,
+   and for the VHDL-widening alternative if you'd rather keep the
+   sensor at full resolution instead. **If you're on an older build of
+   this software without the crop, do this before judging the D-PHY or
+   Bayer-phase fixes from a captured frame** — without it, the right
+   ~47% of every line is corrupted regardless of whether those two are
+   correct, and it's easy to misattribute that corruption to one of
+   them instead.
 2. **Resolution/pixel-clock mismatch — optional, live-HDMI-only, and
-   mostly software once the crop above exists.** The IMX415's native
-   3864×2192 frame doesn't match any entry in `hdmi/VideoOutput.h`'s
-   timing table. But this project's own `timing.xdc` states the real
-   ceiling directly: *"Maximum targeted pixel clock frequency for
-   dynamic video clock generator is 148.5 MHz"* — and `video_dynclk` is
-   explicitly built as a **runtime-reconfigurable** clock generator (DRP-
-   driven, AXI-Lite controlled), not a fixed one. That means once you've
-   picked a resolution within that ceiling (which the ≤2048px-wide crop
-   from point 1 above gets you into range for), none of this needs a
-   Vivado change:
+   mostly software given the crop above.** The now-cropped 2040×2192
+   frame still doesn't match any entry in `hdmi/VideoOutput.h`'s timing
+   table. But this project's own `timing.xdc` states the real ceiling
+   directly: *"Maximum targeted pixel clock frequency for dynamic video
+   clock generator is 148.5 MHz"* — and `video_dynclk` is explicitly
+   built as a **runtime-reconfigurable** clock generator (DRP-driven,
+   AXI-Lite controlled), not a fixed one. That means once you've picked
+   a resolution within that ceiling (2040×2192 already qualifies at
+   modest frame rates), none of this needs a Vivado change:
    * **AXI_VDMA** — `imx415/AXI_VDMA.h`'s `configureRead(h_res, v_res)`/
      `configureWrite(h_res, v_res)` already take frame size as a runtime
      argument. Just call them with the cropped dimensions.
@@ -367,8 +388,9 @@ optional item remains for anyone chasing live HDMI:
    (no HDMI-side code exists here at all), but it's a C++/register-write
    task once you get to it, not a new Vivado design.
 
-Do point 1 first, regardless of whether you ever touch point 2 — it's not
-optional the way point 2 is.
+Point 1 is done in this build; point 2 remains genuinely optional — pursue
+it only if you want live HDMI, and only once you're capturing a correct
+picture in DDR.
 
 ## 5. Wiring & GPIO notes
 
@@ -480,19 +502,19 @@ chip-ID-mismatch message over serial — see §8.
   this software: the D-PHY line rate reconstrained/re-timed for
   720Mbps/lane, and `AXI_BayerToRGB`'s Bayer-phase `case` statement fixed
   for IMX415's actual GBRG output. See §3 points 1–2 for exactly what
-  changed. **One more Vivado-adjacent item is still open and more urgent
-  than either of those two was:** `AXI_BayerToRGB`'s line buffer is
-  hard-limited to 2048px wide, and IMX415's native width (3864px) exceeds
-  it — this corrupts every capture, not just HDMI. See §3 point 3 for the
-  two fix options (sensor-side register crop, or widening the block's own
-  line buffer).
-* **HDMI output not enabled by default** — see §4. Of the original three
-  gaps, two (D-PHY timing, Bayer phase) are now closed. What remains: the
-  line-buffer width limit above (blocks any correct capture, not
-  HDMI-specific), and, only for live preview specifically, matching a
-  chosen resolution's timing/pixel-clock — which turns out to be mostly a
-  runtime software task once the width limit is fixed, bounded by the
-  148.5MHz ceiling this project's own `timing.xdc` documents.
+  changed. **A third, more urgent item — `AXI_BayerToRGB`'s line buffer
+  being hard-limited to 2048px wide against IMX415's 3864px native width
+  — is fixed too, but on the software side of this project, not
+  Vivado:** `IMX415.h` now crops the sensor to 2040px wide before it ever
+  reaches that block. See §3 point 3 for the exact registers, and for
+  the VHDL-widening alternative if you'd rather resynthesize instead of
+  crop.
+* **HDMI output not enabled by default** — see §4. All three original
+  gaps (D-PHY timing, Bayer phase, line-buffer width) are now closed.
+  What remains is optional: matching a chosen resolution's timing/pixel-
+  clock for live preview specifically — mostly a runtime software task
+  given the crop above, bounded by the 148.5MHz ceiling this project's
+  own `timing.xdc` documents.
 * **`IMX415::reset()` doesn't yet drive `CAM_RST` explicitly** — it still
   only toggles the single GPIO inherited from the Pcam 5C/OV5640 driver,
   which may not reach this board's actual reset line at all — see §5. This

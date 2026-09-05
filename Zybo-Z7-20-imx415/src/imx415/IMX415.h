@@ -73,16 +73,21 @@
  *     MIPI Alliance D-PHY spec at that speed) - make sure your D-PHY RX IP
  *     tolerates that if you pick this mode.
  *
- * IMPORTANT: unlike the OV5640, the IMX415 has ONE native readout mode
- * implemented here: a full-pixel-array raw Bayer scan at 3864x2192
- * (RAW10), with WINMODE=0 (all-pixel readout). The sensor hardware itself
- * also supports a window-cropping mode and 2/2-line binning (WINMODE=4h
- * and ADDMODE, per the datasheet) - this driver doesn't implement them
- * (matching the upstream Linux driver's scope), so what you *can* select
- * here is the MIPI lane rate (which changes how fast that same 3864x2192
- * frame can be clocked out, i.e. your achievable frame rate) and the lane
- * count. See README.md for what this means for HDMI preview on the stock
- * hardware platform.
+ * IMPORTANT: unlike the OV5640, the IMX415's full native array is
+ * PIXEL_ARRAY_WIDTH x PIXEL_ARRAY_HEIGHT (3864x2192, RAW10) - but this
+ * driver does NOT run WINMODE=0 (all-pixel readout). It runs WINMODE=4h
+ * (Window Cropping mode), horizontally cropped to CROP_WIDTH x
+ * PIXEL_ARRAY_HEIGHT (2040x2192) via REG_PIX_HST/REG_PIX_HWIDTH. That's
+ * not a resolution choice - it's required, because AXI_BayerToRGB's
+ * line buffer (confirmed from its own VHDL) hard-limits input line width
+ * to 2048px, and the full 3864px native width overflows it, corrupting
+ * every captured frame regardless of lane rate or Bayer-phase
+ * correctness. 2040 is the largest width the sensor's own hardware
+ * constraint (a multiple of 24) allows under that 2048px ceiling. What
+ * you *can* select here is the MIPI lane rate (which changes how fast
+ * that same cropped frame can be clocked out, i.e. your achievable frame
+ * rate) and the lane count. See README.md §3 for the full derivation and
+ * the VHDL-widening alternative to this crop.
  * ---------------------------------------------------------------------------
  */
 
@@ -146,7 +151,9 @@ namespace IMX415_cfg {
 	uint16_t const REG_XMSTA       = 0x3002; // 0=start master streaming, 1=stop
 	uint16_t const REG_BCWAIT_TIME = 0x3008; // 16-bit
 	uint16_t const REG_CPWAIT_TIME = 0x300A; // 16-bit
-	uint16_t const REG_WINMODE     = 0x301C; // 0 = all-pixel readout (only supported mode)
+	uint16_t const REG_WINMODE     = 0x301C; // 0 = all-pixel readout, 4h = window cropping mode (used here - see PIX_HST/PIX_HWIDTH below)
+	uint16_t const REG_PIX_HST     = 0x3040; // 13-bit (0x3040[7:0]+0x3041[4:0]): crop start, horizontal - must be a multiple of 2
+	uint16_t const REG_PIX_HWIDTH  = 0x3042; // 13-bit (0x3042[7:0]+0x3043[4:0]): crop width, horizontal - must be a multiple of 24
 	uint16_t const REG_ADDMODE     = 0x3022; // 0 = no analog binning
 	uint16_t const REG_REVERSE     = 0x3030; // h/v flip
 	uint16_t const REG_ADBIT       = 0x3031; // 0 = RAW10
@@ -188,6 +195,26 @@ namespace IMX415_cfg {
 	uint32_t const PIXEL_ARRAY_VBLANK_MIN = 58;
 	uint32_t const HMAX_MULTIPLIER    = 12;
 
+	// Horizontal window crop - required. AXI_BayerToRGB's line buffer
+	// (confirmed from its own VHDL: LineBuffer.vhd, kLineBufferWidth=>2048,
+	// addressed by an 11-bit counter) hard-limits input line width to
+	// 2048px; the full PIXEL_ARRAY_WIDTH (3864) overflows it, corrupting
+	// every captured frame regardless of D-PHY rate or Bayer-phase
+	// correctness. CROP_WIDTH must be a multiple of 24 (PIX_HWIDTH's
+	// hardware constraint) - 2040 is the largest multiple of 24 that's
+	// <=2048. CROP_HSTART centers the crop (3864-2040=1824, split 912/912;
+	// 912 is already a multiple of 2, PIX_HST's constraint). Vertical is
+	// left uncropped (no equivalent height limit) via PIX_VST/PIX_VWIDTH
+	// simply never being written, so they stay at their reset defaults
+	// (full 2192-line height) - VMAX_DEFAULT below already clears the
+	// datasheet's VMAX >= (PIX_VWIDTH/2)+46 = 2238 restriction for that
+	// case. This width, not PIXEL_ARRAY_WIDTH, is what the sensor actually
+	// streams once REG_WINMODE=4h is applied below - use it, not
+	// PIXEL_ARRAY_WIDTH, anywhere the real per-line data width matters
+	// (e.g. AXI_VDMA's configureRead/configureWrite in main.cc).
+	uint32_t const CROP_HSTART = 912;
+	uint32_t const CROP_WIDTH  = 2040;
+
 	// -------------------------------------------------------------------------
 	// Global init table: documented control registers + Sony's "magic"
 	// undocumented analog/timing tuning registers, applied once regardless of
@@ -196,8 +223,12 @@ namespace IMX415_cfg {
 	// -------------------------------------------------------------------------
 	config_word_t const cfg_init_table_[] =
 	{
-		// all-pixel readout mode, no flip
-		IMX415_REG8(REG_WINMODE, 0x00),
+		// Window Cropping mode (0x04), not all-pixel (0x00) - required by
+		// AXI_BayerToRGB's 2048px line-buffer limit, see CROP_WIDTH above.
+		// No flip.
+		IMX415_REG8(REG_WINMODE, 0x04),
+		IMX415_REG16(REG_PIX_HST,    CROP_HSTART), // 912  (0x0390)
+		IMX415_REG16(REG_PIX_HWIDTH, CROP_WIDTH),  // 2040 (0x07F8)
 		IMX415_REG8(REG_ADDMODE, 0x00),
 		IMX415_REG8(REG_REVERSE, 0x00),
 		// RAW 10-bit mode
