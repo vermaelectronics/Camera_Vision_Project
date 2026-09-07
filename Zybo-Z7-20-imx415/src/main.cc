@@ -49,30 +49,39 @@ using namespace digilent;
 //      HDMI) regardless of how correct fixes #1 and #2 are. Rather than
 //      widening that VHDL (the alternative fix - real RTL change, needs
 //      resynthesis), this version crops the sensor itself down to
-//      IMX415_cfg::CROP_WIDTH (2040px, the largest multiple-of-24 value
-//      that's still <=2048) via IMX415.h's Window Cropping mode
-//      registers (`REG_WINMODE=4h`, `REG_PIX_HST`/`REG_PIX_HWIDTH`) - a
+//      IMX415_cfg::CROP_WIDTH x CROP_HEIGHT (1920x1080) via IMX415.h's
+//      Window Cropping mode registers (`REG_WINMODE=4h`,
+//      `REG_PIX_HST`/`REG_PIX_HWIDTH`/`REG_PIX_VST`/`REG_PIX_VWIDTH`) - a
 //      register-only fix, no Vivado resynthesis needed for this option.
-//      The sensor now streams CROP_WIDTH x PIXEL_ARRAY_HEIGHT (2040x2192),
-//      not the full PIXEL_ARRAY_WIDTH x PIXEL_ARRAY_HEIGHT (3864x2192) -
-//      `configureWrite()` below already reflects this.
+//      The sensor now streams CROP_WIDTH x CROP_HEIGHT (1920x1080), not
+//      the full PIXEL_ARRAY_WIDTH x PIXEL_ARRAY_HEIGHT (3864x2192) -
+//      `configureWrite()` below already reflects this. 1920x1080, not the
+//      2048px-ceiling-maximizing 2040x2192, is a deliberate choice made
+//      together with the HDMI point below - see there for why.
 //
 // Live HDMI preview - now implemented, optional in the sense that nothing
 // above required it, but wired up and on by default here:
-//   The cropped 2040x2192 frame didn't match any entry in
-//   hdmi/VideoOutput.h's timing table, so a new one was added -
-//   Resolution::R2040_2192_24_NP, timed with the VESA CVT standard
-//   formula (verified with the `cvt` reference tool: `cvt 2040 2192 24`)
-//   at 23.96Hz, pixel clock 143.75MHz - under this project's own
-//   `timing.xdc`-documented 148.5MHz ceiling for `video_dynclk`
-//   ("Maximum targeted pixel clock frequency for dynamic video clock
-//   generator is 148.5 MHz"), with ~4.75MHz of margin. 25Hz's CVT timing
-//   for this resolution is already 150MHz, over that ceiling - hence
-//   24Hz, not a rounder-looking 25 or 30.
+//   The cropped frame is exactly 1920x1080, so it uses
+//   Resolution::R1920_1080_60_PP - hdmi/VideoOutput.h's pre-existing,
+//   already-validated standard 1920x1080@60Hz VESA/CEA timing (the same
+//   one the original OV5640-era pipeline used) - not a custom CVT timing.
+//   That's the point of cropping to exactly 1920x1080 rather than the
+//   2048px-ceiling-maximizing 2040x2192: a custom (non-VESA/CEA) timing
+//   is a real, observed risk - some displays reject it outright even with
+//   a mathematically valid signal (confirmed on real hardware: a Dell
+//   monitor rejected the 2040x2192@24Hz custom CVT timing this project
+//   briefly used, with "input timing not supported... use 1920x1080,
+//   60Hz"). Reusing R1920_1080_60_PP sidesteps that entirely - every HDMI
+//   display accepts it. The trade-off: DDR capture is also limited to
+//   1920x1080 this way, since VDMA's write (DDR) and read (HDMI) sides
+//   below use the same crop dimensions. If you want the full 2040x2192
+//   crop back instead (max resolution, custom timing, monitor-dependent),
+//   Resolution::R2040_2192_24_NP is still in VideoOutput.h - see
+//   README.md §4.
 //   `video_dynclk` is a runtime-reconfigurable clock generator (DRP-
 //   driven, via VideoOutput::configure()'s direct XClk_Wiz_WriteReg()
 //   calls - the same mechanism already used for this project's other
-//   three resolutions), and VTC's timing is likewise set at runtime via
+//   resolutions), and VTC's timing is likewise set at runtime via
 //   XVtc_SetGeneratorTiming() - no Vivado/XDC change for either. VDMA's
 //   read side takes its resolution as a runtime argument
 //   (configureRead()) the same way the write side already does.
@@ -96,11 +105,13 @@ void pipeline_mode_change(AXI_VDMA<ScuGicInterruptController>& vdma_driver, IMX4
 	}
 
 	{
-		// CROP_WIDTH (2040), not PIXEL_ARRAY_WIDTH (3864) - the sensor is
-		// configured for a horizontal window crop (IMX415.h, REG_WINMODE=4h)
-		// specifically so this matches what AXI_BayerToRGB's 2048px-limited
-		// line buffer can actually accept. See the header comment above.
-		vdma_driver.configureWrite(IMX415_cfg::CROP_WIDTH, IMX415_cfg::PIXEL_ARRAY_HEIGHT);
+		// CROP_WIDTH x CROP_HEIGHT (1920x1080), not PIXEL_ARRAY_WIDTH x
+		// PIXEL_ARRAY_HEIGHT (3864x2192) - the sensor is configured for a
+		// window crop (IMX415.h, REG_WINMODE=4h) both so this matches what
+		// AXI_BayerToRGB's 2048px-limited line buffer can actually accept,
+		// and so it's exactly the standard 1920x1080 HDMI resolution. See
+		// the header comment above.
+		vdma_driver.configureWrite(IMX415_cfg::CROP_WIDTH, IMX415_cfg::CROP_HEIGHT);
 		Xil_Out32(GAMMA_BASE_ADDR, 3); // Set Gamma correction factor to 1/1.8 (unused without an HDMI/ISP path, harmless to leave configured)
 		// TODO CSI-2 / D-PHY config here.
 		//
@@ -174,20 +185,21 @@ int main()
 	// Output (HDMI) pipeline - brought up once here, not per lane-rate
 	// switch (see pipeline_mode_change()'s header comment for why).
 	// Resolution matches the sensor's cropped capture size exactly -
-	// Resolution::R2040_2192_24_NP, added to hdmi/VideoOutput.h - so VDMA's
-	// read side is configured identically to how its write side already
-	// is, just enabling the second (MM2S) channel on the same frame
-	// buffers.
+	// Resolution::R1920_1080_60_PP, a pre-existing, standard-timing entry
+	// in hdmi/VideoOutput.h (unchanged - no new resolution needed, since
+	// the crop is now exactly 1920x1080) - so VDMA's read side is
+	// configured identically to how its write side already is, just
+	// enabling the second (MM2S) channel on the same frame buffers.
 	{
 		vdma_driver.resetRead();
 		vid.reset();
-		vid.configure(Resolution::R2040_2192_24_NP);
-		vdma_driver.configureRead(IMX415_cfg::CROP_WIDTH, IMX415_cfg::PIXEL_ARRAY_HEIGHT);
+		vid.configure(Resolution::R1920_1080_60_PP);
+		vdma_driver.configureRead(IMX415_cfg::CROP_WIDTH, IMX415_cfg::CROP_HEIGHT);
 		vdma_driver.enableRead();
 		vid.enable();
 	}
 
-	xil_printf("Video init done. Capturing to DDR at 0x%08x and live on HDMI at 2040x2192@24Hz.\r\n", MEM_BASE_ADDR);
+	xil_printf("Video init done. Capturing to DDR at 0x%08x and live on HDMI at 1920x1080@60Hz.\r\n", MEM_BASE_ADDR);
 
 
 	uint8_t read_char0 = 0;
@@ -201,7 +213,7 @@ int main()
 	while (1) {
 		xil_printf("\r\n\r\n\r\nIMX415 MAIN OPTIONS\r\n");
 		xil_printf("\r\nPlease press the key corresponding to the desired option:");
-		xil_printf("\r\n  a. Change MIPI Lane Rate (sensor outputs cropped 2040x2192 RAW10 - see IMX415.h CROP_WIDTH)");
+		xil_printf("\r\n  a. Change MIPI Lane Rate (sensor outputs cropped 1920x1080 RAW10 - see IMX415.h CROP_WIDTH/CROP_HEIGHT)");
 		xil_printf("\r\n  b. Write a Register Inside the Image Sensor");
 		xil_printf("\r\n  c. Read a Register Inside the Image Sensor");
 		xil_printf("\r\n  d. Change Gamma Correction Factor Value\r\n\r\n");

@@ -85,9 +85,10 @@ inconsistency found (in Sony's own document, not in this port).
 | Menu: **d. Change Image Format (Raw or RGB)**, **h. Change AWB Settings** | **removed** | Both were OV5640-internal-ISP features (Bayer→RGB conversion, auto white balance) controlled purely by I2C register writes to the sensor. The IMX415 has no on-sensor ISP, so there's nothing to write — the equivalent functionality (demosaic) now lives in your FPGA's `AXI_BayerToRGB` core instead — see §4. |
 | Menu: **e/f** (write/read sensor register) | kept, renumbered **b/c** | Still very useful for IMX415 bring-up/debug. |
 | Menu: **g** (gamma factor) | kept, renumbered **d** | Drives the FPGA's `AXI_GammaCorrection` core, not the sensor — unrelated to which camera is attached. Same core as before, still directly usable once a real image is flowing through it. |
-| Live HDMI preview wired up in `pipeline_mode_change()` | **Live HDMI preview wired up in `main()`** instead, brought up once rather than inside `pipeline_mode_change()` | Resolution doesn't depend on MIPI lane rate, so it doesn't need re-locking the video clock on every menu-driven mode change. See §4 for the new `Resolution::R2040_2192_24_NP` timing this needed. |
+| Live HDMI preview wired up in `pipeline_mode_change()` | **Live HDMI preview wired up in `main()`** instead, brought up once rather than inside `pipeline_mode_change()` | Resolution doesn't depend on MIPI lane rate, so it doesn't need re-locking the video clock on every menu-driven mode change. See §4 for the resolution/timing this needed — currently the pre-existing standard `Resolution::R1920_1080_60_PP`, after an earlier custom-timing attempt was confirmed rejected by a real display. |
 | `ov5640/PS_IIC.h`, `PS_GPIO.h`, `I2C_Client.h`, `GPIO_Client.h`, `ScuGicInterruptController.h`, `AXI_VDMA.h` | copied to `imx415/` **unchanged**, only the folder moved | Generic Zynq PS peripheral drivers (I2C, GPIO, interrupt controller, VDMA) — not sensor-specific. |
-| `hdmi/VideoOutput.h`, `platform/*`, `lscript.ld`, `Xilinx.spec` | `VideoOutput.h` gained one new `Resolution` entry (§4); the rest unchanged | Generic HDMI-timing / Zynq PS bring-up / linker infrastructure, independent of sensor choice — `VideoOutput.h`'s existing table-driven design just needed a new row for IMX415's non-standard cropped resolution. |
+| `hdmi/VideoOutput.h` | gained one new `Resolution` entry, `R2040_2192_24_NP` (§4) — present but **not currently used** by `main.cc`, which uses the pre-existing `R1920_1080_60_PP` instead | Generic HDMI-timing infrastructure, independent of sensor choice — `VideoOutput.h`'s existing table-driven design needed a new row only for the larger, custom-timing crop option; the current default crop (1920×1080) matches a resolution this file already had. |
+| `platform/*`, `lscript.ld`, `Xilinx.spec` | unchanged | Zynq PS bring-up / linker infrastructure, independent of sensor choice. |
 | `.project` / `.cproject` | renamed to `Zybo-Z7-20-imx415`, cleaned of stale absolute developer paths | — |
 
 ## 2. Where the IMX415 register data comes from (important)
@@ -263,21 +264,35 @@ answer to both is more work than "just check a setting":
    sensor-side crop:**
    * **Sensor-side crop (chosen — no Vivado resynthesis of this
      block):** `IMX415.h` now sets `REG_WINMODE=0x04` (Window Cropping
-     mode, was `0x00`/all-pixel) plus `REG_PIX_HST=912`/
-     `REG_PIX_HWIDTH=2040` (`IMX415_cfg::CROP_HSTART`/`CROP_WIDTH`) —
-     centering a 2040px-wide crop (the largest multiple of 24, the
-     register's own hardware constraint, that's still ≤2048px) in the
-     3864px array. `main.cc`'s `vdma_driver.configureWrite()` was
-     updated to match — it now passes `CROP_WIDTH`, not
-     `PIXEL_ARRAY_WIDTH`, since that's what the sensor actually streams
-     once cropped. `PIXEL_ARRAY_WIDTH` itself is untouched — it still
-     correctly describes the sensor's true physical array size, just no
-     longer what you tell VDMA. Vertical is left uncropped (full
-     2192-line height; `PIX_VST`/`PIX_VWIDTH` are simply never written,
-     staying at their power-on defaults) — there's no equivalent height
-     limit, and the datasheet's `VMAX ≥ (PIX_VWIDTH/2)+46 = 2238`
-     restriction for full height was already satisfied by the existing
-     `VMAX_DEFAULT` (2250) before this change.
+     mode, was `0x00`/all-pixel) plus `REG_PIX_HST=972`/
+     `REG_PIX_HWIDTH=1920` (`IMX415_cfg::CROP_HSTART`/`CROP_WIDTH`) and
+     `REG_PIX_VST=1112`/`REG_PIX_VWIDTH=2160`
+     (`IMX415_cfg::CROP_VSTART`/`CROP_HEIGHT`, ×2 for the register's own
+     Line×2 encoding — see below) — centering a 1920×1080 crop in the
+     3864×2192 array. 1920 is a multiple of 24 (`PIX_HWIDTH`'s hardware
+     constraint) and comfortably under the 2048px line-buffer ceiling
+     (2040 would be the largest multiple of 24 that still clears it, but
+     1920 was chosen instead — see §4 for why: it makes the crop exactly
+     the standard 1920×1080 HDMI resolution). `main.cc`'s
+     `vdma_driver.configureWrite()`/`configureRead()` were updated to
+     match — both now pass `CROP_WIDTH`/`CROP_HEIGHT`, not
+     `PIXEL_ARRAY_WIDTH`/`PIXEL_ARRAY_HEIGHT`, since that's what the
+     sensor actually streams once cropped. `PIXEL_ARRAY_WIDTH`/
+     `PIXEL_ARRAY_HEIGHT` themselves are untouched — they still correctly
+     describe the sensor's true physical array size, just no longer what
+     you tell VDMA.
+     `PIX_VST`/`PIX_VWIDTH` (0x3044/0x3046 — confirmed from the
+     datasheet's own register table, not assumed to mirror
+     `PIX_HST`/`PIX_HWIDTH`'s addressing) encode **Line×2** units, unlike
+     the horizontal pair's plain-pixel encoding — confirmed from their
+     own reset defaults (`PIX_VWIDTH=0x1120=4384`, `4384/2=2192=
+     PIXEL_ARRAY_HEIGHT`). Register value must be a multiple of 4 (i.e.
+     actual line count even); `CROP_VSTART=556`/`CROP_HEIGHT=1080` are
+     both even, satisfying that. The datasheet's `VMAX ≥
+     (PIX_VWIDTH_reg/2)+46 = 1080+46 = 1126` restriction for this crop is
+     comfortably satisfied by the existing `VMAX_DEFAULT` (2250) —
+     unchanged, since this only changes which window is read out, not
+     frame/line timing.
    * **Widen the block itself instead (real RTL change, full
      alternative — not what this driver does, but valid if you'd rather
      keep the sensor at full resolution):** in `LineBuffer.vhd`, widen
@@ -292,9 +307,9 @@ answer to both is more work than "just check a setting":
      in either file changes, and neither file's AXI4-Stream port list
      changes, so nothing upstream or downstream needs touching. If you
      go this route instead, revert `IMX415.h`'s `REG_WINMODE`/
-     `PIX_HST`/`PIX_HWIDTH` writes back to full-array (`WINMODE=0x00`,
-     drop the two new register writes) and change `main.cc` back to
-     `PIXEL_ARRAY_WIDTH`.
+     `PIX_HST`/`PIX_HWIDTH`/`PIX_VST`/`PIX_VWIDTH` writes back to
+     full-array (`WINMODE=0x00`, drop all four new register writes) and
+     change `main.cc` back to `PIXEL_ARRAY_WIDTH`/`PIXEL_ARRAY_HEIGHT`.
      Needs a full resynthesis of `AXI_BayerToRGB_1` (real hardware
      change, not just a constraint), though the resource cost is trivial
      on this device (a few KB of BRAM).
@@ -353,8 +368,8 @@ chasing live HDMI:**
    of the other two fixes could have caught, since it's independent of
    both timing and phase — the block's line buffer is hard-limited to
    2048 pixels wide, and IMX415's native width is 3864. `IMX415.h` now
-   crops the sensor to 2040×2192 (`IMX415_cfg::CROP_WIDTH`/
-   `PIXEL_ARRAY_HEIGHT`) — see §3 point 3 for the exact register writes,
+   crops the sensor to 1920×1080 (`IMX415_cfg::CROP_WIDTH`/
+   `CROP_HEIGHT`) — see §3 point 3 for the exact register writes,
    and for the VHDL-widening alternative if you'd rather keep the
    sensor at full resolution instead. **If you're on an older build of
    this software without the crop, do this before judging the D-PHY or
@@ -363,48 +378,67 @@ chasing live HDMI:**
    correct, and it's easy to misattribute that corruption to one of
    them instead.
 2. **Resolution/pixel-clock mismatch — optional, live-HDMI-only, and now
-   implemented. ✅ Done, entirely in software.** The cropped 2040×2192
-   frame didn't match any entry in `hdmi/VideoOutput.h`'s timing table,
-   so a new one was added: `Resolution::R2040_2192_24_NP`, timed with
-   the VESA CVT standard formula (verified with the `cvt` reference
-   tool — `cvt 2040 2192 24` — not hand-derived) at **23.96Hz, pixel
-   clock 143.75MHz**. This project's own `timing.xdc` states the real
-   ceiling directly: *"Maximum targeted pixel clock frequency for
-   dynamic video clock generator is 148.5 MHz"* — 143.75MHz clears it
-   with ~4.75MHz to spare. (25Hz's CVT timing for this exact resolution
-   is already 150MHz — over the ceiling — which is why this lands on
-   24Hz rather than a rounder-looking 25 or 30.) `video_dynclk` is
-   explicitly built as a **runtime-reconfigurable** clock generator
-   (DRP-driven, AXI-Lite controlled), not a fixed one, so none of this
-   needed a Vivado change:
-   * **AXI_VDMA** — `imx415/AXI_VDMA.h`'s `configureRead(h_res, v_res)`
-     now called with `CROP_WIDTH`/`PIXEL_ARRAY_HEIGHT`, the same pair
-     already used for `configureWrite()`.
-   * **VTC** — new timing (front/back porch, sync widths, polarity) set
-     at runtime via `XVtc_SetGeneratorTiming()` inside
-     `VideoOutput::configure()` — the exact mechanism this file already
-     used for its other three resolutions.
-   * **`video_dynclk`** — new MMCM factors (`mul=14.375`, `divclk=2`,
-     `clkout_div0=1.0`, landing on a 718.75MHz VCO — 5× the 143.75MHz
-     pixel clock, since the MMCM's `CLKOUT0` feeds the DVI serializer
-     at 5× before a BUFR divides it back down) written via
-     `XClk_Wiz_WriteReg()`, the same dynamic-reconfiguration calls
-     `VideoOutput.h` already made for its other three resolutions. The
-     100MHz `video_dynclk` reference input and the 5× relationship were
-     both derived by back-solving the three existing cases, not
-     assumed — see `VideoOutput.h`'s comment on this new case for the
-     arithmetic.
-   * **AXI4S Video Out** (`v_axi4s_vid_out_0`) — turned out to need
-     nothing at all: nothing in this project's original OV5640-era
-     HDMI-working code ever configured it independently of VTC, so
-     there was nothing to add here either.
+   implemented. ✅ Done, entirely in software — and now on a standard
+   timing.** This went through two iterations, worth knowing about if
+   you're comparing against an earlier build or commit:
+   * **First iteration:** the sensor was cropped to 2040×2192 (the
+     largest crop the 2048px line-buffer ceiling allows), which didn't
+     match any entry in `hdmi/VideoOutput.h`'s timing table, so a
+     custom one was added — `Resolution::R2040_2192_24_NP`, timed with
+     the VESA CVT standard formula (`cvt 2040 2192 24`) at 23.96Hz,
+     143.75MHz pixel clock, clearing `video_dynclk`'s documented
+     148.5MHz ceiling with ~4.75MHz to spare.
+   * **Confirmed on real hardware: some displays reject a custom,
+     non-VESA/CEA-standard timing outright**, even though it's
+     mathematically valid and the FPGA-side signal chain works
+     correctly. A Dell monitor connected to this exact board/bitstream
+     showed *"The current input timing is not supported by the monitor
+     display. Please change your input timing to 1920x1080, 60Hz or any
+     other monitor listed timing"* — this is a real, observed risk, not
+     a hypothetical one. (Notably, the monitor read real H/V timing
+     info off the link rather than reporting "no signal" — confirming
+     `video_dynclk`/`VTC`/`rgb2dvi_0` were all working correctly; only
+     the specific timing choice was rejected.)
+   * **Current build: cropped to exactly 1920×1080 instead**, so it
+     uses `Resolution::R1920_1080_60_PP` — a **pre-existing, standard
+     VESA/CEA 1920×1080@60Hz timing** already in `hdmi/VideoOutput.h`
+     (the same one the original OV5640-era pipeline used), not a custom
+     one. This sidesteps the compatibility risk entirely — every HDMI
+     display accepts 1920×1080@60Hz — at the cost of a smaller capture:
+     DDR-buffered frames are also 1920×1080 now (down from 2040×2192),
+     since `main.cc` uses the same crop for VDMA's write (DDR) and read
+     (HDMI) sides. `Resolution::R2040_2192_24_NP` is still present in
+     `VideoOutput.h` if you want to go back to the larger, custom-timing
+     crop (e.g. testing on a more permissive display, or need the
+     resolution and don't need live HDMI).
+   * Either way, `video_dynclk` is explicitly built as a
+     **runtime-reconfigurable** clock generator (DRP-driven, AXI-Lite
+     controlled), not a fixed one, so no Vivado/XDC change was needed
+     for the resolution switch itself:
+     * **AXI_VDMA** — `imx415/AXI_VDMA.h`'s `configureRead(h_res, v_res)`
+       now called with `CROP_WIDTH`/`CROP_HEIGHT`, the same pair used
+       for `configureWrite()`.
+     * **VTC** — timing (front/back porch, sync widths, polarity) set at
+       runtime via `XVtc_SetGeneratorTiming()` inside
+       `VideoOutput::configure()` — for `R1920_1080_60_PP` this is the
+       exact, already-validated case this mechanism ran for the
+       original OV5640-era 1080p HDMI output.
+     * **`video_dynclk`** — for `R1920_1080_60_PP`, this reuses the
+       pre-existing `case 148500000: mul=37.125; divclk=5;
+       clkout_div0=1.0;` MMCM factors (742.5MHz VCO, 5× the 148.5MHz
+       pixel clock) — no new derivation needed, unlike
+       `R2040_2192_24_NP`'s custom 718.75MHz-VCO case (still in
+       `VideoOutput.h`, documented with its own derivation, if you use
+       that resolution instead).
+     * **AXI4S Video Out** (`v_axi4s_vid_out_0`) — needs nothing at all
+       either way: nothing in this project's original OV5640-era
+       HDMI-working code ever configured it independently of VTC.
 
-   A Vivado/XDC change would only be needed to go *above* that
-   148.5MHz ceiling — not the case here. `main()` now brings this up
-   once, right after the first `pipeline_mode_change()` call, rather
-   than inside that function — resolution doesn't depend on MIPI lane
-   rate, so redoing the clock lock on every menu-driven lane-rate
-   switch would be wasteful and could visibly glitch the display.
+   `main()` brings this up once, right after the first
+   `pipeline_mode_change()` call, rather than inside that function —
+   resolution doesn't depend on MIPI lane rate, so redoing the clock
+   lock on every menu-driven lane-rate switch would be wasteful and
+   could visibly glitch the display.
 
 Both points are done in this build.
 
@@ -479,11 +513,11 @@ second EMIO/MIO pin in `PS_GPIO.h`, and drive it (instead of, or alongside,
 ## 7. Using it
 
 On boot the app brings up the sensor at **720 Mbps/lane, 2-lane**, captures
-to DDR at `MEM_BASE_ADDR`, brings up live HDMI at 2040×2192@24Hz, and
+to DDR at `MEM_BASE_ADDR`, brings up live HDMI at 1920×1080@60Hz, and
 prints:
 
 ```
-Video init done. Capturing to DDR at 0x0a000000 and live on HDMI at 2040x2192@24Hz.
+Video init done. Capturing to DDR at 0x0a000000 and live on HDMI at 1920x1080@60Hz.
 ```
 
 Then a serial menu repeats:
@@ -492,15 +526,15 @@ Then a serial menu repeats:
 IMX415 MAIN OPTIONS
 
 Please press the key corresponding to the desired option:
-  a. Change MIPI Lane Rate (sensor always outputs full 3864x2192 RAW10)
+  a. Change MIPI Lane Rate (sensor outputs cropped 1920x1080 RAW10 - see IMX415.h CROP_WIDTH/CROP_HEIGHT)
   b. Write a Register Inside the Image Sensor
   c. Read a Register Inside the Image Sensor
   d. Change Gamma Correction Factor Value
 ```
 
 * **a** → `1` for 720 Mbps/lane or `2` for 1440 Mbps/lane (both 2-lane,
-  both @ this board's confirmed 24MHz INCK, both full 3864×2192 RAW10 —
-  see §2).
+  both @ this board's confirmed 24MHz INCK, both cropped 1920×1080 RAW10 —
+  see §2 for lane-rate details, §3 point 3/§4 for why 1920×1080).
 * **b** / **c** → poke/peek any IMX415 register directly over I2C. Good for
   confirming bring-up: e.g. read `3F12`/`3F13` and check you get `0x514`
   masked with `0xFFF`, or watch `STANDBY` (`3000`) toggle.
@@ -522,16 +556,20 @@ chip-ID-mismatch message over serial — see §8.
   changed. **A third, more urgent item — `AXI_BayerToRGB`'s line buffer
   being hard-limited to 2048px wide against IMX415's 3864px native width
   — is fixed too, but on the software side of this project, not
-  Vivado:** `IMX415.h` now crops the sensor to 2040px wide before it ever
-  reaches that block. See §3 point 3 for the exact registers, and for
-  the VHDL-widening alternative if you'd rather resynthesize instead of
-  crop.
+  Vivado:** `IMX415.h` now crops the sensor to 1920px wide (well under
+  the 2048px limit) before it ever reaches that block. See §3 point 3 for
+  the exact registers, and for the VHDL-widening alternative if you'd
+  rather resynthesize instead of crop.
 * **HDMI output is enabled by default now** — see §4. All three
   original hardware-side gaps (D-PHY timing, Bayer phase, line-buffer
   width) plus the resolution/pixel-clock mismatch are closed. `main()`
-  brings up `Resolution::R2040_2192_24_NP` (2040×2192 @ 23.96Hz,
-  143.75MHz pixel clock) once, right after the sensor/capture side is
-  brought up.
+  brings up `Resolution::R1920_1080_60_PP` (standard 1920×1080@60Hz,
+  148.5MHz pixel clock — the same case the original OV5640-era pipeline
+  used) once, right after the sensor/capture side is brought up. An
+  earlier build used a custom 2040×2192@23.96Hz timing
+  (`Resolution::R2040_2192_24_NP`, still present in `VideoOutput.h` but
+  unused by default) — switched away from after a real display rejected
+  it as an unsupported input timing; see §4.
 * **`IMX415::reset()` doesn't yet drive `CAM_RST` explicitly** — it still
   only toggles the single GPIO inherited from the Pcam 5C/OV5640 driver,
   which may not reach this board's actual reset line at all — see §5. This
@@ -561,8 +599,9 @@ chip-ID-mismatch message over serial — see §8.
 | Chip-ID check passes, but the CSI-2/D-PHY receiver never locks (no image data at all) | If you're on a fresh/unmodified bitstream: this bitstream's only originally-timing-closed rate was 420Mbps/lane against 720/1440Mbps/lane IMX415 modes — see §3 point 1. If you've already reconstrained and re-implemented for 720Mbps/lane (as this project now has) and it still doesn't lock, double-check the `-waveform` argument on `dphy_hs_clock_p` was updated to match the new period, not just the period itself — a stale waveform value doesn't stop the build, but it does make the timing report unreliable. |
 | Image data flows and looks mostly right, but the right ~40-50% of every line is corrupted/repeating/garbled | **This is the `AXI_BayerToRGB` line-buffer width limit from §3 point 3, not a D-PHY or Bayer-phase problem.** The block's line buffer is fixed at 2048px; IMX415's native width is 3864px, so the tail of every line overwrites the buffer addresses its own head just wrote. Fix with a sensor-side crop or the VHDL line-buffer widening — don't chase this as a timing or phase issue, it's neither. |
 | Chip-ID check passes but streaming/timing seems off | Try `REG_SYS_MODE = 0x3034` instead of `0x3033` — see §2's note on the datasheet's internal inconsistency for that one register. |
-| HDMI shows nothing, or a blank/black screen, at 2040×2192@24Hz | Check the monitor actually accepts this exact custom timing — it's not a VESA/CEA standard mode, so some displays/scalers may reject it outright even with a mathematically valid signal. Confirm `video_dynclk` reports lock (`XClk_Wiz_ReadReg(...,0x4) & 0x1`, polled inside `VideoOutput::configure()`) before assuming the timing itself is wrong. |
-| HDMI shows a picture but it's torn, rolling, or mis-timed | Double-check the new `Resolution::R2040_2192_24_NP` row in `hdmi/VideoOutput.h` against this README's §4 values (`h_fp=120, h_sync=208, h_bp=328, v_fp=3, v_sync=10, v_bp=20`) — a transcription slip in any one of those fields will misalign sync relative to active video. |
+| Monitor shows "input timing not supported" / "change to 1920x1080, 60Hz or any other monitor listed timing" | **Confirmed on real hardware** — this is exactly why the default build now uses `Resolution::R1920_1080_60_PP` instead of the custom `R2040_2192_24_NP` timing (see §4). If you're still seeing this on a current build, you're likely still using the custom-timing build/branch — switch `main()`'s `vid.configure(...)` call (and `IMX415.h`'s `CROP_WIDTH`/`CROP_HEIGHT`/`CROP_HSTART`/`CROP_VSTART`) back to the 1920×1080 values. If you *want* the larger custom-timing crop and are seeing this, your specific display just doesn't accept non-standard timings — try a different one, or fall back to DDR-only capture (see the "confirm frames are landing in DDR" row below), which doesn't depend on the monitor at all. |
+| HDMI shows nothing, or a blank/black screen | With the current 1920×1080@60Hz standard timing this would be unusual — check `video_dynclk` reports lock (`XClk_Wiz_ReadReg(...,0x4) & 0x1`, polled inside `VideoOutput::configure()`) and that the HDMI cable/monitor input is actually selected, before suspecting the timing itself. If you've switched to the custom `R2040_2192_24_NP` resolution instead, see the row above first. |
+| HDMI shows a picture but it's torn, rolling, or mis-timed | If you're on the default `Resolution::R1920_1080_60_PP`, this is a pre-existing, previously-validated timing (from the OV5640-era pipeline) — a mis-timing here more likely points at `video_dynclk` not actually locking, or a VDMA read/write frame-buffer race, than a transcription error in the timing table. If you've switched to `Resolution::R2040_2192_24_NP` instead, double-check that row in `hdmi/VideoOutput.h` against this README's §4 values (`h_fp=120, h_sync=208, h_bp=328, v_fp=3, v_sync=10, v_bp=20`) — a transcription slip in any one of those fields will misalign sync relative to active video. |
 | The D-PHY locks and a picture shows on HDMI, but colors look like fine false-color checkerboarding, not a simple tint | The Bayer-phase fix from §3 point 2 (`xor "01"` in `AssignOutputs`) either hasn't been applied yet, or the sensor's crop window has moved off full-array default (the fix assumes pixel (0,0) delivered over MIPI is the sensor's true native (0,0)). |
 | Want to confirm frames are actually landing in DDR | Use a debugger memory view at `MEM_BASE_ADDR` (`DDR_BASE_ADDR + 0x0A000000`) after streaming starts, or add your own readback code — there's no on-screen path yet to eyeball it. Remember the packed 10-bit-per-channel/32-bit-word format from §3 point 3 if you parse it yourself. |
 | Build fails with `'cout' is not a member of 'std'` / `'endl' is not a member of 'std'` in `AXI_VDMA.h`, plus a cascading `make: *** [all] Error 2` | **Pre-existing Digilent bug, already fixed in this tree.** `AXI_VDMA.h`'s four IRQ handlers (`readHandler`/`writeHandler`/`readErrorHandler`/`writeErrorHandler`) use `std::cout`/`std::endl` but the header never included `<iostream>` itself — it only worked before if some other header happened to pull `<iostream>` in first. This project's `main.cc` include chain never does, so it fails outright. Fixed by adding `#include <iostream>` to `AXI_VDMA.h`. If you're seeing this on an older copy of the file (e.g. the original OV5640/pcam-5c project, which has the same bug), add that one include line and it goes away — it's not related to D-PHY/Bayer/crop/HDMI at all. |
