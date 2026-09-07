@@ -631,6 +631,144 @@ for DDR-captured frames (not live HDMI), the same gray-world/white-patch
 correction math can instead be applied in software after reading the
 raw buffer out of DDR — no hardware change needed for that path.
 
+### Concrete hardware pipeline changes, if you want either
+
+Neither of these is done — both are real Vivado work, specified here to
+the same level of detail as the fixes already implemented this project,
+so there's a concrete starting point if you decide to pursue one.
+
+**1. Wider field of view — widen `AXI_BayerToRGB`'s line buffer**
+
+Already the documented alternative to this project's sensor-side crop
+(§3 point 3) — restated here as the "hardware pipeline change" this
+specific question is about:
+
+* `LineBuffer.vhd`: widen `pWriteAddr`/`pReadAddr` from
+  `STD_LOGIC_VECTOR(10 downto 0)` to `(11 downto 0)`; bump the generic
+  default from `2048` to `4096`.
+* `AXI_BayerToRGB.vhd`: widen `sCntColumns`, `sLineBufferWriteAddr`,
+  `sLineBufferReadAddr`, `sLineBufferCrntAddr` from 11 to 12 bits;
+  change `LineBufferInst`'s `generic map(kLineBufferWidth => 2048)` to
+  `4096`. Leave `sCntLines` alone (only its bit-0 parity is read,
+  correct through overflow at any width).
+* Nothing else in either file changes, and neither file's AXI4-Stream
+  port list changes — **no rewiring in the block diagram, no new
+  block, no new AXI-Lite address** — just this one IP's internals.
+  4096 is comfortably past IMX415's full 3864px native width, so
+  `IMX415.h`'s crop could then go all the way back to `WINMODE=0x00`
+  (all-pixel readout) — full native field of view, no crop needed at
+  all (though you'd then need a *different* HDMI timing again, since
+  3864×2192 isn't standard either — see the `R2040_2192_24_NP`
+  precedent in §4 for how to derive one, or keep a smaller crop for a
+  standard timing while still gaining real margin over today's 1920px).
+* Resource cost is trivial on this device (a few KB more BRAM for the
+  doubled buffer). Resynthesize `AXI_BayerToRGB_1`, re-implement,
+  **export a new `.xsa`**, re-associate the Vitis platform project
+  with it (§6).
+
+**2. Real color correction — new AXI-Stream gain block**
+
+Not started; this is a genuinely new IP, not a modification of an
+existing one, so it needs both new RTL and new block-diagram wiring:
+
+* **Position**: insert between `AXI_BayerToRGB_1` and
+  `AXI_GammaCorrection_0` — white balance belongs in the *linear*
+  domain, before gamma's nonlinear tone curve, matching standard ISP
+  ordering.
+* **Data interface**: identical to what already connects those two
+  blocks — an AXI4-Stream, 32-bit `TDATA` packed exactly as
+  `AXI_BayerToRGB` already outputs it (`[29:20]`=Red 10-bit,
+  `[19:10]`=Blue 10-bit, `[9:0]`=Green 10-bit, per §3 point 4) — so
+  this new block is a pure passthrough format-wise: unpack, multiply,
+  saturate, repack, forward `TVALID`/`TREADY`/`TLAST` unchanged. No
+  line buffer needed here at all (unlike `AXI_BayerToRGB`) — it's a
+  per-pixel, single-cycle operation, so it doesn't reintroduce any
+  line-width ceiling.
+* **Control interface**: AXI4-Lite slave, same pattern as
+  `AXI_GammaCorrection_0`'s. Minimum viable register map — 3 writable
+  32-bit registers, one per channel gain, fixed-point (e.g. Q2.8:
+  8 fractional bits, default `0x100` = 1.0×, giving a 0–4× range):
+  `0x00` = Red gain, `0x04` = Green gain (usually left at 1.0× as the
+  reference channel), `0x08` = Blue gain. Correct gain values can't be
+  guessed blind — they need at least one captured frame's actual
+  average R/G/B levels (classic gray-world: `gain_R = avg_G/avg_R`,
+  `gain_B = avg_G/avg_B`) or a white/gray reference object in frame.
+* **VHDL skeleton** (structurally complete; adapt signal names to
+  match this project's actual `AXI_BayerToRGB_1`/`AXI_GammaCorrection_0`
+  port names, which aren't in front of me to copy verbatim):
+
+  ```vhdl
+  entity AXI_WhiteBalance is
+    generic (
+      C_S_AXIS_TDATA_WIDTH : integer := 32;
+      C_M_AXIS_TDATA_WIDTH : integer := 32;
+      C_S_AXI_DATA_WIDTH   : integer := 32;
+      C_S_AXI_ADDR_WIDTH   : integer := 4  -- 3 registers -> 2 bits needed, 4 is a safe/common default
+    );
+    port (
+      -- AXI4-Stream slave (from AXI_BayerToRGB)
+      s_axis_aclk    : in  std_logic;
+      s_axis_aresetn : in  std_logic;
+      s_axis_tvalid  : in  std_logic;
+      s_axis_tready  : out std_logic;
+      s_axis_tdata   : in  std_logic_vector(C_S_AXIS_TDATA_WIDTH-1 downto 0);
+      s_axis_tlast   : in  std_logic;
+      -- AXI4-Stream master (to AXI_GammaCorrection)
+      m_axis_tvalid  : out std_logic;
+      m_axis_tready  : in  std_logic;
+      m_axis_tdata   : out std_logic_vector(C_M_AXIS_TDATA_WIDTH-1 downto 0);
+      m_axis_tlast   : out std_logic;
+      -- AXI4-Lite slave (gain registers)
+      s_axi_aclk     : in  std_logic;
+      s_axi_aresetn  : in  std_logic;
+      s_axi_awaddr   : in  std_logic_vector(C_S_AXI_ADDR_WIDTH-1 downto 0);
+      s_axi_awvalid  : in  std_logic;
+      s_axi_awready  : out std_logic;
+      s_axi_wdata    : in  std_logic_vector(C_S_AXI_DATA_WIDTH-1 downto 0);
+      s_axi_wvalid   : in  std_logic;
+      s_axi_wready   : out std_logic;
+      s_axi_bresp    : out std_logic_vector(1 downto 0);
+      s_axi_bvalid   : out std_logic;
+      s_axi_bready   : in  std_logic;
+      s_axi_araddr   : in  std_logic_vector(C_S_AXI_ADDR_WIDTH-1 downto 0);
+      s_axi_arvalid  : in  std_logic;
+      s_axi_arready  : out std_logic;
+      s_axi_rdata    : out std_logic_vector(C_S_AXI_DATA_WIDTH-1 downto 0);
+      s_axi_rresp    : out std_logic_vector(1 downto 0);
+      s_axi_rvalid   : out std_logic;
+      s_axi_rready   : in  std_logic
+    );
+  end entity;
+  -- Architecture: three Q2.8 unsigned multiplies (gain_reg * channel,
+  -- >>8 to rescale, clamp to 10 bits/0x3FF), one register stage so
+  -- TVALID/TREADY handshake stays combinational-safe. Trivial LUT/DSP
+  -- cost - three 18x10 multiplies at most.
+  ```
+
+  Vivado's **Tools → Create and Package New IP** wizard generates the
+  AXI4-Lite slave boilerplate (address decode, `awready`/`wready`/
+  `bvalid`/etc. state machine) automatically if you start from its
+  "AXI4 peripheral" template — you'd only need to write the 3-register
+  read/write logic and the actual multiply/clamp/repack datapath by
+  hand, not the whole AXI4-Lite protocol machinery.
+* **Block-diagram wiring** (beyond just adding the IP): its AXI4-Lite
+  slave port needs a master port on `ps7_0_axi_periph` to connect
+  to — check that interconnect's current master-port count first;
+  adding a 7th peripheral where it was generated for 6 means
+  regenerating `ps7_0_axi_periph` itself with one more master port,
+  not just dropping the new IP in. After wiring, run Vivado's
+  **Address Editor** to assign the new AXI-Lite slave a base address
+  (becomes a new `XPAR_..._BASEADDR` in `xparameters.h` on the next
+  `.xsa` export) — same mechanism `GAMMA_BASE_ADDR` already uses in
+  `main.cc`.
+* **Software side**, once that's done: a 3-line `Xil_Out32()` driver
+  (identical pattern to how `main.cc` already drives
+  `GAMMA_BASE_ADDR`) plus a new menu option to adjust gains live,
+  mirroring option `d`'s structure.
+* Resynthesize the whole design (new block + widened interconnect),
+  implement, **export a new `.xsa`**, re-associate the Vitis platform
+  project with it (§6).
+
 ## 8. Known limitations / explicitly out of scope here
 
 * **No FPGA/bitstream changes made by this Vitis project itself** — but
