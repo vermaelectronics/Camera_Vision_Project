@@ -664,6 +664,38 @@ public:
 	// conversion must happen downstream (in the FPGA fabric or in software),
 	// not on the sensor itself.
 
+	// Pan the CROP_WIDTH x CROP_HEIGHT capture window around within the
+	// full PIXEL_ARRAY_WIDTH x PIXEL_ARRAY_HEIGHT sensor array, without
+	// changing its size - i.e. moves which part of the sensor's field of
+	// view you see, not how much of it (that's fixed by AXI_BayerToRGB's
+	// 2048px line-buffer limit - see CROP_WIDTH's comment). This is NOT
+	// optical/electronic zoom - there's no way to widen the field of view
+	// back out from software; only the VHDL line-buffer widening
+	// alternative (see README.md §3 point 3) can do that, and that's a
+	// real hardware change.
+	//
+	// Safe to call while streaming: the datasheet's own register table
+	// lists PIX_HST/PIX_VST/PIX_HWIDTH/PIX_VWIDTH's "Reflection timing"
+	// as "V" - the sensor latches a new value at the next vertical
+	// blanking interval itself, no standby/restart needed on this end.
+	Errc setCropOrigin(uint32_t hstart, uint32_t vstart)
+	{
+		// Same alignment rules as the fixed CROP_HSTART/CROP_VSTART
+		// defaults (see their comment): HST a multiple of 2, VST's
+		// register a multiple of 4 (i.e. VST itself even, before the x2
+		// Line-unit encoding). Bounds: the window can't run past the
+		// sensor's true physical edges.
+		if ((hstart % 2) != 0) return ERR_LOGICAL;
+		if ((vstart % 2) != 0) return ERR_LOGICAL;
+		if (hstart + IMX415_cfg::CROP_WIDTH > IMX415_cfg::PIXEL_ARRAY_WIDTH) return ERR_LOGICAL;
+		if (vstart + IMX415_cfg::CROP_HEIGHT > IMX415_cfg::PIXEL_ARRAY_HEIGHT) return ERR_LOGICAL;
+
+		writeReg16(IMX415_cfg::REG_PIX_HST, hstart);
+		writeReg16(IMX415_cfg::REG_PIX_VST, vstart * 2); // Line x2 encoding - see REG_PIX_VST's comment
+
+		return OK;
+	}
+
 	~IMX415() { }
 
 	void readReg(uint16_t reg_addr, uint8_t& buf)

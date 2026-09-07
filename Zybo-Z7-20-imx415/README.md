@@ -536,6 +536,7 @@ Please press the key corresponding to the desired option:
   b. Write a Register Inside the Image Sensor
   c. Read a Register Inside the Image Sensor
   d. Change Gamma Correction Factor Value
+  e. Pan Capture Window (moves field of view - not zoom, see below)
 ```
 
 * **a** → `1` for 720 Mbps/lane or `2` for 1440 Mbps/lane (both 2-lane,
@@ -548,9 +549,87 @@ Please press the key corresponding to the desired option:
   into whatever `AXI_BayerToRGB` demosaics — see §4 for what's still
   unconfirmed about that path (Bayer phase, resolution/timing) before it
   produces a full live picture.
+* **e** → interactive `w`/`a`/`s`/`d` pan control (`r` recenters, `x`
+  exits) that moves the fixed 1920×1080 capture window around within
+  the sensor's full 3864×2192 array, live, no restart needed
+  (`IMX415::setCropOrigin()` — the datasheet lists `PIX_HST`/`PIX_VST`'s
+  reflection timing as "V", meaning the sensor itself latches a new
+  value at the next frame). **This is panning, not zooming** — the
+  window *size* is fixed by `AXI_BayerToRGB`'s 2048px line-buffer limit
+  (§3 point 3), so this only changes *which* ~50%-width/~49%-height
+  slice of the sensor's field of view you're looking at, not how
+  magnified it looks. See "Why the image looks zoomed in" below for
+  the real fix if you want a wider field of view instead.
 
 A `HardwareError` thrown from `init()`/`set_mode()` prints an I2C-NACK or
 chip-ID-mismatch message over serial — see §8.
+
+### Why the image looks zoomed in
+
+**Expected, not a bug.** The sensor's native array is 3864×2192; this
+project crops it to 1920×1080 (§3 point 3, §4) — roughly half the width
+and half the height. Whatever the lens projects onto the full sensor,
+you're only reading out the center ~50%×~49% of it, so the displayed
+image is magnified by roughly **2.0× horizontally, 2.0× vertically**
+relative to the sensor's true field of view. This isn't optical or
+electronic zoom (no lens movement, no scaling) — it's simply a smaller
+window read out at native resolution.
+
+* **Pan around within that ~2× window**: menu option `e` above — free,
+  live, no hardware change.
+* **A real wider field of view (less magnification)**: needs the crop
+  window itself to be wider than `AXI_BayerToRGB`'s 2048px line-buffer
+  ceiling can accept — the only way there is the VHDL line-buffer
+  widening documented as the alternative fix in §3 point 3
+  (`LineBuffer.vhd`/`AXI_BayerToRGB.vhd`, widening `kLineBufferWidth`
+  from 2048 to e.g. 4096 and the addressing signals from 11 to 12
+  bits). **This is a real hardware change** — real RTL edits,
+  resynthesis, a new bitstream, and a new `.xsa` re-exported and
+  re-associated with the Vitis platform project. Software alone cannot
+  get you a wider field of view than this project's current 1920px (or
+  even the line-buffer-maximizing 2040px) crop allows.
+* Physically moving the camera back, or a wider-FOV lens if your module
+  supports swapping it, are the non-electronic alternatives — this
+  project has no optical zoom/focus control (§5, fixed M12 lens).
+
+### Why the image has a violet/magenta color cast
+
+**Also expected, not a new bug** — and actually a good sign about
+everything else: a real, spatially coherent image (not fine
+checkerboard noise) confirms the D-PHY line-rate fix and the
+Bayer-phase fix (§3 points 1–2) are both working correctly. A phase
+error looks like per-pixel false-color noise, not a smooth, uniform
+tint across a recognizable picture.
+
+The tint itself is because **this pipeline has no white balance
+anywhere** — not on the sensor (`IMX415.h` says so explicitly: *"the
+IMX415 has no internal ISP - it always outputs raw Bayer data. AWB/
+gain/format conversion must happen downstream... not on the sensor
+itself"*), and not in the FPGA fabric either: `AXI_BayerToRGB` only
+demosaics (converts the Bayer pattern to RGB, one color sample per
+pixel instead of one color per pixel-position), and `AXI_GammaCorrection`
+only applies a single shared nonlinear gamma curve (menu option `d`) —
+neither does the simple per-channel (R/G/B) linear gain multiplication
+that real white balance needs. Raw demosaiced Bayer data with unequal
+R/G/B channel sensitivity (from the sensor's color filter array
+response, scene lighting, or lack of an IR-cut filter) reads out looking
+tinted exactly like this — it's the expected appearance of "no ISP
+anywhere," which was true of this design from the start.
+
+**To actually correct it, in the live HDMI path, needs new FPGA hardware
+— there's no software/register lever for it in the current pipeline**:
+neither the sensor nor any existing block exposes independent R/G/B
+gain. A real fix means adding a new AWB/color-correction IP block (3
+multiplier coefficients, one per channel, applied after
+`AXI_BayerToRGB` and before `AXI_GammaCorrection` or `AXI_VDMA`) —
+**a real hardware change**: new IP, new connections in the block
+design, resynthesis, new bitstream, new `.xsa`. That's a genuine
+departure from this project's "no new block needed" finding so far
+(§"Why no new block" in the signal-path review) — worth deciding
+deliberately rather than adding speculatively. If you only need this
+for DDR-captured frames (not live HDMI), the same gray-world/white-patch
+correction math can instead be applied in software after reading the
+raw buffer out of DDR — no hardware change needed for that path.
 
 ## 8. Known limitations / explicitly out of scope here
 
@@ -605,6 +684,8 @@ chip-ID-mismatch message over serial — see §8.
 | Program used to abort entirely (`terminate called after throwing...`) on a failed chip-ID check, with no way to poke registers afterward to dig further — **no scope/multimeter handy for the `TP3` probe above** | **Fixed — there's now a degraded diagnostic mode for exactly this.** `IMX415`'s constructor no longer calls `init()` itself (moved to `pipeline_mode_change()`, which already called it), so a failed chip-ID check no longer prevents `cam` from existing. `main()` now catches `HardwareError` around both call sites (initial boot, and the menu's lane-rate option `a`), prints which kind it was (`WRONG_ID` vs `IIC_NACK`) plus the message, skips capture/HDMI bring-up, and **still reaches the interactive menu** — so options `b`/`c` (write/read any sensor register directly) work even on a failed boot. Useful next step if you're stuck at `WRONG_ID: got 0x000` with no way to probe hardware: try reading a few *other* registers (e.g. `3000` = `REG_MODE`, which `init()` itself last wrote to `01`/standby before the exception) via option `c`. If every register you try reads back `0x000`/`0xFFF` too, that's consistent with a sensor that's genuinely not there or fully unresponsive; if some read back plausible values and only `3F12`/`3F13` (`SENSOR_INFO`) look wrong, that points at an addressing quirk specific to that register instead (similar in spirit to the already-documented `SYS_MODE` 0x3033/0x3034 datasheet inconsistency — worth trying alternate documented addresses for `SENSOR_INFO` too, if this comes up). |
 | Chip-ID check passes, but the CSI-2/D-PHY receiver never locks (no image data at all) | If you're on a fresh/unmodified bitstream: this bitstream's only originally-timing-closed rate was 420Mbps/lane against 720/1440Mbps/lane IMX415 modes — see §3 point 1. If you've already reconstrained and re-implemented for 720Mbps/lane (as this project now has) and it still doesn't lock, double-check the `-waveform` argument on `dphy_hs_clock_p` was updated to match the new period, not just the period itself — a stale waveform value doesn't stop the build, but it does make the timing report unreliable. |
 | Image data flows and looks mostly right, but the right ~40-50% of every line is corrupted/repeating/garbled | **This is the `AXI_BayerToRGB` line-buffer width limit from §3 point 3, not a D-PHY or Bayer-phase problem.** The block's line buffer is fixed at 2048px; IMX415's native width is 3864px, so the tail of every line overwrites the buffer addresses its own head just wrote. Fix with a sensor-side crop or the VHDL line-buffer widening — don't chase this as a timing or phase issue, it's neither. |
+| A real, coherent (not checkerboard-noisy) picture shows on HDMI, but it looks zoomed in / magnified vs. what the lens actually sees | **Expected** — see §7 "Why the image looks zoomed in". Use menu option `e` to pan within the current field of view; a genuinely wider field of view needs the VHDL line-buffer widening (real hardware change, new `.xsa`), not a software fix. |
+| The picture is spatially correct (real shapes/edges/detail, not checkerboarding) but has a strong violet/magenta/other color cast | **Expected — actually good news about the Bayer-phase fix (§3 point 2), which is what a checkerboard artifact would look like instead.** See §7 "Why the image has a violet/magenta color cast". This pipeline has no white balance anywhere (sensor or fabric) — fixing it live needs a new FPGA AWB block (real hardware change, new `.xsa`); DDR-captured frames can be corrected in software post-processing instead, no hardware change needed. |
 | Chip-ID check passes but streaming/timing seems off | Try `REG_SYS_MODE = 0x3034` instead of `0x3033` — see §2's note on the datasheet's internal inconsistency for that one register. |
 | Monitor shows "input timing not supported" / "change to 1920x1080, 60Hz or any other monitor listed timing" | **Confirmed on real hardware** — this is exactly why the default build now uses `Resolution::R1920_1080_60_PP` instead of the custom `R2040_2192_24_NP` timing (see §4). If you're still seeing this on a current build, you're likely still using the custom-timing build/branch — switch `main()`'s `vid.configure(...)` call (and `IMX415.h`'s `CROP_WIDTH`/`CROP_HEIGHT`/`CROP_HSTART`/`CROP_VSTART`) back to the 1920×1080 values. If you *want* the larger custom-timing crop and are seeing this, your specific display just doesn't accept non-standard timings — try a different one, or fall back to DDR-only capture (see the "confirm frames are landing in DDR" row below), which doesn't depend on the monitor at all. |
 | HDMI shows nothing, or a blank/black screen | With the current 1920×1080@60Hz standard timing this would be unusual — check `video_dynclk` reports lock (`XClk_Wiz_ReadReg(...,0x4) & 0x1`, polled inside `VideoOutput::configure()`) and that the HDMI cable/monitor input is actually selected, before suspecting the timing itself. If you've switched to the custom `R2040_2192_24_NP` resolution instead, see the row above first. |

@@ -252,7 +252,8 @@ int main()
 		xil_printf("\r\n  a. Change MIPI Lane Rate (sensor outputs cropped 1920x1080 RAW10 - see IMX415.h CROP_WIDTH/CROP_HEIGHT)");
 		xil_printf("\r\n  b. Write a Register Inside the Image Sensor");
 		xil_printf("\r\n  c. Read a Register Inside the Image Sensor");
-		xil_printf("\r\n  d. Change Gamma Correction Factor Value\r\n\r\n");
+		xil_printf("\r\n  d. Change Gamma Correction Factor Value");
+		xil_printf("\r\n  e. Pan Capture Window (moves field of view - not zoom, see README.md)\r\n\r\n");
 
 		read_char0 = getchar();
 		getchar();
@@ -453,6 +454,46 @@ int main()
 				xil_printf("  Selection is outside the available options! Please retry...\r\n");
 			}
 			break;
+
+		case 'e':
+		{
+			// Pan the fixed 1920x1080 capture window around within the
+			// sensor's full 3864x2192 array. This is NOT zoom - the
+			// window size (field of view) is fixed by AXI_BayerToRGB's
+			// 2048px line-buffer limit (see IMX415.h's CROP_WIDTH
+			// comment); this only changes which part of that array you
+			// see, same as panning a fixed crop around a larger photo.
+			// Safe to do live - IMX415::setCropOrigin() writes registers
+			// the datasheet documents as taking effect at the next frame
+			// (Reflection timing "V"), no restart needed.
+			uint32_t const HSTEP = 96, VSTEP = 54; // ~5% of the window per step, both alignment-valid
+			uint32_t hpos = IMX415_cfg::CROP_HSTART, vpos = IMX415_cfg::CROP_VSTART;
+			xil_printf("\r\n  Pan controls: w=up  s=down  a=left  d=right  r=recenter  x=exit\r\n");
+			bool panning = true;
+			while (panning)
+			{
+				xil_printf("  [h=%u v=%u] > ", hpos, vpos);
+				uint8_t k = getchar();
+				getchar();
+				bool moved = false;
+				switch (k)
+				{
+				case 'a': if (hpos >= HSTEP) { hpos -= HSTEP; moved = true; } break;
+				case 'd': if (hpos + HSTEP + IMX415_cfg::CROP_WIDTH <= IMX415_cfg::PIXEL_ARRAY_WIDTH) { hpos += HSTEP; moved = true; } break;
+				case 'w': if (vpos >= VSTEP) { vpos -= VSTEP; moved = true; } break;
+				case 's': if (vpos + VSTEP + IMX415_cfg::CROP_HEIGHT <= IMX415_cfg::PIXEL_ARRAY_HEIGHT) { vpos += VSTEP; moved = true; } break;
+				case 'r': hpos = IMX415_cfg::CROP_HSTART; vpos = IMX415_cfg::CROP_VSTART; moved = true; break;
+				case 'x': panning = false; break;
+				default: xil_printf("\r\n  (unrecognized - use w/a/s/d/r/x)\r\n"); break;
+				}
+				if (moved && cam.setCropOrigin(hpos, vpos) != OK)
+				{
+					xil_printf("\r\n  Rejected (alignment/bounds) - not applied.\r\n");
+				}
+			}
+			xil_printf("\r\n  Pan window left at h=%u v=%u.\r\n", hpos, vpos);
+			break;
+		}
 
 		default:
 			xil_printf("  Selection is outside the available options! Please retry...\r\n");
