@@ -500,7 +500,20 @@ public:
 		iic_(iic), gpio_(gpio)
 	{
 		reset();
-		init();
+		// init() deliberately NOT called here (it used to be) - it's the
+		// one call in this class that can throw HardwareError, and a
+		// throwing constructor means the object never exists, so a failed
+		// chip-ID check used to take the whole program down before
+		// main() could even construct a valid `cam` to poke registers
+		// with for diagnosis. pipeline_mode_change() (main.cc) already
+		// calls init() as part of its normal sequence immediately after
+		// construction, so behavior on a successful boot is unchanged -
+		// this only matters when init() fails: `cam` now still exists,
+		// readReg()/writeReg() are still fully usable (they only need
+		// iic_/dev_address_, set above unconditionally), just whatever
+		// chip-ID-dependent state init() would have set up isn't there.
+		// See main.cc's try/catch around its first pipeline_mode_change()
+		// call.
 	}
 
 	void init()

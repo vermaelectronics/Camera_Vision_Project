@@ -94,6 +94,17 @@ using namespace digilent;
 // switch, since resolution doesn't depend on MIPI lane rate and
 // re-locking the video clock on every menu-driven mode change would be
 // wasteful (and could visibly glitch the display) for no reason.
+//
+// Degraded-mode bring-up: this function's cam.init() can throw
+// IMX415::HardwareError (chip-ID mismatch or I2C NACK - a real,
+// currently-open bring-up issue on some boards, see README.md §5/§9).
+// Both call sites in main() below (initial boot, and the menu's lane-rate
+// option) catch that rather than letting it escape uncaught - IMX415's
+// constructor no longer calls init() itself (see IMX415.h) specifically
+// so `cam` still exists and its readReg()/writeReg() remain usable for
+// manual register poking (menu options 'b'/'c') even when this call
+// fails, instead of the whole program aborting before the menu is ever
+// reached.
 void pipeline_mode_change(AXI_VDMA<ScuGicInterruptController>& vdma_driver, IMX415& cam, IMX415_cfg::mode_t mode)
 {
 	//Bring up input (capture) pipeline back-to-front
@@ -180,26 +191,51 @@ int main()
 			VDMA_S2MM_IRPT_ID);
 	VideoOutput vid(XPAR_VTC_0_DEVICE_ID, XPAR_VIDEO_DYNCLK_DEVICE_ID);
 
-	pipeline_mode_change(vdma_driver, cam, IMX415_cfg::mode_t::MODE_2LANE_720MBPS);
-
-	// Output (HDMI) pipeline - brought up once here, not per lane-rate
-	// switch (see pipeline_mode_change()'s header comment for why).
-	// Resolution matches the sensor's cropped capture size exactly -
-	// Resolution::R1920_1080_60_PP, a pre-existing, standard-timing entry
-	// in hdmi/VideoOutput.h (unchanged - no new resolution needed, since
-	// the crop is now exactly 1920x1080) - so VDMA's read side is
-	// configured identically to how its write side already is, just
-	// enabling the second (MM2S) channel on the same frame buffers.
+	// Sensor bring-up can fail (chip-ID mismatch, I2C NACK - see IMX415.h's
+	// reset()/init() comments and README.md §5/§9). This used to be an
+	// uncaught exception that aborted the whole program before main()
+	// ever reached the interactive menu, which meant a failed boot gave
+	// you nothing to work with for diagnosis - not even the 'b'/'c'
+	// register poke commands. Caught here instead: `cam` still exists
+	// (its constructor no longer calls init() - see IMX415.h), so
+	// readReg()/writeReg() work regardless, and the menu still comes up.
+	// Capture/HDMI bring-up is skipped in that case, since it depends on
+	// a sensor that isn't actually configured.
+	bool sensor_ok = true;
+	try
 	{
-		vdma_driver.resetRead();
-		vid.reset();
-		vid.configure(Resolution::R1920_1080_60_PP);
-		vdma_driver.configureRead(IMX415_cfg::CROP_WIDTH, IMX415_cfg::CROP_HEIGHT);
-		vdma_driver.enableRead();
-		vid.enable();
+		pipeline_mode_change(vdma_driver, cam, IMX415_cfg::mode_t::MODE_2LANE_720MBPS);
+	}
+	catch (IMX415::HardwareError const& e)
+	{
+		sensor_ok = false;
+		xil_printf("\r\n*** Sensor init FAILED (%s): %s\r\n",
+				e.errc() == IMX415::HardwareError::WRONG_ID ? "WRONG_ID" : "IIC_NACK", e.what());
+		xil_printf("*** Continuing to the menu in DEGRADED mode - capture/HDMI are NOT running.\r\n");
+		xil_printf("*** Use 'b'/'c' below to read/write sensor registers directly for diagnosis.\r\n");
 	}
 
-	xil_printf("Video init done. Capturing to DDR at 0x%08x and live on HDMI at 1920x1080@60Hz.\r\n", MEM_BASE_ADDR);
+	if (sensor_ok)
+	{
+		// Output (HDMI) pipeline - brought up once here, not per lane-rate
+		// switch (see pipeline_mode_change()'s header comment for why).
+		// Resolution matches the sensor's cropped capture size exactly -
+		// Resolution::R1920_1080_60_PP, a pre-existing, standard-timing entry
+		// in hdmi/VideoOutput.h (unchanged - no new resolution needed, since
+		// the crop is now exactly 1920x1080) - so VDMA's read side is
+		// configured identically to how its write side already is, just
+		// enabling the second (MM2S) channel on the same frame buffers.
+		{
+			vdma_driver.resetRead();
+			vid.reset();
+			vid.configure(Resolution::R1920_1080_60_PP);
+			vdma_driver.configureRead(IMX415_cfg::CROP_WIDTH, IMX415_cfg::CROP_HEIGHT);
+			vdma_driver.enableRead();
+			vid.enable();
+		}
+
+		xil_printf("Video init done. Capturing to DDR at 0x%08x and live on HDMI at 1920x1080@60Hz.\r\n", MEM_BASE_ADDR);
+	}
 
 
 	uint8_t read_char0 = 0;
@@ -233,12 +269,23 @@ int main()
 			xil_printf("\r\nRead: %d", read_char1);
 			switch(read_char1) {
 			case '1':
-				pipeline_mode_change(vdma_driver, cam, IMX415_cfg::mode_t::MODE_2LANE_720MBPS);
-				xil_printf("Lane rate change done.\r\n");
-				break;
 			case '2':
-				pipeline_mode_change(vdma_driver, cam, IMX415_cfg::mode_t::MODE_2LANE_1440MBPS);
-				xil_printf("Lane rate change done.\r\n");
+				// Caught for the same reason as the initial boot call in
+				// main() above - a failed chip-ID check here shouldn't
+				// take the whole program down, just report it and drop
+				// back to the menu ('b'/'c' still work either way).
+				try
+				{
+					pipeline_mode_change(vdma_driver, cam,
+							read_char1 == '1' ? IMX415_cfg::mode_t::MODE_2LANE_720MBPS
+							                  : IMX415_cfg::mode_t::MODE_2LANE_1440MBPS);
+					xil_printf("Lane rate change done.\r\n");
+				}
+				catch (IMX415::HardwareError const& e)
+				{
+					xil_printf("\r\n*** Lane rate change FAILED (%s): %s\r\n",
+							e.errc() == IMX415::HardwareError::WRONG_ID ? "WRONG_ID" : "IIC_NACK", e.what());
+				}
 				break;
 			default:
 				xil_printf("\r\n  Selection is outside the available options! Please retry...");
