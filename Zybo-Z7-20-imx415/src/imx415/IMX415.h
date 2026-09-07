@@ -616,42 +616,47 @@ public:
 
 	void readReg(uint16_t reg_addr, uint8_t& buf)
 	{
-		for (auto retry_count = retry_count_; retry_count > 0; --retry_count)
+		// NOTE: retry_count here counts the attempt just made, not attempts
+		// remaining - `attempt == retry_count_` is true only on the last
+		// allowed try, which is when a failure should actually propagate.
+		// (A previous version checked `retry_count > 0` INSIDE the catch,
+		// which is always true there - the for-loop's own guard already
+		// guarantees it - so that throw was unreachable dead code: a
+		// totally unresponsive I2C bus would silently exhaust all retries
+		// and return with `buf` untouched, instead of ever raising
+		// IIC_NACK. That silently made a dead bus look identical to a
+		// live sensor reporting a genuinely-zero register.)
+		for (auto attempt = 1u; attempt <= retry_count_; ++attempt)
 		{
 			try
 			{
 				auto buf_addr = std::vector<uint8_t>{(uint8_t)(reg_addr>>8), (uint8_t)reg_addr};
 				iic_.write(dev_address_, buf_addr.data(), buf_addr.size());
 				iic_.read(dev_address_, &buf, 1);
-				break; //If no exceptions, no more retries
+				return; //Success, no more retries
 			}
 			catch (I2C_Client::TransmitError const& e)
 			{
-				if (retry_count > 0)
-				{
-					continue;
-				}
-				else
-				{
-					throw HardwareError(HardwareError::IIC_NACK, e.what());
-				}
+				if (attempt < retry_count_) continue;
+				else throw HardwareError(HardwareError::IIC_NACK, e.what());
 			}
 		}
 	}
 
 	void writeReg(uint16_t reg_addr, uint8_t const reg_data)
 	{
-		for (auto retry_count = retry_count_; retry_count > 0; --retry_count)
+		// See readReg()'s comment above - same fix, same reasoning.
+		for (auto attempt = 1u; attempt <= retry_count_; ++attempt)
 		{
 			try
 			{
 				auto buf = std::vector<uint8_t>{(uint8_t)(reg_addr>>8), (uint8_t)reg_addr, reg_data};
 				iic_.write(dev_address_, buf.data(), buf.size());
-				break; //If no exceptions, no more retries
+				return; //Success, no more retries
 			}
 			catch (I2C_Client::TransmitError const& e)
 			{
-				if (retry_count > 0) continue;
+				if (attempt < retry_count_) continue;
 				else throw HardwareError(HardwareError::IIC_NACK, e.what());
 			}
 		}
