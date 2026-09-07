@@ -10,6 +10,10 @@
 
 #include <stdexcept>
 #include <functional>
+#include <iostream>	// std::cout/std::endl, used in the IRQ handlers below -
+					// pre-existing Digilent code never included this itself;
+					// only worked before if some other header happened to
+					// pull in <iostream> first. See README.md.
 
 #include "xaxivdma.h"
 
