@@ -191,6 +191,27 @@ int main()
 			VDMA_S2MM_IRPT_ID);
 	VideoOutput vid(XPAR_VTC_0_DEVICE_ID, XPAR_VIDEO_DYNCLK_DEVICE_ID);
 
+	// Output (HDMI) pipeline bring-up, factored out to a lambda so it can
+	// run either right after a successful initial boot (below) OR later,
+	// if the sensor initially failed (degraded mode) but a subsequent
+	// menu-driven lane-rate change (option 'a') succeeds - see sensor_ok's
+	// comment below. Resolution matches the sensor's cropped capture size
+	// exactly - Resolution::R1920_1080_60_PP, a pre-existing, standard-
+	// timing entry in hdmi/VideoOutput.h (unchanged - no new resolution
+	// needed, since the crop is exactly 1920x1080) - so VDMA's read side
+	// is configured identically to how its write side already is, just
+	// enabling the second (MM2S) channel on the same frame buffers.
+	auto bring_up_hdmi = [&]()
+	{
+		vdma_driver.resetRead();
+		vid.reset();
+		vid.configure(Resolution::R1920_1080_60_PP);
+		vdma_driver.configureRead(IMX415_cfg::CROP_WIDTH, IMX415_cfg::CROP_HEIGHT);
+		vdma_driver.enableRead();
+		vid.enable();
+		xil_printf("Video init done. Capturing to DDR at 0x%08x and live on HDMI at 1920x1080@60Hz.\r\n", MEM_BASE_ADDR);
+	};
+
 	// Sensor bring-up can fail (chip-ID mismatch, I2C NACK - see IMX415.h's
 	// reset()/init() comments and README.md §5/§9). This used to be an
 	// uncaught exception that aborted the whole program before main()
@@ -200,7 +221,11 @@ int main()
 	// (its constructor no longer calls init() - see IMX415.h), so
 	// readReg()/writeReg() work regardless, and the menu still comes up.
 	// Capture/HDMI bring-up is skipped in that case, since it depends on
-	// a sensor that isn't actually configured.
+	// a sensor that isn't actually configured - confirmed on real
+	// hardware to be genuinely intermittent (WRONG_ID at boot, then a
+	// later menu-driven attempt passing), so sensor_ok is tracked across
+	// the whole of main(), not just at boot: see case 'a' below, which
+	// calls bring_up_hdmi() if a later attempt recovers from this state.
 	bool sensor_ok = true;
 	try
 	{
@@ -212,29 +237,13 @@ int main()
 		xil_printf("\r\n*** Sensor init FAILED (%s): %s\r\n",
 				e.errc() == IMX415::HardwareError::WRONG_ID ? "WRONG_ID" : "IIC_NACK", e.what());
 		xil_printf("*** Continuing to the menu in DEGRADED mode - capture/HDMI are NOT running.\r\n");
-		xil_printf("*** Use 'b'/'c' below to read/write sensor registers directly for diagnosis.\r\n");
+		xil_printf("*** Use 'b'/'c' below to read/write sensor registers directly for diagnosis, or\r\n");
+		xil_printf("*** retry via 'a' - if a later attempt succeeds, HDMI/capture will start then.\r\n");
 	}
 
 	if (sensor_ok)
 	{
-		// Output (HDMI) pipeline - brought up once here, not per lane-rate
-		// switch (see pipeline_mode_change()'s header comment for why).
-		// Resolution matches the sensor's cropped capture size exactly -
-		// Resolution::R1920_1080_60_PP, a pre-existing, standard-timing entry
-		// in hdmi/VideoOutput.h (unchanged - no new resolution needed, since
-		// the crop is now exactly 1920x1080) - so VDMA's read side is
-		// configured identically to how its write side already is, just
-		// enabling the second (MM2S) channel on the same frame buffers.
-		{
-			vdma_driver.resetRead();
-			vid.reset();
-			vid.configure(Resolution::R1920_1080_60_PP);
-			vdma_driver.configureRead(IMX415_cfg::CROP_WIDTH, IMX415_cfg::CROP_HEIGHT);
-			vdma_driver.enableRead();
-			vid.enable();
-		}
-
-		xil_printf("Video init done. Capturing to DDR at 0x%08x and live on HDMI at 1920x1080@60Hz.\r\n", MEM_BASE_ADDR);
+		bring_up_hdmi();
 	}
 
 
@@ -281,9 +290,21 @@ int main()
 							read_char1 == '1' ? IMX415_cfg::mode_t::MODE_2LANE_720MBPS
 							                  : IMX415_cfg::mode_t::MODE_2LANE_1440MBPS);
 					xil_printf("Lane rate change done.\r\n");
+					// Recovering from degraded mode (see main()'s header
+					// comment on sensor_ok): this succeeded where the
+					// initial boot didn't, so HDMI/capture were never
+					// brought up - do that now instead of leaving them
+					// off for the rest of this run.
+					if (!sensor_ok)
+					{
+						sensor_ok = true;
+						xil_printf("*** Sensor recovered - bringing up capture/HDMI now.\r\n");
+						bring_up_hdmi();
+					}
 				}
 				catch (IMX415::HardwareError const& e)
 				{
+					sensor_ok = false;
 					xil_printf("\r\n*** Lane rate change FAILED (%s): %s\r\n",
 							e.errc() == IMX415::HardwareError::WRONG_ID ? "WRONG_ID" : "IIC_NACK", e.what());
 				}
