@@ -89,26 +89,18 @@ vivado -mode batch -source design_1_v_demosaic_0_0/prj/impl/ip/run_ippack.tcl
 wraps the same two steps as a reusable command (`<path-to-run_ippack.tcl>
 [--repackage]`), for scripting or for a different HLS IP's generated file.
 
-### Root-cause option (edits the Xilinx install, not this repo)
+### Root-cause option — ruled out on this install
 
-The template that computes the timestamp lives somewhere under the Vitis
-HLS installation itself — for this machine, confirmed at
-`/mnt/xilinx/tools/Xilinx/Vitis_HLS/2021.1` (from `vitis_hls.log`: `source
-.../Vitis_HLS/2021.1/scripts/vitis_hls/hls.tcl`, and `run_ippack.tcl`
-itself sources `.../Vitis_HLS/2021.1/common/scripts/ipxhls.tcl` at the
-end of packaging). Locate the exact file with:
+Checked and ruled out: on this machine's install
+(`/mnt/xilinx/tools/Xilinx/Vitis_HLS/2021.1`),
 
 ```bash
 grep -RIl 'set Revision' /mnt/xilinx/tools/Xilinx/Vitis_HLS/2021.1 2>/dev/null
-grep -RIl 'clock format' /mnt/xilinx/tools/Xilinx/Vitis_HLS/2021.1/common/scripts 2>/dev/null
 ```
 
-If found and writable, changing that one `set Revision [clock format ...]`
-line to a small fixed integer (e.g. `set Revision 0`) fixes every HLS IP
-export for every project built with this install, permanently — no
-per-project script needed. Caveats: it's a change to vendor-shipped files
-(likely on a shared/read-only mount at `/mnt/xilinx`, given the path), so
-it may not be writable without elevated access, and it's lost on
-reinstall/upgrade. If it's not writable or the logic turns out to be
-compiled in rather than plain Tcl, `scripts/build_hls_ip.sh` above is the
-fix to actually rely on.
+returns nothing. The timestamp-generating logic is not in an editable
+plain-text Tcl file anywhere in the install — it's compiled into the
+`vitis_hls` binary or a protected/bytecode Tcl backend, so there is no
+vendor file to patch here. `scripts/build_hls_ip.sh` above is the fix to
+rely on; there is no simpler root-cause edit available for this Vitis HLS
+2021.1 install.
