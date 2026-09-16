@@ -58,13 +58,20 @@ if {![file exists [file join $gnss_ip_repo gnss_passthrough component.xml]]} {
 }
 # Normally the custom IP already sits inside the ADI library directory that
 # adi_project_create put on ip_repo_paths, so there is nothing to add. Append it
-# only if it is somewhere else, and always rebuild: a plain update_ip_catalog
+# only if it is somewhere else, and always rescan: a plain update_ip_catalog
 # does not reliably scan a repository added after the catalog was first built.
+#
+# This point in the flow is already inside create_bd_design "system" (see
+# adi_project_create), so a full "-rebuild" is refused by Vivado with
+# "CRITICAL WARNING: [Ipptcl 7-1614] Cannot update IP catalog while a BD
+# design is open" and silently skips the scan, leaving gnss_passthrough
+# unresolved. "-repo_path" scans only the new repo instead of forcing a full
+# catalog rebuild, and is not subject to that restriction.
 set gnss_repo_paths [get_property ip_repo_paths [current_fileset]]
 if {[lsearch -exact $gnss_repo_paths $gnss_ip_repo] < 0} {
   set_property ip_repo_paths [concat $gnss_repo_paths $gnss_ip_repo] [current_fileset]
 }
-update_ip_catalog -rebuild
+update_ip_catalog -repo_path $gnss_ip_repo
 
 # Fail here, where the cause is, rather than later where only the symptom shows.
 set gnss_ipdef [get_ipdefs -all -quiet -filter \
