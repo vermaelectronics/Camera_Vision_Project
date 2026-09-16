@@ -1,0 +1,73 @@
+{
+  "_README": [
+    "PER-MACHINE SETTINGS -- NOT PART OF THE PORTABLE PROJECT (requirement 70).",
+    "",
+    "Copy this file to  Source/Config/local.settings.json  and edit it for YOUR PC.",
+    "The scripts create that copy automatically on first run if it is missing.",
+    "",
+    "local.settings.json must never be included in a release package or handed to",
+    "another developer: it contains paths and port numbers that are only correct on",
+    "one machine. Everything portable belongs in board_e310_v1.json instead.",
+    "",
+    "Leave a value as null or \"\" to let the scripts auto-detect it."
+  ],
+
+  "toolchain": {
+    "_comment": "Set install_root to the directory that CONTAINS Vivado\\bin\\vivado.bat. Leave null to auto-detect via PATH, environment variables, Start Menu shortcuts and the usual install roots.",
+    "install_root": null,
+    "_example": "C:/AMDDesignTools/2026.1",
+    "_detected_on_the_setup_machine": "C:/AMDDesignTools/2026.1 (Vivado 2026.1, Vitis 2026.1)"
+  },
+
+  "build": {
+    "_comment": "Parallel jobs for synthesis and implementation. Match your CPU, not the machine this template came from.",
+    "jobs": 4,
+    "_comment_version_override": "The upstream ADI scripts demand Vivado 2021.1 and abort otherwise. Build_All.ps1 sets REQUIRED_VIVADO_VERSION to the detected version so the check passes. Set force_required_version to pin a different string if you deliberately want the original behaviour.",
+    "force_required_version": null
+  },
+
+  "jtag": {
+    "_comment": "Leave hw_server_url null to start a local hw_server. Set target_filter only if more than one device is on the chain; run HardwareTests/JTAG/Detect-JtagChain.ps1 first to see what is actually connected.",
+    "hw_server_url": null,
+    "_hw_server_url_example": "TCP:localhost:3121",
+    "target_filter": null,
+    "_target_filter_example": "*xc7z020*",
+    "expected_idcode": null,
+    "_expected_idcode_note": "Fill this in from a real Detect-JtagChain.ps1 run against your board. Do not copy a value from documentation."
+  },
+
+  "uart": {
+    "_comment": "E310 V1 console is PS UART1 on MIO 12/13 at 921600 baud (from the vendor firmware). The COM number is whatever Windows assigns on YOUR machine -- run HardwareTests/UART/Detect-ComPorts.ps1 to find it.",
+    "port": null,
+    "_port_example": "COM7",
+    "baud": 921600,
+    "data_bits": 8,
+    "parity": "None",
+    "stop_bits": 1,
+    "flow_control": "None"
+  },
+
+  "gnss_receiver": {
+    "_comment": "The external GNSS module used to validate the retransmitted signal (requirements 53, 56). Its COM port is separate from the E310 console port.",
+    "com_port": null,
+    "baud": 9600,
+    "model": null,
+    "viewer_software": null
+  },
+
+  "rf_test": {
+    "_comment": [
+      "SAFETY-RELEVANT. Requirements 54 and 55: initial GNSS validation is a",
+      "CONDUCTED test over coax with attenuation, not an over-the-air",
+      "retransmission. Record the real attenuator value actually fitted.",
+      "",
+      "These are null on purpose. Nothing in this project computes a safe TX",
+      "power for you, and no script will transmit until they are filled in."
+    ],
+    "attenuation_db": null,
+    "tx_attenuation_setting_db": null,
+    "confirmed_conducted_path": false,
+    "confirmed_by": null,
+    "confirmed_on": null
+  }
+}
