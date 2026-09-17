@@ -270,7 +270,14 @@ try {
   # --------------------------------------------------------------------------
   if ($FromStage -le 2) {
     Write-Stage 2 "Preparing a disposable copy of the ADI HDL vendor tree"
-    $adiSource = Join-Path $Root 'Vendor/ADI_hdl_2026_r1_update'
+    # MicroPhase_E310_V1/hdl, not ADI_hdl_2026_r1_update: this is the exact
+    # tree system_bd.tcl's MOD-0/MOD-1/MOD-2 changes were diffed against, and
+    # it is the one whose adi_board.tcl correctly instantiates "xlconstant"
+    # for GND/VCC ties. ADI_hdl_2026_r1_update's adi_board.tcl instead calls
+    # "ad_ip_instance ilconstant", which is not a real IP anywhere in that
+    # tree or in Vivado's own catalog, and fails create_project.tcl the first
+    # time a block design connects a pin to a literal GND/VCC.
+    $adiSource = Join-Path $Root 'Vendor/MicroPhase_E310_V1/hdl'
     if (-not (Test-Path $adiSource)) {
       throw "Vendor tree not found: $adiSource"
     }
