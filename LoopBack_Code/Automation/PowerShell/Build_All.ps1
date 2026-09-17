@@ -311,6 +311,25 @@ try {
         Write-Host "  Copying $sub ..."
         Copy-Item -Path $srcSub -Destination $dstSub -Recurse -Force
       }
+
+      # MicroPhase_E310_V1/hdl predates auto_timing_fix_xilinx.tcl - it is a
+      # newer ADI addition (this project's own note: "a workaround for Vivado
+      # 2024.x/2025.x hold timing issues") that create_project.tcl requires
+      # unconditionally for its AD9361/Zynq-7000 timing-closure aids. It is
+      # self-contained (no further sources), so overlay it from the newer
+      # tree rather than losing that timing-closure help by skipping it.
+      $timingFixName = 'auto_timing_fix_xilinx.tcl'
+      $timingFixDst = Join-Path $VendorWorkHdl "projects/scripts/$timingFixName"
+      if (-not (Test-Path $timingFixDst)) {
+        $timingFixSrc = Join-Path $Root "Vendor/ADI_hdl_2026_r1_update/projects/scripts/$timingFixName"
+        if (Test-Path $timingFixSrc) {
+          Write-Host "  Overlaying $timingFixName from Vendor/ADI_hdl_2026_r1_update (absent from MicroPhase_E310_V1/hdl)"
+          Copy-Item -Path $timingFixSrc -Destination $timingFixDst -Force
+        } else {
+          throw "Neither vendor tree has $timingFixName; create_project.tcl requires it. Looked in: $timingFixSrc"
+        }
+      }
+
       Write-Host "  Vendor working copy ready: $VendorWorkHdl"
     }
   } else {
