@@ -293,7 +293,18 @@ try {
     } else {
       foreach ($sub in @('library', 'scripts', 'projects/scripts')) {
         $srcSub = Join-Path $adiSource $sub
-        if (-not (Test-Path $srcSub)) { throw "Expected vendor subtree missing: $srcSub" }
+        if (-not (Test-Path $srcSub)) {
+          if ($sub -eq 'scripts') {
+            # MicroPhase_E310_V1/hdl (unlike newer ADI HDL layouts) has no
+            # top-level scripts/adi_env.tcl - only library/scripts/ and
+            # projects/scripts/ copies. create_project.tcl already falls back
+            # to projects/scripts/adi_env.tcl when this is absent, so skip
+            # rather than fail.
+            Write-Host "  (no top-level $sub/ in this vendor tree - OK, projects/scripts/adi_env.tcl covers it)"
+            continue
+          }
+          throw "Expected vendor subtree missing: $srcSub"
+        }
         $dstSub = Join-Path $VendorWorkHdl $sub
         $dstParent = Split-Path $dstSub -Parent
         New-Item -ItemType Directory -Force -Path $dstParent | Out-Null
