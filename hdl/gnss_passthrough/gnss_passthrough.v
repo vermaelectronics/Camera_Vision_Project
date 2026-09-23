@@ -79,7 +79,19 @@ module gnss_passthrough #(
   // this fix; tb_gnss_passthrough.v now asserts alpha_reg tracks a
   // non-default write so this class of bug can't hide behind a testbench
   // that only ever wrote back the reset value.
-  localparam [31:0] CORE_VERSION = 32'h00010003;   // v1.3 -- CRPA alpha now actually live
+  // v1.4 -- adds the NORMALIZED power-inversion core (pi_power_inversion_normalized.v,
+  // Eq. 13 of the paper) as a runtime-selectable ALTERNATIVE to the standard
+  // core, not a replacement: CONTROL[4]=0 (the reset default) selects the
+  // standard core, exactly the already-verified v1.3 behavior, unchanged.
+  // CONTROL[4]=1 selects the normalized core instead. Both cores run
+  // continuously and adapt together whenever pass_en=1 regardless of which
+  // one is selected -- only the OUTPUT mux changes, so switching modes at
+  // runtime is bumpless (the newly-selected core is not starting cold) and
+  // reset/pass_en behavior is identical for both. CRPA_COEF(1) (previously
+  // reserved, unconsumed like CRPA_COEF(0) was before v1.3) now carries the
+  // normalized core's gamma (Eq. 13's regulariser), same CDC pattern as
+  // alpha, same continuously-loaded fix (no write-strobe to get wrong).
+  localparam [31:0] CORE_VERSION = 32'h00010004;   // v1.4 -- adds selectable normalized CRPA core
   localparam        AW           = FIFO_ADDR_WIDTH;
 
   // ==========================================================================
@@ -201,7 +213,9 @@ module gnss_passthrough #(
   // ==========================================================================
   (* ASYNC_REG = "TRUE" *) reg [8:0] ctrl_meta = 9'd0;
   (* ASYNC_REG = "TRUE" *) reg [8:0] ctrl_sync = 9'd0;
-  wire [8:0] ctrl_raw = {reg_control[8], 4'b0000, reg_control[3:0]};
+  // v1.4: bit 4 (previously one of the unused 4'b0000 padding bits) now
+  // carries the normalized-vs-standard CRPA mode select.
+  wire [8:0] ctrl_raw = {reg_control[8], 3'b000, reg_control[4], reg_control[3:0]};
 
   always @(posedge clk) begin
     ctrl_meta <= ctrl_raw;
@@ -212,6 +226,7 @@ module gnss_passthrough #(
   wire mute      = ctrl_sync[1];
   wire swap_iq   = ctrl_sync[2];
   wire ch1_copy  = ctrl_sync[3];
+  wire crpa_mode_normalized = ctrl_sync[4];   // 0 = standard core (default), 1 = normalized
   wire cnt_clear = ctrl_sync[8];
 
   // ==========================================================================
@@ -224,6 +239,26 @@ module gnss_passthrough #(
   always @(posedge clk) begin
     crpa_alpha_meta <= crpa_coef[0][15:0];
     crpa_alpha_sync <= crpa_alpha_meta;
+  end
+
+  // ==========================================================================
+  //  CDC: CRPA_COEF[1] (gamma, v1.4) s_axi_aclk -> clk, identical pattern to
+  //  alpha above -- continuously loaded every cycle, no write-strobe, so
+  //  there is no enable line left to hardwire wrong the way alpha's was in
+  //  v1.2 (see CORE_VERSION's history above). Feeds the normalized core's
+  //  regulariser (Eq. 13's gamma > 0); CRPA_GAMMA_W is wider than the 32-bit
+  //  AXI register, so this only zero-extends -- software can still supply
+  //  any value up to 2^32-1, far more range than a regularisation floor
+  //  needs.
+  // ==========================================================================
+  localparam integer CRPA_GAMMA_W = 2*16 + 2 + 2;   // matches pi_power_inversion_normalized's
+                                                     // own POW_W/GAMMA_W derivation for
+                                                     // DATA_W=16, M=2: 2*DATA_W+clog2(2*M)+2
+  (* ASYNC_REG = "TRUE" *) reg [CRPA_GAMMA_W-1:0] crpa_gamma_meta = {{(CRPA_GAMMA_W-1){1'b0}}, 1'b1};   // gamma=1
+  (* ASYNC_REG = "TRUE" *) reg [CRPA_GAMMA_W-1:0] crpa_gamma_sync = {{(CRPA_GAMMA_W-1){1'b0}}, 1'b1};
+  always @(posedge clk) begin
+    crpa_gamma_meta <= {{(CRPA_GAMMA_W-32){1'b0}}, crpa_coef[1]};
+    crpa_gamma_sync <= crpa_gamma_meta;
   end
 
   // ==========================================================================
@@ -278,6 +313,13 @@ module gnss_passthrough #(
   //  Alpha comes from CRPA_COEF[0] (previously reserved, unconsumed).
   //  Adaptation runs only while pass_en=1, matching how every other stage
   //  in this file is already gated on pass_en.
+  //
+  //  v1.4: a SECOND core (pi_power_inversion_normalized, Eq. 13) runs in
+  //  parallel, fed the identical sample stream and reset/enable, gamma from
+  //  CRPA_COEF[1]. CONTROL[4] (crpa_mode_normalized) selects which core's
+  //  s_re/s_im/s_valid actually reach the saturate-and-output stage below;
+  //  the other keeps running and adapting unselected, which is what makes
+  //  switching modes bumpless rather than a cold restart.
   // ==========================================================================
   localparam integer CRPA_DATA_W      = 16;
   localparam integer CRPA_WEIGHT_W    = 32;
@@ -289,10 +331,18 @@ module gnss_passthrough #(
   // SUM_GROWTH = clog2(2) = 1, S_W = PROD1_W + SUM_GROWTH.
   localparam integer CRPA_S_W         = CRPA_DATA_W + CRPA_WEIGHT_W + 2;
 
-  wire signed [CRPA_S_W-1:0] crpa_s_re, crpa_s_im;
-  wire                       crpa_s_valid;
-  wire [2*CRPA_WEIGHT_W-1:0] crpa_w_re, crpa_w_im;
-  wire                       crpa_weights_valid;
+  wire signed [CRPA_S_W-1:0] crpa_s_re_std, crpa_s_im_std;
+  wire                       crpa_s_valid_std;
+  wire [2*CRPA_WEIGHT_W-1:0] crpa_w_re_std, crpa_w_im_std;
+  wire                       crpa_weights_valid_std;
+
+  wire signed [CRPA_S_W-1:0] crpa_s_re_norm, crpa_s_im_norm;
+  wire                       crpa_s_valid_norm;
+  wire [2*CRPA_WEIGHT_W-1:0] crpa_w_re_norm, crpa_w_im_norm;
+  wire                       crpa_weights_valid_norm;
+  wire [32:0]                crpa_alpha_mag_norm;         // diagnostic only, not read back yet
+  wire                       crpa_alpha_mag_valid_norm;
+
   wire                       crpa_aresetn = ~rst & pass_en;
 
   // All four RX strobes together -- both elements must be sampled in lockstep
@@ -327,13 +377,50 @@ module gnss_passthrough #(
       // have avoided and this doesn't.
       .alpha_wr      (1'b1),
       .adapt_en      (pass_en),
-      .s_re          (crpa_s_re),
-      .s_im          (crpa_s_im),
-      .s_valid       (crpa_s_valid),
-      .w_re          (crpa_w_re),
-      .w_im          (crpa_w_im),
-      .weights_valid (crpa_weights_valid)
+      .s_re          (crpa_s_re_std),
+      .s_im          (crpa_s_im_std),
+      .s_valid       (crpa_s_valid_std),
+      .w_re          (crpa_w_re_std),
+      .w_im          (crpa_w_im_std),
+      .weights_valid (crpa_weights_valid_std)
   );
+
+  pi_power_inversion_normalized #(
+      .M           (2),
+      .DATA_W      (CRPA_DATA_W),
+      .WEIGHT_W    (CRPA_WEIGHT_W),
+      .WEIGHT_FRAC (CRPA_WEIGHT_FRAC),
+      .LPF_SHIFT   (CRPA_LPF_SHIFT)
+      // Q_FRAC, ALPHA_GAIN_SHIFT, GAMMA_INIT left at their module defaults
+      // (32, 17, 1) -- the same values tb_pi_power_inversion_normalized.v
+      // verified converge correctly at this project's amp=100 calibration
+      // point. See that module's header for the honest amplitude-
+      // generalisation caveat before assuming this holds at every signal
+      // scale this board might see.
+  ) u_crpa_core_normalized (
+      .clk            (clk),
+      .aresetn        (crpa_aresetn),
+      .x_re           ({adc_data_i1[CRPA_DATA_W-1:0], adc_data_i0[CRPA_DATA_W-1:0]}),
+      .x_im           ({adc_data_q1[CRPA_DATA_W-1:0], adc_data_q0[CRPA_DATA_W-1:0]}),
+      .sample_valid   (crpa_sample_valid),
+      .gamma_in       (crpa_gamma_sync[CRPA_GAMMA_W-1:0]),
+      .adapt_en       (pass_en),
+      .s_re           (crpa_s_re_norm),
+      .s_im           (crpa_s_im_norm),
+      .s_valid        (crpa_s_valid_norm),
+      .w_re           (crpa_w_re_norm),
+      .w_im           (crpa_w_im_norm),
+      .weights_valid  (crpa_weights_valid_norm),
+      .alpha_mag      (crpa_alpha_mag_norm),
+      .alpha_mag_valid(crpa_alpha_mag_valid_norm)
+  );
+
+  // ---- output mux: CONTROL[4] selects which core's result actually
+  //      reaches the DAC. Both cores keep running and adapting either way
+  //      (see the v1.4 comment above) -- only this selection changes. ----
+  wire signed [CRPA_S_W-1:0] crpa_s_re    = crpa_mode_normalized ? crpa_s_re_norm    : crpa_s_re_std;
+  wire signed [CRPA_S_W-1:0] crpa_s_im    = crpa_mode_normalized ? crpa_s_im_norm    : crpa_s_im_std;
+  wire                       crpa_s_valid = crpa_mode_normalized ? crpa_s_valid_norm : crpa_s_valid_std;
 
   // Round-to-nearest, saturate to the 12-bit signed range this file's RX
   // format actually carries -- combinational, so the saturated value is
