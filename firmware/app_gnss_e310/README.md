@@ -74,6 +74,19 @@ This patch:
   model); it has not been run against a real interferer on hardware, and that
   distinction is called out explicitly rather than overclaimed.
 
+## Second bug, found the same way: `%u`/`%lu` print nothing in this console
+
+Confirmed live on hardware after the alpha_wr fix above: `gnss_crpa_alpha=1.0`
+printed `GNSS_CRPA_ALPHA: set to 1.0000 (raw=)` -- the raw value missing
+entirely. `console.c`'s `console_print()` is not real `printf`; it's a
+hand-rolled formatter whose `switch` only implements `%c`/`%s`/`%d`/`%x`/`%f`.
+There is no `%u` case, so it silently consumes nothing and prints nothing;
+`%lu` is worse -- the unhandled `l` falls through, and the following `u` gets
+emitted as a literal character, garbling whatever text follows it too. Fixed
+by switching to `%d` (which this formatter reads as a `long`), matching every
+other command in `command.c` (e.g. `get_gnss_tx`'s `(long)pass_en` pattern) --
+this file's own convention was the correct one from the start.
+
 ## Known gap, called out rather than hidden
 
 There is no AXI-Lite readback of the core's actual nulling weights or output
