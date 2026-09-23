@@ -65,47 +65,80 @@ module probe_mode_select;
     repeat(5) @(posedge s_axi_aclk); s_axi_aresetn = 1;
     repeat(5) @(posedge s_axi_aclk);
 
-    $display("BEFORE any CONTROL write: crpa_mode_normalized=%b (expect 0)", dut.crpa_mode_normalized);
-    if (dut.crpa_mode_normalized !== 1'b0) begin
-      $display("FAIL: mode select is not 0 by default"); errors = errors + 1;
+    $display("BEFORE any CONTROL write: crpa_mode=%b (expect 00)", dut.crpa_mode);
+    if (dut.crpa_mode !== 2'b00) begin
+      $display("FAIL: mode select is not 00 by default"); errors = errors + 1;
     end
 
-    // pass_en=1, mode bit (CONTROL[4]) still 0 -> standard core selected
+    // pass_en=1, mode=00 -> standard core selected
     axil_write(16'h000C, 32'h0000_0001);
     repeat(5) @(posedge clk);
     if (dut.crpa_s_re !== dut.crpa_s_re_std) begin
-      $display("FAIL: with CONTROL[4]=0, output mux is not passing the STANDARD core's s_re");
+      $display("FAIL: with CONTROL[5:4]=00, output mux is not passing the STANDARD core's s_re");
       errors = errors + 1;
     end else begin
-      $display("PASS: CONTROL[4]=0 selects the standard core (crpa_s_re == crpa_s_re_std)");
+      $display("PASS: CONTROL[5:4]=00 selects the standard core (crpa_s_re == crpa_s_re_std)");
     end
 
-    // pass_en=1, mode bit (CONTROL[4]) = 1 -> normalized core selected
-    axil_write(16'h000C, 32'h0000_0011);   // bit0 (pass_en) + bit4 (mode)
+    // pass_en=1, mode=01 -> normalized core selected
+    axil_write(16'h000C, 32'h0000_0011);   // bit0 (pass_en) + bit4 (mode=01)
     repeat(5) @(posedge clk);
-    if (dut.crpa_mode_normalized !== 1'b1) begin
-      $display("FAIL: CONTROL[4]=1 write did not reach crpa_mode_normalized");
+    if (dut.crpa_mode !== 2'b01) begin
+      $display("FAIL: CONTROL[5:4]=01 write did not reach crpa_mode");
       errors = errors + 1;
     end
     if (dut.crpa_s_re !== dut.crpa_s_re_norm) begin
-      $display("FAIL: with CONTROL[4]=1, output mux is not passing the NORMALIZED core's s_re");
+      $display("FAIL: with CONTROL[5:4]=01, output mux is not passing the NORMALIZED core's s_re");
       errors = errors + 1;
     end else begin
-      $display("PASS: CONTROL[4]=1 selects the normalized core (crpa_s_re == crpa_s_re_norm)");
+      $display("PASS: CONTROL[5:4]=01 selects the normalized core (crpa_s_re == crpa_s_re_norm)");
     end
 
-    // gamma register: write a non-default value to CRPA_COEF(1), confirm it
-    // reaches the normalized core's gamma_reg (same class of check as the
-    // v1.3 alpha_wr regression test -- prove the write reaches the
-    // algorithm, not just the AXI-side shadow register).
-    axil_write(16'h0044, 32'd777);   // CRPA_COEF(1) = 0x40 + 1*4 = 0x44
+    // pass_en=1, mode=10 -> PL-NPI core selected
+    axil_write(16'h000C, 32'h0000_0021);   // bit0 (pass_en) + bit5 (mode=10)
+    repeat(5) @(posedge clk);
+    if (dut.crpa_mode !== 2'b10) begin
+      $display("FAIL: CONTROL[5:4]=10 write did not reach crpa_mode");
+      errors = errors + 1;
+    end
+    if (dut.crpa_s_re !== dut.crpa_s_re_pl) begin
+      $display("FAIL: with CONTROL[5:4]=10, output mux is not passing the PL-NPI core's s_re");
+      errors = errors + 1;
+    end else begin
+      $display("PASS: CONTROL[5:4]=10 selects the PL-NPI core (crpa_s_re == crpa_s_re_pl)");
+    end
+
+    // pass_en=1, mode=11 (reserved) -> falls back to standard
+    axil_write(16'h000C, 32'h0000_0031);   // bit0 (pass_en) + bits5:4 (mode=11)
+    repeat(5) @(posedge clk);
+    if (dut.crpa_s_re !== dut.crpa_s_re_std) begin
+      $display("FAIL: with CONTROL[5:4]=11 (reserved), output mux did not fall back to the standard core");
+      errors = errors + 1;
+    end else begin
+      $display("PASS: CONTROL[5:4]=11 (reserved) falls back to the standard core");
+    end
+
+    // gamma registers: write DIFFERENT non-default values to CRPA_COEF(1)
+    // and CRPA_COEF(2), confirm each reaches its OWN core's gamma_reg
+    // independently (same class of check as the v1.3 alpha_wr regression
+    // test -- prove the write reaches the algorithm, not just the AXI-side
+    // shadow register -- and confirm the two gammas are NOT cross-wired).
+    axil_write(16'h0044, 32'd777);   // CRPA_COEF(1) = 0x40 + 1*4 = 0x44 (normalized core's gamma)
+    axil_write(16'h0048, 32'd333);   // CRPA_COEF(2) = 0x40 + 2*4 = 0x48 (PL-NPI's own gamma)
     repeat(10) @(posedge clk);
     if (dut.u_crpa_core_normalized.gamma_reg !== 777) begin
-      $display("FAIL: CRPA_COEF(1)=777 did not reach gamma_reg (got %0d)",
+      $display("FAIL: CRPA_COEF(1)=777 did not reach the normalized core's gamma_reg (got %0d)",
                 dut.u_crpa_core_normalized.gamma_reg);
       errors = errors + 1;
     end else begin
       $display("PASS: CRPA_COEF(1) write reached the normalized core's gamma_reg (777)");
+    end
+    if (dut.u_crpa_core_pl_npi.gamma_reg !== 333) begin
+      $display("FAIL: CRPA_COEF(2)=333 did not reach the PL-NPI core's gamma_reg (got %0d)",
+                dut.u_crpa_core_pl_npi.gamma_reg);
+      errors = errors + 1;
+    end else begin
+      $display("PASS: CRPA_COEF(2) write reached the PL-NPI core's gamma_reg (333), independent of CRPA_COEF(1)");
     end
 
     $display("=========================================================");
