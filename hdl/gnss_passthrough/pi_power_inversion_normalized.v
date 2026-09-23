@@ -187,7 +187,17 @@ module pi_power_inversion_normalized #(
                                             // >>> Q_FRAC below exactly cancels the reciprocal's
                                             // own 2^Q_FRAC scaling for any Q_FRAC).
     parameter integer ALPHA_GAIN_SHIFT = 17,   // <<< the actual calibration knob, see below
-    parameter integer GAMMA_INIT  = 1,     // Eq. 13's gamma > 0; smallest safe regulariser
+    // Declared 64 bits wide, NOT plain `integer` (always exactly 32 bits):
+    // used below as GAMMA_INIT[GAMMA_W-1:0] with GAMMA_W=36 for this
+    // project's default M=2/DATA_W=16. Verilog returns 'x' -- or, per
+    // Vivado's synthesizer specifically, a hard elaboration error
+    // (Synth 8-524, "part-select out of range") -- for any bit selected
+    // outside a vector's DECLARED width. Icarus Verilog tolerated the
+    // narrower declaration silently in simulation; Vivado did not. Same
+    // bug class, same fix, as THRESH1/2/3 in pi_power_inversion_pl_npi.v --
+    // caught there first by a testbench, caught here by Vivado itself
+    // (confirmed against a real synth_design run before this fix).
+    parameter [63:0] GAMMA_INIT   = 64'd1,     // Eq. 13's gamma > 0; smallest safe regulariser
 
     // Derived widths -- declared here so they size the ports below.
     parameter integer PROD1_W     = DATA_W + WEIGHT_W + 1,           // x_i * w_i

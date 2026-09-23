@@ -117,7 +117,17 @@ module pi_power_inversion_pl_npi #(
     parameter integer LPF_SHIFT   = 18,
     parameter integer Q_FRAC      = 32,
     parameter integer ALPHA_GAIN_SHIFT = 17,   // see pi_power_inversion_normalized.v's header
-    parameter integer GAMMA_INIT  = 1,
+    // Same fix as THRESH1/2/3 below, same reason: declared 64 bits wide,
+    // not plain `integer` (always exactly 32 bits), because it's sliced
+    // below as GAMMA_INIT[GAMMA_W-1:0] with GAMMA_W=36 for this project's
+    // default M=2/DATA_W=16. This exact narrowing (in
+    // pi_power_inversion_normalized.v, not caught here until Vivado's
+    // synth_design hit it directly: Synth 8-524, "part-select [35:0] out
+    // of range of prefix 'GAMMA_INIT'") is what THRESH1/2/3's own header
+    // comment below already warned could recur -- it did, in the sibling
+    // file, and is fixed here proactively rather than waiting for the same
+    // synthesis error a second time.
+    parameter [63:0] GAMMA_INIT   = 64'd1,
 
     parameter integer GAIN_FRAC   = 16,        // fixed-point fractional bits of the PL gain
     parameter integer GAIN_1_00   = (1 << GAIN_FRAC),                 // 1.00 exactly
