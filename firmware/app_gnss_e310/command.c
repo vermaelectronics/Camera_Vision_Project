@@ -403,9 +403,9 @@ void set_gnss_crpa_alpha(double* param, char param_no)
 	}
 
 	gnss_pt_set_crpa_alpha(param[0]);
-	console_print("GNSS_CRPA_ALPHA: set to %.4f (raw=%u)\n",
+	console_print("GNSS_CRPA_ALPHA: set to %.4f (raw=%d)\n",
 		      gnss_pt_get_crpa_alpha(),
-		      (unsigned)gnss_pt_get_crpa_alpha_raw());
+		      (long)gnss_pt_get_crpa_alpha_raw());
 }
 
 /**************************************************************************//***
@@ -416,17 +416,17 @@ void get_gnss_crpa_alpha(double* param, char param_no)
 {
 	uint32_t version = gnss_pt_read(GNSS_PT_REG_VERSION);
 
-	console_print("GNSS_CRPA_ALPHA: %.4f (raw=%u)\n",
+	console_print("GNSS_CRPA_ALPHA: %.4f (raw=%d)\n",
 		      gnss_pt_get_crpa_alpha(),
-		      (unsigned)gnss_pt_get_crpa_alpha_raw());
+		      (long)gnss_pt_get_crpa_alpha_raw());
 	if(version != GNSS_PT_EXPECTED_VERSION) {
 		console_print("                 WARNING: bitstream reports version "
-			      "%lu.%lu, not %lu.%lu -- the CRPA core may not be "
+			      "%d.%d, not %d.%d -- the CRPA core may not be "
 			      "present, so this value may not be consumed by "
 			      "anything.\n",
-			      (unsigned long)(version >> 16), (unsigned long)(version & 0xFFFFU),
-			      (unsigned long)(GNSS_PT_EXPECTED_VERSION >> 16),
-			      (unsigned long)(GNSS_PT_EXPECTED_VERSION & 0xFFFFU));
+			      (long)(version >> 16), (long)(version & 0xFFFFU),
+			      (long)(GNSS_PT_EXPECTED_VERSION >> 16),
+			      (long)(GNSS_PT_EXPECTED_VERSION & 0xFFFFU));
 	}
 }
 
