@@ -252,8 +252,9 @@ void get_gnss_ddr_tx(double* param, char param_no);
 void set_gnss_ddr_tx(double* param, char param_no);
 
 /* GNSS-CRPA MOD-11: runtime control of the power-inversion CRPA nulling
- * core's adaptation step size (alpha). Only meaningful on a v1.2+
- * gnss_passthrough bitstream -- see gnss_pt_print_state(). */
+ * core's adaptation step size (alpha). Only meaningful on a v1.3+
+ * gnss_passthrough bitstream -- v1.2 nulls but ignores this write (its
+ * alpha_wr is hardwired); see gnss_pt_print_state(). */
 
 /* Gets the current CRPA adaptation step size (alpha), read back from
  * hardware. */

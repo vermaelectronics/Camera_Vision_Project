@@ -135,7 +135,7 @@ command cmd_list[] = {
 	{"gnss_ddr_tx?", "Gets the DDR round-trip replay state.", "", get_gnss_ddr_tx},
 	{"gnss_ddr_tx=", "1 = capture RX to DDR and replay it cyclically on TX1, 0 = stop.", "gnss_ddr_tx=0", set_gnss_ddr_tx},
 	/* GNSS-CRPA MOD-11: the power-inversion nulling core's adaptation step
-	 * size. Only live on a v1.2+ gnss_passthrough bitstream. */
+	 * size. Only live on a v1.3+ gnss_passthrough bitstream. */
 	{"gnss_crpa_alpha?", "Gets the CRPA adaptation step size (alpha).", "", get_gnss_crpa_alpha},
 	{"gnss_crpa_alpha=", "Sets the CRPA adaptation step size (alpha).", "gnss_crpa_alpha=1.0", set_gnss_crpa_alpha},
 };
@@ -388,7 +388,7 @@ void get_gnss_ddr_tx(double* param, char param_no)
 
 /**************************************************************************//***
  * @brief GNSS-CRPA MOD-11. Set the CRPA nulling core's adaptation step size
- *        (alpha). Only affects a v1.2+ gnss_passthrough bitstream; see
+ *        (alpha). Only affects a v1.3+ gnss_passthrough bitstream; see
  *        gnss_pt_print_state() to confirm which core is actually loaded.
 *******************************************************************************/
 void set_gnss_crpa_alpha(double* param, char param_no)

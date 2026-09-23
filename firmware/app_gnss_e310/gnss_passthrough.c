@@ -63,10 +63,12 @@ int32_t gnss_pt_probe(void)
                "         1.0, its TX output is missing the sample alignment\n"
                "         stage and is 24 dB low. If it reports 1.1, the CRPA\n"
                "         nulling core is not present -- RX passes through\n"
-               "         UNMODIFIED no matter what gnss_crpa_alpha= is sent;\n"
-               "         alpha writes still succeed (nothing on a 1.1 board\n"
-               "         rejects them), they just have no effect. Reprogram\n"
-               "         the FPGA.\n",
+               "         UNMODIFIED no matter what gnss_crpa_alpha= is sent.\n"
+               "         If it reports 1.2, the core nulls, but ALWAYS at\n"
+               "         alpha=1.0 -- that bitstream's alpha_wr input is\n"
+               "         hardwired, so gnss_crpa_alpha= writes succeed and\n"
+               "         read back correctly but never reach the algorithm.\n"
+               "         Reprogram the FPGA.\n",
                (unsigned long)(GNSS_PT_EXPECTED_VERSION >> 16),
                (unsigned long)(GNSS_PT_EXPECTED_VERSION & 0xFFFFU),
                (unsigned long)(ver >> 16), (unsigned long)(ver & 0xFFFFU));
@@ -212,8 +214,9 @@ void gnss_pt_print_state(void)
            (unsigned)s.crpa_alpha_raw,
            (double)s.crpa_alpha_raw / (double)(1U << GNSS_PT_CRPA_ALPHA_FRAC_BITS),
            (s.version == GNSS_PT_EXPECTED_VERSION)
-               ? "(v1.2+ core: live)"
-               : "(pre-1.2 bitstream: NOT consumed, no nulling occurs)");
+               ? "(v1.3+ core: live)"
+               : "(not v1.3: see gnss_pt_probe()'s boot-time warning for what "
+                 "this board's version actually does with alpha)");
     /* The two lines below are in DIFFERENT formats, and that is correct.
      * RX is 12-bit right-aligned in 16 bits; the AD9361 DAC consumes [15:4],
      * so the block left-aligns on the way out.

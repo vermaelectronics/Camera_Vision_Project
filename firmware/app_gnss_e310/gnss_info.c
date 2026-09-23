@@ -176,13 +176,15 @@ static void info_hardware(struct ad9361_rf_phy *phy)
     console_print("   base address    : 0x43C00000, 4 kB aperture\n");
     console_print("   ID register     : 0x%08x  (expect 0x47435031, ASCII 'GCP1')\n",
                   (long)gnss_pt_read(GNSS_PT_REG_ID));
-    console_print("   VERSION         : 0x%08x  (expect 0x00010002 = v1.2)\n",
+    console_print("   VERSION         : 0x%08x  (expect 0x00010003 = v1.3)\n",
                   (long)gnss_pt_read(GNSS_PT_REG_VERSION));
     console_print("     v1.0 is the original identity passthrough and transmits\n");
     console_print("     24 dB LOW. v1.1 adds the RX->TX sample alignment stage.\n");
     console_print("     v1.2 replaces the identity core with the two-element\n");
-    console_print("     power-inversion CRPA nulling core. v1.1 or earlier means\n");
-    console_print("     no nulling regardless of gnss_crpa_alpha=.\n");
+    console_print("     power-inversion CRPA nulling core, but its alpha_wr is\n");
+    console_print("     hardwired -- it nulls, ALWAYS at alpha=1.0, and ignores\n");
+    console_print("     gnss_crpa_alpha=. v1.3 fixes that: alpha is genuinely\n");
+    console_print("     live. v1.1 or earlier means no nulling at all.\n");
     console_print("   CRPA alpha      : raw=%u (%.4f)\n",
                   (unsigned)gnss_pt_get_crpa_alpha_raw(),
                   gnss_pt_get_crpa_alpha());
@@ -450,11 +452,12 @@ static void info_about(void)
     console_print("   This is a CRPA anti-jam front end. A v1.2+ gnss_passthrough\n");
     console_print("   bitstream no longer passes RX straight through -- a\n");
     console_print("   two-element power-inversion nulling core sits in its place,\n");
-    console_print("   adaptively steering a null across the two antenna elements\n");
-    console_print("   using gnss_crpa_alpha= to set how fast it adapts. A board\n");
-    console_print("   still reporting v1.1 or earlier is running the transparent\n");
-    console_print("   identity core (Iout = Iin); see 6 REGISTER MAP for the exact\n");
-    console_print("   version check.\n");
+    console_print("   adaptively steering a null across the two antenna elements.\n");
+    console_print("   Only on v1.3+ does gnss_crpa_alpha= actually set how fast it\n");
+    console_print("   adapts -- v1.2 nulls too, but at a fixed, uncontrollable\n");
+    console_print("   alpha=1.0 (see 6 REGISTER MAP). A board still reporting\n");
+    console_print("   v1.1 or earlier is running the transparent identity core\n");
+    console_print("   (Iout = Iin).\n");
     console_print("   Proving the loop end to end FIRST meant that once the\n");
     console_print("   algorithm went in, any change it causes is measurable\n");
     console_print("   immediately at a real receiver.\n");
@@ -498,13 +501,16 @@ static void info_about(void)
     console_print("     shares 1575.42 MHz and the 18 MHz retransmit bandwidth\n");
     console_print("     carries GPS, Galileo and SBAS together.\n");
     console_print("   * Position ACCURACY was never checked against a reference.\n");
-    console_print("   * The power-inversion CRPA nulling core (v1.2) is verified in\n");
+    console_print("   * The power-inversion CRPA nulling core (v1.3) is verified in\n");
     console_print("     RTL simulation only (gnss_integration/tb_gnss_passthrough.v):\n");
     console_print("     weight convergence and fixed-point accuracy vs. a floating-\n");
     console_print("     point shadow model, not yet nulling a real interferer on\n");
     console_print("     hardware. Everything above this line (Phase 1/2, DDR, SD\n");
     console_print("     card) was run on the Phase-1 IDENTITY core, before nulling\n");
     console_print("     existed -- none of it exercised the CRPA math.\n");
+    console_print("   * v1.2 shipped with alpha_wr hardwired: it nulled, but\n");
+    console_print("     gnss_crpa_alpha= silently had no effect. Fixed in v1.3 --\n");
+    console_print("     see 1 Hardware / 6 Register map for the version check.\n");
     rule();
 
     console_print("\n SAFETY -- READ THIS\n");
@@ -527,7 +533,9 @@ static void info_registers(void)
     head("6  gnss_passthrough REGISTER MAP  (base 0x43C00000, 4 kB)");
 
     console_print("   0x00  ID              RO  0x47435031, ASCII 'GCP1'\n");
-    console_print("   0x04  VERSION         RO  0x00010002 = v1.2 (CRPA core)\n");
+    console_print("   0x04  VERSION         RO  0x00010003 = v1.3 (CRPA core,\n");
+    console_print("                             alpha live; v1.2 nulled but\n");
+    console_print("                             ignored gnss_crpa_alpha=)\n");
     console_print("   0x08  SCRATCH         RW  read/write test\n");
     console_print("   0x0C  CONTROL         RW  [0] pass_en  [1] mute\n");
     console_print("                             [2] swap_iq  [3] ch1_copy\n");
@@ -659,7 +667,7 @@ static void info_issues(void)
 
     console_print("\n 5. RX2 HAS NOTHING CONNECTED.\n");
     rule();
-    console_print("   The v1.2 CRPA core ALREADY combines both RX channels every\n");
+    console_print("   The v1.2+ CRPA core ALREADY combines both RX channels every\n");
     console_print("   sample -- it is running now, not pending future work. If RX2\n");
     console_print("   currently sees only its own noise, the core is nulling against\n");
     console_print("   that noise, not a second antenna element, and the result is\n");
@@ -747,7 +755,10 @@ static void info_quickstart(void)
     console_print("   gnss_tx=1 / gnss_tx=0        live retransmit / ABORT\n");
     console_print("   gnss_ddr_tx=1 / =0          DDR round trip / stop\n");
     console_print("   tx1_attenuation=N           mdB. BIGGER = QUIETER.\n");
+    console_print("   gnss_crpa_alpha=X           CRPA adaptation step size\n");
+    console_print("                               (v1.3+ core only; default 1.0)\n");
     console_print("   gnss_tx? / gnss_status?     state, read back from hardware\n");
+    console_print("   gnss_crpa_alpha?            current alpha, read back\n");
     console_print("   ?                           this menu\n");
     console_print("   help?                       every command (long)\n");
 }
@@ -793,7 +804,13 @@ void gnss_info_menu(void)
     console_print("    gnss_ddr_tx=1 / =0         DDR round trip / stop\n");
     console_print("    tx1_attenuation=N          mdB. BIGGER = QUIETER.\n");
     console_print("                               89750 quietest, 70000 known good\n");
-    console_print("    gnss_tx? gnss_ddr_tx? gnss_status?   read back from hardware\n");
+    console_print("    gnss_crpa_alpha=X          CRPA adaptation step size.\n");
+    console_print("                               v1.3+ ONLY -- on v1.2 this write\n");
+    console_print("                               is silently ignored, the core\n");
+    console_print("                               always nulls at alpha=1.0. On\n");
+    console_print("                               v1.3, raw=0 at power-up means NO\n");
+    console_print("                               adaptation; set this first.\n");
+    console_print("    gnss_tx? gnss_ddr_tx? gnss_status? gnss_crpa_alpha?   read back\n");
     console_print("\n");
     console_print("    ?        this menu            help?    every command (long)\n");
     console_print("===============================================================\n");

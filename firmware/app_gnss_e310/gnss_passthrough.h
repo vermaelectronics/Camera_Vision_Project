@@ -87,12 +87,19 @@
  *       the AD9361 DAC consumes [15:4]). A board reporting 1.0 is running a
  *       bitstream whose TX output is 24 dB low with 4 bits discarded.
  * 1.2 = replaces the Phase-1 identity core with the two-element power-
- *       inversion CRPA nulling core (see u_crpa_core in gnss_passthrough.v).
- *       CRPA_COEF(0)/GNSS_PT_REG_CRPA_ALPHA is now live. A board reporting
- *       1.1 or earlier still passes RX through UNMODIFIED -- alpha writes
- *       are accepted (SCRATCH-like RW) but nothing on that board consumes
- *       them, so no nulling happens no matter what firmware sends. */
-#define GNSS_PT_EXPECTED_VERSION    0x00010002U
+ *       inversion CRPA nulling core (see u_crpa_core in gnss_passthrough.v),
+ *       but has a bug: u_crpa_core's alpha_wr was hardwired to 1'b0, so the
+ *       core's internal alpha_reg never loaded CRPA_COEF(0) and stayed at
+ *       its fixed reset value (1.0) forever. CRPA_COEF(0) writes and reads
+ *       both worked -- the register itself is fine -- they just never
+ *       reached the algorithm. A board reporting 1.2 nulls, but always at
+ *       alpha=1.0; gnss_crpa_alpha= has NO EFFECT on it.
+ * 1.3 = fixes the 1.2 alpha_wr bug. gnss_crpa_alpha= is genuinely live.
+ *       A board reporting 1.1 or earlier still passes RX through
+ *       UNMODIFIED -- alpha writes are accepted (SCRATCH-like RW) but
+ *       nothing on that board consumes them, so no nulling happens no
+ *       matter what firmware sends. */
+#define GNSS_PT_EXPECTED_VERSION    0x00010003U
 
 /* ---- CONTROL bits -------------------------------------------------------- */
 #define GNSS_PT_CTRL_PASS_EN        (1U << 0)  /* 1 = RX->TX passthrough      */

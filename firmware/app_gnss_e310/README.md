@@ -20,21 +20,50 @@ The `gnss_passthrough` core's AXI-Lite register map already reserved
 RTL side of MOD-11 wires `CRPA_COEF(0)` to the new two-element power-inversion
 nulling core's `alpha_in` (the adaptation step size, Q8.8 fixed point,
 default 256 == 1.0) and bumps `CORE_VERSION` from `0x00010001` (v1.1) to
-`0x00010002` (v1.2). `CRPA_COEF(1..15)` remain reserved RW scratch -- nothing
-in the core reads them; there is currently no AXI-visible readback of the
-core's internal weights or nulled output (`w_re`/`w_im`/`s_re`/`s_im` are not
-wired to any register).
+`0x00010003` (v1.3 -- see below for why not v1.2). `CRPA_COEF(1..15)` remain
+reserved RW scratch -- nothing in the core reads them; there is currently no
+AXI-visible readback of the core's internal weights or nulled output
+(`w_re`/`w_im`/`s_re`/`s_im` are not wired to any register).
+
+**v1.2 -> v1.3: a real bug found on real hardware, not a cosmetic bump.**
+The first MOD-11 bitstream (v1.2, `0x00010002`) instantiated
+`u_crpa_core` with `.alpha_wr(1'b0)` -- hardwired low. Inside
+`pi_power_inversion.v`, `alpha_reg` (the register the adaptation math
+actually reads) only loads `alpha_in` when `alpha_wr` pulses; tied to
+`1'b0`, it never does, so `alpha_reg` stays at its reset value (`ALPHA_INIT`,
+1.0) forever. `CRPA_COEF(0)` writes and reads both worked correctly --
+software saw a fully functional control register -- but the value never
+reached the algorithm: the core nulled, always at a fixed alpha=1.0, no
+matter what `gnss_crpa_alpha=` sent. This was invisible to
+`tb_gnss_passthrough.v` because its one alpha write (`256`) is numerically
+identical to the reset default, so "before" and "after" the write were
+indistinguishable. Found by tracing real console output from a live board
+(`crpa alpha : raw=0 (0.0000)` after boot, with no way to change nulling
+behavior) back through the RTL, then confirmed with a standalone simulation
+probe before touching anything. v1.3 fixes it: `.alpha_wr(1'b1)` (correct,
+since `alpha_in` is already a stable, CDC-synchronized value with no
+strobe/handshake needed), and `tb_gnss_passthrough.v` gained a targeted
+regression check -- write a **non-default** alpha (512, not 256) and assert
+`u_crpa_core.alpha_reg` actually changed -- that fails against the old RTL
+and passes against the fix, so this bug class can't hide behind a passing
+testbench again.
+
+**If your board currently reports v1.2**: it nulls, but `gnss_crpa_alpha=`
+will not do anything until it is reflashed with the v1.3 bitstream
+(`hdl/gnss_passthrough/`, rebuilt in Vivado). The firmware's boot-time
+`gnss_pt_probe()` and `gnss_status?` both say so explicitly rather than
+silently reporting the write as having worked.
 
 This patch:
 
 - **gnss_passthrough.h / .c** -- bumps `GNSS_PT_EXPECTED_VERSION` to
-  `0x00010002`, adds `GNSS_PT_REG_CRPA_ALPHA`, and adds
+  `0x00010003` (v1.3), adds `GNSS_PT_REG_CRPA_ALPHA`, and adds
   `gnss_pt_set_crpa_alpha()` / `gnss_pt_get_crpa_alpha()` (float, real alpha)
   and `_raw()` variants (uint16_t, Q8.8). `gnss_pt_get_state()` /
-  `gnss_pt_print_state()` now report the current alpha, with an explicit
-  warning when the loaded bitstream reports a pre-1.2 version (alpha writes
-  still succeed on those boards -- the register is plain RW storage even
-  then -- but nothing consumes them, so no nulling occurs).
+  `gnss_pt_print_state()` now report the current alpha, with explicit
+  version-specific warnings distinguishing pre-1.2 (no CRPA core at all),
+  1.2 (nulls, alpha fixed at 1.0, `gnss_crpa_alpha=` a no-op), and 1.3+
+  (alpha genuinely live).
 - **command.c / command.h** -- adds `gnss_crpa_alpha?` / `gnss_crpa_alpha=`
   console commands (e.g. `gnss_crpa_alpha=1.0`), following the existing
   `gnss_tx=` / `gnss_ddr_tx=` pattern.
