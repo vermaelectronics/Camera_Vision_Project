@@ -2,6 +2,38 @@
 // ============================================================================
 //  tb_gnss_passthrough.v -- VERBOSE testbench
 //
+//  !! RETIRED AS OF v1.6 -- DOES NOT COMPILE AGAINST THE CURRENT DESIGN !!
+//    gnss_passthrough.v v1.6 removed the standard/traditional CRPA core
+//    (pi_power_inversion.v, u_crpa_core) from the design -- see that file's
+//    CORE_VERSION comment. This testbench's entire purpose, per its own
+//    description below, was validating u_crpa_core specifically: its
+//    hierarchical references (dut.u_crpa_core.*), its CRPA_COEF[0]=alpha
+//    v1.2/v1.3 regression check, and its floating-point shadow model all
+//    implement the STANDARD algorithm's recursion, not the normalized/PL-NPI
+//    cores that remain. With u_crpa_core gone, every dut.u_crpa_core.*
+//    hierarchical reference below fails to elaborate -- confirmed: iverilog
+//    aborts at the first one (dut.u_crpa_core.clk, line ~195).
+//
+//    Kept in the repository for historical reference (it documents the
+//    pre-v1.6 standard-core integration path and its own accuracy
+//    verification in detail) but is NOT part of the buildable/active test
+//    suite -- do not include it when building or packaging this IP.
+//    Current top-level/algorithm coverage: tb_gnss_mode_select.v (confirms
+//    CONTROL[4] selects the right remaining core and both gamma registers
+//    reach their own core independently) plus each core's own standalone
+//    comparison testbench (tb_pi_power_inversion_normalized.v,
+//    tb_pi_power_inversion_pl_npi.v), which still instantiate
+//    pi_power_inversion.v directly (unaffected by the removal -- that file
+//    itself was not deleted, only unwired from gnss_passthrough.v) as their
+//    convergence-speed comparison baseline.
+//
+//    If accuracy needs the same fixed-point-vs-floating-point rigor this
+//    file provided, but for the normalized core (now the design's default),
+//    that is a new floating-point shadow model for Eq. 13's per-sample
+//    alpha(k) recursion, not a resurrection of this file -- ask for it as
+//    its own task rather than assuming this file still applies.
+//
+//  ORIGINAL HEADER, describing what this file did before the removal:
 //  Shows every necessary input/output of gnss_passthrough AND of the CRPA
 //  core (u_crpa_core = pi_power_inversion) instantiated inside it: a full
 //  named port dump at three points in the run, a running per-checkpoint

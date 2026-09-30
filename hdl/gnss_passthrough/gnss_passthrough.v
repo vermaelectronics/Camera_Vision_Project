@@ -101,7 +101,27 @@ module gnss_passthrough #(
   // PL-NPI's OWN gamma, independent of CRPA_COEF(1)'s normalized-core
   // gamma -- deliberately not shared, so tuning one mode's regulariser
   // never silently perturbs the other's behaviour when you switch modes.
-  localparam [31:0] CORE_VERSION = 32'h00010005;   // v1.5 -- adds selectable PL-NPI CRPA core
+  // v1.6 -- REMOVES the standard/traditional core (pi_power_inversion.v)
+  // from this design. Reason: that core's fixed-alpha loop gain has a
+  // narrow stable range for this board's real signal levels (confirmed on
+  // hardware -- GPS satellites vanished at alpha=100 with no jammer
+  // present) and the normalized/PL-NPI cores cover the same ground with a
+  // self-scaling step size and no alpha to mistune. u_crpa_core, its
+  // s_re_std/s_im_std/s_valid_std/w_*_std wires, and the CRPA_COEF[0]
+  // (alpha) CDC synchroniser are all gone. CONTROL[5:4] shrinks back to a
+  // single bit, CONTROL[4] (mirroring the v1.4 encoding before PL-NPI added
+  // a third option): 0 (reset default) = normalized, 1 = PL-NPI. There is
+  // no more "reserved" encoding to fall back from -- both values of a
+  // single bit are now defined. CRPA_COEF(0) is left unused/reserved in the
+  // register map rather than renumbering CRPA_COEF(1)/(2) down to fill the
+  // gap, so any existing direct AXI-Lite write scripts targeting gamma at
+  // 0x44/0x48 do not silently start writing the wrong register.
+  // pi_power_inversion.v ITSELF IS NOT DELETED from the repository -- it
+  // remains as a standalone, independently-verified module and is still
+  // used as the convergence-speed comparison baseline in
+  // tb_pi_power_inversion_normalized.v and tb_pi_power_inversion_pl_npi.v.
+  // It is simply no longer instantiated in this design.
+  localparam [31:0] CORE_VERSION = 32'h00010006;   // v1.6 -- removes the standard/traditional CRPA core
   localparam        AW           = FIFO_ADDR_WIDTH;
 
   // ==========================================================================
@@ -223,9 +243,10 @@ module gnss_passthrough #(
   // ==========================================================================
   (* ASYNC_REG = "TRUE" *) reg [8:0] ctrl_meta = 9'd0;
   (* ASYNC_REG = "TRUE" *) reg [8:0] ctrl_sync = 9'd0;
-  // v1.5: bits [5:4] (previously bit 4 alone in v1.4, bit 5 was unused
-  // 4'b0000 padding before that) now carry the 2-bit CRPA mode select.
-  wire [8:0] ctrl_raw = {reg_control[8], 2'b00, reg_control[5:4], reg_control[3:0]};
+  // v1.6: back to a single mode bit (bit 4), same position v1.4 used before
+  // PL-NPI's addition in v1.5 needed a second bit. Bit 5 is unused padding
+  // again, same as pre-v1.5.
+  wire [8:0] ctrl_raw = {reg_control[8], 3'b000, reg_control[4], reg_control[3:0]};
 
   always @(posedge clk) begin
     ctrl_meta <= ctrl_raw;
@@ -236,32 +257,21 @@ module gnss_passthrough #(
   wire mute      = ctrl_sync[1];
   wire swap_iq   = ctrl_sync[2];
   wire ch1_copy  = ctrl_sync[3];
-  // 2'b00 = standard (default), 2'b01 = normalized, 2'b10 = PL-NPI,
-  // 2'b11 = reserved/undefined -> falls back to standard below.
-  wire [1:0] crpa_mode = ctrl_sync[5:4];
+  // 0 (reset default) = normalized, 1 = PL-NPI. No reserved encoding left --
+  // both values of a single bit are defined (see CORE_VERSION's v1.6 note).
+  wire crpa_mode = ctrl_sync[4];
   wire cnt_clear = ctrl_sync[8];
 
   // ==========================================================================
-  //  CDC: CRPA_COEF[0] (alpha) s_axi_aclk -> clk, same two-flop pattern as
-  //  CONTROL above -- alpha is quasi-static software config, not a per-
-  //  sample signal, so bit-wise synchronisation is sufficient here too.
-  // ==========================================================================
-  (* ASYNC_REG = "TRUE" *) reg [15:0] crpa_alpha_meta = 16'd256;   // 256/2^8 = 1.0
-  (* ASYNC_REG = "TRUE" *) reg [15:0] crpa_alpha_sync = 16'd256;
-  always @(posedge clk) begin
-    crpa_alpha_meta <= crpa_coef[0][15:0];
-    crpa_alpha_sync <= crpa_alpha_meta;
-  end
-
-  // ==========================================================================
-  //  CDC: CRPA_COEF[1] (gamma, v1.4) s_axi_aclk -> clk, identical pattern to
-  //  alpha above -- continuously loaded every cycle, no write-strobe, so
-  //  there is no enable line left to hardwire wrong the way alpha's was in
-  //  v1.2 (see CORE_VERSION's history above). Feeds the normalized core's
-  //  regulariser (Eq. 13's gamma > 0); CRPA_GAMMA_W is wider than the 32-bit
-  //  AXI register, so this only zero-extends -- software can still supply
-  //  any value up to 2^32-1, far more range than a regularisation floor
-  //  needs.
+  //  CDC: CRPA_COEF[1] (gamma, v1.4) s_axi_aclk -> clk, same two-flop
+  //  synchroniser pattern as CONTROL above -- continuously loaded every
+  //  cycle, no write-strobe, so there is no enable line left to hardwire
+  //  wrong the way alpha's was in v1.2 (see CORE_VERSION's history above;
+  //  v1.6 removed alpha/CRPA_COEF[0]'s own copy of this CDC block along with
+  //  the standard core it fed). Feeds the normalized core's regulariser
+  //  (Eq. 13's gamma > 0); CRPA_GAMMA_W is wider than the 32-bit AXI
+  //  register, so this only zero-extends -- software can still supply any
+  //  value up to 2^32-1, far more range than a regularisation floor needs.
   // ==========================================================================
   localparam integer CRPA_GAMMA_W = 2*16 + 2 + 2;   // matches pi_power_inversion_normalized's
                                                      // own POW_W/GAMMA_W derivation for
@@ -317,7 +327,7 @@ module gnss_passthrough #(
   //
   //  Array mapping: element 0 = (adc_data_i0, adc_data_q0), element 1 =
   //  (adc_data_i1, adc_data_q1) -- both already in RX format (12-bit signed,
-  //  right-aligned, sign-extended into [15:12]). pi_power_inversion treats
+  //  right-aligned, sign-extended into [15:12]). Both remaining cores treat
   //  them as plain signed integers; the algorithm is correct on any
   //  consistent linear fixed-point representation, so no reformatting is
   //  needed going in.
@@ -335,36 +345,35 @@ module gnss_passthrough #(
   //  new mechanism. proc_i1/proc_q1 mirror the same result so fifo1 stays
   //  populated with a well-defined value if ch1_copy is ever cleared.
   //
-  //  Alpha comes from CRPA_COEF[0] (previously reserved, unconsumed).
-  //  Adaptation runs only while pass_en=1, matching how every other stage
-  //  in this file is already gated on pass_en.
+  //  v1.4 added a SECOND core (pi_power_inversion_normalized, Eq. 13) running
+  //  in parallel with the (then-only) standard core, fed the identical
+  //  sample stream and reset/enable, gamma from CRPA_COEF[1]. CONTROL[4]
+  //  selected which core's s_re/s_im/s_valid actually reached the
+  //  saturate-and-output stage below; the other kept running and adapting
+  //  unselected, which is what made switching modes bumpless rather than a
+  //  cold restart.
   //
-  //  v1.4: a SECOND core (pi_power_inversion_normalized, Eq. 13) runs in
-  //  parallel, fed the identical sample stream and reset/enable, gamma from
-  //  CRPA_COEF[1]. CONTROL[4] (crpa_mode_normalized) selects which core's
-  //  s_re/s_im/s_valid actually reach the saturate-and-output stage below;
-  //  the other keeps running and adapting unselected, which is what makes
-  //  switching modes bumpless rather than a cold restart.
-  //
-  //  v1.5: a THIRD core (pi_power_inversion_pl_npi, Eq. 11) runs alongside
+  //  v1.5 added a THIRD core (pi_power_inversion_pl_npi, Eq. 11) alongside
   //  the other two the same way, gamma from CRPA_COEF[2] (its own, not
-  //  shared with the normalized core's CRPA_COEF[1]). CONTROL[5:4] now
-  //  selects among all three; see CORE_VERSION's v1.5 comment.
+  //  shared with the normalized core's CRPA_COEF[1]). CONTROL[5:4] selected
+  //  among all three.
+  //
+  //  v1.6 REMOVES the standard/traditional core -- see CORE_VERSION's v1.6
+  //  comment above for why. Only the normalized and PL-NPI cores remain,
+  //  both still running and adapting continuously regardless of which is
+  //  selected (same bumpless-switching reasoning as v1.4/v1.5), gamma from
+  //  CRPA_COEF[1] and CRPA_COEF[2] respectively, unchanged addresses.
+  //  CONTROL[4] is back to a single mode bit: 0=normalized, 1=PL-NPI.
   // ==========================================================================
   localparam integer CRPA_DATA_W      = 16;
   localparam integer CRPA_WEIGHT_W    = 32;
   localparam integer CRPA_WEIGHT_FRAC = 20;
-  localparam integer CRPA_ALPHA_W     = 16;
-  localparam integer CRPA_ALPHA_FRAC  = 8;
   localparam integer CRPA_LPF_SHIFT   = 18;
   // Must match pi_power_inversion's own S_W for M=2: PROD1_W = DATA_W+WEIGHT_W+1,
-  // SUM_GROWTH = clog2(2) = 1, S_W = PROD1_W + SUM_GROWTH.
+  // SUM_GROWTH = clog2(2) = 1, S_W = PROD1_W + SUM_GROWTH. Kept as the
+  // reference derivation even with the standard core itself removed, since
+  // the normalized/PL-NPI cores' S_W must still match it bit-for-bit.
   localparam integer CRPA_S_W         = CRPA_DATA_W + CRPA_WEIGHT_W + 2;
-
-  wire signed [CRPA_S_W-1:0] crpa_s_re_std, crpa_s_im_std;
-  wire                       crpa_s_valid_std;
-  wire [2*CRPA_WEIGHT_W-1:0] crpa_w_re_std, crpa_w_im_std;
-  wire                       crpa_weights_valid_std;
 
   wire signed [CRPA_S_W-1:0] crpa_s_re_norm, crpa_s_im_norm;
   wire                       crpa_s_valid_norm;
@@ -390,38 +399,6 @@ module gnss_passthrough #(
                           & adc_valid_q0 & adc_enable_q0
                           & adc_valid_i1 & adc_enable_i1
                           & adc_valid_q1 & adc_enable_q1;
-
-  pi_power_inversion #(
-      .M           (2),
-      .DATA_W      (CRPA_DATA_W),
-      .WEIGHT_W    (CRPA_WEIGHT_W),
-      .WEIGHT_FRAC (CRPA_WEIGHT_FRAC),
-      .ALPHA_W     (CRPA_ALPHA_W),
-      .ALPHA_FRAC  (CRPA_ALPHA_FRAC),
-      .ALPHA_INIT  (1 << CRPA_ALPHA_FRAC),
-      .LPF_SHIFT   (CRPA_LPF_SHIFT)
-  ) u_crpa_core (
-      .clk           (clk),
-      .aresetn       (crpa_aresetn),
-      .x_re          ({adc_data_i1[CRPA_DATA_W-1:0], adc_data_i0[CRPA_DATA_W-1:0]}),
-      .x_im          ({adc_data_q1[CRPA_DATA_W-1:0], adc_data_q0[CRPA_DATA_W-1:0]}),
-      .sample_valid  (crpa_sample_valid),
-      .alpha_in      (crpa_alpha_sync),
-      // v1.3 fix: was 1'b0 (see CORE_VERSION comment above). crpa_alpha_sync
-      // is already a stable, CDC-synchronized value that only changes when
-      // software writes CRPA_COEF(0), so continuously loading it every
-      // cycle is correct -- no separate strobe/handshake is needed, and
-      // there is no metastability risk here that alpha_wr pulsing would
-      // have avoided and this doesn't.
-      .alpha_wr      (1'b1),
-      .adapt_en      (pass_en),
-      .s_re          (crpa_s_re_std),
-      .s_im          (crpa_s_im_std),
-      .s_valid       (crpa_s_valid_std),
-      .w_re          (crpa_w_re_std),
-      .w_im          (crpa_w_im_std),
-      .weights_valid (crpa_weights_valid_std)
-  );
 
   pi_power_inversion_normalized #(
       .M           (2),
@@ -485,26 +462,24 @@ module gnss_passthrough #(
       .pl_gain_band   (crpa_pl_gain_band)
   );
 
-  // ---- output mux: CONTROL[5:4] selects which core's result actually
-  //      reaches the DAC (00=standard, 01=normalized, 10=PL-NPI,
-  //      11=reserved -> standard). All three cores keep running and
-  //      adapting either way (see the v1.4/v1.5 comments above) -- only
-  //      this selection changes. ----
+  // ---- output mux: CONTROL[4] selects which core's result actually
+  //      reaches the DAC (0=normalized, reset default; 1=PL-NPI). Both
+  //      cores keep running and adapting either way (see the v1.4/v1.5/v1.6
+  //      comments above) -- only this selection changes. ----
   reg signed [CRPA_S_W-1:0] crpa_s_re;
   reg signed [CRPA_S_W-1:0] crpa_s_im;
   reg                       crpa_s_valid;
   always @(*) begin
     case (crpa_mode)
-      2'b01:   begin crpa_s_re = crpa_s_re_norm; crpa_s_im = crpa_s_im_norm; crpa_s_valid = crpa_s_valid_norm; end
-      2'b10:   begin crpa_s_re = crpa_s_re_pl;   crpa_s_im = crpa_s_im_pl;   crpa_s_valid = crpa_s_valid_pl;   end
-      default: begin crpa_s_re = crpa_s_re_std;  crpa_s_im = crpa_s_im_std;  crpa_s_valid = crpa_s_valid_std;  end
+      1'b1:    begin crpa_s_re = crpa_s_re_pl;   crpa_s_im = crpa_s_im_pl;   crpa_s_valid = crpa_s_valid_pl;   end
+      default: begin crpa_s_re = crpa_s_re_norm; crpa_s_im = crpa_s_im_norm; crpa_s_valid = crpa_s_valid_norm; end
     endcase
   end
 
   // Round-to-nearest, saturate to the 12-bit signed range this file's RX
   // format actually carries -- combinational, so the saturated value is
   // ready the SAME cycle crpa_s_valid pulses (s_re/s_im are already stable
-  // that cycle, straight off pi_power_inversion's own registered output).
+  // that cycle, straight off the selected core's own registered output).
   // Doing this here, not at the OUTPUT SAMPLE ALIGNMENT stage below, is
   // exactly what that stage's own comment requires: "it must SATURATE
   // before reaching this point... truncating to [11:0] here would wrap."
