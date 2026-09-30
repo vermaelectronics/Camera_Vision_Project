@@ -68,17 +68,35 @@
 #define GNSS_PT_REG_RX_SNAPSHOT_CH1 0x38U   /* RO                             */
 #define GNSS_PT_REG_CRPA_COEF(n)    (0x40U + ((n) * 4U))  /* RW, n = 0..15    */
 
-/* GNSS-CRPA MOD-11: CRPA_COEF(0) is the only slot the hardware actually
- * consumes. It is the adaptation step size (alpha) fed to the two-element
- * power-inversion nulling core, Q8.8 fixed point (alpha_raw / 256.0), reset
- * default 256 (== 1.0). CRPA_COEF(1..15) remain RW scratch with no effect on
- * the array math -- see gnss_passthrough.v, u_crpa_core: only alpha_in is
- * wired from crpa_coef[0]; nothing reads crpa_coef[1..15] back into the
- * core. Do not read anything into that being a second channel or a weights
- * readback -- there isn't one (see gnss_pt_get_crpa_alpha_raw() below). */
-#define GNSS_PT_REG_CRPA_ALPHA      GNSS_PT_REG_CRPA_COEF(0)   /* RW, Q8.8   */
+/* GNSS-CRPA MOD-11: CRPA_COEF(0) was the adaptation step size (alpha) fed
+ * to the two-element power-inversion nulling core, Q8.8 fixed point
+ * (alpha_raw / 256.0), reset default 256 (== 1.0).
+ *
+ * v1.6 REMOVES the standard/traditional core this fed (see
+ * GNSS_PT_EXPECTED_VERSION's history below) -- CRPA_COEF(0) is now
+ * unused/reserved. It is still plain RW storage on the AXI-Lite side (reads
+ * back whatever was last written, same as any other CRPA_COEF slot), so
+ * gnss_pt_set_crpa_alpha()/gnss_pt_get_crpa_alpha() below still work as
+ * register accessors, but nothing in a v1.6+ bitstream reads this value
+ * back into any algorithm. Kept for backward compatibility with anything
+ * still calling them; see GNSS_PT_REG_CRPA_GAMMA_NORM/_PL and
+ * GNSS_PT_CTRL_CRPA_MODE below for what actually controls nulling now. */
+#define GNSS_PT_REG_CRPA_ALPHA      GNSS_PT_REG_CRPA_COEF(0)   /* RW, Q8.8, UNUSED as of v1.6 */
 #define GNSS_PT_CRPA_ALPHA_FRAC_BITS 8
 #define GNSS_PT_CRPA_ALPHA_DEFAULT   256U   /* 256 / 2^8 = 1.0               */
+
+/* v1.6: the standard core's alpha is replaced by two INDEPENDENT
+ * regularisers (Eq. 13's gamma), one per remaining core, so tuning one
+ * mode's regulariser never silently perturbs the other's behaviour when
+ * you switch modes (CRPA_COEF(1) and CRPA_COEF(2) feed separate CDC
+ * synchronisers in gnss_passthrough.v -- not shared). Unlike alpha, gamma
+ * is a PLAIN UNSIGNED INTEGER, not Q-format: it shares the fixed-point
+ * alignment of the power sum sum|x_i|^2 inside each core, which itself has
+ * 0 fractional bits because the raw ADC samples do. There is no
+ * raw/float split to expose here the way alpha had one. */
+#define GNSS_PT_REG_CRPA_GAMMA_NORM GNSS_PT_REG_CRPA_COEF(1)  /* RW, plain uint, normalized core's gamma */
+#define GNSS_PT_REG_CRPA_GAMMA_PL   GNSS_PT_REG_CRPA_COEF(2)  /* RW, plain uint, PL-NPI core's OWN gamma  */
+#define GNSS_PT_CRPA_GAMMA_DEFAULT  1U   /* matches GAMMA_INIT in hardware: Eq. 13's gamma > 0, smallest safe regulariser */
 
 /* ---- expected identity --------------------------------------------------- */
 #define GNSS_PT_EXPECTED_ID         0x47435031U
@@ -98,14 +116,45 @@
  *       A board reporting 1.1 or earlier still passes RX through
  *       UNMODIFIED -- alpha writes are accepted (SCRATCH-like RW) but
  *       nothing on that board consumes them, so no nulling happens no
- *       matter what firmware sends. */
-#define GNSS_PT_EXPECTED_VERSION    0x00010003U
+ *       matter what firmware sends.
+ * 1.4 = adds a SECOND, runtime-selectable core: normalized PI (Eq. 13,
+ *       per-sample step size instead of a fixed alpha). CONTROL[4] selects
+ *       it (1) vs. the standard core (0, default); CRPA_COEF(1) carries its
+ *       gamma (Eq. 13's regulariser). Both cores run and adapt
+ *       continuously regardless of which is selected -- switching is
+ *       bumpless, not a cold restart.
+ * 1.5 = adds a THIRD core, PL-NPI (piecewise-linear variable step).
+ *       CONTROL[5:4] becomes a 2-bit mode select: 00=standard, 01=normalized,
+ *       10=PL-NPI, 11=reserved (falls back to standard). CRPA_COEF(2)
+ *       carries PL-NPI's OWN gamma, independent of CRPA_COEF(1).
+ * 1.6 = REMOVES the standard/traditional core. The fixed-alpha core's loop
+ *       gain has a narrow stable range at this board's real signal levels
+ *       (confirmed on hardware: GPS satellites vanished at alpha=100 with
+ *       no jammer present) and the normalized/PL-NPI cores cover the same
+ *       ground with a self-scaling step and no alpha to mistune.
+ *       CONTROL[5:4] shrinks back to CONTROL[4] (1 bit): 0 (reset default)
+ *       = normalized, 1 = PL-NPI. CRPA_COEF(0)/alpha is now unused/
+ *       reserved -- gnss_crpa_alpha= still writes the register (harmless)
+ *       but has NO EFFECT on any core. A board reporting 1.4 or 1.5 still
+ *       has the standard core AND alpha control; a board reporting 1.3 or
+ *       earlier has neither CONTROL[4] mode select nor gamma control at
+ *       all -- gnss_crpa_mode=/gnss_crpa_gamma_norm=/gnss_crpa_gamma_pl=
+ *       write CONTROL/CRPA_COEF bits that board's bitstream does not
+ *       decode the same way, if at all. */
+#define GNSS_PT_EXPECTED_VERSION    0x00010006U
 
 /* ---- CONTROL bits -------------------------------------------------------- */
 #define GNSS_PT_CTRL_PASS_EN        (1U << 0)  /* 1 = RX->TX passthrough      */
 #define GNSS_PT_CTRL_MUTE           (1U << 1)  /* 1 = drive zeros to the DAC  */
 #define GNSS_PT_CTRL_SWAP_IQ        (1U << 2)
 #define GNSS_PT_CTRL_CH1_COPY       (1U << 3)  /* ch1 TX fed from ch0         */
+/* v1.6+ ONLY: CRPA core mode select. 0 = normalized PI (reset default),
+ * 1 = PL-NPI. On a v1.4/v1.5 bitstream this bit (or CONTROL[5:4] on v1.5)
+ * selected between the (still-present) standard core and normalized/PL-NPI
+ * -- see GNSS_PT_EXPECTED_VERSION's history above before assuming this
+ * meaning on anything but a v1.6+ board. On v1.3 and earlier this bit does
+ * nothing at all. */
+#define GNSS_PT_CTRL_CRPA_MODE      (1U << 4)
 #define GNSS_PT_CTRL_CNT_CLEAR      (1U << 8)  /* held, not self-clearing     */
 
 /* ---- STATUS bits --------------------------------------------------------- */
@@ -149,11 +198,34 @@ void     gnss_pt_clear_counters(void);
  * slower but steadier. Raw form is the Q8.8 value the hardware takes
  * directly; the float form is alpha_raw / 256.0 for convenience on the
  * console ("gnss_crpa_alpha=1.0"). Values above 65535/256 (255.996) are
- * clamped to 16 bits -- the register cannot hold more. */
+ * clamped to 16 bits -- the register cannot hold more.
+ *
+ * v1.6+: UNUSED. These still read/write CRPA_COEF(0) correctly (it is
+ * harmless RW storage either way) but no core in a v1.6+ bitstream
+ * consumes it -- see GNSS_PT_REG_CRPA_ALPHA's comment above. Kept only for
+ * backward compatibility with existing callers/scripts. */
 void     gnss_pt_set_crpa_alpha_raw(uint16_t alpha_q8);
 uint16_t gnss_pt_get_crpa_alpha_raw(void);
 void     gnss_pt_set_crpa_alpha(double alpha);
 double   gnss_pt_get_crpa_alpha(void);
+
+/* v1.6+: CONTROL[4] mode select between the two remaining CRPA cores.
+ * pl_npi=0 -> normalized PI (reset default), pl_npi=nonzero -> PL-NPI.
+ * Both cores run and adapt continuously regardless of which is selected,
+ * so switching at runtime is bumpless, not a cold restart. */
+void     gnss_pt_set_crpa_mode(int pl_npi);
+int      gnss_pt_get_crpa_mode(void);   /* returns 0 (normalized) or 1 (PL-NPI) */
+
+/* v1.6+: independent regularisers (Eq. 13's gamma), one per remaining core
+ * -- CRPA_COEF(1) for normalized, CRPA_COEF(2) for PL-NPI, deliberately not
+ * shared so tuning one mode never silently perturbs the other. Plain
+ * unsigned integers, NOT Q-format like alpha was -- see
+ * GNSS_PT_REG_CRPA_GAMMA_NORM's comment above for why there is no
+ * raw/float split here. */
+void     gnss_pt_set_crpa_gamma_norm(uint32_t gamma);
+uint32_t gnss_pt_get_crpa_gamma_norm(void);
+void     gnss_pt_set_crpa_gamma_pl(uint32_t gamma);
+uint32_t gnss_pt_get_crpa_gamma_pl(void);
 
 /* Snapshot of everything worth observing at runtime (requirement 58). */
 typedef struct {
@@ -174,7 +246,10 @@ typedef struct {
     int      passthrough_enabled;
     int      overflow_sticky;
     int      underflow_sticky;
-    uint16_t crpa_alpha_raw;   /* GNSS-CRPA MOD-11, Q8.8 */
+    uint16_t crpa_alpha_raw;      /* GNSS-CRPA MOD-11, Q8.8. v1.6+: unused, see above */
+    int      crpa_mode;           /* v1.6+: 0=normalized, 1=PL-NPI. 0 on pre-v1.6 boards too, harmlessly */
+    uint32_t crpa_gamma_norm_raw; /* v1.6+: normalized core's gamma, plain uint */
+    uint32_t crpa_gamma_pl_raw;   /* v1.6+: PL-NPI core's OWN gamma, plain uint */
 } gnss_pt_state_t;
 
 void     gnss_pt_get_state(gnss_pt_state_t *st);

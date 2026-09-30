@@ -1,11 +1,13 @@
-# app_gnss_e310 -- GNSS-CRPA MOD-11 firmware patch
+# app_gnss_e310 -- GNSS-CRPA MOD-11/MOD-12 firmware patch
 
 These five files are a **patch**, not a full Vitis workspace checkout. They
 apply on top of the `app_gnss_e310` no-OS application source (the Vitis
 bare-metal app for the ANTSDR E310 V1 GNSS-CRPA project) to add firmware-side
-control for the power-inversion CRPA nulling core that MOD-11 adds to the
-`gnss_passthrough` IP (see `gnss_passthrough.v`, `pi_power_inversion.v`,
-`pi_cmul.v`, verified by `tb_gnss_passthrough.v`; all four checks pass).
+control for the power-inversion CRPA nulling core(s) in the `gnss_passthrough`
+IP (see `hdl/gnss_passthrough/` for the current RTL and its own README/
+testbenches) -- MOD-11 added control for the original fixed-alpha core;
+MOD-12 (below) replaces that control after v1.6 removed that core in favor
+of two self-scaling ones.
 
 The rest of the application (ad9361 driver, no-OS shims, gnss_l1/gnss_capture/
 gnss_txdma, main.c, etc.) is unchanged vendor/project source and is not
@@ -95,3 +97,73 @@ Diagnosing convergence at runtime (beyond "did RX/TX counters advance") needs
 new RTL register wiring (`w_re`/`w_im`/`s_re`/`s_im`/`weights_valid` onto
 spare `CRPA_COEF` slots or new registers) before firmware can add it; that is
 out of scope for this patch.
+
+## v1.6 update: the fixed-alpha core this patch controlled is now GONE
+
+`gnss_passthrough.v` v1.6 removed the standard/traditional core entirely --
+its fixed-alpha loop gain has a narrow stable range at this board's real
+signal levels, confirmed twice: in simulation (diverges at `alpha=100`, the
+paper's own "fast" case) and independently **on real hardware** (GPS
+satellites vanished from the GNSS viewer at `alpha=100` with no jammer
+present). Two cores remain, both with a self-scaling per-sample step size
+instead of a fixed alpha: normalized PI (the new default) and PL-NPI,
+selected by `CONTROL[4]` (was `CONTROL[5:4]`, 2 bits, in the intervening
+v1.4/v1.5 that added these cores alongside the standard one before it was
+removed). `CORE_VERSION` is now `0x00010006`.
+
+This update:
+
+- **gnss_passthrough.h / .c** -- bumps `GNSS_PT_EXPECTED_VERSION` to
+  `0x00010006` (v1.6) and extends the version-history comment through
+  1.4/1.5/1.6. `GNSS_PT_REG_CRPA_ALPHA` / `gnss_pt_set_crpa_alpha()` /
+  `gnss_pt_get_crpa_alpha()` are **kept, not removed** (the register is
+  still harmless RW storage; nothing calling them will break), but are now
+  documented as unused as of v1.6 -- the core they fed is gone. Adds
+  `GNSS_PT_CTRL_CRPA_MODE` (`CONTROL[4]`), `GNSS_PT_REG_CRPA_GAMMA_NORM`
+  (`CRPA_COEF(1)`), `GNSS_PT_REG_CRPA_GAMMA_PL` (`CRPA_COEF(2)`, independent
+  of `_NORM`), and their `gnss_pt_set/get_crpa_mode()` /
+  `gnss_pt_set/get_crpa_gamma_norm()` / `gnss_pt_set/get_crpa_gamma_pl()`
+  accessors. Unlike alpha, gamma is a **plain unsigned integer**, not
+  Q-format -- it shares the fixed-point alignment of the power sum
+  `sum|x_i|^2` inside each core, which has 0 fractional bits because the raw
+  ADC samples do. `gnss_pt_get_state()` / `gnss_pt_print_state()` now report
+  mode and both gammas alongside the (now-inert) alpha reading.
+- **command.c / command.h** -- adds `gnss_crpa_mode?` / `gnss_crpa_mode=`,
+  `gnss_crpa_gamma_norm?` / `gnss_crpa_gamma_norm=`, and
+  `gnss_crpa_gamma_pl?` / `gnss_crpa_gamma_pl=`, following the same pattern
+  `gnss_crpa_alpha?`/`=` established. `gnss_crpa_alpha?`/`=` are kept
+  (still write/read the register correctly) but now print an explicit note
+  on a v1.6 board that the write succeeded and did nothing, rather than
+  silently implying it still controls nulling.
+- **gnss_info.c** -- updates every section that named a specific version
+  number, described `CRPA_COEF(0)` as the only live slot, or told the reader
+  `gnss_crpa_alpha=` controls nulling speed: the boot-time hardware summary,
+  "why it exists", the "what has *not* been proven" changelog, the RX2
+  wiring caution, the register map, and both the short and long command
+  menus (including the very first thing a new user sees, the `?` main
+  menu's CONTROL section).
+
+**If your board currently reports v1.4 or v1.5**: it still has the standard
+core and `gnss_crpa_alpha=` is genuinely live there -- but `gnss_crpa_mode=`
+writes `CONTROL[4]` alone, while a v1.5 board still expects `CONTROL[5:4]`
+as a 2-bit field (`00`=standard/`01`=normalized/`10`=PL-NPI/`11`=reserved),
+not the single bit this firmware sends. Reflash to v1.6 before relying on
+mode/gamma control, or use direct AXI-Lite writes matching that board's own
+encoding in the meantime. `gnss_pt_probe()`'s boot-time warning and
+`gnss_crpa_alpha?`/`gnss_crpa_alpha=`'s own output both spell this out.
+
+**Firmware syntax-checked, not hardware-tested.** This environment has no
+Vitis/Xilinx toolchain, so these changes were verified with
+`gcc -fsyntax-only` against a real copy of the vendor no-OS headers
+(`ad9361_api.h`, `axi_dac_core.h`, `console.h`, `parameters.h`, etc., pulled
+from an earlier delivered bundle) plus minimal stubs for the three
+project-specific headers not present in that bundle (`gnss_l1.h`,
+`gnss_txdma.h`, `gnss_info.h` -- just their declarations, not full
+semantics). All five edited files compiled with zero errors; the only
+warnings were a pre-existing intentional `#warning` (the base-address
+fallback) and one pre-existing, unrelated `ad9361_spi_read` pointer-type
+mismatch from a no-OS driver version difference in the borrowed headers,
+in code this update did not touch. That confirms the C is well-formed, not
+that it has run against real hardware -- build it in the actual Vitis
+workspace and re-run `gnss_pt_probe()` / `gnss_status?` before trusting it
+on a board.

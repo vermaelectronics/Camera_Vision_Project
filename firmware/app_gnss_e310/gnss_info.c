@@ -176,7 +176,7 @@ static void info_hardware(struct ad9361_rf_phy *phy)
     console_print("   base address    : 0x43C00000, 4 kB aperture\n");
     console_print("   ID register     : 0x%08x  (expect 0x47435031, ASCII 'GCP1')\n",
                   (long)gnss_pt_read(GNSS_PT_REG_ID));
-    console_print("   VERSION         : 0x%08x  (expect 0x00010003 = v1.3)\n",
+    console_print("   VERSION         : 0x%08x  (expect 0x00010006 = v1.6)\n",
                   (long)gnss_pt_read(GNSS_PT_REG_VERSION));
     console_print("     v1.0 is the original identity passthrough and transmits\n");
     console_print("     24 dB LOW. v1.1 adds the RX->TX sample alignment stage.\n");
@@ -184,10 +184,23 @@ static void info_hardware(struct ad9361_rf_phy *phy)
     console_print("     power-inversion CRPA nulling core, but its alpha_wr is\n");
     console_print("     hardwired -- it nulls, ALWAYS at alpha=1.0, and ignores\n");
     console_print("     gnss_crpa_alpha=. v1.3 fixes that: alpha is genuinely\n");
-    console_print("     live. v1.1 or earlier means no nulling at all.\n");
-    console_print("   CRPA alpha      : raw=%u (%.4f)\n",
+    console_print("     live. v1.4 adds a second, selectable core (normalized\n");
+    console_print("     PI); v1.5 adds a third (PL-NPI). v1.6 REMOVES the\n");
+    console_print("     original fixed-alpha core -- unstable at real signal\n");
+    console_print("     levels above a small alpha, confirmed on hardware -- so\n");
+    console_print("     gnss_crpa_alpha= now has NO EFFECT. Use gnss_crpa_mode=\n");
+    console_print("     and gnss_crpa_gamma_norm=/gnss_crpa_gamma_pl= instead.\n");
+    console_print("     v1.1 or earlier means no nulling at all.\n");
+    console_print("   CRPA alpha      : raw=%u (%.4f)  %s\n",
                   (unsigned)gnss_pt_get_crpa_alpha_raw(),
-                  gnss_pt_get_crpa_alpha());
+                  gnss_pt_get_crpa_alpha(),
+                  (char *)"[v1.6: unused]");
+    console_print("   CRPA mode       : %s (CONTROL[4]=%d)\n",
+                  (char *)(gnss_pt_get_crpa_mode() ? "PL-NPI" : "normalized"),
+                  gnss_pt_get_crpa_mode());
+    console_print("   CRPA gamma      : normalized=%lu  pl-npi=%lu\n",
+                  (long)gnss_pt_get_crpa_gamma_norm(),
+                  (long)gnss_pt_get_crpa_gamma_pl());
     rule();
 
     console_print(" RF FRONT END                                            [cfg]\n");
@@ -453,11 +466,15 @@ static void info_about(void)
     console_print("   bitstream no longer passes RX straight through -- a\n");
     console_print("   two-element power-inversion nulling core sits in its place,\n");
     console_print("   adaptively steering a null across the two antenna elements.\n");
-    console_print("   Only on v1.3+ does gnss_crpa_alpha= actually set how fast it\n");
-    console_print("   adapts -- v1.2 nulls too, but at a fixed, uncontrollable\n");
-    console_print("   alpha=1.0 (see 6 REGISTER MAP). A board still reporting\n");
-    console_print("   v1.1 or earlier is running the transparent identity core\n");
-    console_print("   (Iout = Iin).\n");
+    console_print("   v1.6 runs TWO selectable cores -- normalized PI (default) and\n");
+    console_print("   PL-NPI, gnss_crpa_mode= picks between them -- both with a\n");
+    console_print("   self-scaling step size instead of a fixed alpha. The original\n");
+    console_print("   fixed-alpha core was REMOVED in v1.6: it was unstable above a\n");
+    console_print("   small alpha at this board's real signal levels, confirmed on\n");
+    console_print("   hardware (GPS satellites vanished at alpha=100, no jammer\n");
+    console_print("   present). gnss_crpa_alpha= now has no effect (see 6 REGISTER\n");
+    console_print("   MAP). A board still reporting v1.1 or earlier is running the\n");
+    console_print("   transparent identity core (Iout = Iin).\n");
     console_print("   Proving the loop end to end FIRST meant that once the\n");
     console_print("   algorithm went in, any change it causes is measurable\n");
     console_print("   immediately at a real receiver.\n");
@@ -511,6 +528,14 @@ static void info_about(void)
     console_print("   * v1.2 shipped with alpha_wr hardwired: it nulled, but\n");
     console_print("     gnss_crpa_alpha= silently had no effect. Fixed in v1.3 --\n");
     console_print("     see 1 Hardware / 6 Register map for the version check.\n");
+    console_print("   * v1.6 REMOVED that fixed-alpha core: confirmed unstable\n");
+    console_print("     above a small alpha at this board's real signal levels,\n");
+    console_print("     both in simulation and on hardware (GPS satellites\n");
+    console_print("     vanished at alpha=100, no jammer present). Two cores with\n");
+    console_print("     a self-scaling step size (normalized PI, PL-NPI) remain,\n");
+    console_print("     selected with gnss_crpa_mode=. Neither has yet been proven\n");
+    console_print("     nulling a real interferer on hardware either -- same\n");
+    console_print("     caveat as above, now for both remaining cores.\n");
     rule();
 
     console_print("\n SAFETY -- READ THIS\n");
@@ -533,12 +558,15 @@ static void info_registers(void)
     head("6  gnss_passthrough REGISTER MAP  (base 0x43C00000, 4 kB)");
 
     console_print("   0x00  ID              RO  0x47435031, ASCII 'GCP1'\n");
-    console_print("   0x04  VERSION         RO  0x00010003 = v1.3 (CRPA core,\n");
-    console_print("                             alpha live; v1.2 nulled but\n");
-    console_print("                             ignored gnss_crpa_alpha=)\n");
+    console_print("   0x04  VERSION         RO  0x00010006 = v1.6 (fixed-alpha\n");
+    console_print("                             core REMOVED; two selectable\n");
+    console_print("                             self-scaling cores remain --\n");
+    console_print("                             see CONTROL[4] and CRPA_COEF\n");
+    console_print("                             below)\n");
     console_print("   0x08  SCRATCH         RW  read/write test\n");
-    console_print("   0x0C  CONTROL         RW  [0] pass_en  [1] mute\n");
-    console_print("                             [2] swap_iq  [3] ch1_copy\n");
+    console_print("   0x0C  CONTROL         RW  [0] pass_en    [1] mute\n");
+    console_print("                             [2] swap_iq    [3] ch1_copy\n");
+    console_print("                             [4] crpa_mode  0=normalized 1=PL-NPI\n");
     console_print("                             [8] cnt_clear\n");
     console_print("   0x10  STATUS          RO  [0] adc_enable_i0  [1] adc_enable_q0\n");
     console_print("                             [2] dac_enable_i0  [3] dac_enable_q0\n");
@@ -557,12 +585,19 @@ static void info_registers(void)
     console_print("   0x30  RX_COUNT_CH1    RO\n");
     console_print("   0x34  TX_COUNT_CH1    RO\n");
     console_print("   0x38  RX_SNAPSHOT_CH1 RO\n");
-    console_print("   0x40  CRPA_COEF0..15  RW  0x40-0x7C. Only COEF0 is live: the\n");
-    console_print("                             nulling core's adaptation step size\n");
-    console_print("                             (alpha), Q8.8, default 256 (1.0).\n");
-    console_print("                             See gnss_crpa_alpha=/?. COEF1..15\n");
-    console_print("                             are stored but still unused --\n");
-    console_print("                             nothing in the core reads them.\n");
+    console_print("   0x40  CRPA_COEF0..15  RW  0x40-0x7C.\n");
+    console_print("           COEF0 (0x40)  UNUSED as of v1.6 -- was the removed\n");
+    console_print("                         core's alpha, Q8.8, default 256 (1.0).\n");
+    console_print("                         gnss_crpa_alpha= still writes it\n");
+    console_print("                         (harmless) but nothing reads it back.\n");
+    console_print("           COEF1 (0x44)  normalized core's gamma (Eq. 13's\n");
+    console_print("                         regulariser), plain uint, default 1.\n");
+    console_print("                         See gnss_crpa_gamma_norm=/?.\n");
+    console_print("           COEF2 (0x48)  PL-NPI core's OWN gamma, independent\n");
+    console_print("                         of COEF1, plain uint, default 1.\n");
+    console_print("                         See gnss_crpa_gamma_pl=/?.\n");
+    console_print("           COEF3..15     stored but unused -- nothing in\n");
+    console_print("                         either core reads them.\n");
     rule();
     console_print(" STATUS BITS [2] AND [3] ARE THE IMPORTANT ONES.\n");
     console_print("   They are axi_ad9361's read-back of (dac_data_sel == 4'h2),\n");
@@ -673,7 +708,8 @@ static void info_issues(void)
     console_print("   that noise, not a second antenna element, and the result is\n");
     console_print("   not meaningful anti-jam behaviour. A second antenna or a\n");
     console_print("   splitter feeding RX2 is required before trusting anything\n");
-    console_print("   gnss_crpa_alpha= does.\n");
+    console_print("   gnss_crpa_mode=/gnss_crpa_gamma_norm=/gnss_crpa_gamma_pl=\n");
+    console_print("   does.\n");
     console_print("   One AD9361 gives only TWO coherent channels. More elements\n");
     console_print("   than that needs more hardware.\n");
     rule();
@@ -755,10 +791,13 @@ static void info_quickstart(void)
     console_print("   gnss_tx=1 / gnss_tx=0        live retransmit / ABORT\n");
     console_print("   gnss_ddr_tx=1 / =0          DDR round trip / stop\n");
     console_print("   tx1_attenuation=N           mdB. BIGGER = QUIETER.\n");
-    console_print("   gnss_crpa_alpha=X           CRPA adaptation step size\n");
-    console_print("                               (v1.3+ core only; default 1.0)\n");
+    console_print("   gnss_crpa_mode=N            0=normalized (default), 1=PL-NPI\n");
+    console_print("   gnss_crpa_gamma_norm=N      normalized core's gamma (default 1)\n");
+    console_print("   gnss_crpa_gamma_pl=N        PL-NPI core's OWN gamma (default 1)\n");
+    console_print("   gnss_crpa_alpha=X           v1.6: UNUSED, see 5 ABOUT\n");
     console_print("   gnss_tx? / gnss_status?     state, read back from hardware\n");
-    console_print("   gnss_crpa_alpha?            current alpha, read back\n");
+    console_print("   gnss_crpa_mode? / gnss_crpa_gamma_norm? / gnss_crpa_gamma_pl?\n");
+    console_print("                               current mode/gamma, read back\n");
     console_print("   ?                           this menu\n");
     console_print("   help?                       every command (long)\n");
 }
@@ -804,13 +843,12 @@ void gnss_info_menu(void)
     console_print("    gnss_ddr_tx=1 / =0         DDR round trip / stop\n");
     console_print("    tx1_attenuation=N          mdB. BIGGER = QUIETER.\n");
     console_print("                               89750 quietest, 70000 known good\n");
-    console_print("    gnss_crpa_alpha=X          CRPA adaptation step size.\n");
-    console_print("                               v1.3+ ONLY -- on v1.2 this write\n");
-    console_print("                               is silently ignored, the core\n");
-    console_print("                               always nulls at alpha=1.0. On\n");
-    console_print("                               v1.3, raw=0 at power-up means NO\n");
-    console_print("                               adaptation; set this first.\n");
-    console_print("    gnss_tx? gnss_ddr_tx? gnss_status? gnss_crpa_alpha?   read back\n");
+    console_print("    gnss_crpa_mode=N           0=normalized PI (default), 1=PL-NPI\n");
+    console_print("    gnss_crpa_gamma_norm=N     normalized core's gamma (default 1)\n");
+    console_print("    gnss_crpa_gamma_pl=N       PL-NPI core's OWN gamma (default 1)\n");
+    console_print("    gnss_crpa_alpha=X          v1.6: UNUSED -- see 5 About this test\n");
+    console_print("    gnss_tx? gnss_ddr_tx? gnss_status?                    read back\n");
+    console_print("    gnss_crpa_mode? gnss_crpa_gamma_norm? gnss_crpa_gamma_pl?\n");
     console_print("\n");
     console_print("    ?        this menu            help?    every command (long)\n");
     console_print("===============================================================\n");

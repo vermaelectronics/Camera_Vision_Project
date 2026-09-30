@@ -68,7 +68,17 @@ int32_t gnss_pt_probe(void)
                "         alpha=1.0 -- that bitstream's alpha_wr input is\n"
                "         hardwired, so gnss_crpa_alpha= writes succeed and\n"
                "         read back correctly but never reach the algorithm.\n"
-               "         Reprogram the FPGA.\n",
+               "         If it reports 1.4 or 1.5, gnss_crpa_alpha= IS live\n"
+               "         (the standard core is still present there) but\n"
+               "         gnss_crpa_mode=/gnss_crpa_gamma_norm=/\n"
+               "         gnss_crpa_gamma_pl= write CONTROL/CRPA_COEF bits\n"
+               "         that bitstream does not decode the v1.6 way -- a\n"
+               "         1.5 board still expects CONTROL[5:4] as 2 bits\n"
+               "         (00=standard/01=normalized/10=PL-NPI/11=reserved),\n"
+               "         not the single CONTROL[4] bit this firmware sends.\n"
+               "         If it reports 1.3 or earlier, mode/gamma control\n"
+               "         does not exist on that board at all. Reprogram the\n"
+               "         FPGA.\n",
                (unsigned long)(GNSS_PT_EXPECTED_VERSION >> 16),
                (unsigned long)(GNSS_PT_EXPECTED_VERSION & 0xFFFFU),
                (unsigned long)(ver >> 16), (unsigned long)(ver & 0xFFFFU));
@@ -137,6 +147,46 @@ double gnss_pt_get_crpa_alpha(void)
            (double)(1U << GNSS_PT_CRPA_ALPHA_FRAC_BITS);
 }
 
+/* v1.6+: CONTROL[4] mode select. Read-modify-write, same pattern as
+ * gnss_pt_set_passthrough()/gnss_pt_set_mute() above, so this never
+ * disturbs pass_en/mute/swap_iq/ch1_copy while changing only the mode bit. */
+void gnss_pt_set_crpa_mode(int pl_npi)
+{
+    uint32_t c = gnss_pt_read(GNSS_PT_REG_CONTROL);
+    if (pl_npi) { c |= GNSS_PT_CTRL_CRPA_MODE; }
+    else        { c &= ~GNSS_PT_CTRL_CRPA_MODE; }
+    gnss_pt_write(GNSS_PT_REG_CONTROL, c);
+    printf("gnss_pt: CRPA mode %s\n", pl_npi ? "PL-NPI" : "normalized");
+}
+
+int gnss_pt_get_crpa_mode(void)
+{
+    return (gnss_pt_read(GNSS_PT_REG_CONTROL) & GNSS_PT_CTRL_CRPA_MODE) ? 1 : 0;
+}
+
+/* v1.6+: independent gamma registers. Plain uint32_t in, uint32_t out --
+ * no Q-format scaling, unlike alpha (see the header comment on
+ * GNSS_PT_REG_CRPA_GAMMA_NORM for why). */
+void gnss_pt_set_crpa_gamma_norm(uint32_t gamma)
+{
+    gnss_pt_write(GNSS_PT_REG_CRPA_GAMMA_NORM, gamma);
+}
+
+uint32_t gnss_pt_get_crpa_gamma_norm(void)
+{
+    return gnss_pt_read(GNSS_PT_REG_CRPA_GAMMA_NORM);
+}
+
+void gnss_pt_set_crpa_gamma_pl(uint32_t gamma)
+{
+    gnss_pt_write(GNSS_PT_REG_CRPA_GAMMA_PL, gamma);
+}
+
+uint32_t gnss_pt_get_crpa_gamma_pl(void)
+{
+    return gnss_pt_read(GNSS_PT_REG_CRPA_GAMMA_PL);
+}
+
 void gnss_pt_get_state(gnss_pt_state_t *st)
 {
     if (!st) { return; }
@@ -167,6 +217,9 @@ void gnss_pt_get_state(gnss_pt_state_t *st)
     st->overflow_sticky     = (st->status & GNSS_PT_ST_OVERFLOW)  ? 1 : 0;
     st->underflow_sticky    = (st->status & GNSS_PT_ST_UNDERFLOW) ? 1 : 0;
     st->crpa_alpha_raw      = gnss_pt_get_crpa_alpha_raw();
+    st->crpa_mode           = (st->control & GNSS_PT_CTRL_CRPA_MODE) ? 1 : 0;
+    st->crpa_gamma_norm_raw = gnss_pt_get_crpa_gamma_norm();
+    st->crpa_gamma_pl_raw   = gnss_pt_get_crpa_gamma_pl();
 }
 
 void gnss_pt_print_state(void)
@@ -207,16 +260,26 @@ void gnss_pt_print_state(void)
     printf("  underflow      : count=%lu sticky=%d\n",
            (unsigned long)s.underflow_count, s.underflow_sticky);
     /* v1.1 and earlier bitstreams accept this write (CRPA_COEF0 is plain RW
-     * storage even then) but have no core wired to consume it -- so a
-     * non-default value here proves nothing about nulling on those boards.
-     * Cross-check against the version line above before trusting this. */
+     * storage even then) but have no core wired to consume it -- and as of
+     * v1.6, NO board consumes it any more (the core alpha fed was removed).
+     * Shown for backward-compat visibility only -- cross-check the version
+     * line above before reading anything into a non-default value here. */
     printf("  crpa alpha     : raw=%u (%.4f)  %s\n",
            (unsigned)s.crpa_alpha_raw,
            (double)s.crpa_alpha_raw / (double)(1U << GNSS_PT_CRPA_ALPHA_FRAC_BITS),
            (s.version == GNSS_PT_EXPECTED_VERSION)
-               ? "(v1.3+ core: live)"
-               : "(not v1.3: see gnss_pt_probe()'s boot-time warning for what "
-                 "this board's version actually does with alpha)");
+               ? "(v1.6: UNUSED, standard core removed -- see gamma/mode below)"
+               : "(see gnss_pt_probe()'s boot-time warning for what this "
+                 "board's version actually does with alpha)");
+    /* v1.6+ only -- meaningless bit/register positions on an older board,
+     * so gate the whole block on the version actually matching. */
+    if (s.version == GNSS_PT_EXPECTED_VERSION) {
+        printf("  crpa mode      : %s (CONTROL[4]=%d)\n",
+               s.crpa_mode ? "PL-NPI" : "normalized", s.crpa_mode);
+        printf("  crpa gamma     : normalized=%lu  pl-npi=%lu\n",
+               (unsigned long)s.crpa_gamma_norm_raw,
+               (unsigned long)s.crpa_gamma_pl_raw);
+    }
     /* The two lines below are in DIFFERENT formats, and that is correct.
      * RX is 12-bit right-aligned in 16 bits; the AD9361 DAC consumes [15:4],
      * so the block left-aligns on the way out.

@@ -135,9 +135,18 @@ command cmd_list[] = {
 	{"gnss_ddr_tx?", "Gets the DDR round-trip replay state.", "", get_gnss_ddr_tx},
 	{"gnss_ddr_tx=", "1 = capture RX to DDR and replay it cyclically on TX1, 0 = stop.", "gnss_ddr_tx=0", set_gnss_ddr_tx},
 	/* GNSS-CRPA MOD-11: the power-inversion nulling core's adaptation step
-	 * size. Only live on a v1.3+ gnss_passthrough bitstream. */
-	{"gnss_crpa_alpha?", "Gets the CRPA adaptation step size (alpha).", "", get_gnss_crpa_alpha},
-	{"gnss_crpa_alpha=", "Sets the CRPA adaptation step size (alpha).", "gnss_crpa_alpha=1.0", set_gnss_crpa_alpha},
+	 * size. Only live on a v1.4/v1.5 gnss_passthrough bitstream -- v1.6+
+	 * removed the standard core this controlled; see set_gnss_crpa_alpha(). */
+	{"gnss_crpa_alpha?", "Gets the CRPA adaptation step size (alpha). v1.6+: no effect.", "", get_gnss_crpa_alpha},
+	{"gnss_crpa_alpha=", "Sets the CRPA adaptation step size (alpha). v1.6+: no effect.", "gnss_crpa_alpha=1.0", set_gnss_crpa_alpha},
+	/* GNSS-CRPA MOD-12: v1.6+ mode select and per-core gamma, replacing
+	 * MOD-11's alpha now that the standard core is gone. */
+	{"gnss_crpa_mode?", "Gets the CRPA mode (0=normalized, 1=PL-NPI).", "", get_gnss_crpa_mode},
+	{"gnss_crpa_mode=", "Sets the CRPA mode (0=normalized, 1=PL-NPI).", "gnss_crpa_mode=0", set_gnss_crpa_mode},
+	{"gnss_crpa_gamma_norm?", "Gets the normalized core's gamma.", "", get_gnss_crpa_gamma_norm},
+	{"gnss_crpa_gamma_norm=", "Sets the normalized core's gamma.", "gnss_crpa_gamma_norm=1", set_gnss_crpa_gamma_norm},
+	{"gnss_crpa_gamma_pl?", "Gets the PL-NPI core's OWN gamma.", "", get_gnss_crpa_gamma_pl},
+	{"gnss_crpa_gamma_pl=", "Sets the PL-NPI core's OWN gamma.", "gnss_crpa_gamma_pl=1", set_gnss_crpa_gamma_pl},
 };
 const char cmd_no = (sizeof(cmd_list) / sizeof(command));
 
@@ -388,11 +397,15 @@ void get_gnss_ddr_tx(double* param, char param_no)
 
 /**************************************************************************//***
  * @brief GNSS-CRPA MOD-11. Set the CRPA nulling core's adaptation step size
- *        (alpha). Only affects a v1.3+ gnss_passthrough bitstream; see
- *        gnss_pt_print_state() to confirm which core is actually loaded.
+ *        (alpha). Only affects a v1.4/v1.5 gnss_passthrough bitstream --
+ *        v1.6+ removed the standard core this fed, so this write succeeds
+ *        but has NO EFFECT on a v1.6+ board. See gnss_pt_print_state() to
+ *        confirm which core is actually loaded.
 *******************************************************************************/
 void set_gnss_crpa_alpha(double* param, char param_no)
 {
+	uint32_t version = gnss_pt_read(GNSS_PT_REG_VERSION);
+
 	if(param_no < 1) {
 		console_print("gnss_crpa_alpha= needs a value, e.g. gnss_crpa_alpha=1.0\n");
 		return;
@@ -406,6 +419,13 @@ void set_gnss_crpa_alpha(double* param, char param_no)
 	console_print("GNSS_CRPA_ALPHA: set to %.4f (raw=%d)\n",
 		      gnss_pt_get_crpa_alpha(),
 		      (long)gnss_pt_get_crpa_alpha_raw());
+	if(version == GNSS_PT_EXPECTED_VERSION) {
+		console_print("                 NOTE: this board reports v1.6 -- the "
+			      "standard core alpha fed was removed from the design. "
+			      "This write succeeded but affects NOTHING. Use "
+			      "gnss_crpa_mode=/gnss_crpa_gamma_norm=/"
+			      "gnss_crpa_gamma_pl= instead.\n");
+	}
 }
 
 /**************************************************************************//***
@@ -419,15 +439,112 @@ void get_gnss_crpa_alpha(double* param, char param_no)
 	console_print("GNSS_CRPA_ALPHA: %.4f (raw=%d)\n",
 		      gnss_pt_get_crpa_alpha(),
 		      (long)gnss_pt_get_crpa_alpha_raw());
-	if(version != GNSS_PT_EXPECTED_VERSION) {
+	if(version == GNSS_PT_EXPECTED_VERSION) {
+		console_print("                 NOTE: this board reports v1.6 -- "
+			      "UNUSED, the standard core alpha fed was removed. Use "
+			      "gnss_crpa_mode?/gnss_crpa_gamma_norm?/"
+			      "gnss_crpa_gamma_pl? instead.\n");
+	} else {
 		console_print("                 WARNING: bitstream reports version "
-			      "%d.%d, not %d.%d -- the CRPA core may not be "
-			      "present, so this value may not be consumed by "
-			      "anything.\n",
+			      "%d.%d, not %d.%d -- see gnss_pt_probe()'s boot-time "
+			      "warning for what this board's version actually does "
+			      "with alpha.\n",
 			      (long)(version >> 16), (long)(version & 0xFFFFU),
 			      (long)(GNSS_PT_EXPECTED_VERSION >> 16),
 			      (long)(GNSS_PT_EXPECTED_VERSION & 0xFFFFU));
 	}
+}
+
+/**************************************************************************//***
+ * @brief GNSS-CRPA MOD-12 (v1.6). Set the CRPA mode: 0=normalized (default),
+ *        1=PL-NPI. Both cores keep running and adapting either way, so
+ *        switching is bumpless, not a cold restart.
+*******************************************************************************/
+void set_gnss_crpa_mode(double* param, char param_no)
+{
+	if(param_no < 1) {
+		console_print("gnss_crpa_mode= needs a value, e.g. gnss_crpa_mode=1\n");
+		return;
+	}
+
+	gnss_pt_set_crpa_mode(param[0] != 0.0);
+	console_print("GNSS_CRPA_MODE: set to %s\n",
+		      gnss_pt_get_crpa_mode() ? "PL-NPI" : "normalized");
+}
+
+/**************************************************************************//***
+ * @brief GNSS-CRPA MOD-12 (v1.6). Report the CRPA mode, read back from
+ *        hardware.
+*******************************************************************************/
+void get_gnss_crpa_mode(double* param, char param_no)
+{
+	console_print("GNSS_CRPA_MODE: %s (%d)\n",
+		      gnss_pt_get_crpa_mode() ? "PL-NPI" : "normalized",
+		      gnss_pt_get_crpa_mode());
+}
+
+/**************************************************************************//***
+ * @brief GNSS-CRPA MOD-12 (v1.6). Set the normalized core's gamma (Eq. 13's
+ *        regulariser). Plain unsigned integer, not Q-format; independent of
+ *        the PL-NPI core's own gamma below.
+*******************************************************************************/
+void set_gnss_crpa_gamma_norm(double* param, char param_no)
+{
+	if(param_no < 1) {
+		console_print("gnss_crpa_gamma_norm= needs a value, e.g. "
+			      "gnss_crpa_gamma_norm=1\n");
+		return;
+	}
+	if(param[0] < 0.0) {
+		console_print("gnss_crpa_gamma_norm=: negative gamma is not "
+			      "representable, clamping to 0\n");
+	}
+
+	gnss_pt_set_crpa_gamma_norm((uint32_t)(param[0] < 0.0 ? 0.0 : param[0]));
+	console_print("GNSS_CRPA_GAMMA_NORM: set to %lu\n",
+		      (unsigned long)gnss_pt_get_crpa_gamma_norm());
+}
+
+/**************************************************************************//***
+ * @brief GNSS-CRPA MOD-12 (v1.6). Report the normalized core's gamma, read
+ *        back from hardware.
+*******************************************************************************/
+void get_gnss_crpa_gamma_norm(double* param, char param_no)
+{
+	console_print("GNSS_CRPA_GAMMA_NORM: %lu\n",
+		      (unsigned long)gnss_pt_get_crpa_gamma_norm());
+}
+
+/**************************************************************************//***
+ * @brief GNSS-CRPA MOD-12 (v1.6). Set the PL-NPI core's OWN gamma. Plain
+ *        unsigned integer, independent of the normalized core's gamma
+ *        above -- tuning one never silently perturbs the other.
+*******************************************************************************/
+void set_gnss_crpa_gamma_pl(double* param, char param_no)
+{
+	if(param_no < 1) {
+		console_print("gnss_crpa_gamma_pl= needs a value, e.g. "
+			      "gnss_crpa_gamma_pl=1\n");
+		return;
+	}
+	if(param[0] < 0.0) {
+		console_print("gnss_crpa_gamma_pl=: negative gamma is not "
+			      "representable, clamping to 0\n");
+	}
+
+	gnss_pt_set_crpa_gamma_pl((uint32_t)(param[0] < 0.0 ? 0.0 : param[0]));
+	console_print("GNSS_CRPA_GAMMA_PL: set to %lu\n",
+		      (unsigned long)gnss_pt_get_crpa_gamma_pl());
+}
+
+/**************************************************************************//***
+ * @brief GNSS-CRPA MOD-12 (v1.6). Report the PL-NPI core's OWN gamma, read
+ *        back from hardware.
+*******************************************************************************/
+void get_gnss_crpa_gamma_pl(double* param, char param_no)
+{
+	console_print("GNSS_CRPA_GAMMA_PL: %lu\n",
+		      (unsigned long)gnss_pt_get_crpa_gamma_pl());
 }
 
 /**************************************************************************//***

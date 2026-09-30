@@ -252,9 +252,11 @@ void get_gnss_ddr_tx(double* param, char param_no);
 void set_gnss_ddr_tx(double* param, char param_no);
 
 /* GNSS-CRPA MOD-11: runtime control of the power-inversion CRPA nulling
- * core's adaptation step size (alpha). Only meaningful on a v1.3+
- * gnss_passthrough bitstream -- v1.2 nulls but ignores this write (its
- * alpha_wr is hardwired); see gnss_pt_print_state(). */
+ * core's adaptation step size (alpha). Only meaningful on a v1.4/v1.5
+ * gnss_passthrough bitstream that still has the standard core -- v1.2
+ * nulls but ignores this write (its alpha_wr is hardwired); v1.6+ removed
+ * the standard core entirely, so this now has NO EFFECT on any board
+ * reporting v1.6+; see gnss_pt_print_state(). */
 
 /* Gets the current CRPA adaptation step size (alpha), read back from
  * hardware. */
@@ -263,5 +265,32 @@ void get_gnss_crpa_alpha(double* param, char param_no);
 /* Sets the CRPA adaptation step size (alpha), e.g. gnss_crpa_alpha=1.0.
  * Larger = faster adaptation, noisier; smaller = slower, steadier. */
 void set_gnss_crpa_alpha(double* param, char param_no);
+
+/* GNSS-CRPA MOD-12 (v1.6): runtime control of the two remaining CRPA cores
+ * -- the standard core MOD-11's alpha controlled is gone as of v1.6, see
+ * set_gnss_crpa_alpha()'s comment above. */
+
+/* Gets the current CRPA mode: 0=normalized (default), 1=PL-NPI. */
+void get_gnss_crpa_mode(double* param, char param_no);
+
+/* Sets the CRPA mode, e.g. gnss_crpa_mode=1 for PL-NPI, 0 for normalized.
+ * Both cores keep running and adapting either way -- switching is
+ * bumpless, not a cold restart. */
+void set_gnss_crpa_mode(double* param, char param_no);
+
+/* Gets the normalized core's regulariser (Eq. 13's gamma), read back from
+ * hardware. Plain unsigned integer, not Q-format. */
+void get_gnss_crpa_gamma_norm(double* param, char param_no);
+
+/* Sets the normalized core's gamma, e.g. gnss_crpa_gamma_norm=1.
+ * Independent of the PL-NPI core's own gamma below. */
+void set_gnss_crpa_gamma_norm(double* param, char param_no);
+
+/* Gets the PL-NPI core's OWN regulariser, read back from hardware.
+ * Independent of the normalized core's gamma above. */
+void get_gnss_crpa_gamma_pl(double* param, char param_no);
+
+/* Sets the PL-NPI core's gamma, e.g. gnss_crpa_gamma_pl=1. */
+void set_gnss_crpa_gamma_pl(double* param, char param_no);
 
 #endif  // __COMMAND_H__
