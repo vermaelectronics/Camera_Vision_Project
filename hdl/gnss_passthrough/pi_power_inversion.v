@@ -138,6 +138,45 @@ module pi_power_inversion #(
             alpha_reg <= alpha_in;
     end
 
+    // ---- saturate a full-width weight-update result into WEIGHT_W bits,
+    // instead of truncating it with a plain Verilog slice. Same house-style
+    // pattern as gnss_passthrough.v's crpa_sat12(): compare against the
+    // representable range and clamp rather than wrap.
+    //
+    // ROOT CAUSE THIS FIXES: at excessive alpha (confirmed on real hardware
+    // at alpha=100 -- GPS satellites vanished from the GNSS viewer with no
+    // jammer present), the loop gain exceeds this LPF_SHIFT/WEIGHT_FRAC
+    // scaling's stable range (linearized stability roughly needs
+    // alpha < ~2^(LPF_SHIFT+1) / lambda_max(Rxx), on the order of single
+    // digits to a few tens at this board's typical signal amplitude) and
+    // w'_i(k+1) can exceed what fits in WEIGHT_W bits. The previous code
+    // truncated that overflow with a plain slice -- silent 2's-complement
+    // wraparound, which can flip the weight's sign and jump it to an
+    // arbitrarily large magnitude on the very next sample: undefined,
+    // chaotic behavior, not a graceful (if excessive) null. Saturating
+    // instead makes the failure mode bounded and well-defined: the weight
+    // pins at its max magnitude and stays there instead of wrapping.
+    //
+    // This does NOT make a too-large alpha a good operating point -- the
+    // loop is still unstable there and will not null a jammer correctly.
+    // Reduce alpha (alpha=1 is this board's confirmed-stable default) or
+    // use the normalized/PL-NPI cores, which derive their own effective
+    // step size instead of using a fixed alpha. This fix only prevents
+    // undefined/chaotic wraparound; it is a safety net, not a tuning fix.
+    function signed [WEIGHT_W-1:0] sat_weight(input signed [ALPHA_PROD_W-1:0] v);
+        localparam signed [WEIGHT_W-1:0] W_SAT_MAX = {1'b0, {(WEIGHT_W-1){1'b1}}};
+        localparam signed [WEIGHT_W-1:0] W_SAT_MIN = {1'b1, {(WEIGHT_W-1){1'b0}}};
+        localparam signed [ALPHA_PROD_W-1:0] W_SAT_MAX_EXT =
+            {{(ALPHA_PROD_W-WEIGHT_W){W_SAT_MAX[WEIGHT_W-1]}}, W_SAT_MAX};
+        localparam signed [ALPHA_PROD_W-1:0] W_SAT_MIN_EXT =
+            {{(ALPHA_PROD_W-WEIGHT_W){W_SAT_MIN[WEIGHT_W-1]}}, W_SAT_MIN};
+        begin
+            if (v > W_SAT_MAX_EXT)      sat_weight = W_SAT_MAX;
+            else if (v < W_SAT_MIN_EXT) sat_weight = W_SAT_MIN;
+            else                        sat_weight = v[WEIGHT_W-1:0];
+        end
+    endfunction
+
     // ---- w_o_i, the fixed quiescent offset vector [1,0,...,0]^T -------
     // (element 0 real part = 1.0 in WEIGHT_FRAC fixed point; every other
     // tap, and every imaginary part, is exactly 0 -- Eq. 4 / GPS omni
@@ -309,6 +348,8 @@ module pi_power_inversion #(
                 reg signed [ALPHA_PROD_W-1:0] leak_in_im;
                 reg signed [ALPHA_PROD_W-1:0] leak_out_re;
                 reg signed [ALPHA_PROD_W-1:0] leak_out_im;
+                reg signed [ALPHA_PROD_W-1:0] wp_next_full_re;
+                reg signed [ALPHA_PROD_W-1:0] wp_next_full_im;
 
                 for (i = 0; i < M; i = i + 1) begin
                     // alpha * conj(x_i(k)) * s(k), full width -- no
@@ -333,10 +374,16 @@ module pi_power_inversion #(
                     leak_out_re = leak_in_re >>> LPF_SHIFT;
                     leak_out_im = leak_in_im >>> LPF_SHIFT;
 
-                    // w'_i(k+1) = w'_i(k) - leak_out -- truncate to
-                    // WEIGHT_W bits only now, at the very end.
-                    wp_re[i] <= wp_re[i] - leak_out_re[WEIGHT_W-1:0];
-                    wp_im[i] <= wp_im[i] - leak_out_im[WEIGHT_W-1:0];
+                    // w'_i(k+1) = w'_i(k) - leak_out, computed at the full
+                    // ALPHA_PROD_W width (wp_re/wp_im sign-extended,
+                    // leak_out already at that width) so nothing truncates
+                    // before the saturation check -- then clamp into
+                    // WEIGHT_W bits. See sat_weight()'s header comment above
+                    // for why this replaced a plain truncating slice.
+                    wp_next_full_re = {{(ALPHA_PROD_W-WEIGHT_W){wp_re[i][WEIGHT_W-1]}}, wp_re[i]} - leak_out_re;
+                    wp_next_full_im = {{(ALPHA_PROD_W-WEIGHT_W){wp_im[i][WEIGHT_W-1]}}, wp_im[i]} - leak_out_im;
+                    wp_re[i] <= sat_weight(wp_next_full_re);
+                    wp_im[i] <= sat_weight(wp_next_full_im);
                 end
             end
         end

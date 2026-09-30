@@ -247,6 +247,24 @@ module pi_power_inversion_pl_npi #(
     //  s(k) computation -- identical structure to pi_power_inversion.v /
     //  pi_power_inversion_normalized.v.
     // ==========================================================================
+    // ---- saturate a full-width weight-update result into WEIGHT_W bits --
+    // same fix, same reasoning as pi_power_inversion.v's sat_weight(): the
+    // previous plain truncating slice could wrap silently on overflow.
+    // See that file's copy of this function for the full explanation.
+    function signed [WEIGHT_W-1:0] sat_weight(input signed [ALPHA_PROD_W-1:0] v);
+        localparam signed [WEIGHT_W-1:0] W_SAT_MAX = {1'b0, {(WEIGHT_W-1){1'b1}}};
+        localparam signed [WEIGHT_W-1:0] W_SAT_MIN = {1'b1, {(WEIGHT_W-1){1'b0}}};
+        localparam signed [ALPHA_PROD_W-1:0] W_SAT_MAX_EXT =
+            {{(ALPHA_PROD_W-WEIGHT_W){W_SAT_MAX[WEIGHT_W-1]}}, W_SAT_MAX};
+        localparam signed [ALPHA_PROD_W-1:0] W_SAT_MIN_EXT =
+            {{(ALPHA_PROD_W-WEIGHT_W){W_SAT_MIN[WEIGHT_W-1]}}, W_SAT_MIN};
+        begin
+            if (v > W_SAT_MAX_EXT)      sat_weight = W_SAT_MAX;
+            else if (v < W_SAT_MIN_EXT) sat_weight = W_SAT_MIN;
+            else                        sat_weight = v[WEIGHT_W-1:0];
+        end
+    endfunction
+
     function signed [WEIGHT_W-1:0] wo_re(input integer idx);
         wo_re = (idx == 0) ? (1 <<< WEIGHT_FRAC) : {WEIGHT_W{1'b0}};
     endfunction
@@ -403,6 +421,8 @@ module pi_power_inversion_pl_npi #(
                 reg signed [ALPHA_PROD_W-1:0] leak_in_im;
                 reg signed [ALPHA_PROD_W-1:0] leak_out_re;
                 reg signed [ALPHA_PROD_W-1:0] leak_out_im;
+                reg signed [ALPHA_PROD_W-1:0] wp_next_full_re;
+                reg signed [ALPHA_PROD_W-1:0] wp_next_full_im;
 
                 for (i = 0; i < M; i = i + 1) begin
                     alpha_term_full_re = corr_re[i] * alpha_pl_signed;
@@ -421,8 +441,12 @@ module pi_power_inversion_pl_npi #(
                     leak_out_re = leak_in_re >>> LPF_SHIFT;
                     leak_out_im = leak_in_im >>> LPF_SHIFT;
 
-                    wp_re[i] <= wp_re[i] - leak_out_re[WEIGHT_W-1:0];
-                    wp_im[i] <= wp_im[i] - leak_out_im[WEIGHT_W-1:0];
+                    // Saturate instead of truncate -- see sat_weight()'s
+                    // header comment above (same fix as pi_power_inversion.v).
+                    wp_next_full_re = {{(ALPHA_PROD_W-WEIGHT_W){wp_re[i][WEIGHT_W-1]}}, wp_re[i]} - leak_out_re;
+                    wp_next_full_im = {{(ALPHA_PROD_W-WEIGHT_W){wp_im[i][WEIGHT_W-1]}}, wp_im[i]} - leak_out_im;
+                    wp_re[i] <= sat_weight(wp_next_full_re);
+                    wp_im[i] <= sat_weight(wp_next_full_im);
                 end
             end
         end
