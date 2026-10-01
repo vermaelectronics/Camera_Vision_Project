@@ -1,15 +1,17 @@
 # PI-NLMS HLS project
 #
 #   make csim   - C simulation with g++ (no Xilinx tools needed)
-#   make hls    - csim + csynth + IP export with Vitis HLS (needs vitis_hls on PATH)
+#   make hls    - csim + csynth + IP export with Vitis HLS 2021.1
+#                 (source <Xilinx>/Vitis_HLS/2021.1/settings64.sh first)
 #   make cosim  - same as hls plus C/RTL co-simulation
 #   make clean
 
 CXX      ?= g++
 AP_TYPES := third_party/HLS_arbitrary_Precision_Types
-CXXFLAGS := -std=c++14 -O2 -Wno-unknown-pragmas \
+CXXFLAGS := -std=c++11 -O2 -Wno-unknown-pragmas \
             -Isrc -Icsim_include -I$(AP_TYPES)/include
 BUILD    := build
+VITIS_HLS ?= vitis_hls
 
 .PHONY: all csim hls cosim clean
 
@@ -26,10 +28,10 @@ csim: $(BUILD)/csim.exe
 	cd $(BUILD) && ./csim.exe
 
 hls:
-	vitis_hls -f run_hls.tcl
+	$(VITIS_HLS) -f run_hls.tcl
 
 cosim:
-	vitis_hls -f run_hls.tcl -tclargs cosim
+	$(VITIS_HLS) -f run_hls.tcl -tclargs cosim
 
 clean:
 	rm -rf $(BUILD) pi_nlms_prj vitis_hls.log
