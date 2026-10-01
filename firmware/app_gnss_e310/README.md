@@ -167,3 +167,43 @@ in code this update did not touch. That confirms the C is well-formed, not
 that it has run against real hardware -- build it in the actual Vitis
 workspace and re-run `gnss_pt_probe()` / `gnss_status?` before trusting it
 on a board.
+
+## Third bug, found the same way AGAIN: gamma's reset default is silently 0, not 1
+
+Confirmed live on hardware right after the v1.6 update above:
+`gnss_status?` printed `crpa gamma : normalized=0  pl-npi=0` -- not the
+documented default of `1`. Root cause: `CRPA_COEF(1)`/`CRPA_COEF(2)` (the
+AXI-side `crpa_coef[]` array in `gnss_passthrough.v`) reset to `0`, not `1`
+-- only the RTL core's *own* `gamma_reg` resets to `GAMMA_INIT=1`. Gamma is
+deliberately loaded continuously with no write-strobe (the fix for the
+v1.2 `alpha_wr`-hardwired bug class above -- no enable line left to tie off
+wrong), so the instant the design leaves reset, `gamma_reg` stops holding
+`GAMMA_INIT` and starts tracking `crpa_coef[1]`/`[2]`, which is `0`. The
+documented "default 1" was only ever true for the first instant of reset,
+never in sustained real operation. Not catastrophic (Eq. 13's denominator
+still has `2*sum|x_i|^2`, nonzero for any real signal) but it removes the
+intended regularisation floor against near-zero-power segments.
+**Workaround, no rebuild needed**: `gnss_crpa_gamma_norm=1` /
+`gnss_crpa_gamma_pl=1` once after every boot -- the write path itself is
+correct, only the hardware reset value is wrong. A proper fix (firmware
+auto-writing gamma=1 right after `gnss_pt_probe()`, or an RTL change to
+`crpa_coef`'s own reset value) has been offered but not yet applied as of
+this commit.
+
+**Fourth bug, immediately after fixing the third**: the hardware readback
+above (fixed correctly) exposed that `gnss_crpa_gamma_norm=1` itself
+printed `GNSS_CRPA_GAMMA_NORM: set to u` -- the value missing entirely.
+This is the EXACT SAME `%u`/`%lu` bug as the "Second bug" section above,
+regressed into the four new gamma get/set functions in `command.c`
+(all used `%lu`), plus a second, separate, pre-existing instance in
+`gnss_info.c`'s "1 Hardware" screen (`CRPA alpha : raw=%u`) that predates
+this session entirely and was never caught because `command.c`'s
+`gnss_crpa_alpha?`/`=` were fixed correctly back then, but this separate
+info-screen copy of the same read was not. Swept the entire project tree
+for every remaining `console_print` call using `%u`/`%lu`; these six
+instances were the only ones (confirmed via `grep` across all `.c` files,
+not just the ones touched this session). All six now use `%d`, matching
+this formatter's actual supported types and the project's own established
+convention. Re-verified with `gcc -fsyntax-only`: zero errors, and a
+follow-up grep confirms no `%u`/`%lu` remains in any `console_print` call
+anywhere in the tree.
