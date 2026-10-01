@@ -83,6 +83,32 @@ int32_t gnss_pt_probe(void)
                (unsigned long)(GNSS_PT_EXPECTED_VERSION & 0xFFFFU),
                (unsigned long)(ver >> 16), (unsigned long)(ver & 0xFFFFU));
     }
+
+    /* v1.6+: CRPA_COEF(1)/(2) (gamma) reset to 0 in hardware, not the
+     * documented default of 1 -- the AXI-side crpa_coef[] array's OWN
+     * reset value, not the RTL core's GAMMA_INIT=1 (gamma is loaded
+     * continuously with no write-strobe, same fix as the v1.2 alpha_wr
+     * bug above, so there's no enable line left to distinguish "never
+     * written" from "written as 0"; see the firmware README's "Third
+     * bug" section for the full account -- confirmed live on hardware,
+     * not theoretical). Correct it here, once, right after confirming
+     * this is a v1.6+ board (older boards don't have these registers
+     * wired to anything meaningful), so every boot starts at the
+     * documented safe default instead of silently running with gamma=0
+     * until a human remembers to set it from the console. */
+    if (ver == GNSS_PT_EXPECTED_VERSION) {
+        gnss_pt_set_crpa_gamma_norm(GNSS_PT_CRPA_GAMMA_DEFAULT);
+        gnss_pt_set_crpa_gamma_pl(GNSS_PT_CRPA_GAMMA_DEFAULT);
+        printf("gnss_pt: gamma initialized to the safe default (%lu) for\n"
+               "         both cores -- hardware resets CRPA_COEF(1)/(2) to\n"
+               "         0, not %lu, so this firmware corrects it on every\n"
+               "         boot rather than leaving the regularisation floor\n"
+               "         silently off until gnss_crpa_gamma_norm=/\n"
+               "         gnss_crpa_gamma_pl= is sent by hand.\n",
+               (unsigned long)GNSS_PT_CRPA_GAMMA_DEFAULT,
+               (unsigned long)GNSS_PT_CRPA_GAMMA_DEFAULT);
+    }
+
     return GNSS_PT_OK;
 }
 
