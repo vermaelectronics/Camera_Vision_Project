@@ -183,12 +183,15 @@ documented "default 1" was only ever true for the first instant of reset,
 never in sustained real operation. Not catastrophic (Eq. 13's denominator
 still has `2*sum|x_i|^2`, nonzero for any real signal) but it removes the
 intended regularisation floor against near-zero-power segments.
-**Workaround, no rebuild needed**: `gnss_crpa_gamma_norm=1` /
-`gnss_crpa_gamma_pl=1` once after every boot -- the write path itself is
-correct, only the hardware reset value is wrong. A proper fix (firmware
-auto-writing gamma=1 right after `gnss_pt_probe()`, or an RTL change to
-`crpa_coef`'s own reset value) has been offered but not yet applied as of
-this commit.
+**Fixed**: `gnss_pt_probe()` now writes `GNSS_PT_CRPA_GAMMA_DEFAULT` (1) to
+both gamma registers itself, once, immediately after confirming the board
+reports v1.6 -- before any console interaction, so every boot starts at
+the documented safe default automatically. No FPGA rebuild needed, this is
+firmware-only, using the same write path `gnss_crpa_gamma_norm=`/`_pl=`
+already used correctly. The manual workaround above (`gnss_crpa_gamma_norm=1`
+/ `gnss_crpa_gamma_pl=1`) is no longer necessary on firmware built after
+this fix, but is harmless to run anyway -- it just re-confirms the same
+value `gnss_pt_probe()` already set.
 
 **Fourth bug, immediately after fixing the third**: the hardware readback
 above (fixed correctly) exposed that `gnss_crpa_gamma_norm=1` itself
