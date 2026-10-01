@@ -17,7 +17,6 @@ set_part {xc7z020clg400-2}
 create_clock -period 10 -name default
 set_clock_uncertainty 1.25
 
-config_cosim -tool xsim
 config_export -format ip_catalog -rtl verilog \
     -vendor Digvijay -library hls -version 1.0 -display_name PI_NLMS_v1 \
     -description "PI-NLMS 2-element null-steering anti-jam core"
@@ -25,7 +24,7 @@ config_export -format ip_catalog -rtl verilog \
 csim_design
 csynth_design
 if {[lsearch $argv cosim] >= 0} {
-    cosim_design -rtl verilog
+    cosim_design -rtl verilog -tool xsim
 }
 if {[catch {export_design -format ip_catalog -rtl verilog} err]} {
     puts "ERROR: export_design failed: $err"
