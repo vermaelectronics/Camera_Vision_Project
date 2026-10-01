@@ -191,14 +191,21 @@ static void info_hardware(struct ad9361_rf_phy *phy)
     console_print("     gnss_crpa_alpha= now has NO EFFECT. Use gnss_crpa_mode=\n");
     console_print("     and gnss_crpa_gamma_norm=/gnss_crpa_gamma_pl= instead.\n");
     console_print("     v1.1 or earlier means no nulling at all.\n");
-    console_print("   CRPA alpha      : raw=%u (%.4f)  %s\n",
-                  (unsigned)gnss_pt_get_crpa_alpha_raw(),
+    /* console_print() has no %u/%lu case -- hand-rolled formatter, only
+     * %c/%s/%d/%x/%f exist (see the firmware README's "Second bug" section,
+     * and command.c's gamma get/set functions for the same fix applied
+     * there). raw= below was still %u until this pass -- a second, separate
+     * instance of the exact same bug class, pre-dating v1.6, never caught
+     * because command.c's gnss_crpa_alpha?/= always used %d correctly;
+     * this info screen's own copy of the value did not. */
+    console_print("   CRPA alpha      : raw=%d (%.4f)  %s\n",
+                  (long)gnss_pt_get_crpa_alpha_raw(),
                   gnss_pt_get_crpa_alpha(),
                   (char *)"[v1.6: unused]");
     console_print("   CRPA mode       : %s (CONTROL[4]=%d)\n",
                   (char *)(gnss_pt_get_crpa_mode() ? "PL-NPI" : "normalized"),
                   gnss_pt_get_crpa_mode());
-    console_print("   CRPA gamma      : normalized=%lu  pl-npi=%lu\n",
+    console_print("   CRPA gamma      : normalized=%d  pl-npi=%d\n",
                   (long)gnss_pt_get_crpa_gamma_norm(),
                   (long)gnss_pt_get_crpa_gamma_pl());
     rule();

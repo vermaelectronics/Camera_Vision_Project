@@ -501,8 +501,11 @@ void set_gnss_crpa_gamma_norm(double* param, char param_no)
 	}
 
 	gnss_pt_set_crpa_gamma_norm((uint32_t)(param[0] < 0.0 ? 0.0 : param[0]));
-	console_print("GNSS_CRPA_GAMMA_NORM: set to %lu\n",
-		      (unsigned long)gnss_pt_get_crpa_gamma_norm());
+	/* console_print() has no %u/%lu case (see get_gnss_crpa_alpha()'s
+	 * sibling fix / the firmware README's "Second bug" section) -- %d is
+	 * what this hand-rolled formatter actually reads as a long. */
+	console_print("GNSS_CRPA_GAMMA_NORM: set to %d\n",
+		      (long)gnss_pt_get_crpa_gamma_norm());
 }
 
 /**************************************************************************//***
@@ -511,8 +514,8 @@ void set_gnss_crpa_gamma_norm(double* param, char param_no)
 *******************************************************************************/
 void get_gnss_crpa_gamma_norm(double* param, char param_no)
 {
-	console_print("GNSS_CRPA_GAMMA_NORM: %lu\n",
-		      (unsigned long)gnss_pt_get_crpa_gamma_norm());
+	console_print("GNSS_CRPA_GAMMA_NORM: %d\n",
+		      (long)gnss_pt_get_crpa_gamma_norm());
 }
 
 /**************************************************************************//***
@@ -533,8 +536,10 @@ void set_gnss_crpa_gamma_pl(double* param, char param_no)
 	}
 
 	gnss_pt_set_crpa_gamma_pl((uint32_t)(param[0] < 0.0 ? 0.0 : param[0]));
-	console_print("GNSS_CRPA_GAMMA_PL: set to %lu\n",
-		      (unsigned long)gnss_pt_get_crpa_gamma_pl());
+	/* console_print() has no %u/%lu case -- see set_gnss_crpa_gamma_norm()'s
+	 * sibling comment above. */
+	console_print("GNSS_CRPA_GAMMA_PL: set to %d\n",
+		      (long)gnss_pt_get_crpa_gamma_pl());
 }
 
 /**************************************************************************//***
@@ -543,8 +548,8 @@ void set_gnss_crpa_gamma_pl(double* param, char param_no)
 *******************************************************************************/
 void get_gnss_crpa_gamma_pl(double* param, char param_no)
 {
-	console_print("GNSS_CRPA_GAMMA_PL: %lu\n",
-		      (unsigned long)gnss_pt_get_crpa_gamma_pl());
+	console_print("GNSS_CRPA_GAMMA_PL: %d\n",
+		      (long)gnss_pt_get_crpa_gamma_pl());
 }
 
 /**************************************************************************//***
