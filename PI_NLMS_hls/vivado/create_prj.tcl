@@ -25,7 +25,11 @@ apply_bd_automation -rule xilinx.com:bd_rule:processing_system7 \
 set_property CONFIG.PCW_FPGA0_PERIPHERAL_FREQMHZ 100 [get_bd_cells ps7]
 
 # PI-NLMS core, control bus on M_AXI_GP0
-create_bd_cell -type ip -vlnv Digvijay:hls:pi_nlms:1.0 pi_nlms_0
+set pi_vlnv [lindex [get_ipdefs -all *:pi_nlms:*] 0]
+if {$pi_vlnv eq ""} {
+    error "pi_nlms IP not found in '$ip_repo' (missing component.xml?). Re-export/package the HLS IP first."
+}
+create_bd_cell -type ip -vlnv $pi_vlnv pi_nlms_0
 apply_bd_automation -rule xilinx.com:bd_rule:axi4 \
     -config {Clk_master {Auto} Clk_slave {Auto} Clk_xbar {Auto} Master {/ps7/M_AXI_GP0} Slave {/pi_nlms_0/s_axi_CTRL_BUS} intc_ip {New AXI Interconnect} master_apm {0}} \
     [get_bd_intf_pins pi_nlms_0/s_axi_CTRL_BUS]
