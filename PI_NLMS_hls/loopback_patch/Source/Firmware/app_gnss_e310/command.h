@@ -230,6 +230,12 @@ void set_dds_tx2_tone2_scale(double* param, char param_no);
 /* Gets the GNSS L1 retransmit state, read back from hardware. */
 void get_gnss_tx(double* param, char param_no);
 
+/* gnss_passthrough v1.3: nulling core and PI-NLMS step size. */
+void get_crpa_core(double* param, char param_no);
+void set_crpa_core(double* param, char param_no);
+void get_crpa_nlms_mu(double* param, char param_no);
+void set_crpa_nlms_mu(double* param, char param_no);
+
 /* 1 = retransmit RX1 on TX1 at MAXIMUM attenuation, 0 = silence TX1.
  * gnss_tx=0 is the abort path and is safe to issue at any time. */
 void set_gnss_tx(double* param, char param_no);

@@ -134,6 +134,11 @@ command cmd_list[] = {
 	 * real sample. See gnss_txdma.h. */
 	{"gnss_ddr_tx?", "Gets the DDR round-trip replay state.", "", get_gnss_ddr_tx},
 	{"gnss_ddr_tx=", "1 = capture RX to DDR and replay it cyclically on TX1, 0 = stop.", "gnss_ddr_tx=0", set_gnss_ddr_tx},
+	/* gnss_passthrough v1.3: 2-element anti-jam nulling between RX and TX. */
+	{"crpa_core?", "Gets the nulling core (0 bypass, 1 PI, 2 PI-NLMS).", "", get_crpa_core},
+	{"crpa_core=", "Selects the nulling core: 0 bypass, 1 PI, 2 PI-NLMS.", "crpa_core=2", set_crpa_core},
+	{"crpa_nlms_mu?", "Gets the PI-NLMS step-size shift.", "", get_crpa_nlms_mu},
+	{"crpa_nlms_mu=", "Sets the PI-NLMS step-size shift (lower = faster, default -3).", "crpa_nlms_mu=-3", set_crpa_nlms_mu},
 };
 const char cmd_no = (sizeof(cmd_list) / sizeof(command));
 
@@ -1342,4 +1347,45 @@ void set_dds_tx2_tone2_scale(double* param, char param_no)	// dds_tx2_tone2_scal
 	}
 	else
 		show_invalid_param_message(1);
+}
+
+/**************************************************************************//**
+ * @brief gnss_passthrough v1.3 nulling core selection and PI-NLMS step size.
+******************************************************************************/
+void get_crpa_core(double* param, char param_no)
+{
+	uint32_t status = gnss_pt_read(GNSS_PT_REG_STATUS);
+	uint32_t core = (status & GNSS_PT_ST_CORE_SEL_MASK) >> GNSS_PT_ST_CORE_SEL_SHIFT;
+
+	console_print("crpa_core=%d\n", (int)core);
+	if(core == GNSS_PT_CORE_NLMS) {
+		console_print("  PI-NLMS configured=%d refused_samples=%d\n",
+			(status & GNSS_PT_ST_NLMS_CFG_DONE) ? 1 : 0,
+			(status & GNSS_PT_ST_NLMS_DROP) ? 1 : 0);
+	}
+}
+
+void set_crpa_core(double* param, char param_no)
+{
+	if(param_no < 1) {
+		console_print("crpa_core= needs 0 (bypass), 1 (PI) or 2 (PI-NLMS)\n");
+		return;
+	}
+	if(gnss_pt_set_core((uint32_t)param[0]) == GNSS_PT_OK)
+		get_crpa_core(param, param_no);
+}
+
+void get_crpa_nlms_mu(double* param, char param_no)
+{
+	console_print("crpa_nlms_mu=%d\n", (int)gnss_pt_get_nlms_mu());
+}
+
+void set_crpa_nlms_mu(double* param, char param_no)
+{
+	if(param_no < 1) {
+		console_print("crpa_nlms_mu= needs a value, e.g. crpa_nlms_mu=-3\n");
+		return;
+	}
+	gnss_pt_set_nlms_mu((int16_t)param[0]);
+	get_crpa_nlms_mu(param, param_no);
 }

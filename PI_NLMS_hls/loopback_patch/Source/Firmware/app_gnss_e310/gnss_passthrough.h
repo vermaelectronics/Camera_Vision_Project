@@ -74,13 +74,21 @@
  * 1.1 = adds the RX->TX sample alignment stage (RX is right-aligned 12-in-16,
  *       the AD9361 DAC consumes [15:4]). A board reporting 1.0 is running a
  *       bitstream whose TX output is 24 dB low with 4 bits discarded. */
-#define GNSS_PT_EXPECTED_VERSION    0x00010001U
+/* 1.3 = adds the PI (RTL) and PI-NLMS (HLS) 2-element nulling cores,
+ *       selected by CONTROL[5:4]. The default (0) is the 1.1 identity path,
+ *       so 1.1 firmware behaviour is unchanged until a core is selected. */
+#define GNSS_PT_EXPECTED_VERSION    0x00010003U
 
 /* ---- CONTROL bits -------------------------------------------------------- */
 #define GNSS_PT_CTRL_PASS_EN        (1U << 0)  /* 1 = RX->TX passthrough      */
 #define GNSS_PT_CTRL_MUTE           (1U << 1)  /* 1 = drive zeros to the DAC  */
 #define GNSS_PT_CTRL_SWAP_IQ        (1U << 2)
 #define GNSS_PT_CTRL_CH1_COPY       (1U << 3)  /* ch1 TX fed from ch0         */
+#define GNSS_PT_CTRL_CORE_SEL_SHIFT 4U         /* [5:4] nulling core          */
+#define GNSS_PT_CTRL_CORE_SEL_MASK  (3U << GNSS_PT_CTRL_CORE_SEL_SHIFT)
+#define GNSS_PT_CORE_BYPASS         0U         /* identity, as v1.1           */
+#define GNSS_PT_CORE_PI             1U         /* power inversion (RTL)       */
+#define GNSS_PT_CORE_NLMS           2U         /* PI-NLMS (Vitis HLS)         */
 #define GNSS_PT_CTRL_CNT_CLEAR      (1U << 8)  /* held, not self-clearing     */
 
 /* ---- STATUS bits --------------------------------------------------------- */
@@ -94,7 +102,14 @@
 #define GNSS_PT_ST_FIFO1_FULL       (1U << 7)
 #define GNSS_PT_ST_OVERFLOW         (1U << 8)
 #define GNSS_PT_ST_UNDERFLOW        (1U << 9)
+#define GNSS_PT_ST_CORE_SEL_SHIFT   10U        /* [11:10] core_sel as applied */
+#define GNSS_PT_ST_CORE_SEL_MASK    (3U << GNSS_PT_ST_CORE_SEL_SHIFT)
+#define GNSS_PT_ST_NLMS_DROP        (1U << 12) /* sticky: PI-NLMS refused a sample */
+#define GNSS_PT_ST_NLMS_CFG_DONE    (1U << 13) /* PI-NLMS step size programmed */
 #define GNSS_PT_ST_PASS_EN_SYNCED   (1U << 16)
+/* ---- CRPA_COEF slots ----------------------------------------------------- */
+#define GNSS_PT_COEF_PI_ALPHA       0U   /* signed Q8.8, default 0x0100 = 1.0  */
+#define GNSS_PT_COEF_NLMS_MU        1U   /* signed mu_shift_ctrl, default -3   */
 
 /* ---- return codes -------------------------------------------------------- */
 #define GNSS_PT_OK                   0
@@ -119,6 +134,18 @@ void     gnss_pt_set_passthrough(int enable);
 void     gnss_pt_set_mute(int mute);
 void     gnss_pt_clear_counters(void);
 
+/* Select the nulling core (GNSS_PT_CORE_*). The PI and PI-NLMS cores combine
+ * RX1 and RX2 into one nulled stream that drives both DACs; changing core
+ * restarts its adaptation. Returns GNSS_PT_OK, or -1 for an invalid core. */
+int32_t  gnss_pt_set_core(uint32_t core);
+uint32_t gnss_pt_get_core(void);
+/* PI-NLMS step size: shift added to the power-normalised step. Lower adapts
+ * faster; -3 is the default, values below -4 behave as -4. */
+void     gnss_pt_set_nlms_mu(int16_t mu_shift);
+int16_t  gnss_pt_get_nlms_mu(void);
+/* PI loop gain alpha, signed Q8.8 (256 = 1.0). */
+void     gnss_pt_set_pi_alpha_q8(int16_t alpha_q8);
+
 /* Snapshot of everything worth observing at runtime (requirement 58). */
 typedef struct {
     uint32_t id;
@@ -138,6 +165,10 @@ typedef struct {
     int      passthrough_enabled;
     int      overflow_sticky;
     int      underflow_sticky;
+    uint32_t core_sel;          /* as applied in the sample domain        */
+    int      nlms_cfg_done;
+    int      nlms_drop_sticky;
+    int16_t  nlms_mu;
 } gnss_pt_state_t;
 
 void     gnss_pt_get_state(gnss_pt_state_t *st);

@@ -67,3 +67,11 @@ set_false_path \
 # Quasi-static software settings through two-flop synchronisers.
 set_false_path \
   -to [get_cells -quiet -hier -filter {NAME =~ *gnss_passthrough/inst/ctrl_meta_reg*}]
+
+# --- 4. CRPA parameter crossings into the sample domain (v1.3) --------------
+# CRPA_COEF[0] (PI alpha) and CRPA_COEF[1] (PI-NLMS mu_shift_ctrl): quasi-static
+# software settings through two-flop synchronisers, exactly like CONTROL.
+set_false_path \
+  -to [get_cells -quiet -hier -filter {NAME =~ *gnss_passthrough/inst/crpa_alpha_meta_reg*}]
+set_false_path \
+  -to [get_cells -quiet -hier -filter {NAME =~ *gnss_passthrough/inst/nlms_mu_meta_reg*}]

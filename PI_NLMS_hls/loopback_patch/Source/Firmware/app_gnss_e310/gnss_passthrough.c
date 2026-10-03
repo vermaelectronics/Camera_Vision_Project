@@ -125,6 +125,56 @@ void gnss_pt_get_state(gnss_pt_state_t *st)
     st->passthrough_enabled = (st->status & GNSS_PT_ST_PASS_EN_SYNCED) ? 1 : 0;
     st->overflow_sticky     = (st->status & GNSS_PT_ST_OVERFLOW)  ? 1 : 0;
     st->underflow_sticky    = (st->status & GNSS_PT_ST_UNDERFLOW) ? 1 : 0;
+    st->core_sel            = (st->status & GNSS_PT_ST_CORE_SEL_MASK) >> GNSS_PT_ST_CORE_SEL_SHIFT;
+    st->nlms_cfg_done       = (st->status & GNSS_PT_ST_NLMS_CFG_DONE) ? 1 : 0;
+    st->nlms_drop_sticky    = (st->status & GNSS_PT_ST_NLMS_DROP)     ? 1 : 0;
+    st->nlms_mu             = gnss_pt_get_nlms_mu();
+}
+
+static const char *gnss_pt_core_name(uint32_t core)
+{
+    switch (core) {
+    case GNSS_PT_CORE_BYPASS: return "bypass (identity)";
+    case GNSS_PT_CORE_PI:     return "PI (power inversion, RTL)";
+    case GNSS_PT_CORE_NLMS:   return "PI-NLMS (HLS)";
+    default:                  return "reserved (bypass)";
+    }
+}
+
+int32_t gnss_pt_set_core(uint32_t core)
+{
+    if (core > GNSS_PT_CORE_NLMS) {
+        printf("gnss_pt: invalid core %lu (0 bypass, 1 PI, 2 PI-NLMS)\n", (unsigned long)core);
+        return -1;
+    }
+    uint32_t c = gnss_pt_read(GNSS_PT_REG_CONTROL);
+    c = (c & ~GNSS_PT_CTRL_CORE_SEL_MASK) | (core << GNSS_PT_CTRL_CORE_SEL_SHIFT);
+    gnss_pt_write(GNSS_PT_REG_CONTROL, c);
+    printf("gnss_pt: nulling core = %s\n", gnss_pt_core_name(core));
+    return GNSS_PT_OK;
+}
+
+uint32_t gnss_pt_get_core(void)
+{
+    return (gnss_pt_read(GNSS_PT_REG_CONTROL) & GNSS_PT_CTRL_CORE_SEL_MASK)
+           >> GNSS_PT_CTRL_CORE_SEL_SHIFT;
+}
+
+void gnss_pt_set_nlms_mu(int16_t mu_shift)
+{
+    gnss_pt_write(GNSS_PT_REG_CRPA_COEF(GNSS_PT_COEF_NLMS_MU), (uint32_t)(int32_t)mu_shift);
+    printf("gnss_pt: PI-NLMS mu_shift_ctrl = %d\n", (int)mu_shift);
+}
+
+int16_t gnss_pt_get_nlms_mu(void)
+{
+    return (int16_t)(gnss_pt_read(GNSS_PT_REG_CRPA_COEF(GNSS_PT_COEF_NLMS_MU)) & 0xFFFFU);
+}
+
+void gnss_pt_set_pi_alpha_q8(int16_t alpha_q8)
+{
+    gnss_pt_write(GNSS_PT_REG_CRPA_COEF(GNSS_PT_COEF_PI_ALPHA), (uint32_t)(int32_t)alpha_q8);
+    printf("gnss_pt: PI alpha = %d/256\n", (int)alpha_q8);
 }
 
 void gnss_pt_print_state(void)
@@ -139,6 +189,11 @@ void gnss_pt_print_state(void)
     printf("  control        : 0x%08lx\n", (unsigned long)s.control);
     printf("  status         : 0x%08lx\n", (unsigned long)s.status);
     printf("  passthrough    : %s\n", s.passthrough_enabled ? "ON" : "off");
+    printf("  nulling core   : %s\n", gnss_pt_core_name(s.core_sel));
+    if (s.core_sel == GNSS_PT_CORE_NLMS) {
+        printf("  PI-NLMS        : mu_shift=%d configured=%d refused_samples=%d\n",
+               (int)s.nlms_mu, s.nlms_cfg_done, s.nlms_drop_sticky);
+    }
     printf("  adc enable i/q : %d / %d\n",
            (s.status & GNSS_PT_ST_ADC_EN_I0) ? 1 : 0,
            (s.status & GNSS_PT_ST_ADC_EN_Q0) ? 1 : 0);

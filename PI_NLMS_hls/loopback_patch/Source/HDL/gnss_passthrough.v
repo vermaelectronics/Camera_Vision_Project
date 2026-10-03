@@ -19,6 +19,15 @@
 //    and the status counters -- is intended to stay unchanged, so that CRPA can
 //    be dropped in without redesigning the radio datapath (requirement 44).
 //
+//    v1.3: the PROCESSING CORE now holds two 2-element anti-jam (null-steering)
+//    cores next to the Phase 1 identity path, chosen at run time by
+//    CONTROL[5:4]:
+//        0  bypass   -- Phase 1 identity, bit-for-bit as v1.1 (the default)
+//        1  PI       -- pi_power_inversion.v, Compton power inversion (RTL)
+//        2  PI-NLMS  -- pi_nlms, power-normalised block NLMS (Vitis HLS)
+//    Both cores combine RX ch0 and ch1 into ONE nulled stream; set
+//    CONTROL[3] ch1_copy to send it to both DACs.
+//
 //  DATAPATH POSITION  (requirement 45)
 //    axi_ad9361 (ADC) --> gnss_passthrough --> axi_ad9361 (DAC)
 //    The path is entirely in programmable logic.  The ARM PS is NOT in the
@@ -48,12 +57,21 @@
 //                                    [1]  mute       1 = drive 0x0000 to DAC
 //                                    [2]  swap_iq    1 = exchange I and Q
 //                                    [3]  ch1_copy   1 = ch1 DAC fed from ch0
+//                                    [5:4] core_sel  0 = bypass (identity)
+//                                                    1 = PI (RTL)
+//                                                    2 = PI-NLMS (HLS)
+//                                                    3 = reserved (bypass)
 //                                    [8]  cnt_clear  1 = hold counters cleared
 //    0x10    STATUS          RO      [0]  adc_enable_i0   [1]  adc_enable_q0
 //                                    [2]  dac_enable_i0   [3]  dac_enable_q0
 //                                    [4]  fifo0_empty     [5]  fifo0_full
 //                                    [6]  fifo1_empty     [7]  fifo1_full
 //                                    [8]  overflow_sticky [9]  underflow_sticky
+//                                    [11:10] core_sel (as seen in the clk domain)
+//                                    [12] nlms_drop_sticky  PI-NLMS refused a
+//                                         sample (input stream not ready)
+//                                    [13] nlms_cfg_done     PI-NLMS mu_shift
+//                                         register programmed, core running
 //                                    [16] pass_en (as seen in the clk domain)
 //
 //            READ [2]/[3] CAREFULLY. dac_enable_* is NOT an enable this block
@@ -90,9 +108,13 @@
 //    0x34    TX_COUNT_CH1    RO      dac_valid_i1 pulses served
 //    0x38    RX_SNAPSHOT_CH1 RO      {adc_data_q1, adc_data_i1} last accepted
 //    0x3C    RESERVED        RO      reads 0
-//    0x40..  CRPA_COEF[0..15] RW     reserved for the future CRPA algorithm;
-//                                    Phase 1 stores and returns them, and no
-//                                    logic consumes them.
+//    0x40..  CRPA_COEF[0..15] RW     CRPA parameters:
+//            CRPA_COEF[0] 0x40       PI alpha, signed Q8.8 [15:0]. Default
+//                                    0x0100 = 1.0
+//            CRPA_COEF[1] 0x44       PI-NLMS mu_shift_ctrl, signed [15:0].
+//                                    Default -3 (0xFFFFFFFD). Lower = faster
+//                                    convergence; values below -4 act as -4.
+//            CRPA_COEF[2..15]        stored and returned, not consumed.
 //
 //  LICENCE
 //    Original work for this project.  Not derived from Analog Devices or
@@ -171,7 +193,9 @@ module gnss_passthrough #(
   localparam [31:0] CORE_ID      = 32'h47435031;   // "GCP1"
   // v1.1 -- adds the RX->TX sample alignment stage. Bumped so a running board
   // reports which of the two behaviours its bitstream actually has.
-  localparam [31:0] CORE_VERSION = 32'h00010001;   // v1.1
+  // v1.3 -- adds the PI (RTL) and PI-NLMS (HLS) nulling cores, selected by
+  // CONTROL[5:4]; the default remains the v1.1 identity path.
+  localparam [31:0] CORE_VERSION = 32'h00010003;   // v1.3
   localparam        AW           = FIFO_ADDR_WIDTH;
 
   // ==========================================================================
@@ -242,7 +266,11 @@ module gnss_passthrough #(
   reg  [31:0] crpa_coef [0:15];
 
   integer ci;
-  initial for (ci = 0; ci < 16; ci = ci + 1) crpa_coef[ci] = 32'd0;
+  initial begin
+    for (ci = 0; ci < 16; ci = ci + 1) crpa_coef[ci] = 32'd0;
+    crpa_coef[0] = 32'h0000_0100;   // PI alpha = 1.0 (Q8.8)
+    crpa_coef[1] = 32'hFFFF_FFFD;   // PI-NLMS mu_shift_ctrl = -3
+  end
 
   always @(posedge s_axi_aclk) begin
     if (s_axi_aresetn == 1'b0) begin
@@ -308,7 +336,7 @@ module gnss_passthrough #(
   // ==========================================================================
   (* ASYNC_REG = "TRUE" *) reg [8:0] ctrl_meta = 9'd0;
   (* ASYNC_REG = "TRUE" *) reg [8:0] ctrl_sync = 9'd0;
-  wire [8:0] ctrl_raw = {reg_control[8], 4'b0000, reg_control[3:0]};
+  wire [8:0] ctrl_raw = {reg_control[8], 2'b00, reg_control[5:0]};
 
   always @(posedge clk) begin
     ctrl_meta <= ctrl_raw;
@@ -319,7 +347,30 @@ module gnss_passthrough #(
   wire mute      = ctrl_sync[1];
   wire swap_iq   = ctrl_sync[2];
   wire ch1_copy  = ctrl_sync[3];
+  wire [1:0] core_sel = ctrl_sync[5:4];
   wire cnt_clear = ctrl_sync[8];
+
+  wire use_pi   = (core_sel == 2'd1);
+  wire use_nlms = (core_sel == 2'd2);
+  wire use_core = use_pi | use_nlms;
+
+  // ==========================================================================
+  //  CDC: CRPA parameters  s_axi_aclk -> clk
+  //  Quasi-static software settings, same two-flop pattern as CONTROL above.
+  //  A multi-bit value can be caught mid-change for one clock; both consumers
+  //  simply follow the settled value a clock later.
+  // ==========================================================================
+  (* ASYNC_REG = "TRUE" *) reg [15:0] crpa_alpha_meta = 16'h0100;
+  (* ASYNC_REG = "TRUE" *) reg [15:0] crpa_alpha_sync = 16'h0100;
+  (* ASYNC_REG = "TRUE" *) reg [15:0] nlms_mu_meta    = 16'hFFFD;
+  (* ASYNC_REG = "TRUE" *) reg [15:0] nlms_mu_sync    = 16'hFFFD;
+
+  always @(posedge clk) begin
+    crpa_alpha_meta <= crpa_coef[0][15:0];
+    crpa_alpha_sync <= crpa_alpha_meta;
+    nlms_mu_meta    <= crpa_coef[1][15:0];
+    nlms_mu_sync    <= nlms_mu_meta;
+  end
 
   // ==========================================================================
   //  Elastic buffer (one per channel)
@@ -356,21 +407,235 @@ module gnss_passthrough #(
     end
   end
 
-  wire wr_en0 = pass_en & adc_valid_i0 & adc_enable_i0;
   wire rd_en0 = pass_en & dac_valid_i0 & primed0;
-  wire wr_en1 = pass_en & adc_valid_i1 & adc_enable_i1;
   wire rd_en1 = pass_en & dac_valid_i1 & primed1;
 
   // ==========================================================================
-  //  PROCESSING CORE  --  replace this section with the CRPA algorithm.
-  //  Phase 1: identity.  proc_i/proc_q are the values written into the
-  //  elastic buffer; they are the raw RX samples, unmodified.
+  //  PROCESSING CORE
+  //  proc_i/proc_q are the values written into the elastic buffer, on
+  //  wr_en0/wr_en1 (defined just after this section).
+  //
+  //  core_sel = 0 (bypass): Phase 1 identity -- the raw RX samples, written on
+  //  each channel's own adc_valid, exactly as v1.1.
+  //
+  //  core_sel = 1 / 2: one of two M=2 null-steering cores combines element 0
+  //  (adc_*_i0/q0) and element 1 (adc_*_i1/q1) into a single nulled stream.
+  //  Both elements must be sampled in the same cycle, so the cores trigger on
+  //  the AND of all four RX valid/enable strobes (true every second l_clk in
+  //  AD9361 2R2T mode). The result is written to BOTH buffers when the core
+  //  says it is ready, not when the raw sample arrived -- neither core is
+  //  combinational. Only the selected core runs; the other is held in reset,
+  //  so every enable restarts adaptation from its quiescent weights.
+  //
+  //  Both cores work on the RX format as plain signed integers (12-bit,
+  //  right-aligned, sign-extended into [15:12]) and their outputs are
+  //  SATURATED to the 12-bit signed range here, before the OUTPUT SAMPLE
+  //  ALIGNMENT stage below takes [11:0] -- truncating there would wrap.
   // ==========================================================================
-  wire [15:0] proc_i0 = adc_data_i0;
-  wire [15:0] proc_q0 = adc_data_q0;
-  wire [15:0] proc_i1 = adc_data_i1;
-  wire [15:0] proc_q1 = adc_data_q1;
+  wire crpa_sample_valid = adc_valid_i0 & adc_enable_i0
+                         & adc_valid_q0 & adc_enable_q0
+                         & adc_valid_i1 & adc_enable_i1
+                         & adc_valid_q1 & adc_enable_q1;
+
+  // --------------------------------------------------------------------------
+  //  Core 1: PI -- pi_power_inversion.v (Compton power inversion, fixed alpha)
+  // --------------------------------------------------------------------------
+  localparam integer CRPA_DATA_W      = 16;
+  localparam integer CRPA_WEIGHT_W    = 32;
+  localparam integer CRPA_WEIGHT_FRAC = 20;
+  localparam integer CRPA_ALPHA_W     = 16;
+  localparam integer CRPA_ALPHA_FRAC  = 8;
+  localparam integer CRPA_LPF_SHIFT   = 18;
+  // Must match pi_power_inversion's own S_W for M=2: PROD1_W = DATA_W+WEIGHT_W+1,
+  // SUM_GROWTH = clog2(2) = 1, S_W = PROD1_W + SUM_GROWTH.
+  localparam integer CRPA_S_W         = CRPA_DATA_W + CRPA_WEIGHT_W + 2;
+
+  wire signed [CRPA_S_W-1:0] crpa_s_re, crpa_s_im;
+  wire                       crpa_s_valid;
+  wire [2*CRPA_WEIGHT_W-1:0] crpa_w_re, crpa_w_im;
+  wire                       crpa_weights_valid;
+  wire                       crpa_aresetn = ~rst & pass_en & use_pi;
+
+  pi_power_inversion #(
+      .M           (2),
+      .DATA_W      (CRPA_DATA_W),
+      .WEIGHT_W    (CRPA_WEIGHT_W),
+      .WEIGHT_FRAC (CRPA_WEIGHT_FRAC),
+      .ALPHA_W     (CRPA_ALPHA_W),
+      .ALPHA_FRAC  (CRPA_ALPHA_FRAC),
+      .ALPHA_INIT  (1 << CRPA_ALPHA_FRAC),
+      .LPF_SHIFT   (CRPA_LPF_SHIFT)
+  ) u_crpa_core (
+      .clk           (clk),
+      .aresetn       (crpa_aresetn),
+      .x_re          ({adc_data_i1[CRPA_DATA_W-1:0], adc_data_i0[CRPA_DATA_W-1:0]}),
+      .x_im          ({adc_data_q1[CRPA_DATA_W-1:0], adc_data_q0[CRPA_DATA_W-1:0]}),
+      .sample_valid  (crpa_sample_valid),
+      .alpha_in      (crpa_alpha_sync),
+      .alpha_wr      (1'b1),            // alpha follows CRPA_COEF[0]
+      .adapt_en      (pass_en),
+      .s_re          (crpa_s_re),
+      .s_im          (crpa_s_im),
+      .s_valid       (crpa_s_valid),
+      .w_re          (crpa_w_re),
+      .w_im          (crpa_w_im),
+      .weights_valid (crpa_weights_valid)
+  );
+
+  // Round to nearest, saturate to 12-bit signed.
+  function signed [11:0] crpa_sat12(input signed [CRPA_S_W-1:0] v);
+    reg signed [CRPA_S_W-1:0] rounded;
+    localparam signed [CRPA_S_W-1:0] SAT_MAX = 2047;
+    localparam signed [CRPA_S_W-1:0] SAT_MIN = -2048;
+    begin
+      rounded = (v + (1 <<< (CRPA_WEIGHT_FRAC-1))) >>> CRPA_WEIGHT_FRAC;
+      if (rounded > SAT_MAX)      crpa_sat12 = SAT_MAX[11:0];
+      else if (rounded < SAT_MIN) crpa_sat12 = SAT_MIN[11:0];
+      else                        crpa_sat12 = rounded[11:0];
+    end
+  endfunction
+
+  wire signed [11:0] crpa_re12 = crpa_sat12(crpa_s_re);
+  wire signed [11:0] crpa_im12 = crpa_sat12(crpa_s_im);
+
+  // --------------------------------------------------------------------------
+  //  Core 2: PI-NLMS -- Vitis HLS top function pi_nlms (Source/HLS/pi_nlms).
+  //  out = 0.707*x0 + w*x1, w adapted once per 1024 samples with a step
+  //  normalised to the element-1 input power. One output per input pair on
+  //  out_r_TVALID, after the core's pipeline latency.
+  //
+  //  The HLS core keeps mu_shift_ctrl in its own AXI4-Lite register (0x10) on
+  //  ap_clk = clk; the small writer below copies CRPA_COEF[1] into it after
+  //  every core reset and whenever the value changes, and samples are offered
+  //  only once that write has completed.
+  // --------------------------------------------------------------------------
+  // Registered synchronous reset. The power-up value of 1 guarantees a real
+  // 1->0 edge on the first clock: the HLS RTL derives its internal reset with
+  // always @(*), which a net already 0 at time 0 never triggers in simulation.
+  reg         nlms_rst_n = 1'b1;
+  always @(posedge clk)
+    nlms_rst_n <= ~rst & pass_en & use_nlms;
+
+  wire        nl_awready, nl_wready, nl_bvalid;
+  reg         nl_awvalid  = 1'b0, nl_wvalid = 1'b0, nl_bready = 1'b0;
+  reg  [15:0] nl_mu_wr    = 16'd0;
+  reg         nl_cfg_done = 1'b0;
+  reg  [1:0]  nl_st       = 2'd0;
+  localparam [1:0] NL_IDLE = 2'd0, NL_REQ = 2'd1, NL_RESP = 2'd2;
+
+  always @(posedge clk) begin
+    if (!nlms_rst_n) begin
+      nl_st       <= NL_IDLE;
+      nl_awvalid  <= 1'b0;
+      nl_wvalid   <= 1'b0;
+      nl_bready   <= 1'b0;
+      nl_cfg_done <= 1'b0;
+    end else begin
+      case (nl_st)
+        NL_IDLE:
+          if (!nl_cfg_done || nl_mu_wr != nlms_mu_sync) begin
+            nl_mu_wr   <= nlms_mu_sync;
+            nl_awvalid <= 1'b1;
+            nl_wvalid  <= 1'b1;
+            nl_st      <= NL_REQ;
+          end
+        NL_REQ: begin
+          if (nl_awready) nl_awvalid <= 1'b0;
+          if (nl_wready)  nl_wvalid  <= 1'b0;
+          if ((!nl_awvalid || nl_awready) && (!nl_wvalid || nl_wready)) begin
+            nl_bready <= 1'b1;
+            nl_st     <= NL_RESP;
+          end
+        end
+        NL_RESP:
+          if (nl_bvalid) begin
+            nl_bready   <= 1'b0;
+            nl_cfg_done <= 1'b1;
+            nl_st       <= NL_IDLE;
+          end
+        default: nl_st <= NL_IDLE;
+      endcase
+    end
+  end
+
+  wire        nlms_in_valid = crpa_sample_valid & nl_cfg_done;
+  wire        nlms_in1_ready, nlms_in2_ready;
+  wire [31:0] nlms_out_data;
+  wire        nlms_out_valid;
+  // A refused sample is lost; STATUS[12] latches it. Must never happen while
+  // samples arrive no faster than the core's initiation interval.
+  wire        nlms_drop = nlms_in_valid & ~(nlms_in1_ready & nlms_in2_ready);
+
+  pi_nlms u_nlms_core (
+      .ap_clk                 (clk),
+      .ap_rst_n               (nlms_rst_n),
+      .in1_TDATA              ({adc_data_q0, adc_data_i0}),
+      .in1_TVALID             (nlms_in_valid),
+      .in1_TREADY             (nlms_in1_ready),
+      .in1_TKEEP              (4'hF),
+      .in1_TSTRB              (4'hF),
+      .in1_TLAST              (1'b0),
+      .in2_TDATA              ({adc_data_q1, adc_data_i1}),
+      .in2_TVALID             (nlms_in_valid),
+      .in2_TREADY             (nlms_in2_ready),
+      .in2_TKEEP              (4'hF),
+      .in2_TSTRB              (4'hF),
+      .in2_TLAST              (1'b0),
+      .out_r_TDATA            (nlms_out_data),
+      .out_r_TVALID           (nlms_out_valid),
+      .out_r_TREADY           (1'b1),
+      .out_r_TKEEP            (),
+      .out_r_TSTRB            (),
+      .out_r_TLAST            (),
+      .s_axi_CTRL_BUS_AWVALID (nl_awvalid),
+      .s_axi_CTRL_BUS_AWREADY (nl_awready),
+      .s_axi_CTRL_BUS_AWADDR  (5'h10),
+      .s_axi_CTRL_BUS_WVALID  (nl_wvalid),
+      .s_axi_CTRL_BUS_WREADY  (nl_wready),
+      .s_axi_CTRL_BUS_WDATA   ({{16{nl_mu_wr[15]}}, nl_mu_wr}),
+      .s_axi_CTRL_BUS_WSTRB   (4'hF),
+      .s_axi_CTRL_BUS_ARVALID (1'b0),
+      .s_axi_CTRL_BUS_ARREADY (),
+      .s_axi_CTRL_BUS_ARADDR  (5'h0),
+      .s_axi_CTRL_BUS_RVALID  (),
+      .s_axi_CTRL_BUS_RREADY  (1'b0),
+      .s_axi_CTRL_BUS_RDATA   (),
+      .s_axi_CTRL_BUS_RRESP   (),
+      .s_axi_CTRL_BUS_BVALID  (nl_bvalid),
+      .s_axi_CTRL_BUS_BREADY  (nl_bready),
+      .s_axi_CTRL_BUS_BRESP   ()
+  );
+
+  // pi_nlms saturates to int16; this path carries 12-bit samples.
+  function signed [11:0] sat12_16(input signed [15:0] v);
+    begin
+      if (v > 16'sd2047)       sat12_16 = 12'sd2047;
+      else if (v < -16'sd2048) sat12_16 = -12'sd2048;
+      else                     sat12_16 = v[11:0];
+    end
+  endfunction
+
+  wire signed [11:0] nlms_re12 = sat12_16(nlms_out_data[15:0]);
+  wire signed [11:0] nlms_im12 = sat12_16(nlms_out_data[31:16]);
+
+  // --------------------------------------------------------------------------
+  //  Selection
+  // --------------------------------------------------------------------------
+  wire signed [11:0] core_re12  = use_nlms ? nlms_re12 : crpa_re12;
+  wire signed [11:0] core_im12  = use_nlms ? nlms_im12 : crpa_im12;
+  wire               core_valid = use_nlms ? nlms_out_valid : crpa_s_valid;
+
+  wire [15:0] core_i = {{4{core_re12[11]}}, core_re12};
+  wire [15:0] core_q = {{4{core_im12[11]}}, core_im12};
+
+  wire [15:0] proc_i0 = use_core ? core_i : adc_data_i0;
+  wire [15:0] proc_q0 = use_core ? core_q : adc_data_q0;
+  wire [15:0] proc_i1 = use_core ? core_i : adc_data_i1;   // one nulled stream:
+  wire [15:0] proc_q1 = use_core ? core_q : adc_data_q1;   // ch1 mirrors ch0
   // ======================= END PROCESSING CORE ==============================
+
+  wire wr_en0 = pass_en & (use_core ? core_valid : (adc_valid_i0 & adc_enable_i0));
+  wire wr_en1 = pass_en & (use_core ? core_valid : (adc_valid_i1 & adc_enable_i1));
 
   reg  [31:0] rd_data0 = 32'd0;
   reg  [31:0] rd_data1 = 32'd0;
@@ -462,6 +727,7 @@ module gnss_passthrough #(
   reg [31:0] ovf_cnt = 32'd0, unf_cnt = 32'd0;
   reg [31:0] rx_snap0 = 32'd0, tx_snap0 = 32'd0, rx_snap1 = 32'd0;
   reg        ovf_sticky = 1'b0, unf_sticky = 1'b0;
+  reg        nlms_drop_sticky = 1'b0;
 
   always @(posedge clk) begin
     if (rst || cnt_clear) begin
@@ -469,6 +735,7 @@ module gnss_passthrough #(
       rx_cnt1 <= 32'd0; tx_cnt1 <= 32'd0;
       ovf_cnt <= 32'd0; unf_cnt <= 32'd0;
       ovf_sticky <= 1'b0; unf_sticky <= 1'b0;
+      nlms_drop_sticky <= 1'b0;
       rx_snap0 <= 32'd0; tx_snap0 <= 32'd0; rx_snap1 <= 32'd0;
     end else begin
       if (adc_valid_i0) begin
@@ -494,12 +761,15 @@ module gnss_passthrough #(
         unf_cnt    <= unf_cnt + 1'b1;
         unf_sticky <= 1'b1;
       end
+      if (nlms_drop)
+        nlms_drop_sticky <= 1'b1;
     end
   end
 
   wire [31:0] status_w;
   assign status_w = { 15'd0, pass_en,
-                      6'd0, unf_sticky, ovf_sticky,
+                      2'd0, nl_cfg_done, nlms_drop_sticky, core_sel,
+                      unf_sticky, ovf_sticky,
                       full1, empty1, full0, empty0,
                       dac_enable_q0, dac_enable_i0,
                       adc_enable_q0, adc_enable_i0 };

@@ -51,3 +51,9 @@ set_false_path \
 # --- 3. Control crossing into the sample domain -----------------------------
 set_false_path \
   -to [get_cells -quiet -hier -filter {NAME =~ *ctrl_meta_reg*}]
+
+# --- 4. CRPA parameter crossings into the sample domain (v1.3) --------------
+set_false_path \
+  -to [get_cells -quiet -hier -filter {NAME =~ *crpa_alpha_meta_reg*}]
+set_false_path \
+  -to [get_cells -quiet -hier -filter {NAME =~ *nlms_mu_meta_reg*}]

@@ -9,9 +9,18 @@
 #  refreshed to a different upstream revision.
 #
 #  INVOCATION
-#    vivado -mode batch -source gnss_passthrough_ip.tcl -tclargs <src> <out>
-#      <src> absolute path to code_r1/Source
-#      <out> absolute path to the IP repository to write into
+#    vivado -mode batch -source gnss_passthrough_ip.tcl -tclargs <src> <out> [<hls_rtl>]
+#      <src>     absolute path to code_r1/Source
+#      <out>     absolute path to the IP repository to write into
+#      <hls_rtl> directory holding the Vitis HLS pi_nlms Verilog
+#                (default <src>/../Build/hls/pi_nlms/verilog, written by
+#                Source/HLS/pi_nlms/run_hls.tcl)
+#
+#  SOURCES (v1.3)
+#    Source/HDL/gnss_passthrough.v      top
+#    Source/HDL/pi_power_inversion.v    PI core      (CONTROL[5:4] = 1)
+#    Source/HDL/pi_cmul.v               PI core complex multiplier
+#    <hls_rtl>/*.v                      PI-NLMS core (CONTROL[5:4] = 2)
 #
 #  OUTPUT
 #    <out>/gnss_passthrough/component.xml  plus the packaged sources.
@@ -30,12 +39,26 @@ set ip_name    "gnss_passthrough"
 set ip_dir     [file join $ip_repo_dir $ip_name]
 set rtl_file   [file join $src_dir "HDL" "${ip_name}.v"]
 set xdc_file   [file join $src_dir "IP" $ip_name "${ip_name}_constr.xdc"]
+set pi_files   [list [file join $src_dir "HDL" "pi_power_inversion.v"] \
+                     [file join $src_dir "HDL" "pi_cmul.v"]]
+if {$argc >= 3} {
+  set hls_rtl_dir [file normalize [lindex $argv 2]]
+} else {
+  set hls_rtl_dir [file normalize [file join $src_dir ".." "Build" "hls" "pi_nlms" "verilog"]]
+}
 
-foreach f [list $rtl_file $xdc_file] {
+foreach f [concat [list $rtl_file $xdc_file] $pi_files] {
   if {![file exists $f]} {
     puts "ERROR: required source not found: $f"
     exit 2
   }
+}
+
+set hls_files [glob -nocomplain -directory $hls_rtl_dir *.v]
+if {[lsearch -glob $hls_files */pi_nlms.v] < 0} {
+  puts "ERROR: PI-NLMS HLS RTL not found in $hls_rtl_dir"
+  puts "       Build it first: vitis_hls -f Source/HLS/pi_nlms/run_hls.tcl -tclargs <LoopBack_Code>"
+  exit 2
 }
 
 # A fresh edit-project guarantees the packaged result reflects the current RTL
@@ -47,6 +70,8 @@ create_project -force ${ip_name}_pkg [file join $ip_dir ".pkg_project"] -part xc
 set_property target_language Verilog [current_project]
 
 add_files -norecurse $rtl_file
+add_files -norecurse $pi_files
+add_files -norecurse $hls_files
 set_property top $ip_name [current_fileset]
 update_compile_order -fileset sources_1
 
@@ -65,7 +90,7 @@ set core [ipx::current_core]
 set_property name           $ip_name                                  $core
 set_property version        1.0                                       $core
 set_property display_name   "GNSS CRPA Passthrough"                   $core
-set_property description    "Phase-1 transparent RX->TX I/Q passthrough and CRPA insertion point for ANTSDR E310 V1" $core
+set_property description    "RX->TX I/Q passthrough with selectable PI / PI-NLMS 2-element CRPA nulling for ANTSDR E310 V1" $core
 set_property vendor_display_name "ANTSDR GNSS CRPA project"           $core
 set_property company_url    "https://github.com/MicroPhase"           $core
 

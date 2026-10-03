@@ -1,10 +1,10 @@
-# gnss_passthrough v1.3 (PI RTL core + PI-NLMS HLS core) -- simulation
+# gnss_passthrough v1.3 (bypass / PI RTL core / PI-NLMS HLS core) -- simulation
 #
 #   make sim HLS_RTL=<dir with HLS-generated pi_nlms*.v>
-#       e.g. HLS_RTL=~/PI_NLMS_2021/PI_NLMS_hls/solution1/syn/verilog
+#       e.g. HLS_RTL=<LoopBack_Code>/Build/hls/pi_nlms/verilog
 #
-#   make sim_nlms   NLMS mode: bit-exact vs C model, suppression, DAC path
-#   make sim_pi     original v1.2 testbench (PI core selected) -- regression
+#   make sim_nlms   bypass + PI-NLMS: bit-exact vs C model, suppression, DAC path
+#   make sim_pi     PI core regression (the original v1.2 testbench)
 #
 # Needs g++ and Icarus Verilog (sudo apt install iverilog).
 
@@ -14,7 +14,8 @@ MU       ?= -3
 BUILD    := build
 AP_TYPES := ../third_party/HLS_arbitrary_Precision_Types
 CXXFLAGS := -std=c++11 -O2 -Wno-unknown-pragmas -I../src -I../csim_include -I$(AP_TYPES)/include
-RTL      := rtl/gnss_passthrough.v rtl/pi_power_inversion.v rtl/pi_cmul.v
+HDL      := ../loopback_patch/Source/HDL
+RTL      := $(HDL)/gnss_passthrough.v $(HDL)/pi_power_inversion.v $(HDL)/pi_cmul.v
 
 .PHONY: sim sim_nlms sim_pi clean
 
@@ -37,7 +38,7 @@ sim_nlms: $(BUILD)/stim.hex
 
 sim_pi:
 	@mkdir -p $(BUILD)
-	iverilog -g2012 -o $(BUILD)/tb_pi tb/tb_gnss_passthrough.v $(RTL) $(wildcard $(HLS_RTL)/*.v)
+	iverilog -g2012 -o $(BUILD)/tb_pi tb/tb_gnss_passthrough_pi.v $(RTL) $(wildcard $(HLS_RTL)/*.v)
 	vvp -n $(BUILD)/tb_pi
 
 clean:

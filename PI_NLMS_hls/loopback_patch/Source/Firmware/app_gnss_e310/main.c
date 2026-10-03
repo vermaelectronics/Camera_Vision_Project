@@ -1155,6 +1155,12 @@ int main(void)
 			/* pass_en = 1 is the ALL-IN-PL live path: the mode that produced a
 			 * real 3D fix (TEST-025). The DDR round trip replays a fixed 20 ms
 			 * buffer and can never yield a fix, so it is wrong for deployment. */
+#ifdef GNSS_DEPLOY_CRPA_CORE
+			/* gnss_passthrough v1.3: start with a nulling core selected
+			 * (1 = PI, 2 = PI-NLMS). Without the define the bypass path runs,
+			 * exactly as before. */
+			gnss_pt_set_core(GNSS_DEPLOY_CRPA_CORE);
+#endif
 			gnss_pt_set_passthrough(1);
 			gnss_pt_set_mute(0);
 			if (gnss_l1_set_dac_source(ad9361_phy,

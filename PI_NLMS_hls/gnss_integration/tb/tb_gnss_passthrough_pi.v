@@ -1,5 +1,5 @@
 `timescale 1ns/100ps
-module tb_gnss_passthrough;
+module tb_gnss_passthrough_pi;
 
   reg clk = 0; always #5 clk = ~clk;                 // 100 MHz l_clk
   reg s_axi_aclk = 0; always #7 s_axi_aclk = ~s_axi_aclk; // ~71 MHz, async on purpose
@@ -106,7 +106,7 @@ module tb_gnss_passthrough;
     end
 
     // -------- Enable CRPA repeater mode, ch1_copy=1 --------
-    axil_write(16'h000C, 32'h0000_0009);  // CONTROL: pass_en=1, ch1_copy=1
+    axil_write(16'h000C, 32'h0000_0019);  // CONTROL: pass_en=1, ch1_copy=1, core_sel=1 (PI)
     axil_write(16'h0040, 32'd256);        // CRPA_COEF[0] = alpha = 1.0 (Q8.8)
     repeat (10) @(posedge clk);
 
