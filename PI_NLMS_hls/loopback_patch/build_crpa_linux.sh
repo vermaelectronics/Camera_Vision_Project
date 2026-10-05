@@ -97,6 +97,16 @@ fi
 # ---------------------------------------------------------------------------
 if want project; then
   step "Create Vivado project"
+  # create_project.tcl hooks ADI's post-route auto timing fix into impl_1. The
+  # 2021.1 MicroPhase tree predates that script; it uses only standard Vivado
+  # commands, so the copy from the newer ADI tree under Vendor/ works as is.
+  atf="$ADI_HDL_DIR/projects/scripts/auto_timing_fix_xilinx.tcl"
+  if [[ ! -f "$atf" ]]; then
+    atf_src="$ROOT/Vendor/ADI_hdl_2026_r1_update/projects/scripts/auto_timing_fix_xilinx.tcl"
+    [[ -f "$atf_src" ]] || die "auto_timing_fix_xilinx.tcl not found in $ADI_HDL_DIR or $atf_src"
+    cp "$atf_src" "$atf"
+    echo "ATF: copied auto_timing_fix_xilinx.tcl into $ADI_HDL_DIR/projects/scripts"
+  fi
   mkdir -p "$ROOT/Vivado/Project"
   ( cd "$ROOT/Vivado/Project" && \
     vivado -mode batch -nojournal -log create_project.log -source ../Scripts/create_project.tcl ) || true
@@ -130,7 +140,9 @@ if want sw; then
     echo "#endif"
   } > "$fw/gnss_build_defines.h"
   [[ "${DEPLOY_AUTO_TX:-0}" == "1" ]] && echo "WARNING: DEPLOY_AUTO_TX=1 -- this image transmits at power-on."
-  rm -rf "$ROOT/Vitis/Workspace/e310_gnss_platform" "$ROOT/Vitis/Workspace/e310_gnss_app"
+  # Fresh workspace every run: XSCT metadata from an earlier run makes
+  # "platform create" fail with "already exists".
+  rm -rf "$ROOT/Vitis/Workspace" && mkdir -p "$ROOT/Vitis/Workspace" && touch "$ROOT/Vitis/Workspace/.gitkeep"
   xsct "$ROOT/Vitis/Scripts/build_software.tcl" \
        "$ROOT/Build/system_top.xsa" "$ROOT/Vitis/Workspace" "$fw" \
        "$ROOT/Build/ELF/e310_gnss_app.elf" 2>&1 | tee "$ROOT/Build/sw.log" || true

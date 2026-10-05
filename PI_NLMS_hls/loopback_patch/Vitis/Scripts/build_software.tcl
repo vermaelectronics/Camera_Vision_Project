@@ -69,7 +69,9 @@ if {[catch {
 # Source/Firmware remains authoritative.  Sync-Firmware.ps1 documents the
 # route back if the sources are edited inside the IDE (requirement 67).
 puts "SW_STAGE: importing firmware from $fw_src"
-importsources -name $app_name -path $fw_src -linker-script
+# No -linker-script: Source/Firmware carries no .ld, so the template's
+# lscript.ld is kept -- the same as build_software.py (import_files).
+importsources -name $app_name -path $fw_src
 
 # The no-OS AD9361 driver needs these to compile for this board.
 app config -name $app_name -add define-compiler-symbols XILINX_PLATFORM

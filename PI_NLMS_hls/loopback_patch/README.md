@@ -32,7 +32,8 @@ RX2 ─┘                          └─ PI-NLMS (core 2, pi_nlms, Vitis HLS)
 | `Source/Firmware/app_gnss_e310/command.[ch]` | console: `crpa_core?`, `crpa_core=`, `crpa_nlms_mu?`, `crpa_nlms_mu=` |
 | `Source/Firmware/app_gnss_e310/main.c` | optional `GNSS_DEPLOY_CRPA_CORE`: power-on core for auto-TX images |
 | `Vitis/Scripts/build_boot_2021.tcl` | new: FSBL + BOOT.BIN with XSCT/bootgen 2021.1 |
-| `build_crpa_linux.sh` | new: whole Linux build, step by step |
+| `Vitis/Scripts/build_software.tcl` | stop importing a linker script that `Source/Firmware` doesn't have; the template's is used, as in `build_software.py` |
+| `build_crpa_linux.sh` | new: whole Linux build, step by step. Also copies ADI's `auto_timing_fix_xilinx.tcl` into the 2021.1 tree, which lacks it and `create_project.tcl` requires it |
 
 ## Registers (base 0x43C0_0000)
 
