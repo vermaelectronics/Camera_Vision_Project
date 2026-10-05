@@ -60,7 +60,7 @@ To open the software workspace, run `vitis -classic -workspace Vitis/Workspace`.
 
 The HDL (`Source/HDL`), constraints (`Source/XDC`) and block design contents are unchanged.
 
-`Vendor/ADI_hdl_2026_r1_update/` and `Vendor/MicroPhase_E310_V1/` are kept for reference. The 2023.2 build does not use them.
+`Vendor/MicroPhase_E310_V1/` is kept for reference. The 2023.2 build does not use it. The ADI `hdl_2026_r1` library used by the original 2026.1 build is not included.
 
 ## Status
 
