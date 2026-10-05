@@ -37,7 +37,14 @@ open_project $xpr
 puts "BUILD_STAGE: synthesis starting"
 reset_run synth_1
 launch_runs synth_1 -jobs $jobs
-wait_on_run synth_1
+# wait_on_run raises a Tcl error whenever Vivado marks ANY run in the chain as
+# failed, even when the run itself completed (seen on 2023.2: impl_1 wrote the
+# bitstream, then wait_on_run aborted citing synth_1 with "set_property expects
+# at least one object"). The decision is therefore taken from the run's own
+# STATUS/PROGRESS below, never from wait_on_run's return code alone.
+if {[catch {wait_on_run synth_1} wait_err]} {
+  puts "BUILD_NOTE: wait_on_run synth_1 reported: $wait_err"
+}
 
 set synth_status [get_property STATUS   [get_runs synth_1]]
 set synth_prog   [get_property PROGRESS [get_runs synth_1]]
@@ -58,14 +65,17 @@ report_utilization    -file [file join [file dirname $bit_out] utilization_synth
 puts "BUILD_STAGE: implementation starting"
 reset_run impl_1
 launch_runs impl_1 -to_step write_bitstream -jobs $jobs
-wait_on_run impl_1
+if {[catch {wait_on_run impl_1} wait_err]} {
+  puts "BUILD_NOTE: wait_on_run impl_1 reported: $wait_err"
+  puts "BUILD_NOTE: judging the result from impl_1 STATUS/PROGRESS and the .bit file instead"
+}
 
 set impl_status [get_property STATUS   [get_runs impl_1]]
 set impl_prog   [get_property PROGRESS [get_runs impl_1]]
 puts "BUILD_IMPL_STATUS: $impl_status"
 puts "BUILD_IMPL_PROGRESS: $impl_prog"
 
-if {$impl_prog ne "100%"} {
+if {$impl_prog ne "100%" || ![string match "*write_bitstream Complete*" $impl_status]} {
   puts "BUILD_RESULT: FAIL - implementation did not complete (progress $impl_prog)"
   puts "BUILD_EVIDENCE: see [get_property DIRECTORY [get_runs impl_1]]/runme.log"
   exit 2
