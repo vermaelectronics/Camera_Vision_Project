@@ -49,7 +49,9 @@ if {$argc > 4} {
 
 set plat_name "e310_gnss_platform"
 set app_name  "e310_gnss_app"
-set domain    "standalone_ps7_cortexa9_0"
+# Vitis 2023.2 XSCT names the platform's default domain "standalone_domain";
+# later releases use "standalone_ps7_cortexa9_0".  Both are tried below.
+set domain_candidates {standalone_domain standalone_ps7_cortexa9_0}
 
 foreach f [list $xsa $fw_src] {
   if {![file exists $f]} {
@@ -79,14 +81,23 @@ if {[catch {
 
 # ---- application -----------------------------------------------------------
 puts "SW_STAGE: creating application"
-if {[catch {
-  app create -name $app_name -platform $plat_name -domain $domain \
-             -template "Empty Application(C)"
-} err]} {
+set app_created 0
+set err ""
+foreach domain $domain_candidates {
+  if {![catch {
+    app create -name $app_name -platform $plat_name -domain $domain \
+               -template "Empty Application(C)"
+  } err]} {
+    set app_created 1
+    break
+  }
+}
+if {!$app_created} {
   puts "SW_RESULT: FAIL - app create"
   puts "SW_ERROR: $err"
   exit 2
 }
+puts "SW_DOMAIN: $domain"
 
 puts "SW_STAGE: importing firmware from $fw_src"
 # Only ask for the linker script to be imported if the firmware ships one;
