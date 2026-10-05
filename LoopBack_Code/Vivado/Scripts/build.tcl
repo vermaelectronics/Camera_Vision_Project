@@ -33,6 +33,14 @@ if {![file exists $xpr]} {
 
 open_project $xpr
 
+# Same as create_project.tcl: never synthesise against a stale or missing
+# incremental reference (Vivado 2023.2 auto-incremental), and clear any
+# reference a previous run left behind on an existing project.
+foreach run [list synth_1 impl_1] {
+  catch {set_property AUTO_INCREMENTAL_CHECKPOINT 0 [get_runs $run]}
+  catch {set_property INCREMENTAL_CHECKPOINT {} [get_runs $run]}
+}
+
 # ---- synthesis -------------------------------------------------------------
 puts "BUILD_STAGE: synthesis starting"
 reset_run synth_1

@@ -166,6 +166,18 @@ set_property STEPS.ROUTE_DESIGN.TCL.POST \
   [get_files $ADI_POST_ROUTE_SCRIPT -of [get_fileset utils_1]] [get_runs impl_1]
 puts "CREATE_TIMING_AIDS: strategy=Congestion_SpreadLogic_high, post-route auto timing fix enabled"
 
+# Vivado 2023.2 automatic incremental synthesis registers the previous run's
+# checkpoint under utils_1/imports/synth_1 after every synthesis. On this flow
+# that step failed ("set_property expects at least one object", which marked
+# a COMPLETED synth_1 as failed) and the next build then refused to start
+# ("Incremental checkpoint file ... does not exist"). Builds here are always
+# from scratch, so switch it off.
+foreach run [list synth_1 impl_1] {
+  catch {set_property AUTO_INCREMENTAL_CHECKPOINT 0 [get_runs $run]}
+  catch {set_property INCREMENTAL_CHECKPOINT {} [get_runs $run]}
+}
+puts "CREATE_INCREMENTAL: automatic incremental checkpoints disabled"
+
 # Record where the design came from, visible in the Vivado GUI project summary.
 set_property generic {} [current_fileset]
 
