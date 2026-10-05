@@ -129,6 +129,10 @@ command cmd_list[] = {
 	{"gnss_tx?", "Gets the GNSS L1 retransmit state.", "", get_gnss_tx},
 	{"gnss_tx=", "1 = retransmit RX1 on TX1, 0 = silence TX1.", "gnss_tx=0", set_gnss_tx},
 	{"gnss_status?", "Prints AD9361 and gnss_passthrough runtime state.", "", get_gnss_status},
+	/* PI-NLMS null steering in gnss_passthrough (bitstream v1.2+). */
+	{"gnss_nlms?", "Gets the PI-NLMS null-steering state.", "", get_gnss_nlms},
+	{"gnss_nlms=", "1 = TX1 carries PI-NLMS(RX1, RX2), 0 = TX1 carries RX1.", "gnss_nlms=1", set_gnss_nlms},
+	{"gnss_nlms_mu=", "Sets the PI-NLMS step size (mu_shift_ctrl, signed).", "gnss_nlms_mu=0", set_gnss_nlms_mu},
 	/* GNSS-CRPA MOD-7: the DDR round trip. Exercises axi_ad9361_dac_dma,
 	 * util_upack2 and the util_rfifo DATA path, none of which had ever moved a
 	 * real sample. See gnss_txdma.h. */
@@ -272,6 +276,60 @@ void get_gnss_status(double* param, char param_no)
 	}
 	gnss_l1_print_status(ad9361_phy);
 	gnss_pt_print_state();
+}
+
+/**************************************************************************//***
+ * @brief PI-NLMS. Report whether the null-steering core is in the TX1 path.
+*******************************************************************************/
+void get_gnss_nlms(double* param, char param_no)
+{
+	uint32_t status = gnss_pt_read(GNSS_PT_REG_STATUS);
+	uint32_t ver    = gnss_pt_read(GNSS_PT_REG_VERSION);
+
+	if(ver < 0x00010002U) {
+		console_print("GNSS_NLMS: bitstream v%d.%d has no PI-NLMS core\n",
+			      (long)(ver >> 16), (long)(ver & 0xFFFFU));
+		return;
+	}
+	console_print("GNSS_NLMS: %s (read from hardware), mu_shift = %d%s\n",
+		      (status & GNSS_PT_ST_NLMS_EN_SYNCED) ? "ON" : "off",
+		      (long)(int16_t)(gnss_pt_read(GNSS_PT_REG_NLMS_MU) & 0xFFFFU),
+		      (status & GNSS_PT_ST_NLMS_DROP)
+		          ? ", DROPPED SAMPLES (sticky)" : "");
+}
+
+/**************************************************************************//***
+ * @brief PI-NLMS. Put the null-steering core in (1) or out (0) of the TX1 path.
+ *
+ * This only selects what feeds TX1. It does not open the transmitter; that is
+ * still gnss_tx=1, with its attenuation interlock. Both AD9361 receive
+ * channels must be connected: the core needs RX2 as its auxiliary element.
+*******************************************************************************/
+void set_gnss_nlms(double* param, char param_no)
+{
+	if(param_no < 1) {
+		console_print("gnss_nlms= needs 0 or 1\n");
+		return;
+	}
+	if(gnss_pt_read(GNSS_PT_REG_VERSION) < 0x00010002U) {
+		console_print("gnss_nlms: this bitstream has no PI-NLMS core\n");
+		return;
+	}
+	gnss_pt_set_nlms((int)param[0] != 0);
+	get_gnss_nlms(param, param_no);
+}
+
+/**************************************************************************//***
+ * @brief PI-NLMS. Set mu_shift_ctrl. Takes effect at the next weight update.
+*******************************************************************************/
+void set_gnss_nlms_mu(double* param, char param_no)
+{
+	if(param_no < 1) {
+		console_print("gnss_nlms_mu= needs a value, e.g. gnss_nlms_mu=0\n");
+		return;
+	}
+	gnss_pt_set_nlms_mu((int16_t)param[0]);
+	get_gnss_nlms(param, param_no);
 }
 
 /* GNSS-CRPA MOD-7: the DDR round trip.

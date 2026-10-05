@@ -9,6 +9,7 @@ Ubuntu 22.04.
 ```bash
 source /tools/Xilinx/Vivado/2023.2/settings64.sh
 source /tools/Xilinx/Vitis/2023.2/settings64.sh
+source /tools/Xilinx/Vitis_HLS/2023.2/settings64.sh
 cd LoopBack_Code
 ./Automation/Linux/build_all.sh --jobs 16
 ```
@@ -37,7 +38,7 @@ Run only some stages, for example after editing only the firmware:
 ./Automation/Linux/build_all.sh --from sw --to boot
 ```
 
-The stages are `vendor, libip, ip, project, build, sw, fsbl, boot`, which you can also give as 1–8.
+The stages are `vendor, libip, nlms, ip, project, build, sw, fsbl, boot`, which you can also give as 1–9.
 
 To open the generated project in the GUI, run `vivado Vivado/Project/antsdr_e310_gnss.xpr`.
 To open the software workspace, run `vitis -classic -workspace Vitis/Workspace`.
@@ -74,3 +75,30 @@ the post-route fix to close timing, and 2023.2 may route differently.
 `SD_Image/BOOT.BIN` is the existing image built with 2026.1. It runs on the
 board whatever tools you have installed. A 2023.2 build writes its own
 `Build/Output/BOOT.BIN`.
+
+## PI-NLMS null steering (bitstream v1.2)
+
+The PI-NLMS anti-jam core from `Source/HLS/pi_nlms` (Vitis HLS C++) runs inside
+`gnss_passthrough`, between the AD9361 receive and transmit paths:
+
+    RX1 ─┐
+         ├─► pi_nlms (PL, sample clock, II=1) ─► TX1      when CONTROL[4] = 1
+    RX2 ─┘
+    RX2 ───────────────────────────────────────► TX2
+
+- Stage `nlms` runs Vitis HLS on the unmodified `pi_nlms.cpp` and writes plain
+  Verilog to `Source/HDL/pi_nlms/`. Only the interface changes: the step size
+  becomes a port instead of an AXI-Lite register, because `gnss_passthrough`
+  already owns the registers and the clock crossing. The HLS clock target is
+  8 ns, the AD9361 sample clock constraint.
+- The IP packaging step adds that Verilog to the `gnss_passthrough` IP, so the
+  block design does not change.
+- Registers: `CONTROL[4]` (0x0C) enables it, `0x40[15:0]` sets `mu_shift_ctrl`,
+  `STATUS[17]` reads it back, and `STATUS[10]` flags dropped samples. VERSION
+  reads 1.2.
+- Console: `gnss_nlms=1`, `gnss_nlms=0`, `gnss_nlms_mu=<n>`, `gnss_nlms?`.
+  `gnss_tx=1` still controls whether anything is transmitted at all.
+
+RX samples (12-bit) are scaled ×16 into the 16-bit range the core was verified
+with, and the saturated output is scaled back. Both RX inputs must be connected:
+RX2 is the auxiliary antenna element.

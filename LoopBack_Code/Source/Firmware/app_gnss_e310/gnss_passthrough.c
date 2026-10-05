@@ -96,6 +96,19 @@ void gnss_pt_clear_counters(void)
     gnss_pt_write(GNSS_PT_REG_CONTROL, c & ~GNSS_PT_CTRL_CNT_CLEAR);
 }
 
+void gnss_pt_set_nlms(int enable)
+{
+    uint32_t c = gnss_pt_read(GNSS_PT_REG_CONTROL);
+    if (enable) { c |= GNSS_PT_CTRL_NLMS_EN; }
+    else        { c &= ~GNSS_PT_CTRL_NLMS_EN; }
+    gnss_pt_write(GNSS_PT_REG_CONTROL, c);
+}
+
+void gnss_pt_set_nlms_mu(int16_t mu_shift)
+{
+    gnss_pt_write(GNSS_PT_REG_NLMS_MU, (uint32_t)(uint16_t)mu_shift);
+}
+
 void gnss_pt_get_state(gnss_pt_state_t *st)
 {
     if (!st) { return; }
@@ -139,6 +152,10 @@ void gnss_pt_print_state(void)
     printf("  control        : 0x%08lx\n", (unsigned long)s.control);
     printf("  status         : 0x%08lx\n", (unsigned long)s.status);
     printf("  passthrough    : %s\n", s.passthrough_enabled ? "ON" : "off");
+    printf("  pi-nlms        : %s, mu_shift=%d%s\n",
+           (s.status & GNSS_PT_ST_NLMS_EN_SYNCED) ? "ON" : "off",
+           (int)(int16_t)(gnss_pt_read(GNSS_PT_REG_NLMS_MU) & 0xFFFFU),
+           (s.status & GNSS_PT_ST_NLMS_DROP) ? "  DROPPED SAMPLES (sticky)" : "");
     printf("  adc enable i/q : %d / %d\n",
            (s.status & GNSS_PT_ST_ADC_EN_I0) ? 1 : 0,
            (s.status & GNSS_PT_ST_ADC_EN_Q0) ? 1 : 0);

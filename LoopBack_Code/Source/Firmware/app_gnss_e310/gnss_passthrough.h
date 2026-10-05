@@ -70,6 +70,8 @@
 #define GNSS_PT_REG_TX_COUNT_CH1    0x34U   /* RO                             */
 #define GNSS_PT_REG_RX_SNAPSHOT_CH1 0x38U   /* RO                             */
 #define GNSS_PT_REG_CRPA_COEF(n)    (0x40U + ((n) * 4U))  /* RW, n = 0..15    */
+/* CRPA_COEF[0][15:0] is the PI-NLMS step-size control (signed). */
+#define GNSS_PT_REG_NLMS_MU         GNSS_PT_REG_CRPA_COEF(0)
 
 /* ---- expected identity --------------------------------------------------- */
 #define GNSS_PT_EXPECTED_ID         0x47435031U
@@ -77,13 +79,15 @@
  * 1.1 = adds the RX->TX sample alignment stage (RX is right-aligned 12-in-16,
  *       the AD9361 DAC consumes [15:4]). A board reporting 1.0 is running a
  *       bitstream whose TX output is 24 dB low with 4 bits discarded. */
-#define GNSS_PT_EXPECTED_VERSION    0x00010001U
+/* 1.2 = adds the PI-NLMS two-element null-steering core (CONTROL[4]). */
+#define GNSS_PT_EXPECTED_VERSION    0x00010002U
 
 /* ---- CONTROL bits -------------------------------------------------------- */
 #define GNSS_PT_CTRL_PASS_EN        (1U << 0)  /* 1 = RX->TX passthrough      */
 #define GNSS_PT_CTRL_MUTE           (1U << 1)  /* 1 = drive zeros to the DAC  */
 #define GNSS_PT_CTRL_SWAP_IQ        (1U << 2)
 #define GNSS_PT_CTRL_CH1_COPY       (1U << 3)  /* ch1 TX fed from ch0         */
+#define GNSS_PT_CTRL_NLMS_EN        (1U << 4)  /* ch0 TX = PI-NLMS(RX1, RX2)  */
 #define GNSS_PT_CTRL_CNT_CLEAR      (1U << 8)  /* held, not self-clearing     */
 
 /* ---- STATUS bits --------------------------------------------------------- */
@@ -97,7 +101,9 @@
 #define GNSS_PT_ST_FIFO1_FULL       (1U << 7)
 #define GNSS_PT_ST_OVERFLOW         (1U << 8)
 #define GNSS_PT_ST_UNDERFLOW        (1U << 9)
+#define GNSS_PT_ST_NLMS_DROP        (1U << 10) /* core was not ready: lost data */
 #define GNSS_PT_ST_PASS_EN_SYNCED   (1U << 16)
+#define GNSS_PT_ST_NLMS_EN_SYNCED   (1U << 17)
 
 /* ---- return codes -------------------------------------------------------- */
 #define GNSS_PT_OK                   0
@@ -121,6 +127,15 @@ int32_t  gnss_pt_probe(void);
 void     gnss_pt_set_passthrough(int enable);
 void     gnss_pt_set_mute(int mute);
 void     gnss_pt_clear_counters(void);
+
+/* PI-NLMS null steering (bitstream v1.2+). Enabled, channel 0 TX carries the
+ * PI-NLMS combination of RX1 and RX2 instead of RX1 alone; passthrough must
+ * also be on. Disabling holds the core in reset, so re-enabling restarts the
+ * adaptation from zero weights. */
+void     gnss_pt_set_nlms(int enable);
+/* Step-size control written to the core (mu_shift_ctrl). 0 is the value the
+ * HLS testbench verified; larger = slower, finer adaptation. */
+void     gnss_pt_set_nlms_mu(int16_t mu_shift);
 
 /* Snapshot of everything worth observing at runtime (requirement 58). */
 typedef struct {

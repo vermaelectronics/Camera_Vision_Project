@@ -48,13 +48,23 @@
 //                                    [1]  mute       1 = drive 0x0000 to DAC
 //                                    [2]  swap_iq    1 = exchange I and Q
 //                                    [3]  ch1_copy   1 = ch1 DAC fed from ch0
+//                                    [4]  nlms_en    1 = ch0 TX carries the
+//                                                        PI-NLMS output (RX1
+//                                                        and RX2 combined)
+//                                                    0 = ch0 TX carries RX1
+//                                                        unchanged; the core
+//                                                        is held in reset
 //                                    [8]  cnt_clear  1 = hold counters cleared
 //    0x10    STATUS          RO      [0]  adc_enable_i0   [1]  adc_enable_q0
 //                                    [2]  dac_enable_i0   [3]  dac_enable_q0
 //                                    [4]  fifo0_empty     [5]  fifo0_full
 //                                    [6]  fifo1_empty     [7]  fifo1_full
 //                                    [8]  overflow_sticky [9]  underflow_sticky
+//                                    [10] nlms_drop_sticky: an RX sample pair
+//                                         was offered while the PI-NLMS core
+//                                         was not ready (should never set)
 //                                    [16] pass_en (as seen in the clk domain)
+//                                    [17] nlms_en (as seen in the clk domain)
 //
 //            READ [2]/[3] CAREFULLY. dac_enable_* is NOT an enable this block
 //            drives, and it is NOT derived from the valid strobes. It is a
@@ -90,9 +100,12 @@
 //    0x34    TX_COUNT_CH1    RO      dac_valid_i1 pulses served
 //    0x38    RX_SNAPSHOT_CH1 RO      {adc_data_q1, adc_data_i1} last accepted
 //    0x3C    RESERVED        RO      reads 0
-//    0x40..  CRPA_COEF[0..15] RW     reserved for the future CRPA algorithm;
-//                                    Phase 1 stores and returns them, and no
-//                                    logic consumes them.
+//    0x40    CRPA_COEF[0]    RW      [15:0] PI-NLMS mu_shift_ctrl (signed).
+//                                    Step-size control: larger = slower,
+//                                    finer adaptation. 0 is the value the
+//                                    PI-NLMS testbench was verified with.
+//    0x44..  CRPA_COEF[1..15] RW     reserved; stored and returned, no logic
+//                                    consumes them.
 //
 //  LICENCE
 //    Original work for this project.  Not derived from Analog Devices or
@@ -171,7 +184,8 @@ module gnss_passthrough #(
   localparam [31:0] CORE_ID      = 32'h47435031;   // "GCP1"
   // v1.1 -- adds the RX->TX sample alignment stage. Bumped so a running board
   // reports which of the two behaviours its bitstream actually has.
-  localparam [31:0] CORE_VERSION = 32'h00010001;   // v1.1
+  // v1.2 -- adds the PI-NLMS two-element null-steering core (CONTROL[4]).
+  localparam [31:0] CORE_VERSION = 32'h00010002;   // v1.2
   localparam        AW           = FIFO_ADDR_WIDTH;
 
   // ==========================================================================
@@ -240,6 +254,10 @@ module gnss_passthrough #(
   reg  [31:0] reg_scratch = 32'd0;
   reg  [31:0] reg_control = 32'd0;
   reg  [31:0] crpa_coef [0:15];
+  // CRPA_COEF[0][15:0] is also kept in a plain register: it feeds the PI-NLMS
+  // core in the clk domain, and a register is what the synchroniser below
+  // can cross from (the coefficient array may map to LUT RAM).
+  reg  [15:0] reg_nlms_mu = 16'd0;
 
   integer ci;
   initial for (ci = 0; ci < 16; ci = ci + 1) crpa_coef[ci] = 32'd0;
@@ -248,10 +266,12 @@ module gnss_passthrough #(
     if (s_axi_aresetn == 1'b0) begin
       reg_scratch <= 32'd0;
       reg_control <= 32'd0;
+      reg_nlms_mu <= 16'd0;
     end else if (reg_wr) begin
       case (reg_waddr)
         12'h002: reg_scratch <= s_axi_wdata;   // 0x08
         12'h003: reg_control <= s_axi_wdata;   // 0x0C
+        12'h010: reg_nlms_mu <= s_axi_wdata[15:0];   // 0x40
         default: ;
       endcase
       if (reg_waddr >= 12'h010 && reg_waddr <= 12'h01F)   // 0x40..0x7C
@@ -308,7 +328,7 @@ module gnss_passthrough #(
   // ==========================================================================
   (* ASYNC_REG = "TRUE" *) reg [8:0] ctrl_meta = 9'd0;
   (* ASYNC_REG = "TRUE" *) reg [8:0] ctrl_sync = 9'd0;
-  wire [8:0] ctrl_raw = {reg_control[8], 4'b0000, reg_control[3:0]};
+  wire [8:0] ctrl_raw = {reg_control[8], 3'b000, reg_control[4:0]};
 
   always @(posedge clk) begin
     ctrl_meta <= ctrl_raw;
@@ -319,7 +339,20 @@ module gnss_passthrough #(
   wire mute      = ctrl_sync[1];
   wire swap_iq   = ctrl_sync[2];
   wire ch1_copy  = ctrl_sync[3];
+  wire nlms_en   = ctrl_sync[4];
   wire cnt_clear = ctrl_sync[8];
+
+  // PI-NLMS step size. Quasi-static like the CONTROL bits; the core only
+  // samples it once per 1024-sample weight update, so a single cycle of a
+  // partly-updated value during a write cannot matter. The name keeps the
+  // "ctrl_meta" pattern so the existing false-path constraint covers it.
+  (* ASYNC_REG = "TRUE" *) reg [15:0] mu_ctrl_meta = 16'd0;
+  (* ASYNC_REG = "TRUE" *) reg [15:0] mu_ctrl_sync = 16'd0;
+
+  always @(posedge clk) begin
+    mu_ctrl_meta <= reg_nlms_mu;
+    mu_ctrl_sync <= mu_ctrl_meta;
+  end
 
   // ==========================================================================
   //  Elastic buffer (one per channel)
@@ -356,18 +389,90 @@ module gnss_passthrough #(
     end
   end
 
-  wire wr_en0 = pass_en & adc_valid_i0 & adc_enable_i0;
+  // With nlms_en the ch0 buffer is fed by the PI-NLMS output strobe instead
+  // of the raw RX strobe. Both run at the RX sample rate.
+  wire nlms_out_valid;
+  wire wr_en0 = pass_en & (nlms_en ? nlms_out_valid
+                                   : (adc_valid_i0 & adc_enable_i0));
   wire rd_en0 = pass_en & dac_valid_i0 & primed0;
   wire wr_en1 = pass_en & adc_valid_i1 & adc_enable_i1;
   wire rd_en1 = pass_en & dac_valid_i1 & primed1;
 
   // ==========================================================================
-  //  PROCESSING CORE  --  replace this section with the CRPA algorithm.
-  //  Phase 1: identity.  proc_i/proc_q are the values written into the
-  //  elastic buffer; they are the raw RX samples, unmodified.
+  //  PROCESSING CORE
+  //
+  //  nlms_en = 0 : identity. proc_i/proc_q are the raw RX samples.
+  //  nlms_en = 1 : channel 0 carries the PI-NLMS output. The core takes RX1
+  //                (reference element, in1) and RX2 (auxiliary element, in2)
+  //                and steers a null onto the strongest correlated signal,
+  //                i.e. the jammer. Channel 1 is left as raw RX2.
+  //
+  //  pi_nlms is the Vitis HLS core from Source/HLS/pi_nlms, generated as plain
+  //  Verilog by build_rtl.tcl (AXI-Stream data, mu_shift_ctrl as a port,
+  //  free-running). It runs at II=1 in this clk domain, so no clock crossing.
+  //
+  //  SAMPLE FORMAT. The core works on signed 16-bit I/Q, packed {Q, I}, and
+  //  was verified with a jammer at ~-12 dBFS of that 16-bit range. The RX
+  //  samples are 12-bit RIGHT-aligned, so they are scaled up by 16 (<<4) on
+  //  the way in to use the same range. The core saturates its 16-bit output,
+  //  and an arithmetic >>4 brings it back to the 12-bit right-aligned RX
+  //  format the elastic buffer and the output alignment stage expect. That
+  //  conversion cannot wrap: a saturated 16-bit value >>4 is still inside the
+  //  12-bit signed range, which is exactly the saturation the OUTPUT SAMPLE
+  //  ALIGNMENT note below asks of any CRPA core.
+  //
+  //  RESET. The core is held in reset whenever pass_en or nlms_en is 0, so
+  //  re-enabling restarts adaptation from zero weights.
   // ==========================================================================
-  wire [15:0] proc_i0 = adc_data_i0;
-  wire [15:0] proc_q0 = adc_data_q0;
+  wire nlms_run = pass_en & nlms_en;
+
+  reg nlms_rst_n = 1'b0;
+  always @(posedge clk) nlms_rst_n <= ~rst & nlms_run;
+
+  wire [31:0] nlms_in1 = {adc_data_q0[11:0], 4'b0000, adc_data_i0[11:0], 4'b0000};
+  wire [31:0] nlms_in2 = {adc_data_q1[11:0], 4'b0000, adc_data_i1[11:0], 4'b0000};
+  // axi_ad9361 strobes all four channel valids together, so one RX1 sample and
+  // one RX2 sample are always offered as a pair.
+  wire        nlms_in_valid = nlms_rst_n & adc_valid_i0 & adc_valid_i1 &
+                              adc_enable_i0 & adc_enable_i1;
+  wire        nlms_in1_ready, nlms_in2_ready;
+  wire [31:0] nlms_out_data;
+
+  pi_nlms u_pi_nlms (
+    .ap_clk        (clk),
+    .ap_rst_n      (nlms_rst_n),
+    .in1_TDATA     (nlms_in1),
+    .in1_TVALID    (nlms_in_valid),
+    .in1_TREADY    (nlms_in1_ready),
+    .in1_TKEEP     (4'hF),
+    .in1_TSTRB     (4'hF),
+    .in1_TLAST     (1'b0),
+    .in2_TDATA     (nlms_in2),
+    .in2_TVALID    (nlms_in_valid),
+    .in2_TREADY    (nlms_in2_ready),
+    .in2_TKEEP     (4'hF),
+    .in2_TSTRB     (4'hF),
+    .in2_TLAST     (1'b0),
+    .out_r_TDATA   (nlms_out_data),
+    .out_r_TVALID  (nlms_out_valid),
+    .out_r_TREADY  (1'b1),          // the elastic buffer always accepts
+    .out_r_TKEEP   (),
+    .out_r_TSTRB   (),
+    .out_r_TLAST   (),
+    .mu_shift_ctrl (mu_ctrl_sync),
+    .reserved_ctrl (16'd0)
+  );
+
+  // The core is II=1 and its output is never back-pressured, so it is ready
+  // for every pair. If that assumption ever breaks, say so in STATUS[10]
+  // instead of silently dropping samples.
+  wire nlms_drop = nlms_in_valid & ~(nlms_in1_ready & nlms_in2_ready);
+
+  wire [15:0] nlms_i = nlms_out_data[15:0];
+  wire [15:0] nlms_q = nlms_out_data[31:16];
+
+  wire [15:0] proc_i0 = nlms_en ? {{4{nlms_i[15]}}, nlms_i[15:4]} : adc_data_i0;
+  wire [15:0] proc_q0 = nlms_en ? {{4{nlms_q[15]}}, nlms_q[15:4]} : adc_data_q0;
   wire [15:0] proc_i1 = adc_data_i1;
   wire [15:0] proc_q1 = adc_data_q1;
   // ======================= END PROCESSING CORE ==============================
@@ -462,6 +567,7 @@ module gnss_passthrough #(
   reg [31:0] ovf_cnt = 32'd0, unf_cnt = 32'd0;
   reg [31:0] rx_snap0 = 32'd0, tx_snap0 = 32'd0, rx_snap1 = 32'd0;
   reg        ovf_sticky = 1'b0, unf_sticky = 1'b0;
+  reg        nlms_drop_sticky = 1'b0;
 
   always @(posedge clk) begin
     if (rst || cnt_clear) begin
@@ -469,6 +575,7 @@ module gnss_passthrough #(
       rx_cnt1 <= 32'd0; tx_cnt1 <= 32'd0;
       ovf_cnt <= 32'd0; unf_cnt <= 32'd0;
       ovf_sticky <= 1'b0; unf_sticky <= 1'b0;
+      nlms_drop_sticky <= 1'b0;
       rx_snap0 <= 32'd0; tx_snap0 <= 32'd0; rx_snap1 <= 32'd0;
     end else begin
       if (adc_valid_i0) begin
@@ -494,12 +601,14 @@ module gnss_passthrough #(
         unf_cnt    <= unf_cnt + 1'b1;
         unf_sticky <= 1'b1;
       end
+      if (nlms_drop)
+        nlms_drop_sticky <= 1'b1;
     end
   end
 
   wire [31:0] status_w;
-  assign status_w = { 15'd0, pass_en,
-                      6'd0, unf_sticky, ovf_sticky,
+  assign status_w = { 14'd0, nlms_en, pass_en,
+                      5'd0, nlms_drop_sticky, unf_sticky, ovf_sticky,
                       full1, empty1, full0, empty0,
                       dac_enable_q0, dac_enable_i0,
                       adc_enable_q0, adc_enable_i0 };

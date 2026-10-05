@@ -237,6 +237,13 @@ void set_gnss_tx(double* param, char param_no);
 /* Prints AD9361 and gnss_passthrough runtime state. */
 void get_gnss_status(double* param, char param_no);
 
+/* PI-NLMS null steering in the PL (bitstream v1.2+).
+ * gnss_nlms=1 puts the PI-NLMS output of RX1+RX2 on TX1 (with gnss_tx=1),
+ * gnss_nlms=0 returns TX1 to plain RX1. gnss_nlms_mu= sets the step size. */
+void get_gnss_nlms(double* param, char param_no);
+void set_gnss_nlms(double* param, char param_no);
+void set_gnss_nlms_mu(double* param, char param_no);
+
 /* GNSS-CRPA MOD-9: the main menu, bound to "?".
  * Short and grouped, unlike get_help() which dumps all ~60 vendor commands. */
 void get_menu(double* param, char param_no);

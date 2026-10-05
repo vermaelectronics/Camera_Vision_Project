@@ -38,6 +38,17 @@ foreach f [list $rtl_file $xdc_file] {
   }
 }
 
+# gnss_passthrough instantiates the PI-NLMS core. Its Verilog is generated
+# from Source/HLS/pi_nlms by build_rtl.tcl (build_all.sh stage "nlms").
+set nlms_dir   [file join $src_dir "HDL" "pi_nlms"]
+set nlms_files [lsort [glob -nocomplain -directory $nlms_dir *.v]]
+if {[lsearch -glob $nlms_files */pi_nlms.v] < 0} {
+  puts "ERROR: PI-NLMS RTL not found in $nlms_dir"
+  puts "       Generate it first: cd Source/HLS/pi_nlms && vitis_hls -f build_rtl.tcl"
+  puts "       (or ./Automation/Linux/build_all.sh --from nlms)"
+  exit 2
+}
+
 # A fresh edit-project guarantees the packaged result reflects the current RTL
 # and never a stale cache (requirement 66).
 file delete -force $ip_dir
@@ -47,6 +58,8 @@ create_project -force ${ip_name}_pkg [file join $ip_dir ".pkg_project"] -part xc
 set_property target_language Verilog [current_project]
 
 add_files -norecurse $rtl_file
+add_files -norecurse $nlms_files
+puts "IP_PACKAGE_NLMS: [llength $nlms_files] PI-NLMS Verilog files from $nlms_dir"
 set_property top $ip_name [current_fileset]
 update_compile_order -fileset sources_1
 

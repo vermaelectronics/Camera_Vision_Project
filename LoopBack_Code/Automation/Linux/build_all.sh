@@ -7,21 +7,23 @@
 #
 #    1 vendor   copy Vendor/ADI_hdl_2023_r2 to Build/VendorWork/hdl (disposable)
 #    2 libip    package the Analog Devices library IP the block design uses
-#    3 ip       package the custom gnss_passthrough IP into Build/ip_repo
-#    4 project  recreate Vivado/Project/antsdr_e310_gnss.xpr
-#    5 build    synthesis, implementation, bitstream, XSA
-#    6 sw       bare-metal application ELF (XSCT, classic BSP)
-#    7 fsbl     Zynq FSBL ELF (XSCT)
-#    8 boot     BOOT.BIN = FSBL + bitstream + application (bootgen)
+#    3 nlms     Vitis HLS: Source/HLS/pi_nlms -> Source/HDL/pi_nlms/*.v
+#    4 ip       package the custom gnss_passthrough IP into Build/ip_repo
+#    5 project  recreate Vivado/Project/antsdr_e310_gnss.xpr
+#    6 build    synthesis, implementation, bitstream, XSA
+#    7 sw       bare-metal application ELF (XSCT, classic BSP)
+#    8 fsbl     Zynq FSBL ELF (XSCT)
+#    9 boot     BOOT.BIN = FSBL + bitstream + application (bootgen)
 #
 #  USAGE
 #    source /tools/Xilinx/Vivado/2023.2/settings64.sh
 #    source /tools/Xilinx/Vitis/2023.2/settings64.sh
+#    source /tools/Xilinx/Vitis_HLS/2023.2/settings64.sh   (stage 3)
 #    ./Automation/Linux/build_all.sh [options]
 #
 #  OPTIONS
 #    --from STAGE      start at this stage (name or number), default 1
-#    --to STAGE        stop after this stage, default 8
+#    --to STAGE        stop after this stage, default 9
 #    --jobs N          parallel Vivado jobs, default 8
 #    --defines LIST    comma-separated firmware build-variant defines,
 #                      e.g. --defines GNSS_DEPLOY_AUTO_TX for the SD-card build
@@ -39,15 +41,16 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TARGET_VERSION="2023.2"
 
 FROM=1
-TO=8
+TO=9
 JOBS=8
 DEFINES=""
 CLEAN=0
 
 stage_num() {
   case "$1" in
-    1|vendor) echo 1 ;; 2|libip) echo 2 ;; 3|ip) echo 3 ;; 4|project) echo 4 ;;
-    5|build) echo 5 ;; 6|sw) echo 6 ;; 7|fsbl) echo 7 ;; 8|boot) echo 8 ;;
+    1|vendor) echo 1 ;; 2|libip) echo 2 ;; 3|nlms) echo 3 ;; 4|ip) echo 4 ;;
+    5|project) echo 5 ;; 6|build) echo 6 ;; 7|sw) echo 7 ;; 8|fsbl) echo 8 ;;
+    9|boot) echo 9 ;;
     *) echo "unknown stage: $1" >&2; exit 2 ;;
   esac
 }
@@ -103,7 +106,7 @@ export REQUIRED_VIVADO_VERSION="$TARGET_VERSION"
 
 die()  { echo "BUILD_ALL: FAIL - $*" >&2; exit 2; }
 want() { [[ $1 -ge $FROM && $1 -le $TO ]]; }
-need() { command -v "$1" >/dev/null 2>&1 || die "'$1' not found on PATH. Run: source /tools/Xilinx/Vivado/$TARGET_VERSION/settings64.sh; source /tools/Xilinx/Vitis/$TARGET_VERSION/settings64.sh"; }
+need() { command -v "$1" >/dev/null 2>&1 || die "'$1' not found on PATH. Run: source /tools/Xilinx/Vivado/$TARGET_VERSION/settings64.sh; source /tools/Xilinx/Vitis/$TARGET_VERSION/settings64.sh; source /tools/Xilinx/Vitis_HLS/$TARGET_VERSION/settings64.sh"; }
 
 # Run a command, tee it to a log, and require the given PASS marker in it.
 run_logged() {
@@ -150,8 +153,16 @@ if want 2; then
   done
 fi
 
-# ---- 3 custom IP ------------------------------------------------------------
+# ---- 3 PI-NLMS RTL (Vitis HLS) -----------------------------------------------
 if want 3; then
+  need vitis_hls
+  ( cd "$ROOT/Source/HLS/pi_nlms" && run_logged nlms "PI_NLMS_RTL: PASS" \
+      vitis_hls -f build_rtl.tcl )
+  grep -E "Estimated Fmax|Timing" -A0 "$LOG_DIR/nlms.log" | tail -2 || true
+fi
+
+# ---- 4 custom IP ------------------------------------------------------------
+if want 4; then
   mkdir -p "$IP_REPO"
   ( cd "$IP_REPO" && run_logged ip "IP_PACKAGE_OK" \
       vivado -mode batch -nojournal -log "$LOG_DIR/ip_vivado.log" \
@@ -159,9 +170,9 @@ if want 3; then
       -tclargs "$ROOT/Source" "$IP_REPO" )
 fi
 
-# ---- 4 project --------------------------------------------------------------
-if want 4; then
-  [[ -f "$IP_REPO/gnss_passthrough/component.xml" ]] || die "run stage 3 (ip) first"
+# ---- 5 project --------------------------------------------------------------
+if want 5; then
+  [[ -f "$IP_REPO/gnss_passthrough/component.xml" ]] || die "run stage 4 (ip) first"
   # The project directory is generated; clear it so nothing stale survives.
   find "$PROJ_DIR" -mindepth 1 ! -name .gitkeep -exec rm -rf {} + 2>/dev/null || true
   mkdir -p "$PROJ_DIR"
@@ -171,36 +182,36 @@ if want 4; then
   [[ -f "$XPR" ]] || die "[project] $XPR was not created"
 fi
 
-# ---- 5 build ----------------------------------------------------------------
-if want 5; then
-  [[ -f "$XPR" ]] || die "run stage 4 (project) first"
+# ---- 6 build ----------------------------------------------------------------
+if want 6; then
+  [[ -f "$XPR" ]] || die "run stage 5 (project) first"
   ( cd "$PROJ_DIR" && run_logged build "BUILD_RESULT: PASS" \
       vivado -mode batch -nojournal -log "$LOG_DIR/build_vivado.log" \
       -source "$ROOT/Vivado/Scripts/build.tcl" \
       -tclargs "$XPR" "$BIT" "$XSA" "$JOBS" )
 fi
 
-# ---- 6 software -------------------------------------------------------------
-if want 6; then
+# ---- 7 software -------------------------------------------------------------
+if want 7; then
   need xsct
-  [[ -f "$XSA" ]] || die "run stage 5 (build) first"
+  [[ -f "$XSA" ]] || die "run stage 6 (build) first"
   run_logged sw "SW_RESULT: PASS" \
     xsct "$ROOT/Vitis/Scripts/build_software.tcl" \
     "$XSA" "$ROOT/Vitis/Workspace" "$ROOT/Source/Firmware/app_gnss_e310" "$APP_ELF" "$DEFINES"
   touch "$ROOT/Vitis/Workspace/.gitkeep"
 fi
 
-# ---- 7 FSBL -----------------------------------------------------------------
-if want 7; then
+# ---- 8 FSBL -----------------------------------------------------------------
+if want 8; then
   need xsct
-  [[ -f "$XSA" ]] || die "run stage 5 (build) first"
+  [[ -f "$XSA" ]] || die "run stage 6 (build) first"
   run_logged fsbl "FSBL_RESULT: PASS" \
     xsct "$ROOT/Vitis/Scripts/build_fsbl.tcl" \
     "$XSA" "$ROOT/Build/FsblWorkspace" "$FSBL_ELF"
 fi
 
-# ---- 8 BOOT.BIN -------------------------------------------------------------
-if want 8; then
+# ---- 9 BOOT.BIN -------------------------------------------------------------
+if want 9; then
   need bootgen
   for f in "$FSBL_ELF" "$BIT" "$APP_ELF"; do [[ -f "$f" ]] || die "[boot] missing $f"; done
   BIF="$OUT_DIR/boot.bif"
