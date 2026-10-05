@@ -89,8 +89,9 @@ The PI-NLMS anti-jam core from `Source/HLS/pi_nlms` (Vitis HLS C++) runs inside
 - Stage `nlms` runs Vitis HLS on the unmodified `pi_nlms.cpp` and writes plain
   Verilog to `Source/HDL/pi_nlms/`. Only the interface changes: the step size
   becomes a port instead of an AXI-Lite register, because `gnss_passthrough`
-  already owns the registers and the clock crossing. The HLS clock target is
-  8 ns, the AD9361 sample clock constraint.
+  already owns the registers and the clock crossing. HLS targets 6 ns so the
+  core closes timing at the 8 ns AD9361 sample clock after place-and-route
+  (`PI_NLMS_CLK_NS` overrides it).
 - The IP packaging step adds that Verilog to the `gnss_passthrough` IP, so the
   block design does not change.
 - Registers: `CONTROL[4]` (0x0C) enables it, `0x40[15:0]` sets `mu_shift_ctrl`,

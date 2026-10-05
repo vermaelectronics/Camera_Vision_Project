@@ -27,10 +27,18 @@ set here    [file normalize [file dirname [info script]]]
 set out_hdl [file normalize [file join $here .. .. HDL pi_nlms]]
 set work    [file join $here build]
 
-# Clock target: axi_ad9361/l_clk is constrained at 8 ns (rx_clk in
-# Source/XDC/system.xdc), so the core must close at 125 MHz, not 100 MHz.
-set clk_period 8
+# Clock target. axi_ad9361/l_clk is constrained at 8 ns (rx_clk in
+# Source/XDC/system.xdc), so the core must close at 125 MHz in Vivado.
+# HLS is given a TIGHTER target than that on purpose: at an 8 ns target it
+# scheduled the input combine, saturation, multiply and 48-bit accumulate into
+# too few stages (HLS estimate 7.93 ns, real routed path ~11.3 ns, WNS -3.3 ns
+# on reg_q2_term -> accum_grad_r). A 6 ns target makes it pipeline deeper; the
+# throughput stays one sample per clock (II=1).
+# Override with:  PI_NLMS_CLK_NS=5 vitis_hls -f build_rtl.tcl
+set clk_period 6
+if {[info exists ::env(PI_NLMS_CLK_NS)]} { set clk_period $::env(PI_NLMS_CLK_NS) }
 set clk_uncertainty 1.0
+puts "PI_NLMS_RTL: HLS clock target $clk_period ns (uncertainty $clk_uncertainty ns)"
 
 file mkdir $work
 
