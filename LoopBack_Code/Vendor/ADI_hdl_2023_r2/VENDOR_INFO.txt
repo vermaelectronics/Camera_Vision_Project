@@ -1,0 +1,13 @@
+Analog Devices HDL reference library - release branch hdl_2023_r2
+  repo   : https://github.com/analogdevicesinc/hdl
+  branch : hdl_2023_r2
+  commit : d146370c10fdd55156de2bafdd9b24292c01b6e1
+  target : AMD Vivado 2023.2 (scripts/adi_env.tcl: required_vivado_version "2023.2")
+
+Subset kept: library/, scripts/, projects/scripts/, projects/common/ and the
+licence files. Reference projects and docs were dropped; this project only
+needs the IP library and the Tcl helpers.
+
+This tree is used by the Vivado 2023.2 flow (Automation/Linux/build_all.sh).
+Keep it pristine: the build packages IP in a disposable copy under
+Build/VendorWork/, never in place.
