@@ -103,6 +103,12 @@ export GNSS_CRPA_ROOT="$ROOT"
 export GNSS_CRPA_IP_REPO="$IP_REPO"
 export ADI_HDL_DIR="$ADI_WORK"
 export REQUIRED_VIVADO_VERSION="$TARGET_VERSION"
+# Synthesise the block design globally instead of ADI's default per-IP
+# out-of-context runs with a shared IP cache. With OOC on, a stale or
+# interrupted cache left axi_ad9361 and other cores as black boxes at
+# opt_design (DRC INBB-3). Global synthesis is slower but self-contained.
+# Set ADI_USE_OOC_SYNTHESIS=y before running to get the ADI default back.
+export ADI_USE_OOC_SYNTHESIS="${ADI_USE_OOC_SYNTHESIS:-n}"
 
 die()  { echo "BUILD_ALL: FAIL - $*" >&2; exit 2; }
 want() { [[ $1 -ge $FROM && $1 -le $TO ]]; }
