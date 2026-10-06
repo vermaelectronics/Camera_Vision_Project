@@ -79,8 +79,10 @@
  * 1.1 = adds the RX->TX sample alignment stage (RX is right-aligned 12-in-16,
  *       the AD9361 DAC consumes [15:4]). A board reporting 1.0 is running a
  *       bitstream whose TX output is 24 dB low with 4 bits discarded. */
-/* 1.2 = adds the PI-NLMS two-element null-steering core (CONTROL[4]). */
-#define GNSS_PT_EXPECTED_VERSION    0x00010002U
+/* 1.2 = adds the PI-NLMS two-element null-steering core (CONTROL[4]).
+ * 1.3 = the PI-NLMS core is a separate block-design IP (pi_nlms_0) instead of
+ *       being inside gnss_passthrough. Same registers and behaviour as 1.2. */
+#define GNSS_PT_EXPECTED_VERSION    0x00010003U
 
 /* ---- CONTROL bits -------------------------------------------------------- */
 #define GNSS_PT_CTRL_PASS_EN        (1U << 0)  /* 1 = RX->TX passthrough      */

@@ -76,27 +76,33 @@ the post-route fix to close timing, and 2023.2 may route differently.
 board whatever tools you have installed. A 2023.2 build writes its own
 `Build/Output/BOOT.BIN`.
 
-## PI-NLMS null steering (bitstream v1.2)
+## PI-NLMS null steering (bitstream v1.3)
 
-The PI-NLMS anti-jam core from `Source/HLS/pi_nlms` (Vitis HLS C++) runs inside
-`gnss_passthrough`, between the AD9361 receive and transmit paths:
+The PI-NLMS anti-jam core from `Source/HLS/pi_nlms` (Vitis HLS C++) is its own
+block in the block design, `pi_nlms_0`, next to `gnss_passthrough`:
 
-    RX1 ─┐
-         ├─► pi_nlms (PL, sample clock, II=1) ─► TX1      when CONTROL[4] = 1
-    RX2 ─┘
-    RX2 ───────────────────────────────────────► TX2
+    axi_ad9361 RX1,RX2 ─► gnss_passthrough ─ m_axis_nlms1 ─► pi_nlms_0/in1
+                                           ─ m_axis_nlms2 ─► pi_nlms_0/in2
+                          gnss_passthrough ◄─ s_axis_nlms ─ pi_nlms_0/out_r
+                          gnss_passthrough ─► axi_ad9361 TX1   (when CONTROL[4] = 1)
+                          nlms_mu    ─► pi_nlms_0/mu_shift_ctrl   (register 0x40)
+                          nlms_rst_n ─► pi_nlms_0/ap_rst_n
+                          axi_ad9361/l_clk ─► pi_nlms_0/ap_clk
 
-- Stage `nlms` runs Vitis HLS on the unmodified `pi_nlms.cpp` and writes plain
-  Verilog to `Source/HDL/pi_nlms/`. Only the interface changes: the step size
-  becomes a port instead of an AXI-Lite register, because `gnss_passthrough`
-  already owns the registers and the clock crossing. HLS builds the core with II=2 (2R2T delivers a sample at most every 2nd clock) so the
-  core closes timing at the 8 ns AD9361 sample clock after place-and-route
-  (`PI_NLMS_CLK_NS` overrides it).
-- The IP packaging step adds that Verilog to the `gnss_passthrough` IP, so the
-  block design does not change.
+- Stage `nlms` runs Vitis HLS on the unmodified `pi_nlms.cpp` and exports the
+  IP `antsdr:gnss:pi_nlms:1.0` to `Build/ip_repo/pi_nlms` (Verilog in
+  `hdl/verilog/`). Only the interface changes: the step size becomes a port
+  instead of an AXI-Lite register, because `gnss_passthrough` already owns the
+  registers and the clock crossing. So `pi_nlms_0` needs no AXI-Lite
+  connection, and it shows `mu_shift_ctrl`/`reserved_ctrl` as plain ports.
+- HLS builds the core with II=2 (2R2T delivers a sample at most every 2nd
+  clock) so it closes timing at the 8 ns AD9361 sample clock
+  (`PI_NLMS_CLK_NS` and `PI_NLMS_II` override it).
+- `pi_nlms_0` runs on the same `l_clk` as `gnss_passthrough`, so there is no
+  clock crossing between them.
 - Registers: `CONTROL[4]` (0x0C) enables it, `0x40[15:0]` sets `mu_shift_ctrl`,
   `STATUS[17]` reads it back, and `STATUS[10]` flags dropped samples. VERSION
-  reads 1.2.
+  reads 1.3.
 - Console: `gnss_nlms=1`, `gnss_nlms=0`, `gnss_nlms_mu=<n>`, `gnss_nlms?`.
   `gnss_tx=1` still controls whether anything is transmitted at all.
 

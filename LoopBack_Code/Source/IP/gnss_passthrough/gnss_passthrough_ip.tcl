@@ -38,16 +38,9 @@ foreach f [list $rtl_file $xdc_file] {
   }
 }
 
-# gnss_passthrough instantiates the PI-NLMS core. Its Verilog is generated
-# from Source/HLS/pi_nlms by build_rtl.tcl (build_all.sh stage "nlms").
-set nlms_dir   [file join $src_dir "HDL" "pi_nlms"]
-set nlms_files [lsort [glob -nocomplain -directory $nlms_dir *.v]]
-if {[lsearch -glob $nlms_files */pi_nlms.v] < 0} {
-  puts "ERROR: PI-NLMS RTL not found in $nlms_dir"
-  puts "       Generate it first: cd Source/HLS/pi_nlms && vitis_hls -f build_rtl.tcl"
-  puts "       (or ./Automation/Linux/build_all.sh --from nlms)"
-  exit 2
-}
+# The PI-NLMS core is NOT part of this IP. It is its own Vitis HLS IP
+# (Build/ip_repo/pi_nlms, from Source/HLS/pi_nlms/build_rtl.tcl) and the block
+# design connects it to the m_axis_nlms1/m_axis_nlms2/s_axis_nlms ports.
 
 # A fresh edit-project guarantees the packaged result reflects the current RTL
 # and never a stale cache (requirement 66).
@@ -58,8 +51,6 @@ create_project -force ${ip_name}_pkg [file join $ip_dir ".pkg_project"] -part xc
 set_property target_language Verilog [current_project]
 
 add_files -norecurse $rtl_file
-add_files -norecurse $nlms_files
-puts "IP_PACKAGE_NLMS: [llength $nlms_files] PI-NLMS Verilog files from $nlms_dir"
 set_property top $ip_name [current_fileset]
 update_compile_order -fileset sources_1
 
@@ -119,11 +110,43 @@ set_bus_param $rst_if POLARITY         ACTIVE_LOW
 # matches BOTH clocks, get_property then returns a two-element reset list, and
 # the next filter becomes the malformed 'NAME == rst s_axi_aresetn'.
 # Clearing ASSOCIATED_BUSIF here is what keeps that lookup unambiguous.
+#
+# The PI-NLMS AXI-Stream interfaces ARE in the sample domain, so clk claims
+# those (and only those). The value never equals "s_axi", so the lookup above
+# still finds s_axi_aclk alone.
+# ---------------------------------------------------------------------------
+#  PI-NLMS AXI-Stream interfaces. Created explicitly, with every port mapped,
+#  so that they match the HLS core's in1/in2/out_r (TDATA, TVALID, TREADY,
+#  TKEEP, TSTRB, TLAST) and the block design can connect them as interfaces.
+# ---------------------------------------------------------------------------
+proc add_axis_if {core name mode} {
+  foreach bif [ipx::get_bus_interfaces $name -of_objects $core] {
+    ipx::remove_bus_interface $name $core
+  }
+  set bif [ipx::add_bus_interface $name $core]
+  set_property abstraction_type_vlnv xilinx.com:interface:axis_rtl:1.0 $bif
+  set_property bus_type_vlnv         xilinx.com:interface:axis:1.0     $bif
+  set_property interface_mode        $mode                             $bif
+  foreach sig {TDATA TVALID TREADY TKEEP TSTRB TLAST} {
+    set pm [ipx::add_port_map $sig $bif]
+    set_property physical_name "${name}_[string tolower $sig]" $pm
+  }
+  return $bif
+}
+set nlms_axis {m_axis_nlms1 m_axis_nlms2 s_axis_nlms}
+add_axis_if $core m_axis_nlms1 master
+add_axis_if $core m_axis_nlms2 master
+add_axis_if $core s_axis_nlms  slave
+
 set sclk_if [ensure_bus_if $core clk xilinx.com:signal:clock_rtl:1.0]
 set srst_if [ensure_bus_if $core rst xilinx.com:signal:reset_rtl:1.0]
 set_bus_param $srst_if POLARITY         ACTIVE_HIGH
 set_bus_param $sclk_if ASSOCIATED_RESET rst
-set_bus_param $sclk_if ASSOCIATED_BUSIF ""
+set_bus_param $sclk_if ASSOCIATED_BUSIF [join $nlms_axis ":"]
+
+# nlms_rst_n drives pi_nlms_0/ap_rst_n: an active-low reset output.
+set nrst_if [ensure_bus_if $core nlms_rst_n xilinx.com:signal:reset_rtl:1.0]
+set_bus_param $nrst_if POLARITY ACTIVE_LOW
 
 # ---------------------------------------------------------------------------
 #  Memory map: 4 kB aperture.  The actual base address is assigned by the
@@ -163,6 +186,15 @@ if {[llength $claimants] != 1 || [lindex $claimants 0] ne "s_axi_aclk"} {
   exit 2
 }
 puts "IP_PACKAGE_SELFCHECK: OK - s_axi is claimed only by s_axi_aclk"
+
+foreach n $nlms_axis {
+  if {[llength [ipx::get_bus_interfaces $n -of_objects $core]] != 1} {
+    puts "IP_PACKAGE_SELFCHECK: FAIL - AXI-Stream interface $n missing"
+    close_project
+    exit 2
+  }
+}
+puts "IP_PACKAGE_SELFCHECK: OK - PI-NLMS AXI-Stream interfaces: $nlms_axis"
 
 # The CDC constraints are what keep the design timing-clean. If they silently
 # failed to package, the only symptom would be a setup violation much later.

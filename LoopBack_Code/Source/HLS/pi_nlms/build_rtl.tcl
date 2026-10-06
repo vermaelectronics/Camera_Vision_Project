@@ -1,14 +1,15 @@
 # ============================================================================
-#  build_rtl.tcl  --  Vitis HLS 2023.2: pi_nlms.cpp -> plain Verilog RTL
+#  build_rtl.tcl  --  Vitis HLS 2023.2: pi_nlms.cpp -> block-design IP
 #
 #  The original HLS project (PI_NLMS_hls) exports pi_nlms as a stand-alone
-#  Vivado IP with its own AXI-Lite control bus.  Inside this design the core
-#  sits in gnss_passthrough, in the AD9361 sample clock domain, and gnss_passthrough
-#  already owns the register interface and its clock-domain crossing.  So this
-#  script synthesises the SAME C++ with one difference: mu_shift_ctrl and
-#  reserved_ctrl become plain input ports (ap_none) instead of AXI-Lite
-#  registers.  The algorithm, the AXI-Stream data ports and the free-running
-#  control (ap_ctrl_none) are unchanged.
+#  Vivado IP with its own AXI-Lite control bus.  In this design the core sits
+#  in the block design next to gnss_passthrough (cell pi_nlms_0), in the
+#  AD9361 sample clock domain, and gnss_passthrough already owns the register
+#  interface and its clock-domain crossing.  So this script synthesises the
+#  SAME C++ with one difference: mu_shift_ctrl and reserved_ctrl become plain
+#  input ports (ap_none) instead of AXI-Lite registers, driven by
+#  gnss_passthrough.  The algorithm, the AXI-Stream data ports and the
+#  free-running control (ap_ctrl_none) are unchanged.
 #
 #  The interface change is made on a generated copy (build/pi_nlms_rtl.cpp);
 #  pi_nlms.cpp stays the single, unmodified source of the algorithm.
@@ -17,15 +18,23 @@
 #    vitis_hls -f build_rtl.tcl
 #
 #  OUTPUT
-#    ../../HDL/pi_nlms/*.v   -- instantiated by Source/HDL/gnss_passthrough.v
+#    $GNSS_CRPA_IP_REPO/pi_nlms/component.xml  (default ../../../Build/ip_repo)
+#      VLNV antsdr:gnss:pi_nlms:1.0, instantiated by
+#      Source/BlockDesign/system_bd.tcl as pi_nlms_0. Its Verilog is in
+#      pi_nlms/hdl/verilog/.
 #
 #  SUCCESS MARKER
-#    Prints "PI_NLMS_RTL: PASS" only after the Verilog has been copied.
+#    Prints "PI_NLMS_RTL: PASS" only after the IP has been copied.
 # ============================================================================
 
 set here    [file normalize [file dirname [info script]]]
-set out_hdl [file normalize [file join $here .. .. HDL pi_nlms]]
 set work    [file join $here build]
+if {[info exists ::env(GNSS_CRPA_IP_REPO)]} {
+  set ip_repo [file normalize $::env(GNSS_CRPA_IP_REPO)]
+} else {
+  set ip_repo [file normalize [file join $here .. .. .. Build ip_repo]]
+}
+set out_ip  [file join $ip_repo pi_nlms]
 
 # Clock and initiation interval.
 #
@@ -92,18 +101,35 @@ set_clock_uncertainty $clk_uncertainty
 csim_design
 csynth_design
 
-# ---- collect the Verilog --------------------------------------------------
-set gen_dir [file join $work pi_nlms_rtl sol syn verilog]
-set files [glob -nocomplain -directory $gen_dir *.v *.dat]
-if {[llength $files] == 0} {
-  puts "PI_NLMS_RTL: FAIL - no Verilog produced in $gen_dir"
+# ---- package as a Vivado IP ------------------------------------------------
+export_design -format ip_catalog -rtl verilog \
+  -vendor antsdr -library gnss -version 1.0 -ipname pi_nlms \
+  -display_name "PI-NLMS null steering" \
+  -description "Two-element PI-NLMS anti-jam core (Vitis HLS). in1 = RX1, in2 = RX2, out_r = null-steered output."
+
+set impl_dir [file join $work pi_nlms_rtl sol impl]
+set ip_src   [file join $impl_dir ip]
+if {![file exists [file join $ip_src component.xml]]} {
+  # Some releases leave only the zip; unpack it.
+  set zips [glob -nocomplain -directory $impl_dir *.zip]
+  if {[llength $zips] == 0} {
+    puts "PI_NLMS_RTL: FAIL - export_design produced no IP in $impl_dir"
+    exit 1
+  }
+  file delete -force $ip_src
+  file mkdir $ip_src
+  exec unzip -q -o [lindex $zips 0] -d $ip_src
+}
+if {![file exists [file join $ip_src component.xml]]} {
+  puts "PI_NLMS_RTL: FAIL - no component.xml in $ip_src"
   exit 1
 }
-file delete -force $out_hdl
-file mkdir $out_hdl
-foreach f $files { file copy -force $f $out_hdl }
-file copy -force [file join $work pi_nlms_rtl sol syn report pi_nlms_csynth.rpt] $out_hdl
 
-puts "PI_NLMS_RTL: [llength $files] files -> $out_hdl"
+file mkdir $ip_repo
+file delete -force $out_ip
+file copy -force $ip_src $out_ip
+file copy -force [file join $work pi_nlms_rtl sol syn report pi_nlms_csynth.rpt] $out_ip
+
+puts "PI_NLMS_RTL: IP antsdr:gnss:pi_nlms:1.0 -> $out_ip"
 puts "PI_NLMS_RTL: PASS"
 exit 0

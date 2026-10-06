@@ -75,8 +75,18 @@ if {[llength $gnss_ipdef] == 0} {
          Source/IP/gnss_passthrough/gnss_passthrough_ip.tcl, or run\
          Automation/Linux/build_all.sh --from ip."
 }
+# The PI-NLMS core is a separate Vitis HLS IP in the same repository
+# (Source/HLS/pi_nlms/build_rtl.tcl, build_all.sh stage "nlms").
+set nlms_ipdef [get_ipdefs -all -quiet -filter \
+  {VLNV =~ *:pi_nlms:* && design_tool_contexts =~ *IPI* && UPGRADE_VERSIONS == ""}]
+if {[llength $nlms_ipdef] == 0} {
+  error "ERROR: pi_nlms was not found in the IP catalog at $gnss_ip_repo.\
+         Build it with Source/HLS/pi_nlms/build_rtl.tcl, or run\
+         Automation/Linux/build_all.sh --from nlms."
+}
 puts "GNSS-CRPA: custom IP repository registered: $gnss_ip_repo"
 puts "GNSS-CRPA: custom IP resolved in catalog: $gnss_ipdef"
+puts "GNSS-CRPA: PI-NLMS IP resolved in catalog: $nlms_ipdef"
 # GNSS-CRPA MOD-0 END
 # ---------------------------------------------------------------------------
 
@@ -492,6 +502,20 @@ ad_connect gnss_passthrough/dac_data_i0 axi_ad9361/dac_data_i0
 ad_connect gnss_passthrough/dac_data_q0 axi_ad9361/dac_data_q0
 ad_connect gnss_passthrough/dac_data_i1 axi_ad9361/dac_data_i1
 ad_connect gnss_passthrough/dac_data_q1 axi_ad9361/dac_data_q1
+
+# PI-NLMS null-steering core (Vitis HLS IP), next to gnss_passthrough.
+#   gnss_passthrough selects whether TX1 carries its output (CONTROL[4]),
+#   supplies the step size (register 0x40) and holds it in reset while
+#   disabled. Same clock as gnss_passthrough, so no clock crossing here.
+ad_ip_instance pi_nlms pi_nlms_0
+
+ad_connect axi_ad9361/l_clk              pi_nlms_0/ap_clk
+ad_connect gnss_passthrough/nlms_rst_n   pi_nlms_0/ap_rst_n
+ad_connect gnss_passthrough/m_axis_nlms1 pi_nlms_0/in1
+ad_connect gnss_passthrough/m_axis_nlms2 pi_nlms_0/in2
+ad_connect pi_nlms_0/out_r               gnss_passthrough/s_axis_nlms
+ad_connect gnss_passthrough/nlms_mu       pi_nlms_0/mu_shift_ctrl
+ad_connect gnss_passthrough/nlms_reserved pi_nlms_0/reserved_ctrl
 
 # GNSS-CRPA MOD-2 END
 # ---------------------------------------------------------------------------

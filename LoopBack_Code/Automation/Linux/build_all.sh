@@ -7,7 +7,7 @@
 #
 #    1 vendor   copy Vendor/ADI_hdl_2023_r2 to Build/VendorWork/hdl (disposable)
 #    2 libip    package the Analog Devices library IP the block design uses
-#    3 nlms     Vitis HLS: Source/HLS/pi_nlms -> Source/HDL/pi_nlms/*.v
+#    3 nlms     Vitis HLS: Source/HLS/pi_nlms -> Build/ip_repo/pi_nlms (IP)
 #    4 ip       package the custom gnss_passthrough IP into Build/ip_repo
 #    5 project  recreate Vivado/Project/antsdr_e310_gnss.xpr
 #    6 build    synthesis, implementation, bitstream, XSA
@@ -162,6 +162,7 @@ fi
 # ---- 3 PI-NLMS RTL (Vitis HLS) -----------------------------------------------
 if want 3; then
   need vitis_hls
+  mkdir -p "$IP_REPO"
   ( cd "$ROOT/Source/HLS/pi_nlms" && run_logged nlms "PI_NLMS_RTL: PASS" \
       vitis_hls -f build_rtl.tcl )
   grep -E "Estimated Fmax|Timing" -A0 "$LOG_DIR/nlms.log" | tail -2 || true
@@ -179,6 +180,7 @@ fi
 # ---- 5 project --------------------------------------------------------------
 if want 5; then
   [[ -f "$IP_REPO/gnss_passthrough/component.xml" ]] || die "run stage 4 (ip) first"
+  [[ -f "$IP_REPO/pi_nlms/component.xml" ]] || die "run stage 3 (nlms) first"
   # The project directory is generated; clear it so nothing stale survives.
   find "$PROJ_DIR" -mindepth 1 ! -name .gitkeep -exec rm -rf {} + 2>/dev/null || true
   mkdir -p "$PROJ_DIR"

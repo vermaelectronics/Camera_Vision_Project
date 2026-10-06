@@ -157,6 +157,37 @@ module gnss_passthrough #(
   output     [15:0]   dac_data_i1,
   output     [15:0]   dac_data_q1,
 
+  // ---- PI-NLMS core: separate block-design IP (Vitis HLS pi_nlms) ---------
+  //  All in the clk domain. Source/BlockDesign/system_bd.tcl connects:
+  //    m_axis_nlms1  -> pi_nlms_0/in1            (RX1, reference element)
+  //    m_axis_nlms2  -> pi_nlms_0/in2            (RX2, auxiliary element)
+  //    pi_nlms_0/out_r -> s_axis_nlms            (null-steered output)
+  //    nlms_mu       -> pi_nlms_0/mu_shift_ctrl  (register 0x40)
+  //    nlms_reserved -> pi_nlms_0/reserved_ctrl  (0)
+  //    nlms_rst_n    -> pi_nlms_0/ap_rst_n       (CONTROL[0] & CONTROL[4])
+  //    axi_ad9361/l_clk -> pi_nlms_0/ap_clk      (same clock as clk)
+  output     [31:0]   m_axis_nlms1_tdata,
+  output              m_axis_nlms1_tvalid,
+  input               m_axis_nlms1_tready,
+  output     [ 3:0]   m_axis_nlms1_tkeep,
+  output     [ 3:0]   m_axis_nlms1_tstrb,
+  output              m_axis_nlms1_tlast,
+  output     [31:0]   m_axis_nlms2_tdata,
+  output              m_axis_nlms2_tvalid,
+  input               m_axis_nlms2_tready,
+  output     [ 3:0]   m_axis_nlms2_tkeep,
+  output     [ 3:0]   m_axis_nlms2_tstrb,
+  output              m_axis_nlms2_tlast,
+  input      [31:0]   s_axis_nlms_tdata,
+  input               s_axis_nlms_tvalid,
+  output              s_axis_nlms_tready,
+  input      [ 3:0]   s_axis_nlms_tkeep,
+  input      [ 3:0]   s_axis_nlms_tstrb,
+  input               s_axis_nlms_tlast,
+  output     [15:0]   nlms_mu,
+  output     [15:0]   nlms_reserved,
+  output              nlms_rst_n,
+
   // ---- AXI4-Lite slave (sys_cpu_clk domain) -------------------------------
   input               s_axi_aclk,
   input               s_axi_aresetn,
@@ -185,7 +216,10 @@ module gnss_passthrough #(
   // v1.1 -- adds the RX->TX sample alignment stage. Bumped so a running board
   // reports which of the two behaviours its bitstream actually has.
   // v1.2 -- adds the PI-NLMS two-element null-steering core (CONTROL[4]).
-  localparam [31:0] CORE_VERSION = 32'h00010002;   // v1.2
+  // v1.3 -- PI-NLMS moved out of this module into its own block-design IP
+  //         (pi_nlms_0), connected through the m_axis_nlms*/s_axis_nlms
+  //         ports. Registers and behaviour are the same as v1.2.
+  localparam [31:0] CORE_VERSION = 32'h00010003;   // v1.3
   localparam        AW           = FIFO_ADDR_WIDTH;
 
   // ==========================================================================
@@ -407,9 +441,11 @@ module gnss_passthrough #(
   //                and steers a null onto the strongest correlated signal,
   //                i.e. the jammer. Channel 1 is left as raw RX2.
   //
-  //  pi_nlms is the Vitis HLS core from Source/HLS/pi_nlms, generated as plain
-  //  Verilog by build_rtl.tcl (AXI-Stream data, mu_shift_ctrl as a port,
-  //  free-running). It runs at II=1 in this clk domain, so no clock crossing.
+  //  pi_nlms is the Vitis HLS core from Source/HLS/pi_nlms, packaged as an IP
+  //  by build_rtl.tcl (AXI-Stream data, mu_shift_ctrl as a port, free-running)
+  //  and placed next to this block in the block design as pi_nlms_0. It runs
+  //  at II=2 on the same l_clk as this module, so there is no clock crossing:
+  //  this section only drives and receives its AXI-Stream ports.
   //
   //  SAMPLE FORMAT. The core works on signed 16-bit I/Q, packed {Q, I}, and
   //  was verified with a jammer at ~-12 dBFS of that 16-bit range. The RX
@@ -426,47 +462,38 @@ module gnss_passthrough #(
   // ==========================================================================
   wire nlms_run = pass_en & nlms_en;
 
-  reg nlms_rst_n = 1'b0;
-  always @(posedge clk) nlms_rst_n <= ~rst & nlms_run;
+  reg nlms_rst_n_r = 1'b0;
+  always @(posedge clk) nlms_rst_n_r <= ~rst & nlms_run;
+  assign nlms_rst_n = nlms_rst_n_r;
 
-  wire [31:0] nlms_in1 = {adc_data_q0[11:0], 4'b0000, adc_data_i0[11:0], 4'b0000};
-  wire [31:0] nlms_in2 = {adc_data_q1[11:0], 4'b0000, adc_data_i1[11:0], 4'b0000};
   // axi_ad9361 strobes all four channel valids together, so one RX1 sample and
   // one RX2 sample are always offered as a pair.
-  wire        nlms_in_valid = nlms_rst_n & adc_valid_i0 & adc_valid_i1 &
-                              adc_enable_i0 & adc_enable_i1;
-  wire        nlms_in1_ready, nlms_in2_ready;
-  wire [31:0] nlms_out_data;
+  wire nlms_in_valid = nlms_rst_n_r & adc_valid_i0 & adc_valid_i1 &
+                       adc_enable_i0 & adc_enable_i1;
 
-  pi_nlms u_pi_nlms (
-    .ap_clk        (clk),
-    .ap_rst_n      (nlms_rst_n),
-    .in1_TDATA     (nlms_in1),
-    .in1_TVALID    (nlms_in_valid),
-    .in1_TREADY    (nlms_in1_ready),
-    .in1_TKEEP     (4'hF),
-    .in1_TSTRB     (4'hF),
-    .in1_TLAST     (1'b0),
-    .in2_TDATA     (nlms_in2),
-    .in2_TVALID    (nlms_in_valid),
-    .in2_TREADY    (nlms_in2_ready),
-    .in2_TKEEP     (4'hF),
-    .in2_TSTRB     (4'hF),
-    .in2_TLAST     (1'b0),
-    .out_r_TDATA   (nlms_out_data),
-    .out_r_TVALID  (nlms_out_valid),
-    .out_r_TREADY  (1'b1),          // the elastic buffer always accepts
-    .out_r_TKEEP   (),
-    .out_r_TSTRB   (),
-    .out_r_TLAST   (),
-    .mu_shift_ctrl (mu_ctrl_sync),
-    .reserved_ctrl (16'd0)
-  );
+  assign m_axis_nlms1_tdata  = {adc_data_q0[11:0], 4'b0000, adc_data_i0[11:0], 4'b0000};
+  assign m_axis_nlms1_tvalid = nlms_in_valid;
+  assign m_axis_nlms1_tkeep  = 4'hF;
+  assign m_axis_nlms1_tstrb  = 4'hF;
+  assign m_axis_nlms1_tlast  = 1'b0;
+  assign m_axis_nlms2_tdata  = {adc_data_q1[11:0], 4'b0000, adc_data_i1[11:0], 4'b0000};
+  assign m_axis_nlms2_tvalid = nlms_in_valid;
+  assign m_axis_nlms2_tkeep  = 4'hF;
+  assign m_axis_nlms2_tstrb  = 4'hF;
+  assign m_axis_nlms2_tlast  = 1'b0;
 
-  // The core is II=1 and its output is never back-pressured, so it is ready
-  // for every pair. If that assumption ever breaks, say so in STATUS[10]
-  // instead of silently dropping samples.
-  wire nlms_drop = nlms_in_valid & ~(nlms_in1_ready & nlms_in2_ready);
+  assign s_axis_nlms_tready  = 1'b1;           // the elastic buffer always accepts
+  assign nlms_out_valid      = s_axis_nlms_tvalid;
+  wire [31:0] nlms_out_data  = s_axis_nlms_tdata;
+
+  assign nlms_mu             = mu_ctrl_sync;
+  assign nlms_reserved       = 16'd0;
+
+  // The core accepts one pair per two clocks (II=2) and its output is never
+  // back-pressured, so it is ready for every pair the AD9361 delivers. If
+  // that assumption ever breaks, say so in STATUS[10] instead of silently
+  // dropping samples.
+  wire nlms_drop = nlms_in_valid & ~(m_axis_nlms1_tready & m_axis_nlms2_tready);
 
   wire [15:0] nlms_i = nlms_out_data[15:0];
   wire [15:0] nlms_q = nlms_out_data[31:16];
