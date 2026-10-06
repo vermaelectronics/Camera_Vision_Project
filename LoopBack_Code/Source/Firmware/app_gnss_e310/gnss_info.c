@@ -176,10 +176,12 @@ static void info_hardware(struct ad9361_rf_phy *phy)
     console_print("   base address    : 0x43C00000, 4 kB aperture\n");
     console_print("   ID register     : 0x%08x  (expect 0x47435031, ASCII 'GCP1')\n",
                   (long)gnss_pt_read(GNSS_PT_REG_ID));
-    console_print("   VERSION         : 0x%08x  (expect 0x00010001 = v1.1)\n",
+    console_print("   VERSION         : 0x%08x  (expect 0x00010003 = v1.3)\n",
                   (long)gnss_pt_read(GNSS_PT_REG_VERSION));
     console_print("     v1.0 is the original identity passthrough and transmits\n");
     console_print("     24 dB LOW. v1.1 adds the RX->TX sample alignment stage.\n");
+    console_print("     v1.2 adds PI-NLMS null steering. v1.3 is the same, with\n");
+    console_print("     PI-NLMS as its own block-design IP (pi_nlms_0).\n");
     rule();
 
     console_print(" RF FRONT END                                            [cfg]\n");
@@ -257,6 +259,11 @@ static void info_config(struct ad9361_rf_phy *phy)
                   (char *)(((ctrl >> 1) & 1U) ? "output forced to zero" : "output live"));
     console_print("     [2] swap_iq  : %d\n", (long)((ctrl >> 2) & 1U));
     console_print("     [3] ch1_copy : %d\n", (long)((ctrl >> 3) & 1U));
+    console_print("     [4] nlms_en  : %d   %s\n", (long)((ctrl >> 4) & 1U),
+                  (char *)(((ctrl >> 4) & 1U) ? "TX1 = PI-NLMS(RX1, RX2)"
+                                              : "TX1 = RX1 (PI-NLMS off)"));
+    console_print("   PI-NLMS mu     : %d   (gnss_nlms_mu=, register 0x40)\n",
+                  (long)(int16_t)(gnss_pt_read(GNSS_PT_REG_NLMS_MU) & 0xFFFFU));
     console_print("   DDR replay     : %s\n",
                   (char *)(gnss_txdma_is_running() ? "RUNNING" : "stopped"));
 }
@@ -383,6 +390,16 @@ static void info_pl(void)
     console_print("   axi_ad9361 -> AD9361 -> [TX1 SMA]\n");
     rule();
 
+    console_print("\n PI-NLMS NULL STEERING (v1.3)                           [cfg]\n");
+    rule();
+    console_print("   pi_nlms_0 is a Vitis HLS IP next to gnss_passthrough, on the\n");
+    console_print("   same l_clk. gnss_passthrough feeds it RX1 (in1) and RX2 (in2)\n");
+    console_print("   over AXI-Stream and, with CONTROL[4] = 1, sends its output\n");
+    console_print("   (out_r) to TX1 instead of RX1. Step size: register 0x40.\n");
+    console_print("   It has no AXI-Lite port: all control goes through\n");
+    console_print("   gnss_passthrough. TX2 always carries plain RX2.\n");
+    rule();
+
     console_print("\n THE ONE MODIFICATION THAT MATTERS\n");
     rule();
     console_print("   Upstream wired the DAC FIFO's data pins straight into\n");
@@ -441,11 +458,11 @@ static void info_about(void)
 
     console_print("\n WHY IT EXISTS\n");
     rule();
-    console_print("   This is the skeleton of a CRPA anti-jam front end. Today\n");
-    console_print("   gnss_passthrough is transparent -- Iout = Iin. It is the\n");
-    console_print("   insertion point where a Controlled Reception Pattern Antenna\n");
-    console_print("   algorithm will replace the identity with adaptive null\n");
-    console_print("   steering across two antenna elements.\n");
+    console_print("   This is the skeleton of a CRPA anti-jam front end. With\n");
+    console_print("   gnss_nlms=0 gnss_passthrough is transparent -- Iout = Iin.\n");
+    console_print("   With gnss_nlms=1 the PI-NLMS core (pi_nlms_0) replaces the\n");
+    console_print("   identity on TX1 with adaptive null steering across the two\n");
+    console_print("   antenna elements RX1 and RX2.\n");
     console_print("   Proving the loop end to end FIRST means that when the\n");
     console_print("   algorithm goes in, any change it causes is measurable\n");
     console_print("   immediately at a real receiver.\n");
@@ -489,7 +506,8 @@ static void info_about(void)
     console_print("     shares 1575.42 MHz and the 18 MHz retransmit bandwidth\n");
     console_print("     carries GPS, Galileo and SBAS together.\n");
     console_print("   * Position ACCURACY was never checked against a reference.\n");
-    console_print("   * No CRPA algorithm exists yet. The block is still identity.\n");
+    console_print("   * PI-NLMS null steering has NOT yet been verified on hardware\n");
+    console_print("     against a jammer. Treat it as under test.\n");
     rule();
 
     console_print("\n SAFETY -- READ THIS\n");
@@ -512,18 +530,20 @@ static void info_registers(void)
     head("6  gnss_passthrough REGISTER MAP  (base 0x43C00000, 4 kB)");
 
     console_print("   0x00  ID              RO  0x47435031, ASCII 'GCP1'\n");
-    console_print("   0x04  VERSION         RO  0x00010001 = v1.1\n");
+    console_print("   0x04  VERSION         RO  0x00010003 = v1.3\n");
     console_print("   0x08  SCRATCH         RW  read/write test\n");
     console_print("   0x0C  CONTROL         RW  [0] pass_en  [1] mute\n");
     console_print("                             [2] swap_iq  [3] ch1_copy\n");
-    console_print("                             [8] cnt_clear\n");
+    console_print("                             [4] nlms_en  [8] cnt_clear\n");
     console_print("   0x10  STATUS          RO  [0] adc_enable_i0  [1] adc_enable_q0\n");
     console_print("                             [2] dac_enable_i0  [3] dac_enable_q0\n");
     console_print("                             [4] fifo0_empty    [5] fifo0_full\n");
     console_print("                             [6] fifo1_empty    [7] fifo1_full\n");
     console_print("                             [8] overflow_sticky\n");
     console_print("                             [9] underflow_sticky\n");
+    console_print("                            [10] nlms_drop_sticky (must stay 0)\n");
     console_print("                            [16] pass_en in the sample domain\n");
+    console_print("                            [17] nlms_en in the sample domain\n");
     console_print("   0x14  RX_COUNT_CH0    RO\n");
     console_print("   0x18  TX_COUNT_CH0    RO\n");
     console_print("   0x1C  OVERFLOW_COUNT  RO\n");
@@ -534,8 +554,8 @@ static void info_registers(void)
     console_print("   0x30  RX_COUNT_CH1    RO\n");
     console_print("   0x34  TX_COUNT_CH1    RO\n");
     console_print("   0x38  RX_SNAPSHOT_CH1 RO\n");
-    console_print("   0x40  CRPA_COEF0..15  RW  0x40-0x7C, reserved for the CRPA.\n");
-    console_print("                             Stored but unused today.\n");
+    console_print("   0x40  CRPA_COEF0      RW  [15:0] PI-NLMS mu_shift_ctrl (signed)\n");
+    console_print("   0x44  CRPA_COEF1..15  RW  0x44-0x7C, stored but unused.\n");
     rule();
     console_print(" STATUS BITS [2] AND [3] ARE THE IMPORTANT ONES.\n");
     console_print("   They are axi_ad9361's read-back of (dac_data_sel == 4'h2),\n");
@@ -638,12 +658,12 @@ static void info_issues(void)
     console_print("   nothing and the board looks broken when it is not.\n");
     rule();
 
-    console_print("\n 5. RX2 HAS NOTHING CONNECTED.\n");
+    console_print("\n 5. PI-NLMS NEEDS RX2 CONNECTED.\n");
     rule();
     console_print("   Both RX channels are wired in the PL, so a TWO-ELEMENT CRPA\n");
-    console_print("   needs no block-design change -- but RX2 currently sees only\n");
-    console_print("   its own noise. A second antenna or a splitter is required\n");
-    console_print("   before any array work.\n");
+    console_print("   is in place -- but with nothing on RX2 it sees only its own\n");
+    console_print("   noise and gnss_nlms=1 cannot null anything. A second antenna\n");
+    console_print("   or a splitter is required before any array work.\n");
     console_print("   One AD9361 gives only TWO coherent channels. More elements\n");
     console_print("   than that needs more hardware.\n");
     rule();
