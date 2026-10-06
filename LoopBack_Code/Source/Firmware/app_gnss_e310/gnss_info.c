@@ -725,7 +725,10 @@ static void info_quickstart(void)
     console_print("   gnss_tx=1 / gnss_tx=0        live retransmit / ABORT\n");
     console_print("   gnss_ddr_tx=1 / =0          DDR round trip / stop\n");
     console_print("   tx1_attenuation=N           mdB. BIGGER = QUIETER.\n");
+    console_print("   gnss_nlms=1 / gnss_nlms=0   PI-NLMS null steering on TX1 / off\n");
+    console_print("   gnss_nlms_mu=N              PI-NLMS step size, -4..4, 0 = default\n");
     console_print("   gnss_tx? / gnss_status?     state, read back from hardware\n");
+    console_print("   gnss_nlms?                  PI-NLMS on/off, mu, dropped samples\n");
     console_print("   ?                           this menu\n");
     console_print("   help?                       every command (long)\n");
 }
@@ -771,7 +774,9 @@ void gnss_info_menu(void)
     console_print("    gnss_ddr_tx=1 / =0         DDR round trip / stop\n");
     console_print("    tx1_attenuation=N          mdB. BIGGER = QUIETER.\n");
     console_print("                               89750 quietest, 70000 known good\n");
-    console_print("    gnss_tx? gnss_ddr_tx? gnss_status?   read back from hardware\n");
+    console_print("    gnss_nlms=1 / gnss_nlms=0  PI-NLMS null steering on TX1 / off\n");
+    console_print("    gnss_nlms_mu=N             PI-NLMS step size, -4..4, 0 = default\n");
+    console_print("    gnss_tx? gnss_ddr_tx? gnss_status? gnss_nlms?   read back\n");
     console_print("\n");
     console_print("    ?        this menu            help?    every command (long)\n");
     console_print("===============================================================\n");
