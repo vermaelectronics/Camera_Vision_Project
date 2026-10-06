@@ -118,6 +118,20 @@
 #define XPAR_PS7_SPI_1_SPI_CLK_FREQ_HZ  XPAR_XSPIPS_1_SPI_CLK_FREQ_HZ
 #endif
 
+/* The Vitis 2023.2 Unified IDE (SDT) BSP defines neither spelling. The block
+ * design leaves PCW_SPI_PERIPHERAL_FREQMHZ at the PS7 default, 166.666666 MHz,
+ * which the classic BSP reports as 166666672 Hz. Use that value and say so.
+ * If this is ever wrong the SPI to the AD9361 runs at a different speed:
+ * the AD9361 init in the boot log ("ad9361_init : AD936x Rev 2 successfully
+ * initialized") is the check. */
+#ifndef XPAR_PS7_SPI_0_SPI_CLK_FREQ_HZ
+#warning "No SPI0 clock in xparameters.h; assuming the PS7 default 166666672 Hz"
+#define XPAR_PS7_SPI_0_SPI_CLK_FREQ_HZ  166666672U
+#endif
+#ifndef XPAR_PS7_SPI_1_SPI_CLK_FREQ_HZ
+#define XPAR_PS7_SPI_1_SPI_CLK_FREQ_HZ  166666672U
+#endif
+
 /* ---------------------------------------------------------------------------
  * 3b. Peripheral instance counts.
  *
