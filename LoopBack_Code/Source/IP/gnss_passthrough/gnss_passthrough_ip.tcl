@@ -119,7 +119,7 @@ set_bus_param $rst_if POLARITY         ACTIVE_LOW
 #  so that they match the HLS core's in1/in2/out_r (TDATA, TVALID, TREADY,
 #  TKEEP, TSTRB, TLAST) and the block design can connect them as interfaces.
 # ---------------------------------------------------------------------------
-proc add_axis_if {core name mode} {
+proc add_axis_if {core name mode {sigs {TDATA TVALID TREADY TKEEP TSTRB TLAST}}} {
   foreach bif [ipx::get_bus_interfaces $name -of_objects $core] {
     ipx::remove_bus_interface $name $core
   }
@@ -127,7 +127,7 @@ proc add_axis_if {core name mode} {
   set_property abstraction_type_vlnv xilinx.com:interface:axis_rtl:1.0 $bif
   set_property bus_type_vlnv         xilinx.com:interface:axis:1.0     $bif
   set_property interface_mode        $mode                             $bif
-  foreach sig {TDATA TVALID TREADY TKEEP TSTRB TLAST} {
+  foreach sig $sigs {
     set pm [ipx::add_port_map $sig $bif]
     set_property physical_name "${name}_[string tolower $sig]" $pm
   }
@@ -137,6 +137,11 @@ set nlms_axis {m_axis_nlms1 m_axis_nlms2 s_axis_nlms}
 add_axis_if $core m_axis_nlms1 master
 add_axis_if $core m_axis_nlms2 master
 add_axis_if $core s_axis_nlms  slave
+# PL-NPI streams (pl_npi_0): TDATA/TVALID/TREADY only.
+set npi_axis {m_axis_npi s_axis_npi}
+add_axis_if $core m_axis_npi master {TDATA TVALID TREADY}
+add_axis_if $core s_axis_npi slave  {TDATA TVALID TREADY}
+set nlms_axis [concat $nlms_axis $npi_axis]
 
 set sclk_if [ensure_bus_if $core clk xilinx.com:signal:clock_rtl:1.0]
 set srst_if [ensure_bus_if $core rst xilinx.com:signal:reset_rtl:1.0]
@@ -147,6 +152,9 @@ set_bus_param $sclk_if ASSOCIATED_BUSIF [join $nlms_axis ":"]
 # nlms_rst_n drives pi_nlms_0/ap_rst_n: an active-low reset output.
 set nrst_if [ensure_bus_if $core nlms_rst_n xilinx.com:signal:reset_rtl:1.0]
 set_bus_param $nrst_if POLARITY ACTIVE_LOW
+# npi_rst_n drives pl_npi_0/aresetn: an active-low reset output.
+set prst_if [ensure_bus_if $core npi_rst_n xilinx.com:signal:reset_rtl:1.0]
+set_bus_param $prst_if POLARITY ACTIVE_LOW
 
 # ---------------------------------------------------------------------------
 #  Memory map: 4 kB aperture.  The actual base address is assigned by the
@@ -194,7 +202,7 @@ foreach n $nlms_axis {
     exit 2
   }
 }
-puts "IP_PACKAGE_SELFCHECK: OK - PI-NLMS AXI-Stream interfaces: $nlms_axis"
+puts "IP_PACKAGE_SELFCHECK: OK - PI-NLMS / PL-NPI AXI-Stream interfaces: $nlms_axis"
 
 # The CDC constraints are what keep the design timing-clean. If they silently
 # failed to package, the only symptom would be a setup violation much later.

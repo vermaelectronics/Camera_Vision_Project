@@ -243,6 +243,14 @@ void get_gnss_status(double* param, char param_no);
 void get_gnss_nlms(double* param, char param_no);
 void set_gnss_nlms(double* param, char param_no);
 void set_gnss_nlms_mu(double* param, char param_no);
+/* PL-NPI power inversion in the PL (bitstream v1.4+).
+ * gnss_npi=1 puts the PL-NPI output of RX1+RX2 on TX1 (with gnss_tx=1) and
+ * switches PI-NLMS off; gnss_npi=0 switches it off. gnss_npi_gamma= sets the
+ * regulariser, gnss_npi_freeze= freezes the weights. */
+void get_gnss_npi(double* param, char param_no);
+void set_gnss_npi(double* param, char param_no);
+void set_gnss_npi_gamma(double* param, char param_no);
+void set_gnss_npi_freeze(double* param, char param_no);
 
 /* GNSS-CRPA MOD-9: the main menu, bound to "?".
  * Short and grouped, unlike get_help() which dumps all ~60 vendor commands. */

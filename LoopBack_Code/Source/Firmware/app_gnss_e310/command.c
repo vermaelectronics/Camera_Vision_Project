@@ -133,6 +133,11 @@ command cmd_list[] = {
 	{"gnss_nlms?", "Gets the PI-NLMS null-steering state.", "", get_gnss_nlms},
 	{"gnss_nlms=", "1 = TX1 carries PI-NLMS(RX1, RX2), 0 = TX1 carries RX1.", "gnss_nlms=1", set_gnss_nlms},
 	{"gnss_nlms_mu=", "Sets the PI-NLMS step size (mu_shift_ctrl, signed).", "gnss_nlms_mu=0", set_gnss_nlms_mu},
+	/* PL-NPI power inversion in pl_npi_0 (bitstream v1.4+). */
+	{"gnss_npi?", "Gets the PL-NPI power-inversion state.", "", get_gnss_npi},
+	{"gnss_npi=", "1 = TX1 carries PL-NPI(RX1, RX2), 0 = off. Switches PI-NLMS off.", "gnss_npi=1", set_gnss_npi},
+	{"gnss_npi_gamma=", "Sets the PL-NPI regulariser gamma (>= 1).", "gnss_npi_gamma=1", set_gnss_npi_gamma},
+	{"gnss_npi_freeze=", "1 = freeze the PL-NPI weights, 0 = adapt.", "gnss_npi_freeze=0", set_gnss_npi_freeze},
 	/* GNSS-CRPA MOD-7: the DDR round trip. Exercises axi_ad9361_dac_dma,
 	 * util_upack2 and the util_rfifo DATA path, none of which had ever moved a
 	 * real sample. See gnss_txdma.h. */
@@ -330,6 +335,73 @@ void set_gnss_nlms_mu(double* param, char param_no)
 	}
 	gnss_pt_set_nlms_mu((int16_t)param[0]);
 	get_gnss_nlms(param, param_no);
+}
+
+/**************************************************************************//***
+ * @brief PL-NPI. Report whether the power-inversion core is in the TX1 path.
+*******************************************************************************/
+void get_gnss_npi(double* param, char param_no)
+{
+	uint32_t status = gnss_pt_read(GNSS_PT_REG_STATUS);
+	uint32_t ver    = gnss_pt_read(GNSS_PT_REG_VERSION);
+
+	(void)param; (void)param_no;
+	if(ver < 0x00010004U) {
+		console_print("GNSS_NPI: bitstream v%d.%d has no PL-NPI core\n",
+			      (long)(ver >> 16), (long)(ver & 0xFFFFU));
+		return;
+	}
+	console_print("GNSS_NPI: %s (read from hardware)%s, gamma = %d, gain band = %d\n",
+		      (char*)((status & GNSS_PT_ST_NPI_EN_SYNCED) ? "ON" : "off"),
+		      (char*)((gnss_pt_read(GNSS_PT_REG_CONTROL) & GNSS_PT_CTRL_NPI_FREEZE)
+		          ? ", weights FROZEN" : ""),
+		      (long)gnss_pt_read(GNSS_PT_REG_NPI_GAMMA),
+		      (long)((status >> GNSS_PT_ST_NPI_BAND_SHIFT) & GNSS_PT_ST_NPI_BAND_MASK));
+}
+
+/**************************************************************************//***
+ * @brief PL-NPI. Put the power-inversion core in (1) or out (0) of the TX1
+ * path. Enabling it switches PI-NLMS off: only one core feeds TX1. Like
+ * gnss_nlms=, this does not open the transmitter (that is gnss_tx=1).
+*******************************************************************************/
+void set_gnss_npi(double* param, char param_no)
+{
+	if(param_no < 1) {
+		console_print("gnss_npi= needs 0 or 1\n");
+		return;
+	}
+	if(gnss_pt_read(GNSS_PT_REG_VERSION) < 0x00010004U) {
+		console_print("gnss_npi: this bitstream has no PL-NPI core\n");
+		return;
+	}
+	gnss_pt_set_npi((int)param[0] != 0);
+	get_gnss_npi(param, param_no);
+}
+
+/**************************************************************************//***
+ * @brief PL-NPI. Set the regulariser gamma. Read every sample by the core.
+*******************************************************************************/
+void set_gnss_npi_gamma(double* param, char param_no)
+{
+	if(param_no < 1 || param[0] < 1.0 || param[0] > 4294967295.0) {
+		console_print("gnss_npi_gamma= needs a value from 1 to 4294967295, e.g. gnss_npi_gamma=1\n");
+		return;
+	}
+	gnss_pt_set_npi_gamma((uint32_t)param[0]);
+	get_gnss_npi(param, param_no);
+}
+
+/**************************************************************************//***
+ * @brief PL-NPI. Freeze (1) or release (0) the adaptive weights.
+*******************************************************************************/
+void set_gnss_npi_freeze(double* param, char param_no)
+{
+	if(param_no < 1) {
+		console_print("gnss_npi_freeze= needs 0 or 1\n");
+		return;
+	}
+	gnss_pt_set_npi_freeze((int)param[0] != 0);
+	get_gnss_npi(param, param_no);
 }
 
 /* GNSS-CRPA MOD-7: the DDR round trip.

@@ -72,6 +72,8 @@
 #define GNSS_PT_REG_CRPA_COEF(n)    (0x40U + ((n) * 4U))  /* RW, n = 0..15    */
 /* CRPA_COEF[0][15:0] is the PI-NLMS step-size control (signed). */
 #define GNSS_PT_REG_NLMS_MU         GNSS_PT_REG_CRPA_COEF(0)
+/* CRPA_COEF[2] is the PL-NPI regulariser gamma (unsigned; 0 acts as 1). */
+#define GNSS_PT_REG_NPI_GAMMA       GNSS_PT_REG_CRPA_COEF(2)
 
 /* ---- expected identity --------------------------------------------------- */
 #define GNSS_PT_EXPECTED_ID         0x47435031U
@@ -81,8 +83,9 @@
  *       bitstream whose TX output is 24 dB low with 4 bits discarded. */
 /* 1.2 = adds the PI-NLMS two-element null-steering core (CONTROL[4]).
  * 1.3 = the PI-NLMS core is a separate block-design IP (pi_nlms_0) instead of
- *       being inside gnss_passthrough. Same registers and behaviour as 1.2. */
-#define GNSS_PT_EXPECTED_VERSION    0x00010003U
+ *       being inside gnss_passthrough. Same registers and behaviour as 1.2.
+ * 1.4 = adds the PL-NPI power-inversion core (pl_npi_0, CONTROL[5]). */
+#define GNSS_PT_EXPECTED_VERSION    0x00010004U
 
 /* ---- CONTROL bits -------------------------------------------------------- */
 #define GNSS_PT_CTRL_PASS_EN        (1U << 0)  /* 1 = RX->TX passthrough      */
@@ -90,6 +93,8 @@
 #define GNSS_PT_CTRL_SWAP_IQ        (1U << 2)
 #define GNSS_PT_CTRL_CH1_COPY       (1U << 3)  /* ch1 TX fed from ch0         */
 #define GNSS_PT_CTRL_NLMS_EN        (1U << 4)  /* ch0 TX = PI-NLMS(RX1, RX2)  */
+#define GNSS_PT_CTRL_NPI_EN         (1U << 5)  /* ch0 TX = PL-NPI(RX1, RX2)   */
+#define GNSS_PT_CTRL_NPI_FREEZE     (1U << 6)  /* PL-NPI weights frozen       */
 #define GNSS_PT_CTRL_CNT_CLEAR      (1U << 8)  /* held, not self-clearing     */
 
 /* ---- STATUS bits --------------------------------------------------------- */
@@ -106,6 +111,9 @@
 #define GNSS_PT_ST_NLMS_DROP        (1U << 10) /* core was not ready: lost data */
 #define GNSS_PT_ST_PASS_EN_SYNCED   (1U << 16)
 #define GNSS_PT_ST_NLMS_EN_SYNCED   (1U << 17)
+#define GNSS_PT_ST_NPI_EN_SYNCED    (1U << 18)
+#define GNSS_PT_ST_NPI_BAND_SHIFT   20         /* [21:20] PL-NPI gain band    */
+#define GNSS_PT_ST_NPI_BAND_MASK    0x3U
 
 /* ---- return codes -------------------------------------------------------- */
 #define GNSS_PT_OK                   0
@@ -138,6 +146,18 @@ void     gnss_pt_set_nlms(int enable);
 /* Step-size control written to the core (mu_shift_ctrl). 0 is the value the
  * HLS testbench verified; larger = slower, finer adaptation. */
 void     gnss_pt_set_nlms_mu(int16_t mu_shift);
+
+/* PL-NPI power inversion (bitstream v1.4+). Enabled, channel 0 TX carries the
+ * PL-NPI array output of RX1 and RX2. Enabling it switches PI-NLMS off (and
+ * enabling PI-NLMS switches PL-NPI off): only one core feeds TX1. Disabling
+ * holds the core in reset, so re-enabling restarts from the quiescent
+ * weights [1, 0]. */
+void     gnss_pt_set_npi(int enable);
+/* Regulariser gamma of mu_NPI = 1/(2*x^T x + gamma). 1 is the value the
+ * PL-NPI testbench was measured with; 0 is used as 1 by the hardware. */
+void     gnss_pt_set_npi_gamma(uint32_t gamma);
+/* 1 = freeze the PL-NPI weights at their current value, 0 = adapt. */
+void     gnss_pt_set_npi_freeze(int freeze);
 
 /* Snapshot of everything worth observing at runtime (requirement 58). */
 typedef struct {
