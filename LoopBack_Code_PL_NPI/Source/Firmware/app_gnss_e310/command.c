@@ -293,12 +293,13 @@ void get_gnss_npi(double* param, char param_no)
 			      (long)(ver >> 16), (long)(ver & 0xFFFFU));
 		return;
 	}
-	console_print("GNSS_NPI: %s (read from hardware)%s, gamma = %d, gain band = %d\n",
+	console_print("GNSS_NPI: %s (read from hardware)%s, gamma = %d, gain band = %d%s\n",
 		      (char*)((status & GNSS_PT_ST_NPI_EN_SYNCED) ? "ON" : "off"),
 		      (char*)((gnss_pt_read(GNSS_PT_REG_CONTROL) & GNSS_PT_CTRL_NPI_FREEZE)
 		          ? ", weights FROZEN" : ""),
 		      (long)gnss_pt_read(GNSS_PT_REG_NPI_GAMMA),
-		      (long)((status >> GNSS_PT_ST_NPI_BAND_SHIFT) & GNSS_PT_ST_NPI_BAND_MASK));
+		      (long)((status >> GNSS_PT_ST_NPI_BAND_SHIFT) & GNSS_PT_ST_NPI_BAND_MASK),
+		      (char*)((status & GNSS_PT_ST_NPI_DROP) ? ", SAMPLES DROPPED (STATUS[10])" : ""));
 }
 
 /**************************************************************************//***

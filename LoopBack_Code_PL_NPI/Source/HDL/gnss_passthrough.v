@@ -62,6 +62,10 @@
 //                                    [4]  fifo0_empty     [5]  fifo0_full
 //                                    [6]  fifo1_empty     [7]  fifo1_full
 //                                    [8]  overflow_sticky [9]  underflow_sticky
+//                                    [10] npi_drop_sticky: an RX sample pair
+//                                         arrived while the previous one was
+//                                         still waiting for pl_npi_0 (never
+//                                         expected; cleared with cnt_clear)
 //                                    [16] pass_en (as seen in the clk domain)
 //                                    [18] npi_en  (as seen in the clk domain)
 //                                    [21:20] PL-NPI gain band of the latest
@@ -207,7 +211,10 @@ module gnss_passthrough #(
   // v2.0 -- PL-NPI-only build: the PL-NPI power-inversion core is a separate
   //         block-design IP (pl_npi_0), selected by CONTROL[5], with its
   //         regulariser in register 0x48. No PI-NLMS core in this design.
-  localparam [31:0] CORE_VERSION = 32'h00020000;   // v2.0
+  // v2.1 -- pl_npi_0 is the pipelined Vitis HLS core (II=2). The input to it
+  //         goes through a one-entry holding register, STATUS[10] flags a
+  //         sample pair it could not take.
+  localparam [31:0] CORE_VERSION = 32'h00020001;   // v2.1
   localparam        AW           = FIFO_ADDR_WIDTH;
 
   // ==========================================================================
@@ -442,9 +449,29 @@ module gnss_passthrough #(
   always @(posedge clk) npi_rst_n_r <= ~rst & npi_run;
   assign npi_rst_n = npi_rst_n_r;
 
-  assign m_axis_npi_tdata  = {adc_data_q1, adc_data_i1, adc_data_q0, adc_data_i0};
-  assign m_axis_npi_tvalid = npi_rst_n_r & adc_valid_i0 & adc_valid_i1 &
-                             adc_enable_i0 & adc_enable_i1;
+  // The HLS core accepts one sample pair every 2 clocks (II=2) and its
+  // TREADY may be low in the clock a pair arrives. The pair is therefore held
+  // in a one-entry register until accepted. Pairs arrive at most every 2nd
+  // clock, so one entry is enough; a pair that finds the register still
+  // occupied is dropped and flagged (STATUS[10]).
+  wire npi_in_valid = npi_rst_n_r & adc_valid_i0 & adc_valid_i1 &
+                      adc_enable_i0 & adc_enable_i1;
+  reg  [63:0] npi_x_data  = 64'd0;
+  reg         npi_x_valid = 1'b0;
+  wire        npi_x_free  = ~npi_x_valid | m_axis_npi_tready;
+  wire        npi_drop    = npi_in_valid & ~npi_x_free;
+  always @(posedge clk) begin
+    if (!npi_rst_n_r) begin
+      npi_x_valid <= 1'b0;
+    end else if (npi_in_valid && npi_x_free) begin
+      npi_x_data  <= {adc_data_q1, adc_data_i1, adc_data_q0, adc_data_i0};
+      npi_x_valid <= 1'b1;
+    end else if (m_axis_npi_tready) begin
+      npi_x_valid <= 1'b0;
+    end
+  end
+  assign m_axis_npi_tdata  = npi_x_data;
+  assign m_axis_npi_tvalid = npi_x_valid;
   assign s_axis_npi_tready = 1'b1;        // the elastic buffer always accepts
   assign npi_out_valid     = s_axis_npi_tvalid;
   assign npi_gamma         = gamma_ctrl_sync;
@@ -557,6 +584,7 @@ module gnss_passthrough #(
   reg [31:0] ovf_cnt = 32'd0, unf_cnt = 32'd0;
   reg [31:0] rx_snap0 = 32'd0, tx_snap0 = 32'd0, rx_snap1 = 32'd0;
   reg        ovf_sticky = 1'b0, unf_sticky = 1'b0;
+  reg        npi_drop_sticky = 1'b0;
 
   always @(posedge clk) begin
     if (rst || cnt_clear) begin
@@ -564,6 +592,7 @@ module gnss_passthrough #(
       rx_cnt1 <= 32'd0; tx_cnt1 <= 32'd0;
       ovf_cnt <= 32'd0; unf_cnt <= 32'd0;
       ovf_sticky <= 1'b0; unf_sticky <= 1'b0;
+      npi_drop_sticky <= 1'b0;
       rx_snap0 <= 32'd0; tx_snap0 <= 32'd0; rx_snap1 <= 32'd0;
     end else begin
       if (adc_valid_i0) begin
@@ -589,12 +618,14 @@ module gnss_passthrough #(
         unf_cnt    <= unf_cnt + 1'b1;
         unf_sticky <= 1'b1;
       end
+      if (npi_drop)
+        npi_drop_sticky <= 1'b1;
     end
   end
 
   wire [31:0] status_w;
   assign status_w = { 10'd0, npi_band, 1'b0, npi_en, 1'b0, pass_en,
-                      5'd0, 1'b0, unf_sticky, ovf_sticky,
+                      5'd0, npi_drop_sticky, unf_sticky, ovf_sticky,
                       full1, empty1, full0, empty0,
                       dac_enable_q0, dac_enable_i0,
                       adc_enable_q0, adc_enable_i0 };

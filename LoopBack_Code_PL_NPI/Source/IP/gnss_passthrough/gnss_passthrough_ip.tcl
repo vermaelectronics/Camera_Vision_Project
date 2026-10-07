@@ -38,8 +38,8 @@ foreach f [list $rtl_file $xdc_file] {
   }
 }
 
-# The PL-NPI core is NOT part of this IP. It is its own RTL IP
-# (Build/ip_repo/pl_npi, from Source/IP/pl_npi/pl_npi_ip.tcl) and the block
+# The PL-NPI core is NOT part of this IP. It is its own Vitis HLS IP
+# (Build/ip_repo/pl_npi, from Source/HLS/pl_npi/build_hls.tcl) and the block
 # design connects it to the m_axis_npi/s_axis_npi ports.
 
 # A fresh edit-project guarantees the packaged result reflects the current RTL

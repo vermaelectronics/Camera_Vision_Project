@@ -82,7 +82,7 @@
 /* 2.0 = PL-NPI-only build: the PL-NPI power-inversion core is a separate
  *       block-design IP (pl_npi_0, CONTROL[5], gamma in 0x48). This design
  *       has no PI-NLMS core. */
-#define GNSS_PT_EXPECTED_VERSION    0x00020000U
+#define GNSS_PT_EXPECTED_VERSION    0x00020001U
 
 /* ---- CONTROL bits -------------------------------------------------------- */
 #define GNSS_PT_CTRL_PASS_EN        (1U << 0)  /* 1 = RX->TX passthrough      */
@@ -104,6 +104,7 @@
 #define GNSS_PT_ST_FIFO1_FULL       (1U << 7)
 #define GNSS_PT_ST_OVERFLOW         (1U << 8)
 #define GNSS_PT_ST_UNDERFLOW        (1U << 9)
+#define GNSS_PT_ST_NPI_DROP         (1U << 10) /* v2.1+: pair lost at pl_npi_0 */
 #define GNSS_PT_ST_PASS_EN_SYNCED   (1U << 16)
 #define GNSS_PT_ST_NPI_EN_SYNCED    (1U << 18)
 #define GNSS_PT_ST_NPI_BAND_SHIFT   20         /* [21:20] PL-NPI gain band    */

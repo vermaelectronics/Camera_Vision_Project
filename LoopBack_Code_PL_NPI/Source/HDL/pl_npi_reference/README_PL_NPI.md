@@ -1,3 +1,8 @@
+> **Reference only.** This is the original PL-NPI RTL package, kept unchanged
+> for comparison. The build uses the pipelined Vitis HLS core in
+> `Source/HLS/pl_npi/` instead (see `README_VIVADO_2023.2.md`, "v2.1"); this
+> RTL does not meet the 8 ns `rx_clk` timing.
+
 # pi_power_inversion_pl_npi -- PL-NPI CRPA core (standalone)
 
 The PL-NPI (Piecewise-Linear Normalized Power Inversion) adaptive-array

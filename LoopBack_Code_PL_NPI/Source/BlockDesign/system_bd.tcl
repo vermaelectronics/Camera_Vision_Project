@@ -75,14 +75,14 @@ if {[llength $gnss_ipdef] == 0} {
          Source/IP/gnss_passthrough/gnss_passthrough_ip.tcl, or run\
          Automation/Linux/build_all.sh --from ip."
 }
-# The PL-NPI core is a separate RTL IP in the same repository
-# (Source/IP/pl_npi/pl_npi_ip.tcl, build_all.sh stage "ip").
+# The PL-NPI core is a separate Vitis HLS IP in the same repository
+# (Source/HLS/pl_npi/build_hls.tcl, build_all.sh stage "npi").
 set npi_ipdef [get_ipdefs -all -quiet -filter \
   {VLNV =~ *:pl_npi:* && design_tool_contexts =~ *IPI* && UPGRADE_VERSIONS == ""}]
 if {[llength $npi_ipdef] == 0} {
   error "ERROR: pl_npi was not found in the IP catalog at $gnss_ip_repo.\
-         Package it with Source/IP/pl_npi/pl_npi_ip.tcl, or run\
-         Automation/Linux/build_all.sh --from ip."
+         Build it with Source/HLS/pl_npi/build_hls.tcl (vitis_hls), or run\
+         Automation/Linux/build_all.sh --from npi."
 }
 puts "GNSS-CRPA: PL-NPI IP resolved in catalog: $npi_ipdef"
 puts "GNSS-CRPA: custom IP repository registered: $gnss_ip_repo"
@@ -503,13 +503,13 @@ ad_connect gnss_passthrough/dac_data_q0 axi_ad9361/dac_data_q0
 ad_connect gnss_passthrough/dac_data_i1 axi_ad9361/dac_data_i1
 ad_connect gnss_passthrough/dac_data_q1 axi_ad9361/dac_data_q1
 
-# PL-NPI power-inversion core (RTL IP), next to gnss_passthrough.
+# PL-NPI power-inversion core (pipelined Vitis HLS IP, II=2), next to gnss_passthrough.
 #   gnss_passthrough selects it for TX1 with CONTROL[5], supplies gamma (register 0x48) and adapt_en (~CONTROL[6]), and
 #   holds it in reset while disabled. Same clock, so no clock crossing.
 ad_ip_instance pl_npi pl_npi_0
 
-ad_connect axi_ad9361/l_clk             pl_npi_0/aclk
-ad_connect gnss_passthrough/npi_rst_n   pl_npi_0/aresetn
+ad_connect axi_ad9361/l_clk             pl_npi_0/ap_clk
+ad_connect gnss_passthrough/npi_rst_n   pl_npi_0/ap_rst_n
 ad_connect gnss_passthrough/m_axis_npi  pl_npi_0/s_axis_x
 ad_connect pl_npi_0/m_axis_y            gnss_passthrough/s_axis_npi
 ad_connect gnss_passthrough/npi_gamma    pl_npi_0/gamma

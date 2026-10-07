@@ -7,7 +7,7 @@
 #
 #    1 vendor   copy Vendor/ADI_hdl_2023_r2 to Build/VendorWork/hdl (disposable)
 #    2 libip    package the Analog Devices library IP the block design uses
-#    3 npi      package the PL-NPI core (Source/HDL/pl_npi) into Build/ip_repo/pl_npi
+#    3 npi      Vitis HLS: Source/HLS/pl_npi -> Build/ip_repo/pl_npi (IP)
 #    4 ip       package the custom gnss_passthrough IP into Build/ip_repo
 #    5 project  recreate Vivado/Project/antsdr_e310_gnss.xpr
 #    6 build    synthesis, implementation, bitstream, XSA
@@ -18,6 +18,7 @@
 #  USAGE
 #    source /tools/Xilinx/Vivado/2023.2/settings64.sh
 #    source /tools/Xilinx/Vitis/2023.2/settings64.sh
+#    source /tools/Xilinx/Vitis_HLS/2023.2/settings64.sh   (stage 3)
 #    ./Automation/Linux/build_all.sh [options]
 #
 #  OPTIONS
@@ -111,7 +112,7 @@ export ADI_USE_OOC_SYNTHESIS="${ADI_USE_OOC_SYNTHESIS:-n}"
 
 die()  { echo "BUILD_ALL: FAIL - $*" >&2; exit 2; }
 want() { [[ $1 -ge $FROM && $1 -le $TO ]]; }
-need() { command -v "$1" >/dev/null 2>&1 || die "'$1' not found on PATH. Run: source /tools/Xilinx/Vivado/$TARGET_VERSION/settings64.sh; source /tools/Xilinx/Vitis/$TARGET_VERSION/settings64.sh"; }
+need() { command -v "$1" >/dev/null 2>&1 || die "'$1' not found on PATH. Run: source /tools/Xilinx/Vivado/$TARGET_VERSION/settings64.sh; source /tools/Xilinx/Vitis/$TARGET_VERSION/settings64.sh; source /tools/Xilinx/Vitis_HLS/$TARGET_VERSION/settings64.sh"; }
 
 # Run a command, tee it to a log, and require the given PASS marker in it.
 run_logged() {
@@ -158,13 +159,13 @@ if want 2; then
   done
 fi
 
-# ---- 3 PL-NPI IP -------------------------------------------------------------
+# ---- 3 PL-NPI IP (Vitis HLS) -------------------------------------------------
 if want 3; then
+  need vitis_hls
   mkdir -p "$IP_REPO"
-  ( cd "$IP_REPO" && run_logged npi "IP_PACKAGE_OK" \
-      vivado -mode batch -nojournal -log "$LOG_DIR/npi_vivado.log" \
-      -source "$ROOT/Source/IP/pl_npi/pl_npi_ip.tcl" \
-      -tclargs "$ROOT/Source" "$IP_REPO" )
+  ( cd "$ROOT/Source/HLS/pl_npi" && run_logged npi "PL_NPI_HLS: PASS" \
+      vitis_hls -f build_hls.tcl )
+  grep -E "PL_NPI_HLS: (estimated|HLS clock)" "$LOG_DIR/npi.log" || true
 fi
 
 # ---- 4 custom IP ------------------------------------------------------------

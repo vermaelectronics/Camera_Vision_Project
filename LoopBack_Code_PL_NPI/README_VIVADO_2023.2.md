@@ -9,6 +9,7 @@ Ubuntu 22.04.
 ```bash
 source /tools/Xilinx/Vivado/2023.2/settings64.sh
 source /tools/Xilinx/Vitis/2023.2/settings64.sh
+source /tools/Xilinx/Vitis_HLS/2023.2/settings64.sh
 cd LoopBack_Code_PL_NPI
 ./Automation/Linux/build_all.sh --jobs 16
 ```
@@ -63,6 +64,9 @@ The HDL (`Source/HDL`), constraints (`Source/XDC`) and block design contents are
 
 ## Status
 
+The PL-NPI HLS core (v2.1) was checked in C simulation only: Vitis HLS
+synthesis, the II and timing have not been run yet.
+
 These changes have **not yet been built** under Vivado 2023.2. The archive was
 prepared without access to the tools. The scripts were syntax-checked, and
 every IP and parameter in the block design was checked against the
@@ -75,11 +79,11 @@ the post-route fix to close timing, and 2023.2 may route differently.
 board whatever tools you have installed. A 2023.2 build writes its own
 `Build/Output/BOOT.BIN`.
 
-## PL-NPI power inversion (bitstream v2.0)
+## PL-NPI power inversion (bitstream v2.1)
 
-This folder is the **PL-NPI-only** variant: it has no PI-NLMS core, no Vitis HLS
-stage and no `gnss_nlms` commands. The PI-NLMS design is the separate
-`LoopBack_Code` folder.
+This folder is the **PL-NPI-only** variant: it has no PI-NLMS core and no
+`gnss_nlms` commands. The PI-NLMS design is the separate `LoopBack_Code`
+folder.
 
 The PL-NPI core (piecewise-linear normalized power inversion, Jia et al.,
 IEEE Access vol. 11, 2023, Eq. 11) is a second, separate block in the block
@@ -90,35 +94,84 @@ design, `pl_npi_0`, next to `gnss_passthrough`:
                           gnss_passthrough ─► axi_ad9361 TX1   (when CONTROL[5] = 1)
                           npi_gamma    ─► pl_npi_0/gamma      (register 0x48)
                           npi_adapt_en ─► pl_npi_0/adapt_en   (~CONTROL[6])
-                          npi_rst_n    ─► pl_npi_0/aresetn
+                          npi_rst_n    ─► pl_npi_0/ap_rst_n
                           pl_npi_0/gain_band ─► STATUS[21:20]
-                          axi_ad9361/l_clk ─► pl_npi_0/aclk
+                          axi_ad9361/l_clk ─► pl_npi_0/ap_clk
 
-- Sources: `Source/HDL/pl_npi/rtl/` holds the PL-NPI package's own RTL,
-  unchanged (`pi_power_inversion_pl_npi.v`, `pi_reciprocal.v`, `pi_cmul.v`),
-  with its README and testbench. `Source/HDL/pl_npi/pl_npi.v` is the
-  block-design wrapper (AXI-Stream ports, output scaling, gamma >= 1).
-- Stage `npi` packages it with `Source/IP/pl_npi/pl_npi_ip.tcl` as
-  `antsdr:gnss:pl_npi:1.0` in `Build/ip_repo/pl_npi`.
+### v2.1: the core is a pipelined Vitis HLS IP
+
+The v2.0 core was the PL-NPI package's RTL, which does each weight update in
+ONE clock (a 67 x 51-bit complex multiply-accumulate into a 118-bit
+add/shift/saturate chain). At the 8 ns `rx_clk` it missed timing by about
+20 ns (WNS -19.998 ns, 2229 failing endpoints).
+
+v2.1 replaces it with `Source/HLS/pl_npi/pl_npi.cpp`, the same algorithm
+rewritten for timing:
+
+1. **Narrowed multiplies.** `s` is reduced to 25 bits before the
+   correlation, the step `alpha x gain` is a 19-bit mantissa plus a shift,
+   and the result is 48 bits instead of 118. Every product fits a few DSP48.
+2. **Delayed update.** The weight update is split into stages A (output
+   `s`), B (correlation `conj(x) s` and gain band), C (x step), D (shift and
+   saturate), E (leak and weight write). Each stage works on the previous
+   sample's register, so the weights used for a sample are about four samples
+   behind (delayed LMS). At these step sizes the delay does not change the
+   result (C simulation below).
+3. **Registered side calculations.** `alpha = 2^32/(2 x^T x + gamma)` and the
+   four gain products are computed from the sample alone, ahead of the
+   update, and registered.
+4. **alpha from the same sample as the correlation.** The original RTL used an
+   alpha about 16 samples older than the correlation (33-stage reciprocal),
+   which blows the weights up when a strong jammer appears after a quiet
+   spell (simulated output 73-83 dB against a 56 dB jammer). The HLS core
+   delays alpha to match the correlation and stays stable.
+
+`#pragma HLS PIPELINE II=2` at 8 ns: the AD9361 2R2T LVDS interface delivers
+at most one sample pair every second `l_clk`, so II=2 loses nothing.
+`gnss_passthrough` holds each pair in a one-entry register until the core
+takes it. `STATUS[10]` (`npi_drop_sticky`) is set if a pair was lost. It must
+stay 0.
+
+C simulation (testbench.cpp, run by the build), jammer 600 LSB, `h = 0.6-0.5j`:
+
+| | original RTL (v2.0) | HLS core (v2.1) |
+|---|---|---|
+| null depth, gamma 1 | -51.6 dB | -50.0 dB |
+| samples to a 40 dB null | 200 | 300 |
+| no jammer, gamma 1e6, output vs RX1 | -6.7 dB | -5.4 dB |
+| no jammer, gamma 1, output vs RX1 | -24.6 dB | -24.5 dB |
+| jammer 3000 LSB switched on/off every 3000 samples | 73-83 dB after it returns (unstable) | about 0 dB (stable) |
+
+- Sources: `Source/HLS/pl_npi/` (`pl_npi.cpp`, `pl_npi.h`, `testbench.cpp`,
+  `build_hls.tcl`). The original RTL, its README and testbench are kept for
+  reference in `Source/HDL/pl_npi_reference/`. The build does not use them.
+- Stage `npi` runs `vitis_hls -f build_hls.tcl`: C simulation (3 scenarios),
+  C synthesis, then **fails** if the achieved II is worse than 2 or the
+  estimated clock is above 8 ns, then exports `antsdr:gnss:pl_npi:1.0` to
+  `Build/ip_repo/pl_npi` (with `pl_npi_csynth.rpt`). Overrides:
+  `PL_NPI_CLK_NS=7` (more margin), `PL_NPI_II=<n>`, `PL_NPI_SKIP_CSIM=1`.
 - It works at the raw ADC scale its calibration assumes: RX samples go in as
   received (12-bit, sign-extended) and the output is saturated back to 12
   bits.
 - All weights adapt from the quiescent vector [1, 0] (classic power
   inversion), so whatever reaches only RX1, GNSS included, also comes out
-  lower than with the core off. In simulation with RX2 = (0.6 - 0.5j) x RX1
-  the RX1 weight settled at 0.38 (about -8 dB).
+  lower than with the core off.
 - Registers: `CONTROL[5]` (0x0C) enables it, `CONTROL[6]` freezes the
-  weights, `0x48` is gamma, `STATUS[18]` reads the enable back and
-  `STATUS[21:20]` the gain band. VERSION reads 2.0.
+  weights, `0x48` is gamma, `STATUS[18]` reads the enable back,
+  `STATUS[21:20]` the gain band, `STATUS[10]` the drop flag. VERSION reads 2.1.
 - Console: `gnss_npi=1`, `gnss_npi=0`, `gnss_npi_gamma=<n>` (>= 1),
   `gnss_npi_freeze=1/0`, `gnss_npi?`. `gnss_tx=1` still controls whether
   anything is transmitted at all.
 
-**Timing.** The core does each weight update in one clock: a 67 x 51-bit
-complex multiply-accumulate feeding a 118-bit add/shift/saturate chain. At
-the 8 ns `rx_clk` constraint that will not close, so expect
-`BUILD_TIMING: VIOLATED` with large negative slack inside `pl_npi_0`, and do
-not trust PL-NPI results on hardware until it is pipelined. The rest of the
-design (passthrough) is unaffected as long as its own paths meet
-timing: check that the failing paths in `Build/Output/timing_impl.rpt` are
-all inside `pl_npi_0`.
+**gamma.** The leak toward [1, 0] is weak (2^-18 per sample), so gamma must be
+much larger than the noise power at RX1+RX2 to stop the core cancelling noise
+and GNSS when there is no jammer. gamma = 1 cancels everything it can; with
+noise of about +-15 LSB even gamma = 1e5 slowly pulls the output down. Start
+with `gnss_npi_gamma=1000000` and lower it until the jammer is nulled fast
+enough.
+
+**Timing.** Not yet built with the tools. After stage `npi`, check
+`Build/Logs/npi.log` for `PL_NPI_HLS: estimated clock period ... achieved
+II 2`, then `BUILD_TIMING: MET` in `Build/Logs/build.log`. If a few paths in
+`pl_npi_0` still fail after place-and-route, rebuild with
+`PL_NPI_CLK_NS=7 ./Automation/Linux/build_all.sh --from npi`.

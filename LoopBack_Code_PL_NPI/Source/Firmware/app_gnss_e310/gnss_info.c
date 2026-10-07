@@ -176,12 +176,13 @@ static void info_hardware(struct ad9361_rf_phy *phy)
     console_print("   base address    : 0x43C00000, 4 kB aperture\n");
     console_print("   ID register     : 0x%08x  (expect 0x47435031, ASCII 'GCP1')\n",
                   (long)gnss_pt_read(GNSS_PT_REG_ID));
-    console_print("   VERSION         : 0x%08x  (expect 0x00020000 = v2.0)\n",
+    console_print("   VERSION         : 0x%08x  (expect 0x00020001 = v2.1)\n",
                   (long)gnss_pt_read(GNSS_PT_REG_VERSION));
     console_print("     v1.0 is the original identity passthrough and transmits\n");
     console_print("     24 dB LOW. v1.1 adds the RX->TX sample alignment stage.\n");
     console_print("     v2.0 is the PL-NPI-only build: the PL-NPI power-inversion\n");
-    console_print("     core (pl_npi_0) on TX1, no PI-NLMS.\n");
+    console_print("     core (pl_npi_0) on TX1, no PI-NLMS. v2.1 makes pl_npi_0\n");
+    console_print("     the pipelined Vitis HLS core (II=2) that meets 8 ns timing.\n");
     rule();
 
     console_print(" RF FRONT END                                            [cfg]\n");
@@ -391,9 +392,9 @@ static void info_pl(void)
     console_print("   axi_ad9361 -> AD9361 -> [TX1 SMA]\n");
     rule();
 
-    console_print("\n PL-NPI POWER INVERSION (v2.0)                          [cfg]\n");
+    console_print("\n PL-NPI POWER INVERSION (v2.1)                          [cfg]\n");
     rule();
-    console_print("   pl_npi_0 is an RTL IP next to gnss_passthrough, on the same\n");
+    console_print("   pl_npi_0 is a Vitis HLS IP next to gnss_passthrough, on the same\n");
     console_print("   l_clk. It takes RX1 and RX2 at the raw ADC scale over one\n");
     console_print("   AXI-Stream (s_axis_x) and returns the array output (m_axis_y).\n");
     console_print("   CONTROL[5] puts it on TX1 instead of RX1, register 0x48\n");
@@ -532,7 +533,7 @@ static void info_registers(void)
     head("6  gnss_passthrough REGISTER MAP  (base 0x43C00000, 4 kB)");
 
     console_print("   0x00  ID              RO  0x47435031, ASCII 'GCP1'\n");
-    console_print("   0x04  VERSION         RO  0x00020000 = v2.0\n");
+    console_print("   0x04  VERSION         RO  0x00020001 = v2.1\n");
     console_print("   0x08  SCRATCH         RW  read/write test\n");
     console_print("   0x0C  CONTROL         RW  [0] pass_en  [1] mute\n");
     console_print("                             [2] swap_iq  [3] ch1_copy\n");
@@ -544,6 +545,7 @@ static void info_registers(void)
     console_print("                             [6] fifo1_empty    [7] fifo1_full\n");
     console_print("                             [8] overflow_sticky\n");
     console_print("                             [9] underflow_sticky\n");
+    console_print("                            [10] npi_drop_sticky (must stay 0)\n");
     console_print("                            [16] pass_en in the sample domain\n");
     console_print("                            [18] npi_en in the sample domain\n");
     console_print("                         [21:20] PL-NPI gain band (0..3)\n");
