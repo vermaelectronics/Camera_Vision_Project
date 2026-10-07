@@ -19,6 +19,11 @@
 //      wp_i   = sat32(wp_i - ((wp_i + term_i) >> 18))
 //      y      = sat16(s >> 20)
 //
+//    Per sample: wp -= wp/2^18 + corr/(2(2 x^T x + gamma)), a leaky LMS. Where
+//    2 x^T x << gamma its steady state is diagonally loaded power inversion,
+//    w = L (R + L I)^-1 wo with L ~= gamma / 2^17 [LSB^2]: directions of the
+//    input covariance R much stronger than L are nulled, weaker ones pass.
+//
 //  WHAT IS DIFFERENT, AND WHY
 //    The original RTL computes a whole weight update in ONE clock: a 67x51-bit
 //    multiply feeding 118-bit add/shift/saturate logic. On the xc7z020 at the

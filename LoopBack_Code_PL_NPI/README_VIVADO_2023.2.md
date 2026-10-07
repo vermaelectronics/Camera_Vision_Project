@@ -138,7 +138,7 @@ C simulation (testbench.cpp, run by the build), jammer 600 LSB, `h = 0.6-0.5j`:
 |---|---|---|
 | null depth, gamma 1 | -51.6 dB | -50.0 dB |
 | samples to a 40 dB null | 200 | 300 |
-| no jammer, gamma 1e6, output vs RX1 | -6.7 dB | -5.4 dB |
+| no jammer, gamma 1e6, output vs RX1, first 6000 samples only | -6.7 dB | -5.4 dB |
 | no jammer, gamma 1, output vs RX1 | -24.6 dB | -24.5 dB |
 | jammer 3000 LSB switched on/off every 3000 samples | 73-83 dB after it returns (unstable) | about 0 dB (stable) |
 
@@ -163,12 +163,29 @@ C simulation (testbench.cpp, run by the build), jammer 600 LSB, `h = 0.6-0.5j`:
   `gnss_npi_freeze=1/0`, `gnss_npi?`. `gnss_tx=1` still controls whether
   anything is transmitted at all.
 
-**gamma.** The leak toward [1, 0] is weak (2^-18 per sample), so gamma must be
-much larger than the noise power at RX1+RX2 to stop the core cancelling noise
-and GNSS when there is no jammer. gamma = 1 cancels everything it can; with
-noise of about +-15 LSB even gamma = 1e5 slowly pulls the output down. Start
-with `gnss_npi_gamma=1000000` and lower it until the jammer is nulled fast
-enough.
+**gamma.** The core is a leaky LMS: the weights leak toward [1, 0] by 2^-18
+per sample, and the step is 1/(2(2 x^T x + gamma)). In steady state this is
+power inversion with diagonal loading,
+
+    w = sigma_L^2 (R + sigma_L^2 I)^-1 [1, 0],   sigma_L^2 ~= gamma / 2^17
+
+so every eigen-direction of the input covariance R with power well above
+sigma_L^2 is nulled, and every direction well below it is passed. To keep the
+noise (and the GNSS under it) when there is no jammer, sigma_L^2 must be
+above the noise power per channel:
+
+    gamma ~= 2^17 x (3..10) x noise power per channel   [LSB^2]
+
+C model, noise +-20 LSB (267 LSB^2 per channel), 800000 samples, output vs RX1:
+
+| gamma | no jammer | jammer 600 LSB |
+|---|---|---|
+| 1 / 1e5 / 1e6 | -24.5 dB (noise cancelled; 1e6 only takes longer) | -55 dB |
+| 1e7 | -12 dB | -48 dB |
+| 1e8 | -1.6 dB | -39 dB (output = noise, jammer nulled) |
+
+Measure the noise power on the board (RX snapshot with no signal,
+mean of I^2 + Q^2) and set gamma from it; for about +-20 LSB that is 1e8.
 
 **Timing.** Not yet built with the tools. After stage `npi`, check
 `Build/Logs/npi.log` for `PL_NPI_HLS: estimated clock period ... achieved

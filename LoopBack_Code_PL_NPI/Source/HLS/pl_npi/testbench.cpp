@@ -11,8 +11,12 @@
 //    2. Same, and the output does not grow again later (no oscillation from
 //       the delayed update).
 //    3. Gain-band coverage: more than one Eq. 11 band is used.
-//    4. No jammer, gamma 1e6: the output is NOT cancelled (power within 6 dB
-//       of RX1's own power), i.e. gamma protects the wanted signal.
+//    4. No jammer, noise +-20 LSB, gamma 1e8, 200000 samples: the output is
+//       NOT cancelled in steady state (second half within 3 dB of RX1), i.e.
+//       gamma protects the wanted signal. gamma acts as diagonal loading of
+//       about gamma/2^17 LSB^2 (see pl_npi.cpp); it must be well above the
+//       noise power per channel (about 267 LSB^2 here). A smaller gamma
+//       (1e6) only slows the cancellation down, it does not prevent it.
 //
 //  Writing the stimulus/response to files for a comparison against the
 //  original RTL core is enabled with the environment variable PL_NPI_DUMP.
@@ -118,10 +122,10 @@ int main(int argc, char **argv) {
         if (r.grew)                                    { printf("FAIL: output grew again after converging\n"); fail = 1; }
         if (r.bands_seen < 2)                          { printf("FAIL: only one gain band used\n"); fail = 1; }
     } else if (scen == 2) {
-        Result r = run(0.0, 1000000u, 6000, 20, fs, fr);
-        printf("no jammer, noise +-20 LSB, gamma 1e6: output vs RX1 power %.1f dB\n",
+        Result r = run(0.0, 100000000u, 200000, 20, fs, fr);
+        printf("no jammer, noise +-20 LSB, gamma 1e8, 200000 samples: output vs RX1 power %.1f dB\n",
                r.out_vs_rx1_db);
-        if (r.out_vs_rx1_db < -6.0) { printf("FAIL: wanted signal cancelled without a jammer\n"); fail = 1; }
+        if (r.out_vs_rx1_db < -3.0) { printf("FAIL: wanted signal cancelled without a jammer\n"); fail = 1; }
     } else if (scen == 3) {
         Result r = run(0.0, 1u, 6000, 20, fs, fr);
         printf("no jammer, noise +-20 LSB, gamma 1 (informational): output vs RX1 power %.1f dB\n",
