@@ -99,29 +99,8 @@ void gnss_pt_clear_counters(void)
 void gnss_pt_set_nlms(int enable)
 {
     uint32_t c = gnss_pt_read(GNSS_PT_REG_CONTROL);
-    if (enable) { c |= GNSS_PT_CTRL_NLMS_EN; c &= ~GNSS_PT_CTRL_NPI_EN; }
+    if (enable) { c |= GNSS_PT_CTRL_NLMS_EN; }
     else        { c &= ~GNSS_PT_CTRL_NLMS_EN; }
-    gnss_pt_write(GNSS_PT_REG_CONTROL, c);
-}
-
-void gnss_pt_set_npi(int enable)
-{
-    uint32_t c = gnss_pt_read(GNSS_PT_REG_CONTROL);
-    if (enable) { c |= GNSS_PT_CTRL_NPI_EN; c &= ~GNSS_PT_CTRL_NLMS_EN; }
-    else        { c &= ~GNSS_PT_CTRL_NPI_EN; }
-    gnss_pt_write(GNSS_PT_REG_CONTROL, c);
-}
-
-void gnss_pt_set_npi_gamma(uint32_t gamma)
-{
-    gnss_pt_write(GNSS_PT_REG_NPI_GAMMA, gamma);
-}
-
-void gnss_pt_set_npi_freeze(int freeze)
-{
-    uint32_t c = gnss_pt_read(GNSS_PT_REG_CONTROL);
-    if (freeze) { c |= GNSS_PT_CTRL_NPI_FREEZE; }
-    else        { c &= ~GNSS_PT_CTRL_NPI_FREEZE; }
     gnss_pt_write(GNSS_PT_REG_CONTROL, c);
 }
 
@@ -177,11 +156,6 @@ void gnss_pt_print_state(void)
            (s.status & GNSS_PT_ST_NLMS_EN_SYNCED) ? "ON" : "off",
            (int)(int16_t)(gnss_pt_read(GNSS_PT_REG_NLMS_MU) & 0xFFFFU),
            (s.status & GNSS_PT_ST_NLMS_DROP) ? "  DROPPED SAMPLES (sticky)" : "");
-    printf("  pl-npi         : %s%s, gamma=%lu, gain band=%lu\n",
-           (s.status & GNSS_PT_ST_NPI_EN_SYNCED) ? "ON" : "off",
-           (s.control & GNSS_PT_CTRL_NPI_FREEZE) ? " (weights frozen)" : "",
-           (unsigned long)gnss_pt_read(GNSS_PT_REG_NPI_GAMMA),
-           (unsigned long)((s.status >> GNSS_PT_ST_NPI_BAND_SHIFT) & GNSS_PT_ST_NPI_BAND_MASK));
     printf("  adc enable i/q : %d / %d\n",
            (s.status & GNSS_PT_ST_ADC_EN_I0) ? 1 : 0,
            (s.status & GNSS_PT_ST_ADC_EN_Q0) ? 1 : 0);

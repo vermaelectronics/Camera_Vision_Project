@@ -102,51 +102,10 @@ block in the block design, `pi_nlms_0`, next to `gnss_passthrough`:
   clock crossing between them.
 - Registers: `CONTROL[4]` (0x0C) enables it, `0x40[15:0]` sets `mu_shift_ctrl`,
   `STATUS[17]` reads it back, and `STATUS[10]` flags dropped samples. VERSION
-  reads 1.4.
+  reads 1.3.
 - Console: `gnss_nlms=1`, `gnss_nlms=0`, `gnss_nlms_mu=<n>`, `gnss_nlms?`.
   `gnss_tx=1` still controls whether anything is transmitted at all.
 
 RX samples (12-bit) are scaled ×16 into the 16-bit range the core was verified
 with, and the saturated output is scaled back. Both RX inputs must be connected:
 RX2 is the auxiliary antenna element.
-
-## PL-NPI power inversion (bitstream v1.4)
-
-The PL-NPI core (piecewise-linear normalized power inversion, Jia et al.,
-IEEE Access vol. 11, 2023, Eq. 11) is a second, separate block in the block
-design, `pl_npi_0`, next to `pi_nlms_0`:
-
-    axi_ad9361 RX1,RX2 ─► gnss_passthrough ─ m_axis_npi ─► pl_npi_0/s_axis_x
-                          gnss_passthrough ◄─ s_axis_npi ─ pl_npi_0/m_axis_y
-                          gnss_passthrough ─► axi_ad9361 TX1   (when CONTROL[5] = 1)
-                          npi_gamma    ─► pl_npi_0/gamma      (register 0x48)
-                          npi_adapt_en ─► pl_npi_0/adapt_en   (~CONTROL[6])
-                          npi_rst_n    ─► pl_npi_0/aresetn
-                          pl_npi_0/gain_band ─► STATUS[21:20]
-                          axi_ad9361/l_clk ─► pl_npi_0/aclk
-
-- Sources: `Source/HDL/pl_npi/rtl/` holds the PL-NPI package's own RTL,
-  unchanged (`pi_power_inversion_pl_npi.v`, `pi_reciprocal.v`, `pi_cmul.v`),
-  with its README and testbench. `Source/HDL/pl_npi/pl_npi.v` is the
-  block-design wrapper (AXI-Stream ports, output scaling, gamma >= 1).
-- Stage `ip` packages it with `Source/IP/pl_npi/pl_npi_ip.tcl` as
-  `antsdr:gnss:pl_npi:1.0` in `Build/ip_repo/pl_npi`.
-- It works at the raw ADC scale its calibration assumes: RX samples go in as
-  received (12-bit, sign-extended) and the output is saturated back to 12
-  bits.
-- All weights adapt from the quiescent vector [1, 0] (classic power
-  inversion), so whatever reaches only RX1, GNSS included, also comes out
-  lower than with the core off. In simulation with RX2 = (0.6 - 0.5j) x RX1
-  the RX1 weight settled at 0.38 (about -8 dB).
-- Console: `gnss_npi=1`, `gnss_npi=0`, `gnss_npi_gamma=<n>` (>= 1),
-  `gnss_npi_freeze=1/0`, `gnss_npi?`. Enabling PL-NPI switches PI-NLMS off
-  and the other way round.
-
-**Timing.** The core does each weight update in one clock: a 67 x 51-bit
-complex multiply-accumulate feeding a 118-bit add/shift/saturate chain. At
-the 8 ns `rx_clk` constraint that will not close, so expect
-`BUILD_TIMING: VIOLATED` with large negative slack inside `pl_npi_0`, and do
-not trust PL-NPI results on hardware until it is pipelined. The rest of the
-design (PI-NLMS, passthrough) is unaffected as long as its own paths meet
-timing: check that the failing paths in `Build/Output/timing_impl.rpt` are
-all inside `pl_npi_0`.

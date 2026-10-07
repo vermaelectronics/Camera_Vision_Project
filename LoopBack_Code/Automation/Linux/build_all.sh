@@ -8,7 +8,7 @@
 #    1 vendor   copy Vendor/ADI_hdl_2023_r2 to Build/VendorWork/hdl (disposable)
 #    2 libip    package the Analog Devices library IP the block design uses
 #    3 nlms     Vitis HLS: Source/HLS/pi_nlms -> Build/ip_repo/pi_nlms (IP)
-#    4 ip       package the custom gnss_passthrough and pl_npi IPs into Build/ip_repo
+#    4 ip       package the custom gnss_passthrough IP into Build/ip_repo
 #    5 project  recreate Vivado/Project/antsdr_e310_gnss.xpr
 #    6 build    synthesis, implementation, bitstream, XSA
 #    7 sw       bare-metal application ELF (XSCT, classic BSP)
@@ -175,17 +175,12 @@ if want 4; then
       vivado -mode batch -nojournal -log "$LOG_DIR/ip_vivado.log" \
       -source "$ROOT/Source/IP/gnss_passthrough/gnss_passthrough_ip.tcl" \
       -tclargs "$ROOT/Source" "$IP_REPO" )
-  ( cd "$IP_REPO" && run_logged ip_npi "IP_PACKAGE_OK" \
-      vivado -mode batch -nojournal -log "$LOG_DIR/ip_npi_vivado.log" \
-      -source "$ROOT/Source/IP/pl_npi/pl_npi_ip.tcl" \
-      -tclargs "$ROOT/Source" "$IP_REPO" )
 fi
 
 # ---- 5 project --------------------------------------------------------------
 if want 5; then
   [[ -f "$IP_REPO/gnss_passthrough/component.xml" ]] || die "run stage 4 (ip) first"
   [[ -f "$IP_REPO/pi_nlms/component.xml" ]] || die "run stage 3 (nlms) first"
-  [[ -f "$IP_REPO/pl_npi/component.xml" ]] || die "run stage 4 (ip) first"
   # The project directory is generated; clear it so nothing stale survives.
   find "$PROJ_DIR" -mindepth 1 ! -name .gitkeep -exec rm -rf {} + 2>/dev/null || true
   mkdir -p "$PROJ_DIR"

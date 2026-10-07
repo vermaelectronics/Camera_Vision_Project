@@ -84,16 +84,6 @@ if {[llength $nlms_ipdef] == 0} {
          Build it with Source/HLS/pi_nlms/build_rtl.tcl, or run\
          Automation/Linux/build_all.sh --from nlms."
 }
-# The PL-NPI core is a separate RTL IP in the same repository
-# (Source/IP/pl_npi/pl_npi_ip.tcl, build_all.sh stage "ip").
-set npi_ipdef [get_ipdefs -all -quiet -filter \
-  {VLNV =~ *:pl_npi:* && design_tool_contexts =~ *IPI* && UPGRADE_VERSIONS == ""}]
-if {[llength $npi_ipdef] == 0} {
-  error "ERROR: pl_npi was not found in the IP catalog at $gnss_ip_repo.\
-         Package it with Source/IP/pl_npi/pl_npi_ip.tcl, or run\
-         Automation/Linux/build_all.sh --from ip."
-}
-puts "GNSS-CRPA: PL-NPI IP resolved in catalog: $npi_ipdef"
 puts "GNSS-CRPA: custom IP repository registered: $gnss_ip_repo"
 puts "GNSS-CRPA: custom IP resolved in catalog: $gnss_ipdef"
 puts "GNSS-CRPA: PI-NLMS IP resolved in catalog: $nlms_ipdef"
@@ -526,20 +516,6 @@ ad_connect gnss_passthrough/m_axis_nlms2 pi_nlms_0/in2
 ad_connect pi_nlms_0/out_r               gnss_passthrough/s_axis_nlms
 ad_connect gnss_passthrough/nlms_mu       pi_nlms_0/mu_shift_ctrl
 ad_connect gnss_passthrough/nlms_reserved pi_nlms_0/reserved_ctrl
-
-# PL-NPI power-inversion core (RTL IP), also next to gnss_passthrough.
-#   gnss_passthrough selects it for TX1 with CONTROL[5] (priority over
-#   PI-NLMS), supplies gamma (register 0x48) and adapt_en (~CONTROL[6]), and
-#   holds it in reset while disabled. Same clock, so no clock crossing.
-ad_ip_instance pl_npi pl_npi_0
-
-ad_connect axi_ad9361/l_clk             pl_npi_0/aclk
-ad_connect gnss_passthrough/npi_rst_n   pl_npi_0/aresetn
-ad_connect gnss_passthrough/m_axis_npi  pl_npi_0/s_axis_x
-ad_connect pl_npi_0/m_axis_y            gnss_passthrough/s_axis_npi
-ad_connect gnss_passthrough/npi_gamma    pl_npi_0/gamma
-ad_connect gnss_passthrough/npi_adapt_en pl_npi_0/adapt_en
-ad_connect pl_npi_0/gain_band           gnss_passthrough/npi_band
 
 # GNSS-CRPA MOD-2 END
 # ---------------------------------------------------------------------------

@@ -174,7 +174,7 @@
       "TX attenuation value and the resulting power at the GNSS receiver input have not been calculated yet.",
       "These must be decided and recorded here before any RF test is run."
     ],
-    "phase2_processing": "PI-NLMS two-element null steering (Source/HLS/pi_nlms) on channel 0 when CONTROL[4] = 1: TX1 = PI-NLMS(RX1, RX2). PL-NPI power inversion (Source/HDL/pl_npi, block pl_npi_0) when CONTROL[5] = 1, priority over PI-NLMS."
+    "phase2_processing": "PI-NLMS two-element null steering (Source/HLS/pi_nlms) on channel 0 when CONTROL[4] = 1: TX1 = PI-NLMS(RX1, RX2)."
   },
   "custom_ip_register_map": {
     "_comment": "Mirrors the header comment in Source/HDL/gnss_passthrough.v. Offsets are from the base address in address_map.project_assigned.gnss_passthrough.",
@@ -192,8 +192,8 @@
         "offset": "0x04",
         "name": "VERSION",
         "access": "RO",
-        "reset": "0x00010004",
-        "note": "1.0 = Phase-1 identity passthrough. 1.1 = adds the RX->TX sample alignment stage; a board reporting 1.0 transmits 24 dB low. 1.2 = adds the PI-NLMS null-steering core (CONTROL[4]). 1.3 = PI-NLMS is a separate block-design IP (pi_nlms_0), same registers. 1.4 = adds the PL-NPI power-inversion core (pl_npi_0, CONTROL[5], gamma in 0x48)."
+        "reset": "0x00010003",
+        "note": "1.0 = Phase-1 identity passthrough. 1.1 = adds the RX->TX sample alignment stage; a board reporting 1.0 transmits 24 dB low. 1.2 = adds the PI-NLMS null-steering core (CONTROL[4]). 1.3 = PI-NLMS is a separate block-design IP (pi_nlms_0), same registers."
       },
       {
         "offset": "0x08",
@@ -210,9 +210,7 @@
           "2": "swap_iq",
           "3": "ch1_copy",
           "8": "cnt_clear",
-          "4": "nlms_en",
-          "5": "npi_en",
-          "6": "npi_freeze"
+          "4": "nlms_en"
         }
       },
       {
@@ -232,9 +230,7 @@
           "9": "underflow_sticky",
           "16": "pass_en_in_sample_domain",
           "10": "nlms_drop_sticky",
-          "17": "nlms_en_in_sample_domain",
-          "18": "npi_en_in_sample_domain",
-          "21:20": "npi_gain_band"
+          "17": "nlms_en_in_sample_domain"
         },
         "note": "Bits [2]/[3] are axi_ad9361's read-back of (dac_data_sel == 4'h2), NOT an enable this block drives and NOT derived from the valid strobes (axi_ad9361_tx_channel.v:272). 0 means the DAC core is sourcing DDS and DISCARDING everything gnss_passthrough outputs, while TX_COUNT still advances. Firmware must write CHAN_CNTRL_7 (0x0418 + c*0x40) = 2."
       },
@@ -295,7 +291,7 @@
         "offset": "0x40",
         "name": "CRPA_COEF0..15",
         "access": "RW",
-        "note": "0x40 [15:0] = PI-NLMS mu_shift_ctrl (signed). 0x48 = PL-NPI regulariser gamma (unsigned, 0 acts as 1). 0x44 and 0x4C-0x7C reserved."
+        "note": "0x40 [15:0] = PI-NLMS mu_shift_ctrl (signed). 0x44-0x7C reserved."
       }
     ]
   }

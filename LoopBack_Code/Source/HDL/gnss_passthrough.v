@@ -54,14 +54,6 @@
 //                                                    0 = ch0 TX carries RX1
 //                                                        unchanged; the core
 //                                                        is held in reset
-//                                    [5]  npi_en     1 = ch0 TX carries the
-//                                                        PL-NPI power-inversion
-//                                                        output (RX1 and RX2
-//                                                        combined). Takes
-//                                                        priority over nlms_en.
-//                                                    0 = PL-NPI held in reset
-//                                    [6]  npi_freeze 1 = PL-NPI weights frozen
-//                                                        (adapt_en = 0)
 //                                    [8]  cnt_clear  1 = hold counters cleared
 //    0x10    STATUS          RO      [0]  adc_enable_i0   [1]  adc_enable_q0
 //                                    [2]  dac_enable_i0   [3]  dac_enable_q0
@@ -73,9 +65,6 @@
 //                                         was not ready (should never set)
 //                                    [16] pass_en (as seen in the clk domain)
 //                                    [17] nlms_en (as seen in the clk domain)
-//                                    [18] npi_en  (as seen in the clk domain)
-//                                    [21:20] PL-NPI gain band of the latest
-//                                         sample (0..3 = x1.00/1.05/1.10/1.20)
 //
 //            READ [2]/[3] CAREFULLY. dac_enable_* is NOT an enable this block
 //            drives, and it is NOT derived from the valid strobes. It is a
@@ -115,11 +104,7 @@
 //                                    Step-size control: larger = slower,
 //                                    finer adaptation. 0 is the value the
 //                                    PI-NLMS testbench was verified with.
-//    0x44    CRPA_COEF[1]    RW      reserved; stored and returned
-//    0x48    CRPA_COEF[2]    RW      PL-NPI regulariser gamma (unsigned, 32
-//                                    bits; 0 is used as 1). mu_NPI =
-//                                    1/(2*x^T x + gamma).
-//    0x4C..  CRPA_COEF[3..15] RW     reserved; stored and returned, no logic
+//    0x44..  CRPA_COEF[1..15] RW     reserved; stored and returned, no logic
 //                                    consumes them.
 //
 //  LICENCE
@@ -203,25 +188,6 @@ module gnss_passthrough #(
   output     [15:0]   nlms_reserved,
   output              nlms_rst_n,
 
-  // ---- PL-NPI core: separate block-design IP (pl_npi_0) -------------------
-  //  All in the clk domain. Source/BlockDesign/system_bd.tcl connects:
-  //    m_axis_npi    -> pl_npi_0/s_axis_x  {rx2_q, rx2_i, rx1_q, rx1_i}
-  //    pl_npi_0/m_axis_y -> s_axis_npi     {y_q, y_i}
-  //    npi_gamma     -> pl_npi_0/gamma     (register 0x48)
-  //    npi_adapt_en  -> pl_npi_0/adapt_en  (~CONTROL[6])
-  //    npi_rst_n     -> pl_npi_0/aresetn   (CONTROL[0] & CONTROL[5])
-  //    pl_npi_0/gain_band -> npi_band      (STATUS[21:20])
-  output     [63:0]   m_axis_npi_tdata,
-  output              m_axis_npi_tvalid,
-  input               m_axis_npi_tready,
-  input      [31:0]   s_axis_npi_tdata,
-  input               s_axis_npi_tvalid,
-  output              s_axis_npi_tready,
-  output     [31:0]   npi_gamma,
-  output              npi_adapt_en,
-  output              npi_rst_n,
-  input      [1:0]    npi_band,
-
   // ---- AXI4-Lite slave (sys_cpu_clk domain) -------------------------------
   input               s_axi_aclk,
   input               s_axi_aresetn,
@@ -253,10 +219,7 @@ module gnss_passthrough #(
   // v1.3 -- PI-NLMS moved out of this module into its own block-design IP
   //         (pi_nlms_0), connected through the m_axis_nlms*/s_axis_nlms
   //         ports. Registers and behaviour are the same as v1.2.
-  // v1.4 -- adds the PL-NPI power-inversion core as a second separate
-  //         block-design IP (pl_npi_0), selected by CONTROL[5], with its
-  //         regulariser in register 0x48.
-  localparam [31:0] CORE_VERSION = 32'h00010004;   // v1.4
+  localparam [31:0] CORE_VERSION = 32'h00010003;   // v1.3
   localparam        AW           = FIFO_ADDR_WIDTH;
 
   // ==========================================================================
@@ -329,8 +292,6 @@ module gnss_passthrough #(
   // core in the clk domain, and a register is what the synchroniser below
   // can cross from (the coefficient array may map to LUT RAM).
   reg  [15:0] reg_nlms_mu = 16'd0;
-  // CRPA_COEF[2] likewise kept in a plain register for the PL-NPI gamma.
-  reg  [31:0] reg_npi_gamma = 32'd1;
 
   integer ci;
   initial for (ci = 0; ci < 16; ci = ci + 1) crpa_coef[ci] = 32'd0;
@@ -340,13 +301,11 @@ module gnss_passthrough #(
       reg_scratch <= 32'd0;
       reg_control <= 32'd0;
       reg_nlms_mu <= 16'd0;
-      reg_npi_gamma <= 32'd1;
     end else if (reg_wr) begin
       case (reg_waddr)
         12'h002: reg_scratch <= s_axi_wdata;   // 0x08
         12'h003: reg_control <= s_axi_wdata;   // 0x0C
         12'h010: reg_nlms_mu <= s_axi_wdata[15:0];   // 0x40
-        12'h012: reg_npi_gamma <= s_axi_wdata;       // 0x48
         default: ;
       endcase
       if (reg_waddr >= 12'h010 && reg_waddr <= 12'h01F)   // 0x40..0x7C
@@ -403,7 +362,7 @@ module gnss_passthrough #(
   // ==========================================================================
   (* ASYNC_REG = "TRUE" *) reg [8:0] ctrl_meta = 9'd0;
   (* ASYNC_REG = "TRUE" *) reg [8:0] ctrl_sync = 9'd0;
-  wire [8:0] ctrl_raw = {reg_control[8], 1'b0, reg_control[6:0]};
+  wire [8:0] ctrl_raw = {reg_control[8], 3'b000, reg_control[4:0]};
 
   always @(posedge clk) begin
     ctrl_meta <= ctrl_raw;
@@ -415,8 +374,6 @@ module gnss_passthrough #(
   wire swap_iq   = ctrl_sync[2];
   wire ch1_copy  = ctrl_sync[3];
   wire nlms_en   = ctrl_sync[4];
-  wire npi_en    = ctrl_sync[5];
-  wire npi_freeze = ctrl_sync[6];
   wire cnt_clear = ctrl_sync[8];
 
   // PI-NLMS step size. Quasi-static like the CONTROL bits; the core only
@@ -429,16 +386,6 @@ module gnss_passthrough #(
   always @(posedge clk) begin
     mu_ctrl_meta <= reg_nlms_mu;
     mu_ctrl_sync <= mu_ctrl_meta;
-  end
-
-  // PL-NPI gamma: quasi-static, same treatment and the same "ctrl_meta"
-  // naming as mu above.
-  (* ASYNC_REG = "TRUE" *) reg [31:0] gamma_ctrl_meta = 32'd1;
-  (* ASYNC_REG = "TRUE" *) reg [31:0] gamma_ctrl_sync = 32'd1;
-
-  always @(posedge clk) begin
-    gamma_ctrl_meta <= reg_npi_gamma;
-    gamma_ctrl_sync <= gamma_ctrl_meta;
   end
 
   // ==========================================================================
@@ -479,10 +426,8 @@ module gnss_passthrough #(
   // With nlms_en the ch0 buffer is fed by the PI-NLMS output strobe instead
   // of the raw RX strobe. Both run at the RX sample rate.
   wire nlms_out_valid;
-  wire npi_out_valid;
-  wire wr_en0 = pass_en & (npi_en  ? npi_out_valid  :
-                           nlms_en ? nlms_out_valid :
-                                     (adc_valid_i0 & adc_enable_i0));
+  wire wr_en0 = pass_en & (nlms_en ? nlms_out_valid
+                                   : (adc_valid_i0 & adc_enable_i0));
   wire rd_en0 = pass_en & dac_valid_i0 & primed0;
   wire wr_en1 = pass_en & adc_valid_i1 & adc_enable_i1;
   wire rd_en1 = pass_en & dac_valid_i1 & primed1;
@@ -553,43 +498,8 @@ module gnss_passthrough #(
   wire [15:0] nlms_i = nlms_out_data[15:0];
   wire [15:0] nlms_q = nlms_out_data[31:16];
 
-  // --------------------------------------------------------------------------
-  //  PL-NPI (pl_npi_0). Same arrangement as PI-NLMS above. The PL-NPI core
-  //  works at the RAW ADC scale (its thresholds and gain calibration assume
-  //  it), so RX samples go in as received -- 12-bit right-aligned,
-  //  sign-extended to 16 -- and its 16-bit output is saturated back to the
-  //  12-bit range the elastic buffer and output alignment stage expect.
-  //  npi_en takes priority over nlms_en; firmware keeps them exclusive.
-  // --------------------------------------------------------------------------
-  wire npi_run = pass_en & npi_en;
-
-  reg npi_rst_n_r = 1'b0;
-  always @(posedge clk) npi_rst_n_r <= ~rst & npi_run;
-  assign npi_rst_n = npi_rst_n_r;
-
-  assign m_axis_npi_tdata  = {adc_data_q1, adc_data_i1, adc_data_q0, adc_data_i0};
-  assign m_axis_npi_tvalid = npi_rst_n_r & adc_valid_i0 & adc_valid_i1 &
-                             adc_enable_i0 & adc_enable_i1;
-  assign s_axis_npi_tready = 1'b1;        // the elastic buffer always accepts
-  assign npi_out_valid     = s_axis_npi_tvalid;
-  assign npi_gamma         = gamma_ctrl_sync;
-  assign npi_adapt_en      = ~npi_freeze;
-
-  function [15:0] sat12(input [15:0] v);
-    begin
-      if      ($signed(v) >  $signed(16'sd2047)) sat12 = 16'h07FF;
-      else if ($signed(v) < -$signed(16'sd2048)) sat12 = 16'hF800;
-      else                                        sat12 = v;
-    end
-  endfunction
-
-  wire [15:0] npi_i = sat12(s_axis_npi_tdata[15:0]);
-  wire [15:0] npi_q = sat12(s_axis_npi_tdata[31:16]);
-
-  wire [15:0] proc_i0 = npi_en  ? npi_i :
-                        nlms_en ? {{4{nlms_i[15]}}, nlms_i[15:4]} : adc_data_i0;
-  wire [15:0] proc_q0 = npi_en  ? npi_q :
-                        nlms_en ? {{4{nlms_q[15]}}, nlms_q[15:4]} : adc_data_q0;
+  wire [15:0] proc_i0 = nlms_en ? {{4{nlms_i[15]}}, nlms_i[15:4]} : adc_data_i0;
+  wire [15:0] proc_q0 = nlms_en ? {{4{nlms_q[15]}}, nlms_q[15:4]} : adc_data_q0;
   wire [15:0] proc_i1 = adc_data_i1;
   wire [15:0] proc_q1 = adc_data_q1;
   // ======================= END PROCESSING CORE ==============================
@@ -724,7 +634,7 @@ module gnss_passthrough #(
   end
 
   wire [31:0] status_w;
-  assign status_w = { 10'd0, npi_band, 1'b0, npi_en, nlms_en, pass_en,
+  assign status_w = { 14'd0, nlms_en, pass_en,
                       5'd0, nlms_drop_sticky, unf_sticky, ovf_sticky,
                       full1, empty1, full0, empty0,
                       dac_enable_q0, dac_enable_i0,

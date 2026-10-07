@@ -176,13 +176,12 @@ static void info_hardware(struct ad9361_rf_phy *phy)
     console_print("   base address    : 0x43C00000, 4 kB aperture\n");
     console_print("   ID register     : 0x%08x  (expect 0x47435031, ASCII 'GCP1')\n",
                   (long)gnss_pt_read(GNSS_PT_REG_ID));
-    console_print("   VERSION         : 0x%08x  (expect 0x00010004 = v1.4)\n",
+    console_print("   VERSION         : 0x%08x  (expect 0x00010003 = v1.3)\n",
                   (long)gnss_pt_read(GNSS_PT_REG_VERSION));
     console_print("     v1.0 is the original identity passthrough and transmits\n");
     console_print("     24 dB LOW. v1.1 adds the RX->TX sample alignment stage.\n");
     console_print("     v1.2 adds PI-NLMS null steering. v1.3 is the same, with\n");
-    console_print("     PI-NLMS as its own block-design IP (pi_nlms_0). v1.4 adds\n");
-    console_print("     the PL-NPI power-inversion core (pl_npi_0).\n");
+    console_print("     PI-NLMS as its own block-design IP (pi_nlms_0).\n");
     rule();
 
     console_print(" RF FRONT END                                            [cfg]\n");
@@ -265,12 +264,6 @@ static void info_config(struct ad9361_rf_phy *phy)
                                               : "TX1 = RX1 (PI-NLMS off)"));
     console_print("   PI-NLMS mu     : %d   (gnss_nlms_mu=, register 0x40)\n",
                   (long)(int16_t)(gnss_pt_read(GNSS_PT_REG_NLMS_MU) & 0xFFFFU));
-    console_print("     [5] npi_en   : %d   %s\n", (long)((ctrl >> 5) & 1U),
-                  (char *)(((ctrl >> 5) & 1U) ? "TX1 = PL-NPI(RX1, RX2)"
-                                              : "PL-NPI off"));
-    console_print("     [6] npi_freeze: %d\n", (long)((ctrl >> 6) & 1U));
-    console_print("   PL-NPI gamma   : %d   (gnss_npi_gamma=, register 0x48)\n",
-                  (long)gnss_pt_read(GNSS_PT_REG_NPI_GAMMA));
     console_print("   DDR replay     : %s\n",
                   (char *)(gnss_txdma_is_running() ? "RUNNING" : "stopped"));
 }
@@ -407,15 +400,6 @@ static void info_pl(void)
     console_print("   gnss_passthrough. TX2 always carries plain RX2.\n");
     rule();
 
-    console_print("\n PL-NPI POWER INVERSION (v1.4)                          [cfg]\n");
-    rule();
-    console_print("   pl_npi_0 is an RTL IP next to gnss_passthrough, on the same\n");
-    console_print("   l_clk. It takes RX1 and RX2 at the raw ADC scale over one\n");
-    console_print("   AXI-Stream (s_axis_x) and returns the array output (m_axis_y).\n");
-    console_print("   CONTROL[5] puts it on TX1 (priority over PI-NLMS), register\n");
-    console_print("   0x48 sets gamma, CONTROL[6] freezes the weights.\n");
-    rule();
-
     console_print("\n THE ONE MODIFICATION THAT MATTERS\n");
     rule();
     console_print("   Upstream wired the DAC FIFO's data pins straight into\n");
@@ -546,12 +530,11 @@ static void info_registers(void)
     head("6  gnss_passthrough REGISTER MAP  (base 0x43C00000, 4 kB)");
 
     console_print("   0x00  ID              RO  0x47435031, ASCII 'GCP1'\n");
-    console_print("   0x04  VERSION         RO  0x00010004 = v1.4\n");
+    console_print("   0x04  VERSION         RO  0x00010003 = v1.3\n");
     console_print("   0x08  SCRATCH         RW  read/write test\n");
     console_print("   0x0C  CONTROL         RW  [0] pass_en  [1] mute\n");
     console_print("                             [2] swap_iq  [3] ch1_copy\n");
-    console_print("                             [4] nlms_en  [5] npi_en\n");
-    console_print("                             [6] npi_freeze [8] cnt_clear\n");
+    console_print("                             [4] nlms_en  [8] cnt_clear\n");
     console_print("   0x10  STATUS          RO  [0] adc_enable_i0  [1] adc_enable_q0\n");
     console_print("                             [2] dac_enable_i0  [3] dac_enable_q0\n");
     console_print("                             [4] fifo0_empty    [5] fifo0_full\n");
@@ -561,8 +544,6 @@ static void info_registers(void)
     console_print("                            [10] nlms_drop_sticky (must stay 0)\n");
     console_print("                            [16] pass_en in the sample domain\n");
     console_print("                            [17] nlms_en in the sample domain\n");
-    console_print("                            [18] npi_en in the sample domain\n");
-    console_print("                         [21:20] PL-NPI gain band (0..3)\n");
     console_print("   0x14  RX_COUNT_CH0    RO\n");
     console_print("   0x18  TX_COUNT_CH0    RO\n");
     console_print("   0x1C  OVERFLOW_COUNT  RO\n");
@@ -574,9 +555,7 @@ static void info_registers(void)
     console_print("   0x34  TX_COUNT_CH1    RO\n");
     console_print("   0x38  RX_SNAPSHOT_CH1 RO\n");
     console_print("   0x40  CRPA_COEF0      RW  [15:0] PI-NLMS mu_shift_ctrl (signed)\n");
-    console_print("   0x44  CRPA_COEF1      RW  stored but unused\n");
-    console_print("   0x48  CRPA_COEF2      RW  PL-NPI regulariser gamma (0 acts as 1)\n");
-    console_print("   0x4C  CRPA_COEF3..15  RW  0x4C-0x7C, stored but unused.\n");
+    console_print("   0x44  CRPA_COEF1..15  RW  0x44-0x7C, stored but unused.\n");
     rule();
     console_print(" STATUS BITS [2] AND [3] ARE THE IMPORTANT ONES.\n");
     console_print("   They are axi_ad9361's read-back of (dac_data_sel == 4'h2),\n");
@@ -770,9 +749,6 @@ static void info_quickstart(void)
     console_print("   gnss_nlms_mu=N              PI-NLMS step size, -4..4, 0 = default\n");
     console_print("   gnss_tx? / gnss_status?     state, read back from hardware\n");
     console_print("   gnss_nlms?                  PI-NLMS on/off, mu, dropped samples\n");
-    console_print("   gnss_npi=1 / gnss_npi=0     PL-NPI power inversion on TX1 / off\n");
-    console_print("   gnss_npi_gamma=N            PL-NPI regulariser, >= 1, 1 = default\n");
-    console_print("   gnss_npi?                   PL-NPI on/off, gamma, gain band\n");
     console_print("   ?                           this menu\n");
     console_print("   help?                       every command (long)\n");
 }
@@ -820,9 +796,7 @@ void gnss_info_menu(void)
     console_print("                               89750 quietest, 70000 known good\n");
     console_print("    gnss_nlms=1 / gnss_nlms=0  PI-NLMS null steering on TX1 / off\n");
     console_print("    gnss_nlms_mu=N             PI-NLMS step size, -4..4, 0 = default\n");
-    console_print("    gnss_npi=1 / gnss_npi=0    PL-NPI power inversion on TX1 / off\n");
-    console_print("    gnss_npi_gamma=N           PL-NPI regulariser, >= 1, 1 = default\n");
-    console_print("    gnss_tx? gnss_status? gnss_nlms? gnss_npi?   read back\n");
+    console_print("    gnss_tx? gnss_ddr_tx? gnss_status? gnss_nlms?   read back\n");
     console_print("\n");
     console_print("    ?        this menu            help?    every command (long)\n");
     console_print("===============================================================\n");
