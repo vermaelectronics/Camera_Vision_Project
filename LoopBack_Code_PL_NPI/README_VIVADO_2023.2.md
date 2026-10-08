@@ -14,6 +14,10 @@ cd LoopBack_Code_PL_NPI
 ./Automation/Linux/build_all.sh --jobs 16
 ```
 
+`build_all.sh` loads the 2023.2 Vivado, Vitis and Vitis HLS `settings64.sh`
+itself when the tools are not on PATH (searched in `XILINX_INSTALL_DIR`,
+`/tools/Xilinx`, `/opt/Xilinx`), so the `source` lines above are optional.
+
 Outputs:
 
 | File | What it is |

@@ -130,6 +130,31 @@ run_logged() {
 }
 
 # ---- tool check -------------------------------------------------------------
+# Load the Xilinx tools automatically, so the build runs in any terminal
+# without sourcing settings64.sh by hand. Each tool is loaded only if it is
+# not already on PATH. The install root is searched in XILINX_INSTALL_DIR,
+# /tools/Xilinx and /opt/Xilinx (override: XILINX_INSTALL_DIR=/path ./...).
+load_xilinx_tool() {   # <tool dir name> <command it provides>
+  command -v "$2" >/dev/null 2>&1 && return 0
+  local base f
+  for base in "${XILINX_INSTALL_DIR:-}" /tools/Xilinx /opt/Xilinx "$HOME/Xilinx"; do
+    [[ -n "$base" ]] || continue
+    f="$base/$1/$TARGET_VERSION/settings64.sh"
+    if [[ -f "$f" ]]; then
+      echo "BUILD_ALL: loading $f"
+      set +eu
+      # shellcheck disable=SC1090
+      source "$f" >/dev/null 2>&1
+      set -eu
+      return 0
+    fi
+  done
+  return 0   # not found: need() below reports it
+}
+load_xilinx_tool Vivado    vivado
+load_xilinx_tool Vitis     xsct
+load_xilinx_tool Vitis_HLS vitis_hls
+
 need vivado
 VIV_VER="$(vivado -version 2>/dev/null | grep -oE 'v[0-9]{4}\.[0-9]' | head -1 | tr -d v)"
 if [[ "$VIV_VER" != "$TARGET_VERSION" ]]; then
