@@ -155,7 +155,11 @@ GNSS it is negligible.
   0 means nothing is being cancelled), `STATUS[10]` a dropped sample pair
   (must stay 0). VERSION reads 3.0.
 - Console: `gnss_smi=1`, `gnss_smi=0`, `gnss_smi_load=<n>`,
-  `gnss_smi_freeze=1/0`, `gnss_smi?`. `gnss_tx=1` still controls whether
+  `gnss_smi_freeze=1/0`, `gnss_smi?`, `gnss_rx_gain=<dB>` / `gnss_rx_gain?`,
+  `gnss_rx_agc=1/0`. `gnss_smi=1` locks RX1 and RX2 at one manual gain if
+  they are still under AGC: two independent AGCs change the RX1/RX2 ratio at
+  every gain step and turn the gain (and the GNSS level) down when a jammer
+  appears. `gnss_tx=1` still controls whether
   anything is transmitted at all, and starts at 89.75 dB attenuation:
   use `tx1_attenuation=70000` (the known-good level).
 - Limits: two elements null ONE jammer direction. Satellites close to the

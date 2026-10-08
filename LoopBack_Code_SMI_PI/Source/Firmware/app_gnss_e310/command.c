@@ -134,6 +134,9 @@ command cmd_list[] = {
 	{"gnss_smi=", "1 = TX1 carries SMI-PI(RX1, RX2), 0 = TX1 carries RX1.", "gnss_smi=1", set_gnss_smi},
 	{"gnss_smi_load=", "Sets the SMI-PI diagonal loading L in LSB^2 (>= 1).", "gnss_smi_load=16", set_gnss_smi_load},
 	{"gnss_smi_freeze=", "1 = freeze the SMI-PI weight, 0 = track.", "gnss_smi_freeze=0", set_gnss_smi_freeze},
+	{"gnss_rx_gain?", "Gets RX1/RX2 gain mode and gain [dB].", "", get_gnss_rx_gain},
+	{"gnss_rx_gain=", "Fixes RX1 AND RX2 at the same manual gain [dB].", "gnss_rx_gain=40", set_gnss_rx_gain},
+	{"gnss_rx_agc=", "1 = slow AGC on RX1/RX2, 0 = lock both at RX1's present gain.", "gnss_rx_agc=0", set_gnss_rx_agc},
 	/* GNSS-CRPA MOD-7: the DDR round trip. Exercises axi_ad9361_dac_dma,
 	 * util_upack2 and the util_rfifo DATA path, none of which had ever moved a
 	 * real sample. See gnss_txdma.h. */
@@ -318,8 +321,94 @@ void set_gnss_smi(double* param, char param_no)
 		console_print("gnss_smi: this bitstream has no SMI-PI core\n");
 		return;
 	}
+	/* SMI-PI needs the same, constant gain on both channels: two independent
+	 * AGCs change the RX1/RX2 ratio at every gain step (the null has to be
+	 * re-learnt) and turn the gain down when a jammer appears (the GNSS level
+	 * drops with it). Lock both at RX1's present gain unless the operator has
+	 * already fixed them with gnss_rx_gain=. */
+	if((int)param[0] != 0)
+		gnss_rx_lock_if_agc();
 	gnss_pt_set_smi((int)param[0] != 0);
 	get_gnss_smi(param, param_no);
+}
+
+/**************************************************************************//***
+ * @brief Gain control for the SMI-PI pair. Prints mode and gain of RX1/RX2.
+*******************************************************************************/
+void get_gnss_rx_gain(double* param, char param_no)
+{
+	uint8_t m1 = 0, m2 = 0;
+	int32_t g1 = 0, g2 = 0;
+
+	(void)param; (void)param_no;
+	ad9361_get_rx_gain_control_mode(ad9361_phy, 0, &m1);
+	ad9361_get_rx_gain_control_mode(ad9361_phy, 1, &m2);
+	ad9361_get_rx_rf_gain(ad9361_phy, 0, &g1);
+	ad9361_get_rx_rf_gain(ad9361_phy, 1, &g2);
+	console_print("GNSS_RX_GAIN: RX1 %s %d dB, RX2 %s %d dB%s\n",
+		      (char*)(m1 == RF_GAIN_MGC ? "MANUAL" : "AGC"), (long)g1,
+		      (char*)(m2 == RF_GAIN_MGC ? "MANUAL" : "AGC"), (long)g2,
+		      (char*)((m1 == RF_GAIN_MGC && m2 == RF_GAIN_MGC && g1 == g2)
+		          ? " (locked, OK for SMI-PI)" : " (NOT locked)"));
+}
+
+static void gnss_rx_set_both(int32_t gain_db)
+{
+	ad9361_set_rx_gain_control_mode(ad9361_phy, 0, RF_GAIN_MGC);
+	ad9361_set_rx_gain_control_mode(ad9361_phy, 1, RF_GAIN_MGC);
+	ad9361_set_rx_rf_gain(ad9361_phy, 0, gain_db);
+	ad9361_set_rx_rf_gain(ad9361_phy, 1, gain_db);
+}
+
+void gnss_rx_lock_if_agc(void)
+{
+	uint8_t m1 = 0, m2 = 0;
+	int32_t g1 = 0;
+
+	ad9361_get_rx_gain_control_mode(ad9361_phy, 0, &m1);
+	ad9361_get_rx_gain_control_mode(ad9361_phy, 1, &m2);
+	if(m1 == RF_GAIN_MGC && m2 == RF_GAIN_MGC)
+		return;
+	ad9361_get_rx_rf_gain(ad9361_phy, 0, &g1);
+	gnss_rx_set_both(g1);
+	console_print("gnss_smi: RX1/RX2 gain locked at %d dB (was AGC). "
+		      "Change with gnss_rx_gain=<dB>.\n", (long)g1);
+}
+
+/**************************************************************************//***
+ * @brief Fix RX1 and RX2 at the same manual gain [dB]. Pick the highest gain
+ * at which the strongest expected jammer does not clip the ADC.
+*******************************************************************************/
+void set_gnss_rx_gain(double* param, char param_no)
+{
+	if(param_no < 1 || param[0] < 0.0 || param[0] > 76.0) {
+		console_print("gnss_rx_gain= needs a gain in dB, 0 to 76, e.g. gnss_rx_gain=40\n");
+		return;
+	}
+	gnss_rx_set_both((int32_t)param[0]);
+	get_gnss_rx_gain(param, param_no);
+}
+
+/**************************************************************************//***
+ * @brief 1 = slow AGC on both channels (power-on default), 0 = lock both at
+ * RX1's present gain.
+*******************************************************************************/
+void set_gnss_rx_agc(double* param, char param_no)
+{
+	int32_t g1 = 0;
+
+	if(param_no < 1) {
+		console_print("gnss_rx_agc= needs 0 or 1\n");
+		return;
+	}
+	if((int)param[0] != 0) {
+		ad9361_set_rx_gain_control_mode(ad9361_phy, 0, RF_GAIN_SLOWATTACK_AGC);
+		ad9361_set_rx_gain_control_mode(ad9361_phy, 1, RF_GAIN_SLOWATTACK_AGC);
+	} else {
+		ad9361_get_rx_rf_gain(ad9361_phy, 0, &g1);
+		gnss_rx_set_both(g1);
+	}
+	get_gnss_rx_gain(param, param_no);
 }
 
 /**************************************************************************//***
