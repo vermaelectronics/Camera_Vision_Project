@@ -121,7 +121,7 @@ if {$ii eq "" || $ii > $pipeline_ii} {
 export_design -format ip_catalog -rtl verilog \
   -vendor antsdr -library gnss -version 1.0 -ipname pl_npi \
   -display_name "PL-NPI power inversion" \
-  -description "Two-element PL-NPI anti-jam core (pipelined, Vitis HLS). s_axis_x = {rx2_q,rx2_i,rx1_q,rx1_i}, m_axis_y = {y_q,y_i}."
+  -description "Two-element PL-NPI anti-jam core (pipelined, Vitis HLS). s_axis_x = RX1 and RX2 IQ, m_axis_y = array output IQ."
 
 set impl_dir [file join $work pl_npi_hls sol impl]
 set ip_src   [file join $impl_dir ip]

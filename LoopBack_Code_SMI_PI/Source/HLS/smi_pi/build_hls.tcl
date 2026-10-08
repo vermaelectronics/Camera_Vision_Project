@@ -125,7 +125,7 @@ if {$ii eq "" || $ii > $pipeline_ii} {
 export_design -format ip_catalog -rtl verilog \
   -vendor antsdr -library gnss -version 1.0 -ipname smi_pi \
   -display_name "SMI power inversion" \
-  -description "Two-element closed-form (SMI) power-inversion anti-jam core, w1 = 1 (Vitis HLS). s_axis_x = {rx2_q,rx2_i,rx1_q,rx1_i}, m_axis_y = {y_q,y_i} = x1 - a*x2."
+  -description "Two-element closed-form SMI power-inversion anti-jam core (Vitis HLS). s_axis_x = RX1 and RX2 IQ, m_axis_y = RX1 minus a times RX2."
 
 set impl_dir [file join $work smi_pi_hls sol impl]
 set ip_src   [file join $impl_dir ip]
