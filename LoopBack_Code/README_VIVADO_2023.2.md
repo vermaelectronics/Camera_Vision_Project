@@ -109,3 +109,9 @@ block in the block design, `pi_nlms_0`, next to `gnss_passthrough`:
 RX samples (12-bit) are scaled ×16 into the 16-bit range the core was verified
 with, and the saturated output is scaled back. Both RX inputs must be connected:
 RX2 is the auxiliary antenna element.
+
+**CDC constraint fix (2026-10-08).** `Source/XDC/gnss_passthrough_cdc.xdc` now
+false-paths every `*ctrl_meta` synchroniser. It used to match only the CONTROL
+one, so the parameter synchroniser (`mu_ctrl_meta`) was timed as an ordinary
+`s_axi_aclk -> rx_clk` path and could appear among the failing inter-clock
+paths. Rebuild from stage `project` to pick it up.

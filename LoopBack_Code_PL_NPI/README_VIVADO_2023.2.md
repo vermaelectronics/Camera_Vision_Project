@@ -192,3 +192,9 @@ mean of I^2 + Q^2) and set gamma from it; for about +-20 LSB that is 1e8.
 II 2`, then `BUILD_TIMING: MET` in `Build/Logs/build.log`. If a few paths in
 `pl_npi_0` still fail after place-and-route, rebuild with
 `PL_NPI_CLK_NS=7 ./Automation/Linux/build_all.sh --from npi`.
+
+**CDC constraint fix (2026-10-08).** `Source/XDC/gnss_passthrough_cdc.xdc` now
+false-paths every `*ctrl_meta` synchroniser. It used to match only the CONTROL
+one, so the parameter synchroniser (`gamma_ctrl_meta`) was timed as an ordinary
+`s_axi_aclk -> rx_clk` path and could appear among the failing inter-clock
+paths. Rebuild from stage `project` to pick it up.
