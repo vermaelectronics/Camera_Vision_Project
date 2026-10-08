@@ -22,6 +22,9 @@
 #    PL_NPI_CLK_NS=<ns>   HLS clock target, default 8
 #    PL_NPI_II=<n>        pipeline II, default 2
 #    PL_NPI_SKIP_CSIM=1   skip step 1
+#    PL_NPI_EXTRA_DELAY=<n>  delay registers in the weight loop, default 4
+#    PL_NPI_STEP_SHIFT=<n>   step reduction 2^-n, default 1 (keep >= 1 when
+#                            PL_NPI_EXTRA_DELAY > 0, or the loop oscillates)
 #
 #  OUTPUT
 #    $GNSS_CRPA_IP_REPO/pl_npi/component.xml, VLNV antsdr:gnss:pl_npi:1.0
@@ -69,8 +72,13 @@ close $fh
 cd $work
 open_project -reset pl_npi_hls
 set_top pl_npi
-add_files $hls_src -cflags "-I$here"
-add_files -tb [file join $here testbench.cpp] -cflags "-I$here -Wno-unknown-pragmas"
+set defs ""
+foreach v {PL_NPI_EXTRA_DELAY PL_NPI_STEP_SHIFT} {
+  if {[info exists ::env($v)]} { append defs " -D$v=$::env($v)" }
+}
+if {$defs ne ""} { puts "PL_NPI_HLS: defines$defs" }
+add_files $hls_src -cflags "-I$here$defs"
+add_files -tb [file join $here testbench.cpp] -cflags "-I$here$defs -Wno-unknown-pragmas"
 open_solution -reset sol -flow_target vivado
 set_part {xc7z020clg400-2}
 create_clock -period $clk_period -name default

@@ -65,6 +65,23 @@
 //    One sample every two clocks (#pragma HLS PIPELINE II=2): the AD9361 in
 //    2R2T mode delivers a sample pair at most every 2nd l_clk. build_hls.tcl
 //    fails the build unless HLS reports II=2 and meets the clock target.
+//
+//    At II=2 every register in the weight-update loop gives the loop two
+//    clocks. With only the five stage registers A..E the loop had 10 clocks
+//    for two wide multiplies, sums, saturations and shifts; HLS then chained
+//    a 32x16 multiply, two adds and a saturation into ONE clock (estimated
+//    13.4 ns at an 8 ns target, measured on the 2023.2 build PC). NQ =
+//    PL_NPI_EXTRA_DELAY pure delay registers (tQ, default 4) between stage D
+//    and stage E raise the budget to 2*(5+NQ) = 18 clocks.
+//
+//    The cost is a delayed LMS: the update reaches the weights NQ samples
+//    later. With the full step that oscillates (simulated: 93 dB output even
+//    at NQ = 1), so the step is halved (PL_NPI_STEP_SHIFT = 1). C-simulation
+//    with NQ = 4, shift 1 against the original (NQ = 0, shift 0):
+//      jammer 600 LSB      null -50.7 dB (was -50.0), converged at 300 samples
+//      jammer 2000 steady  residual 18-19 dB (was 19-20 dB)
+//      jammer 3000 on/off every 3000 samples: settles within 3 blocks, then
+//                          flat (same as the original)
 // ============================================================================
 #include "pl_npi.h"
 
@@ -73,6 +90,18 @@ typedef ap_int<32> w_t;       // weight, Q12.20
 
 // Eq. 11 gain constants, GAIN_FRAC = 16, as the original RTL computes them
 // (integer division, i.e. rounded down).
+// Pure delay registers between stage D and stage E (see "TIMING" in the
+// header). Each one gives the weight-update loop two more clocks at II=2.
+#ifndef PL_NPI_EXTRA_DELAY
+#define PL_NPI_EXTRA_DELAY 4
+#endif
+static const int NQ = PL_NPI_EXTRA_DELAY;
+// The step is alpha*gain / 2^PL_NPI_STEP_SHIFT. A delayed LMS is only stable
+// if step x delay stays small, so the extra delay above needs a smaller step.
+#ifndef PL_NPI_STEP_SHIFT
+#define PL_NPI_STEP_SHIFT 1
+#endif
+
 static const ap_uint<17> GAIN_K[4] = {65536, 68812, 72089, 78643};
 
 // |Re s| thresholds at the Q.8 scale of the stage-A register
@@ -190,6 +219,19 @@ void pl_npi(hls::stream<ap_uint<64> > &s_axis_x,
 #pragma HLS ARRAY_PARTITION variable=tD_im complete
 #pragma HLS RESET variable=tD_re
 #pragma HLS RESET variable=tD_im
+#if PL_NPI_EXTRA_DELAY > 0
+    // tD delayed by NQ more samples before stage E uses it.
+    static ap_int<48> tQ_re[NQ][2], tQ_im[NQ][2];
+#pragma HLS ARRAY_PARTITION variable=tQ_re complete dim=0
+#pragma HLS ARRAY_PARTITION variable=tQ_im complete dim=0
+#pragma HLS RESET variable=tQ_re
+#pragma HLS RESET variable=tQ_im
+#define TE_RE(i) tQ_re[NQ - 1][i]
+#define TE_IM(i) tQ_im[NQ - 1][i]
+#else
+#define TE_RE(i) tD_re[i]
+#define TE_IM(i) tD_im[i]
+#endif
 
     *gain_band = bandB;
 
@@ -241,8 +283,8 @@ void pl_npi(hls::stream<ap_uint<64> > &s_axis_x,
 #pragma HLS ARRAY_PARTITION variable=nwp_im complete
     for (int i = 0; i < 2; i++) {
 #pragma HLS UNROLL
-        ap_int<49> lr = ((ap_int<49>)wp_re[i] + tD_re[i]) >> 18;
-        ap_int<49> li = ((ap_int<49>)wp_im[i] + tD_im[i]) >> 18;
+        ap_int<49> lr = ((ap_int<49>)wp_re[i] + TE_RE(i)) >> 18;
+        ap_int<49> li = ((ap_int<49>)wp_im[i] + TE_IM(i)) >> 18;
         nwp_re[i] = adapt_en ? sat32((ap_int<49>)wp_re[i] - lr) : wp_re[i];
         nwp_im[i] = adapt_en ? sat32((ap_int<49>)wp_im[i] - li) : wp_im[i];
     }
@@ -265,7 +307,7 @@ void pl_npi(hls::stream<ap_uint<64> > &s_axis_x,
 #pragma HLS ARRAY_PARTITION variable=npC_re complete
 #pragma HLS ARRAY_PARTITION variable=npC_im complete
     ap_uint<18> m_sel  = mkB[bandB];
-    ap_int<8>   sh_sel = ekB[bandB];
+    ap_int<8>   sh_sel = ekB[bandB] - PL_NPI_STEP_SHIFT;
     for (int i = 0; i < 2; i++) {
 #pragma HLS UNROLL
         npC_re[i] = cB_re[i] * (ap_int<19>)m_sel;
@@ -303,6 +345,13 @@ void pl_npi(hls::stream<ap_uint<64> > &s_axis_x,
     for (int i = 0; i < 2; i++) {
 #pragma HLS UNROLL
         wp_re[i] = nwp_re[i];  wp_im[i] = nwp_im[i];
+#if PL_NPI_EXTRA_DELAY > 0
+        for (int j = NQ - 1; j > 0; j--) {
+#pragma HLS UNROLL
+            tQ_re[j][i] = tQ_re[j - 1][i];  tQ_im[j][i] = tQ_im[j - 1][i];
+        }
+        tQ_re[0][i] = tD_re[i];  tQ_im[0][i] = tD_im[i];
+#endif
         tD_re[i] = ntD_re[i];  tD_im[i] = ntD_im[i];
         pC_re[i] = npC_re[i];  pC_im[i] = npC_im[i];
         cB_re[i] = ncB_re[i];  cB_im[i] = ncB_im[i];

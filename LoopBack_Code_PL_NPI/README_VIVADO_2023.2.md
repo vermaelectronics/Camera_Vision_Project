@@ -153,7 +153,8 @@ C simulation (testbench.cpp, run by the build), jammer 600 LSB, `h = 0.6-0.5j`:
   C synthesis, then **fails** if the achieved II is worse than 2 or the
   estimated clock is above 8 ns, then exports `antsdr:gnss:pl_npi:1.0` to
   `Build/ip_repo/pl_npi` (with `pl_npi_csynth.rpt`). Overrides:
-  `PL_NPI_CLK_NS=7` (more margin), `PL_NPI_II=<n>`, `PL_NPI_SKIP_CSIM=1`.
+  `PL_NPI_CLK_NS=7` (more margin), `PL_NPI_II=<n>`, `PL_NPI_SKIP_CSIM=1`,
+  `PL_NPI_EXTRA_DELAY=<n>` (default 4), `PL_NPI_STEP_SHIFT=<n>` (default 1).
 - It works at the raw ADC scale its calibration assumes: RX samples go in as
   received (12-bit, sign-extended) and the output is saturated back to 12
   bits.
@@ -191,7 +192,14 @@ C model, noise +-20 LSB (267 LSB^2 per channel), 800000 samples, output vs RX1:
 Measure the noise power on the board (RX snapshot with no signal,
 mean of I^2 + Q^2) and set gamma from it; for about +-20 LSB that is 1e8.
 
-**Timing.** Not yet built with the tools. After stage `npi`, check
+**Timing.** The first 2023.2 build failed in HLS: estimated clock 13.433 ns
+at the 8 ns target. The weight-update loop had only 10 clocks (5 registers at
+II=2), so HLS chained a 32x16 multiply, two adds and a saturation into one
+clock. Fix (2026-10-08): 4 extra delay registers in the loop (18 clocks) and
+half the adaptation step, which keeps the delayed loop stable. In C
+simulation, the null depth, convergence and jammer on/off behaviour are the
+same as the original or better (see the TIMING note in `pl_npi.cpp`). The new
+clock estimate still has to be confirmed on the build PC. After stage `npi`, check
 `Build/Logs/npi.log` for `PL_NPI_HLS: estimated clock period ... achieved
 II 2`, then `BUILD_TIMING: MET` in `Build/Logs/build.log`. If a few paths in
 `pl_npi_0` still fail after place-and-route, rebuild with
