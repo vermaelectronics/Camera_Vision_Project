@@ -164,8 +164,9 @@ C simulation (testbench.cpp, run by the build), jammer 600 LSB, `h = 0.6-0.5j`:
 - Registers: `CONTROL[5]` (0x0C) enables it, `CONTROL[6]` freezes the
   weights, `0x48` is gamma, `STATUS[18]` reads the enable back,
   `STATUS[21:20]` the gain band, `STATUS[10]` the drop flag. VERSION reads 2.1.
-- Console: `gnss_npi=1`, `gnss_npi=0`, `gnss_npi_gamma=<n>` (>= 1),
-  `gnss_npi_freeze=1/0`, `gnss_npi?`. `gnss_tx=1` still controls whether
+- Console: `gnss_npi=1`, `gnss_npi=0`, `gnss_npi_auto=1/0`, `gnss_npi_k=<k>`,
+  `gnss_npi_gamma=<n>` (fixed, turns auto off), `gnss_npi_freeze=1/0`,
+  `gnss_npi?`, `gnss_rx_gain?`, `gnss_rx_gain=<dB>`, `gnss_rx_agc=0/1/2`. `gnss_tx=1` still controls whether
   anything is transmitted at all.
 
 **gamma.** The core is a leaky LMS: the weights leak toward [1, 0] by 2^-18
@@ -189,8 +190,32 @@ C model, noise +-20 LSB (267 LSB^2 per channel), 800000 samples, output vs RX1:
 | 1e7 | -12 dB | -48 dB |
 | 1e8 | -1.6 dB | -39 dB (output = noise, jammer nulled) |
 
-Measure the noise power on the board (RX snapshot with no signal,
-mean of I^2 + Q^2) and set gamma from it; for about +-20 LSB that is 1e8.
+**Automatic gamma and gain (firmware v2.1.7, `gnss_npi_agc.c`).** With the
+power-on gamma of 1, PL-NPI cancels the noise and the satellites with it. The
+C model gives the satellites -39 dB (none visible), and with a jammer they are
+-15 dB. `gnss_npi=1` now starts a loop, run from the console idle hook every
+20 ms:
+
+- **Automatic gamma:** `gamma = 2^17 x k x noise power per channel`, with
+  k = 4 (`gnss_npi_k=`). The noise power is measured from 512 snapshot samples
+  per channel. It is followed only while the input is within 3 dB of it, so
+  a jammer never pulls gamma up, and it is rescaled with every gain step. The
+  last clean value per dB of gain is remembered, so switching on with the
+  jammer already present still gets the right gamma. C model, noise +-20
+  LSB, 1500 LSB jammer, gamma 1.4e8: output SINR -7.0 dB (SMI-PI -6.8 dB,
+  RX1 alone -48 dB), satellites -1.0 dB with no jammer.
+- **Matched RX gain:** both channels are always set to the same manual gain,
+  lowered together when the ADC peak nears clipping, and raised back to the
+  clean reference afterwards. With independent AGC steps the null fell to
+  -20 dB in the C model; with matched steps it stays at -55 dB.
+- **TX level hold:** TX1 attenuation is lowered by the RX gain reduction (at
+  most 30 dB), but only while TX and PL-NPI are on and the output is no
+  louder than the clean output +3 dB.
+- **Speed:** the null reaches -40 dB 33 us after jammer switch-on, and the
+  gain settles within about 100 ms.
+
+`gnss_npi_gamma=<n>` still sets a fixed value and turns the automatic gamma
+off; `gnss_npi_auto=1` turns it back on.
 
 **Timing.** The first 2023.2 build failed in HLS: estimated clock 13.433 ns
 at the 8 ns target. The weight-update loop had only 10 clocks (5 registers at

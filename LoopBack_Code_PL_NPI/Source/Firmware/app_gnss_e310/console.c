@@ -44,6 +44,20 @@
 #include "stdlib.h"
 #include "stdio.h"
 #include "console.h"
+#include "xparameters.h"
+#if defined(STDIN_BASEADDRESS) && defined(XPAR_XUARTPS_NUM_INSTANCES)
+#include "xuartps_hw.h"
+#define CONSOLE_HAS_IDLE_POLL 1
+#endif
+
+/* Called repeatedly while the console waits for a character (gnss_npi_agc.c
+ * runs its matched gain / automatic gamma loop from here). */
+static void (*console_idle_hook)(void) = 0;
+
+void console_set_idle_hook(void (*hook)(void))
+{
+	console_idle_hook = hook;
+}
 
 /***************************************************************************//**
  * @brief Initializes the UART communication peripheral. If the value of the
@@ -84,6 +98,17 @@ void uart_write_char(char data)
 *******************************************************************************/
 void uart_read_char(char * data)
 {
+#ifdef CONSOLE_HAS_IDLE_POLL
+	/* Read the PS UART directly so the wait can run the idle hook. The hook
+	 * is installed before the first command is read, so stdio's input
+	 * buffer is never used and nothing is lost by switching. */
+	if(console_idle_hook) {
+		while(!XUartPs_IsReceiveData(STDIN_BASEADDRESS))
+			console_idle_hook();
+		*data = (char)XUartPs_RecvByte(STDIN_BASEADDRESS);
+		return;
+	}
+#endif
 	*data = getchar();
 }
 

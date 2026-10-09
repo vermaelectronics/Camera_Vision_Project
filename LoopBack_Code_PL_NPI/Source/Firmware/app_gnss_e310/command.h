@@ -245,6 +245,11 @@ void get_gnss_npi(double* param, char param_no);
 void set_gnss_npi(double* param, char param_no);
 void set_gnss_npi_gamma(double* param, char param_no);
 void set_gnss_npi_freeze(double* param, char param_no);
+void get_gnss_rx_gain(double* param, char param_no);
+void set_gnss_rx_gain(double* param, char param_no);
+void set_gnss_rx_agc(double* param, char param_no);
+void set_gnss_npi_auto(double* param, char param_no);
+void set_gnss_npi_k(double* param, char param_no);
 
 /* GNSS-CRPA MOD-9: the main menu, bound to "?".
  * Short and grouped, unlike get_help() which dumps all ~60 vendor commands. */

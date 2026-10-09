@@ -753,7 +753,12 @@ static void info_quickstart(void)
     console_print("   tx1_attenuation=N           mdB. BIGGER = QUIETER.\n");
     console_print("   gnss_tx? / gnss_status?     state, read back from hardware\n");
     console_print("   gnss_npi=1 / gnss_npi=0     PL-NPI power inversion on TX1 / off\n");
-    console_print("   gnss_npi_gamma=N            PL-NPI regulariser, >= 1, 1 = default\n");
+    console_print("   gnss_npi_gamma=N            fixed PL-NPI gamma (turns AUTO off)\n");
+    console_print("   gnss_npi_auto=1 / =0        automatic gamma on (default) / off\n");
+    console_print("   gnss_npi_k=N                auto gamma = 2^17*N*noise, default 4\n");
+    console_print("   gnss_rx_gain?               RX1/RX2 gain, mode, level hold, gamma\n");
+    console_print("   gnss_rx_gain=<dB>           same gain on RX1+RX2 (auto reference)\n");
+    console_print("   gnss_rx_agc=2 / =0 / =1     matched auto / manual / AD9361 AGC\n");
     console_print("   gnss_npi?                   PL-NPI on/off, gamma, gain band\n");
     console_print("   ?                           this menu\n");
     console_print("   help?                       every command (long)\n");
@@ -801,7 +806,8 @@ void gnss_info_menu(void)
     console_print("    tx1_attenuation=N          mdB. BIGGER = QUIETER.\n");
     console_print("                               89750 quietest, 70000 known good\n");
     console_print("    gnss_npi=1 / gnss_npi=0    PL-NPI power inversion on TX1 / off\n");
-    console_print("    gnss_npi_gamma=N           PL-NPI regulariser, >= 1, 1 = default\n");
+    console_print("    gnss_npi_auto=1            automatic gamma (default with gnss_npi=1)\n");
+    console_print("    gnss_rx_gain?              gain, level hold, gamma, jammer flag\n");
     console_print("    gnss_tx? gnss_ddr_tx? gnss_status? gnss_npi?   read back\n");
     console_print("\n");
     console_print("    ?        this menu            help?    every command (long)\n");

@@ -50,6 +50,7 @@
 /* GNSS-CRPA MOD-6 */
 #include "gnss_l1.h"
 #include "gnss_passthrough.h"
+#include "gnss_npi_agc.h"
 /* GNSS-CRPA MOD-7 */
 #include "gnss_txdma.h"
 #include "axi_dmac.h"
@@ -132,7 +133,12 @@ command cmd_list[] = {
 	/* PL-NPI power inversion in pl_npi_0 (bitstream v1.4+). */
 	{"gnss_npi?", "Gets the PL-NPI power-inversion state.", "", get_gnss_npi},
 	{"gnss_npi=", "1 = TX1 carries PL-NPI(RX1, RX2), 0 = TX1 carries RX1.", "gnss_npi=1", set_gnss_npi},
-	{"gnss_npi_gamma=", "Sets the PL-NPI regulariser gamma (>= 1).", "gnss_npi_gamma=1", set_gnss_npi_gamma},
+	{"gnss_npi_gamma=", "Sets a FIXED PL-NPI gamma (>= 1); turns automatic gamma off.", "gnss_npi_gamma=100000000", set_gnss_npi_gamma},
+	{"gnss_npi_auto=", "1 = automatic gamma from the noise floor (default), 0 = fixed.", "gnss_npi_auto=1", set_gnss_npi_auto},
+	{"gnss_npi_k=", "Automatic gamma = 2^17 * k * noise power, k 1..64 (default 4).", "gnss_npi_k=4", set_gnss_npi_k},
+	{"gnss_rx_gain?", "Gets RX1/RX2 gain, mode, TX level hold and gamma.", "", get_gnss_rx_gain},
+	{"gnss_rx_gain=", "Sets RX1 AND RX2 to the same gain [dB] (also the auto reference).", "gnss_rx_gain=40", set_gnss_rx_gain},
+	{"gnss_rx_agc=", "0 = manual locked, 1 = AD9361 AGC per channel, 2 = matched auto (PL-NPI).", "gnss_rx_agc=2", set_gnss_rx_agc},
 	{"gnss_npi_freeze=", "1 = freeze the PL-NPI weights, 0 = adapt.", "gnss_npi_freeze=0", set_gnss_npi_freeze},
 	/* GNSS-CRPA MOD-7: the DDR round trip. Exercises axi_ad9361_dac_dma,
 	 * util_upack2 and the util_rfifo DATA path, none of which had ever moved a
@@ -318,8 +324,74 @@ void set_gnss_npi(double* param, char param_no)
 		console_print("gnss_npi: this bitstream has no PL-NPI core\n");
 		return;
 	}
+	/* PL-NPI needs the same gain on both channels at all times and a gamma
+	 * that matches the noise floor. gnss_npi=1 therefore switches from the
+	 * AD9361 per-channel AGC to the matched automatic loop (gnss_npi_agc.c),
+	 * which also sets gamma from the measured noise and holds the
+	 * retransmitted level. A manual gain set by the operator (gnss_rx_agc=0
+	 * / gnss_rx_gain=) is kept. gnss_npi=0 first gives the operator's TX
+	 * attenuation back. */
+	if((int)param[0] != 0) {
+		if(gnss_rxg_mode() == GNSS_RXG_AD9361) {
+			gnss_rxg_set_mode(GNSS_RXG_MATCHED);
+			console_print("gnss_npi: RX gain MATCHED AUTO on RX1+RX2, gamma %s "
+				      "(gnss_rx_gain? to see it)\n",
+				      (char*)(gnss_npi_gamma_is_auto() ? "AUTO" : "fixed"));
+		}
+	} else {
+		gnss_rxg_stop_tx_hold();
+	}
 	gnss_pt_set_npi((int)param[0] != 0);
 	get_gnss_npi(param, param_no);
+}
+
+/**************************************************************************//***
+ * @brief RX gain control and automatic gamma for PL-NPI (gnss_npi_agc.c).
+*******************************************************************************/
+void get_gnss_rx_gain(double* param, char param_no)
+{
+	(void)param; (void)param_no;
+	gnss_rxg_print();
+}
+
+void set_gnss_rx_gain(double* param, char param_no)
+{
+	if(param_no < 1 || param[0] < 1.0 || param[0] > 76.0) {
+		console_print("gnss_rx_gain= needs a gain in dB, 1 to 76, e.g. gnss_rx_gain=40\n");
+		return;
+	}
+	gnss_rxg_set_gain((int32_t)param[0]);
+	gnss_rxg_print();
+}
+
+void set_gnss_rx_agc(double* param, char param_no)
+{
+	if(param_no < 1 || param[0] < 0.0 || param[0] > 2.0) {
+		console_print("gnss_rx_agc= needs 0 (manual), 1 (AD9361 AGC) or 2 (matched auto)\n");
+		return;
+	}
+	gnss_rxg_set_mode((int)param[0]);
+	gnss_rxg_print();
+}
+
+void set_gnss_npi_auto(double* param, char param_no)
+{
+	if(param_no < 1) {
+		console_print("gnss_npi_auto= needs 0 or 1\n");
+		return;
+	}
+	gnss_npi_gamma_auto((int)param[0] != 0);
+	gnss_rxg_print();
+}
+
+void set_gnss_npi_k(double* param, char param_no)
+{
+	if(param_no < 1 || param[0] < 1.0 || param[0] > 64.0) {
+		console_print("gnss_npi_k= needs 1 to 64 (default 4)\n");
+		return;
+	}
+	gnss_npi_gamma_k((uint32_t)param[0]);
+	gnss_rxg_print();
 }
 
 /**************************************************************************//***
@@ -331,7 +403,10 @@ void set_gnss_npi_gamma(double* param, char param_no)
 		console_print("gnss_npi_gamma= needs a value from 1 to 4294967295, e.g. gnss_npi_gamma=1\n");
 		return;
 	}
+	gnss_npi_gamma_auto(0);            /* a typed value is meant to stay */
 	gnss_pt_set_npi_gamma((uint32_t)param[0]);
+	console_print("gnss_npi_gamma: fixed value, automatic gamma OFF "
+		      "(gnss_npi_auto=1 to turn it back on)\n");
 	get_gnss_npi(param, param_no);
 }
 
