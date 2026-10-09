@@ -264,8 +264,9 @@ static void info_config(struct ad9361_rf_phy *phy)
                   (char *)(((ctrl >> 5) & 1U) ? "TX1 = PL-NPI(RX1, RX2)"
                                               : "TX1 = RX1 (PL-NPI off)"));
     console_print("     [6] npi_freeze: %d\n", (long)((ctrl >> 6) & 1U));
-    console_print("   PL-NPI gamma   : %d   (gnss_npi_gamma=, register 0x48)\n",
-                  (long)gnss_pt_read(GNSS_PT_REG_NPI_GAMMA));
+    console_print("   PL-NPI gamma   : %d%d   (gnss_npi_gamma=, register 0x48)\n",
+                  (long)(gnss_pt_read(GNSS_PT_REG_NPI_GAMMA) / 10U),
+                  (long)(gnss_pt_read(GNSS_PT_REG_NPI_GAMMA) % 10U));
     console_print("   DDR replay     : %s\n",
                   (char *)(gnss_txdma_is_running() ? "RUNNING" : "stopped"));
 }
@@ -755,7 +756,7 @@ static void info_quickstart(void)
     console_print("   gnss_npi=1 / gnss_npi=0     PL-NPI power inversion on TX1 / off\n");
     console_print("   gnss_npi_gamma=N            fixed PL-NPI gamma (turns AUTO off)\n");
     console_print("   gnss_npi_auto=1 / =0        automatic gamma on (default) / off\n");
-    console_print("   gnss_npi_k=N                auto gamma = 2^17*N*noise, default 4\n");
+    console_print("   gnss_npi_k=0 / =N           k automatic (default) / fixed N\n");
     console_print("   gnss_rx_gain?               RX1/RX2 gain, mode, level hold, gamma\n");
     console_print("   gnss_rx_gain=<dB>           same gain on RX1+RX2 (auto reference)\n");
     console_print("   gnss_rx_agc=2 / =0 / =1     matched auto / manual / AD9361 AGC\n");

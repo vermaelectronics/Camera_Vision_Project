@@ -33,14 +33,31 @@ static int      last_peak, last_comp_db;
 static double   last_pout;
 
 /* ---- automatic gamma ----------------------------------------------------
- * gamma = 2^17 * k * noise power per channel (mean I^2+Q^2, LSB^2). C model
- * (pl_npi.cpp, noise +-20 LSB): gamma 1 cancels the noise AND the satellites
- * (-39 dB); gamma 1.4e8 (k = 4) nulls a 1500 LSB jammer to the optimum
- * output SINR (-7.0 dB, SMI-PI -6.8 dB) and passes the satellites with no
- * jammer (-1.0 dB). The noise floor is tracked only while no jammer is
- * present and is rescaled with every RX gain step. */
+ * gamma = 2^17 * k * noise power per channel (mean I^2+Q^2, LSB^2). The noise
+ * floor is tracked only while no jammer is present and is rescaled with every
+ * RX gain step.
+ *
+ * k itself is chosen automatically from the jammer state. C model (pl_npi.cpp,
+ * noise +-20 LSB, satellite on both elements), output SINR in dB:
+ *
+ *          no jammer   jammer 60   jammer 300   jammer 1500 LSB
+ *   k = 1    -10.1       -9.7        -7.1         -7.0
+ *   k = 4     -9.8      -14.3        -8.4         -7.0
+ *   k = 32    -9.1      -20.2       -20.1        -10.5
+ *   RX1       -8.9      -20.1       -33.2        -44.5
+ *
+ * No single k is good for both: a large k passes the satellites untouched
+ * when there is no jammer, k = 1 gives the deepest null for weak and strong
+ * jammers alike. So k = 32 while the input is clean and k = 1 from the moment
+ * a jammer is detected (input > 6 dB above the noise floor, or the ADC near
+ * clipping); back to 32 after 200 ms clean. */
+#define K_CLEAN_Q   128U     /* k in quarter units: 32   */
+#define K_JAM_Q       4U     /*                      1   */
+#define JAM_OFF_AFTER 10     /* clean polls (200 ms) before leaving jammer mode */
 static int      gam_auto = 1;
-static uint32_t gam_k = 4;
+static int      k_auto = 1;
+static uint32_t k_fixed_q = 16U; /* manual k (gnss_npi_k=N), quarter units */
+static int      jam_on, jam_quiet;
 static double   nfloor;          /* noise power per channel [LSB^2]          */
 static double   last_prx;
 static uint32_t gam_written;
@@ -107,12 +124,18 @@ static int set_both(int32_t db)
 	return 0;
 }
 
+static double cur_kq(void)
+{
+	if(!k_auto) return (double)k_fixed_q;
+	return (double)(jam_on ? K_JAM_Q : K_CLEAN_Q);
+}
+
 static void write_gamma(void)
 {
 	double g;
 	uint32_t gi;
 	if(!gam_auto || nfloor <= 0.0) return;
-	g = 131072.0 * (double)gam_k * nfloor;
+	g = 131072.0 * cur_kq() / 4.0 * nfloor;
 	if(g < 1.0e5)          g = 1.0e5;
 	if(g > 4.0e9)          g = 4.0e9;
 	gi = (uint32_t)g;
@@ -194,6 +217,8 @@ static void start_loop(void)
 	att_written = cur;
 	att_holding = 0;
 	pout_ref = 0.0;
+	jam_on = 0;
+	jam_quiet = 0;
 	{
 		double p0, p1;
 		rx_peak(GNSS_PT_REG_RX_SNAPSHOT_CH0, &p0);
@@ -204,6 +229,7 @@ static void start_loop(void)
 		if(nf_per_0db > 0.0) {
 			double known = nf_per_0db * lin10(rxg_gain);
 			nfloor = (p > 2.0 * known) ? known : p;
+			jam_on = (p > 4.0 * known);
 		} else {
 			nfloor = 0.0;
 			track_floor(p);
@@ -246,9 +272,13 @@ int gnss_npi_gamma_is_auto(void) { return gam_auto; }
 
 void gnss_npi_gamma_k(uint32_t k)
 {
-	if(k < 1U) k = 1U;
-	if(k > 64U) k = 64U;
-	gam_k = k;
+	if(k == 0U) {
+		k_auto = 1;                     /* 32 clean, 1 with a jammer */
+	} else {
+		if(k > 64U) k = 64U;
+		k_auto = 0;
+		k_fixed_q = 4U * k;
+	}
 	gam_written = 0U;
 	write_gamma();
 }
@@ -287,6 +317,22 @@ void gnss_rxg_poll(void)
 	last_peak = peak;
 	if(peak <= GNSS_RXG_PEAK_HIGH)          /* clipped data says nothing */
 		track_floor(last_prx);
+
+	/* Jammer state (drives k): on at once, off after 200 ms clean. */
+	{
+		int was = jam_on;
+		if(peak > GNSS_RXG_PEAK_HIGH || (nfloor > 0.0 && last_prx > 4.0 * nfloor)) {
+			jam_on = 1;
+			jam_quiet = 0;
+		} else if(jam_on) {
+			if(last_prx < 2.0 * nfloor) {
+				if(++jam_quiet >= JAM_OFF_AFTER) jam_on = 0;
+			} else {
+				jam_quiet = 0;
+			}
+		}
+		if(jam_on != was) gam_written = 0U;   /* new k: rewrite gamma now */
+	}
 
 	if(peak > GNSS_RXG_PEAK_HIGH) {
 		/* Down by enough to bring the peak to ~1200; 6 dB if clipping. */
@@ -327,7 +373,7 @@ void gnss_rxg_poll(void)
 		return;
 	}
 	last_pout = tx_power();
-	if(rxg_gain >= rxg_ref) {
+	if(!jam_on && rxg_gain >= rxg_ref) {
 		/* Clean state: learn the reference output power slowly. Not while
 		 * the ADC is near clipping, and not from a sudden jump (a jammer that
 		 * has just appeared), so the reference stays the clean level. */
@@ -342,11 +388,12 @@ void gnss_rxg_poll(void)
 	}
 	if(pout_ref <= 0.0) return;       /* no clean reference yet: do nothing */
 	{
-		/* Wanted: undo the RX gain cut. Allowed: never louder than the clean
-		 * output + 3 dB (a jammer that is NOT nulled is never amplified). */
-		double want = (double)(rxg_ref - rxg_gain);
-		double room = db10(2.0 * pout_ref / (last_pout + 1e-9));
-		double comp = want < room ? want : room;
+		/* Bring the output back to the clean output power: this undoes the
+		 * RX gain cut AND the level the null itself takes (C model: satellite
+		 * -3 to -6 dB at k = 1). It can never make the output louder than
+		 * the clean level, so a jammer that is NOT nulled is never
+		 * amplified. */
+		double comp = db10(pout_ref / (last_pout + 1e-9));
 		uint32_t target, floor_mdb;
 		if(comp < 0.0) comp = 0.0;
 		if(comp * 1000.0 > (double)GNSS_RXG_MAX_COMP_MDB)
@@ -391,9 +438,14 @@ void gnss_rxg_print(void)
 			      "(operator %d mdB, level hold +%d dB)\n",
 			      (long)rxg_ref, (long)last_peak, (long)att,
 			      (long)att_base, (long)last_comp_db);
-	console_print("  gamma %s: %d (k = %d), noise floor %d LSB^2, RX power %d LSB^2%s\n",
+	console_print("  gamma %s: %d%d, k = %d %s, noise floor %d LSB^2, RX power %d LSB^2\n",
 		      (char*)(gam_auto ? "AUTO" : "manual"),
-		      (long)gnss_pt_read(GNSS_PT_REG_NPI_GAMMA), (long)gam_k,
-		      (long)nfloor, (long)last_prx,
-		      (char*)((last_prx > 2.0 * nfloor && nfloor > 0.0) ? "  <- jammer" : ""));
+		      /* gamma can exceed 2^31; console_print has only signed %d */
+		      (long)(gnss_pt_read(GNSS_PT_REG_NPI_GAMMA) / 10U),
+		      (long)(gnss_pt_read(GNSS_PT_REG_NPI_GAMMA) % 10U),
+		      (long)(cur_kq() / 4.0),
+		      (char*)(k_auto ? "(auto)" : "(fixed)"),
+		      (long)nfloor, (long)last_prx);
+	console_print("  jammer: %s\n", (char*)(jam_on ? "DETECTED (deep-null k = 1)"
+	                                               : "none (satellite k = 32)"));
 }

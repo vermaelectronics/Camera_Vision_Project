@@ -164,7 +164,7 @@ C simulation (testbench.cpp, run by the build), jammer 600 LSB, `h = 0.6-0.5j`:
 - Registers: `CONTROL[5]` (0x0C) enables it, `CONTROL[6]` freezes the
   weights, `0x48` is gamma, `STATUS[18]` reads the enable back,
   `STATUS[21:20]` the gain band, `STATUS[10]` the drop flag. VERSION reads 2.1.
-- Console: `gnss_npi=1`, `gnss_npi=0`, `gnss_npi_auto=1/0`, `gnss_npi_k=<k>`,
+- Console: `gnss_npi=1`, `gnss_npi=0`, `gnss_npi_auto=1/0`, `gnss_npi_k=0|<k>`,
   `gnss_npi_gamma=<n>` (fixed, turns auto off), `gnss_npi_freeze=1/0`,
   `gnss_npi?`, `gnss_rx_gain?`, `gnss_rx_gain=<dB>`, `gnss_rx_agc=0/1/2`. `gnss_tx=1` still controls whether
   anything is transmitted at all.
@@ -196,8 +196,23 @@ C model gives the satellites -39 dB (none visible), and with a jammer they are
 -15 dB. `gnss_npi=1` now starts a loop, run from the console idle hook every
 20 ms:
 
-- **Automatic gamma:** `gamma = 2^17 x k x noise power per channel`, with
-  k = 4 (`gnss_npi_k=`). The noise power is measured from 512 snapshot samples
+- **Automatic gamma:** `gamma = 2^17 x k x noise power per channel`. k is
+  itself automatic (firmware v2.1.9): **k = 32** while no jammer is seen, so
+  the satellites pass almost untouched, and **k = 1** from the poll a jammer
+  is detected, for the deepest null. Detection means the input is more than
+  6 dB above the noise floor or the ADC is near clipping. k returns to 32
+  after 200 ms clean. C model output SINR in dB:
+
+  | k | no jammer | jammer 60 | jammer 300 | jammer 1500 LSB |
+  |---|---|---|---|---|
+  | 1 | -10.1 | -9.7 | -7.1 | -7.0 |
+  | 4 (v2.1.7) | -9.8 | -14.3 | -8.4 | -7.0 |
+  | 32 | -9.1 | -20.2 | -20.1 | -10.5 |
+  | RX1 alone | -8.9 | -20.1 | -33.2 | -44.5 |
+
+  After the switch to k = 1 the core is at the deep-null optimum within
+  about 4000 samples (130 us). `gnss_npi_k=N` fixes k (1..64);
+  `gnss_npi_k=0` returns to automatic. The noise power is measured from 512 snapshot samples
   per channel. It is followed only while the input is within 3 dB of it, so
   a jammer never pulls gamma up, and it is rescaled with every gain step. The
   last clean value per dB of gain is remembered, so switching on with the
@@ -208,9 +223,11 @@ C model gives the satellites -39 dB (none visible), and with a jammer they are
   lowered together when the ADC peak nears clipping, and raised back to the
   clean reference afterwards. With independent AGC steps the null fell to
   -20 dB in the C model; with matched steps it stays at -55 dB.
-- **TX level hold:** TX1 attenuation is lowered by the RX gain reduction (at
-  most 30 dB), but only while TX and PL-NPI are on and the output is no
-  louder than the clean output +3 dB.
+- **TX level hold:** while a jammer is present, TX1 attenuation is lowered
+  so the output power returns to the clean output power (at most 30 dB).
+  This undoes both the RX gain cut and the level the null itself takes. It
+  is only applied while TX and PL-NPI are on, and it can never make the
+  output louder than the clean level.
 - **Speed:** the null reaches -40 dB 33 us after jammer switch-on, and the
   gain settles within about 100 ms.
 

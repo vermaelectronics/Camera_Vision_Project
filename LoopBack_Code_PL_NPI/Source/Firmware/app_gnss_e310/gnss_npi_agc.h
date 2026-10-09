@@ -30,7 +30,9 @@
  *     while TX1 is transmitting, PL-NPI is on and the output is NOT louder
  *     than the clean reference output (i.e. the jammer is really nulled);
  *     otherwise the operator's attenuation is restored.
- *   - Automatic gamma: gamma = 2^17 * k * noise power per channel (k = 4).
+ *   - Automatic gamma: gamma = 2^17 * k * noise power per channel, with k
+ *     itself automatic: 32 while no jammer is seen (satellites pass almost
+ *     untouched), 1 as soon as one is (deepest null); see gnss_npi_agc.c.
  *     The noise power is measured from the same snapshots, followed only
  *     while the input is within 3 dB of it (no jammer) and rescaled with each
  *     gain step, so a jammer never pulls gamma up.
@@ -56,6 +58,6 @@ void    gnss_rxg_poll(void);           /* console idle hook                 */
 void    gnss_rxg_print(void);
 void    gnss_npi_gamma_auto(int on);   /* 1 = automatic gamma (default)     */
 int     gnss_npi_gamma_is_auto(void);
-void    gnss_npi_gamma_k(uint32_t k);  /* gamma = 2^17 * k * noise, k 1..64 */
+void    gnss_npi_gamma_k(uint32_t k);  /* 0 = automatic k (default), 1..64 fixed */
 
 #endif

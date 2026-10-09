@@ -135,7 +135,7 @@ command cmd_list[] = {
 	{"gnss_npi=", "1 = TX1 carries PL-NPI(RX1, RX2), 0 = TX1 carries RX1.", "gnss_npi=1", set_gnss_npi},
 	{"gnss_npi_gamma=", "Sets a FIXED PL-NPI gamma (>= 1); turns automatic gamma off.", "gnss_npi_gamma=100000000", set_gnss_npi_gamma},
 	{"gnss_npi_auto=", "1 = automatic gamma from the noise floor (default), 0 = fixed.", "gnss_npi_auto=1", set_gnss_npi_auto},
-	{"gnss_npi_k=", "Automatic gamma = 2^17 * k * noise power, k 1..64 (default 4).", "gnss_npi_k=4", set_gnss_npi_k},
+	{"gnss_npi_k=", "0 = automatic k (default: 32 clean, 1 with jammer), 1..64 = fixed k.", "gnss_npi_k=0", set_gnss_npi_k},
 	{"gnss_rx_gain?", "Gets RX1/RX2 gain, mode, TX level hold and gamma.", "", get_gnss_rx_gain},
 	{"gnss_rx_gain=", "Sets RX1 AND RX2 to the same gain [dB] (also the auto reference).", "gnss_rx_gain=40", set_gnss_rx_gain},
 	{"gnss_rx_agc=", "0 = manual locked, 1 = AD9361 AGC per channel, 2 = matched auto (PL-NPI).", "gnss_rx_agc=2", set_gnss_rx_agc},
@@ -299,11 +299,13 @@ void get_gnss_npi(double* param, char param_no)
 			      (long)(ver >> 16), (long)(ver & 0xFFFFU));
 		return;
 	}
-	console_print("GNSS_NPI: %s (read from hardware)%s, gamma = %d, gain band = %d%s\n",
+	console_print("GNSS_NPI: %s (read from hardware)%s, gamma = %d%d, gain band = %d%s\n",
 		      (char*)((status & GNSS_PT_ST_NPI_EN_SYNCED) ? "ON" : "off"),
 		      (char*)((gnss_pt_read(GNSS_PT_REG_CONTROL) & GNSS_PT_CTRL_NPI_FREEZE)
 		          ? ", weights FROZEN" : ""),
-		      (long)gnss_pt_read(GNSS_PT_REG_NPI_GAMMA),
+		      /* gamma can exceed 2^31; console_print has only signed %d */
+		      (long)(gnss_pt_read(GNSS_PT_REG_NPI_GAMMA) / 10U),
+		      (long)(gnss_pt_read(GNSS_PT_REG_NPI_GAMMA) % 10U),
 		      (long)((status >> GNSS_PT_ST_NPI_BAND_SHIFT) & GNSS_PT_ST_NPI_BAND_MASK),
 		      (char*)((status & GNSS_PT_ST_NPI_DROP) ? ", SAMPLES DROPPED (STATUS[10])" : ""));
 }
@@ -398,8 +400,8 @@ void set_gnss_npi_auto(double* param, char param_no)
 
 void set_gnss_npi_k(double* param, char param_no)
 {
-	if(param_no < 1 || param[0] < 1.0 || param[0] > 64.0) {
-		console_print("gnss_npi_k= needs 1 to 64 (default 4)\n");
+	if(param_no < 1 || param[0] < 0.0 || param[0] > 64.0) {
+		console_print("gnss_npi_k= needs 0 (automatic, default) or 1 to 64 (fixed)\n");
 		return;
 	}
 	gnss_npi_gamma_k((uint32_t)param[0]);
