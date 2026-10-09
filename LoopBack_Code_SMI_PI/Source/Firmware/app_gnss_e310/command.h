@@ -248,7 +248,6 @@ void set_gnss_smi_freeze(double* param, char param_no);
 void get_gnss_rx_gain(double* param, char param_no);
 void set_gnss_rx_gain(double* param, char param_no);
 void set_gnss_rx_agc(double* param, char param_no);
-void gnss_rx_lock_if_agc(void);
 
 /* GNSS-CRPA MOD-9: the main menu, bound to "?".
  * Short and grouped, unlike get_help() which dumps all ~60 vendor commands. */

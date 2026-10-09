@@ -69,6 +69,7 @@
 /* GNSS-CRPA MOD-3: project additions. See Docs/Architecture/MODIFICATIONS.md. */
 #include "gnss_l1.h"
 #include "gnss_passthrough.h"
+#include "gnss_smi_agc.h"
 #include "gnss_capture.h"
 #include "gnss_info.h"   /* GNSS-CRPA MOD-10 */
 
@@ -1177,6 +1178,9 @@ int main(void)
 	/* GNSS-CRPA MOD-9/MOD-10: show the information menu at start-up, not the
 	 * full ~60-line vendor command dump. `help?` still prints everything. */
 	gnss_info_menu();
+
+	/* SMI-PI matched RX gain loop runs while the console is idle. */
+	console_set_idle_hook(gnss_rxg_poll);
 
 	while(1)
 	{

@@ -155,13 +155,35 @@ GNSS it is negligible.
   0 means nothing is being cancelled), `STATUS[10]` a dropped sample pair
   (must stay 0). VERSION reads 3.0.
 - Console: `gnss_smi=1`, `gnss_smi=0`, `gnss_smi_load=<n>`,
-  `gnss_smi_freeze=1/0`, `gnss_smi?`, `gnss_rx_gain=<dB>` / `gnss_rx_gain?`,
-  `gnss_rx_agc=1/0`. `gnss_smi=1` locks RX1 and RX2 at one manual gain if
-  they are still under AGC: two independent AGCs change the RX1/RX2 ratio at
-  every gain step and turn the gain (and the GNSS level) down when a jammer
-  appears. `gnss_tx=1` still controls whether
-  anything is transmitted at all, and starts at 89.75 dB attenuation:
-  use `tx1_attenuation=70000` (the known-good level).
+  `gnss_smi_freeze=1/0`, `gnss_smi?`, `gnss_rx_gain?`, `gnss_rx_gain=<dB>`,
+  `gnss_rx_agc=0/1/2`.
+
+**RX gain with SMI-PI (firmware v3.0.5, `gnss_smi_agc.c`).** The AD9361 AGC
+runs RX1 and RX2 independently. Each unequal gain step changes the RX1/RX2
+ratio the weight was computed for. In the C model with the real HLS core, the
+jammer residual reached -1 dB during such steps, against -50 dB when both
+channels step together. `gnss_smi=1` therefore switches to **matched
+automatic gain** (`gnss_rx_agc=2`):
+
+- Both channels are always set to the same manual gain.
+- Every 20 ms the firmware reads 512 snapshot samples per channel. A peak
+  above 1700 of 2047 lowers both gains (6 dB if the ADC clips). A peak below
+  600 for 60 ms raises both by 1 dB, never above the reference (the clean
+  gain when the loop started, or `gnss_rx_gain=`).
+- **TX level hold:** while the gain is G dB below the reference, TX1
+  attenuation is lowered by G dB (at most 30 dB), so the retransmitted GNSS
+  level does not drop. It is only applied while TX1 transmits, SMI-PI is on,
+  and the output is no louder than the clean output +3 dB. A jammer that is
+  not nulled is therefore never amplified. `gnss_smi=0`, `gnss_tx=0` or a
+  new `tx1_attenuation=` hands control back to the operator's value.
+
+The null itself needs no speed-up: −40 dB within about 8 µs of jammer
+switch-on (C model, any SMI_PI_K from 8 to 10). Start `gnss_smi=1` with the
+jammer off, so the reference gain is the clean one.
+
+- `gnss_tx=1` still controls whether anything is transmitted at all, and
+  starts at 89.75 dB attenuation: use `tx1_attenuation=70000` (the known-good
+  level).
 - Limits: two elements null ONE jammer direction. Satellites close to the
   jammer direction are attenuated with it. A wideband jammer with a
   significant inter-element delay limits the null depth of any single-tap

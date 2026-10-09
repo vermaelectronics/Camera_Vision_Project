@@ -758,8 +758,9 @@ static void info_quickstart(void)
     console_print("   gnss_smi=1 / gnss_smi=0     SMI-PI power inversion on TX1 / off\n");
     console_print("   gnss_smi_load=N             SMI-PI loading L, >= 1, 16 = default\n");
     console_print("   gnss_smi_freeze=1 / =0      freeze / track the SMI-PI weight\n");
-    console_print("   gnss_rx_gain=<dB> / ?       same fixed gain on RX1+RX2 (SMI-PI)\n");
-    console_print("   gnss_rx_agc=1 / =0          AGC on both / lock at present gain\n");
+    console_print("   gnss_rx_gain?               RX1/RX2 gain, mode, TX level hold\n");
+    console_print("   gnss_rx_gain=<dB>           same gain on RX1+RX2 (auto reference)\n");
+    console_print("   gnss_rx_agc=2 / =0 / =1     matched auto / manual / AD9361 AGC\n");
     console_print("   gnss_smi?                   SMI-PI on/off, L, |a| band, drops\n");
     console_print("   ?                           this menu\n");
     console_print("   help?                       every command (long)\n");
