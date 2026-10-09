@@ -342,6 +342,18 @@ void set_gnss_npi(double* param, char param_no)
 		gnss_rxg_stop_tx_hold();
 	}
 	gnss_pt_set_npi((int)param[0] != 0);
+	/* The enable crosses into the sample-clock domain and its read-back
+	 * crosses back into the AXI domain; reading STATUS straight after the
+	 * write can still show the old state (the first gnss_npi=1 printed
+	 * "off" although the core had been switched on). Wait until the hardware
+	 * confirms, at most ~1 ms. */
+	{
+		uint32_t want = ((int)param[0] != 0) ? GNSS_PT_ST_NPI_EN_SYNCED : 0U;
+		int n;
+		for(n = 0; n < 10000; n++)
+			if((gnss_pt_read(GNSS_PT_REG_STATUS) & GNSS_PT_ST_NPI_EN_SYNCED) == want)
+				break;
+	}
 	get_gnss_npi(param, param_no);
 }
 
