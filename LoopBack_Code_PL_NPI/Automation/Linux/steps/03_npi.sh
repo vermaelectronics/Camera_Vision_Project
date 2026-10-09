@@ -5,4 +5,4 @@ set -e
 cd "$(dirname "$0")/../../.."
 ./Automation/Linux/build_all.sh --from npi --to npi
 echo "---- check ----"
-grep PL_NPI_HLS Build/Logs/npi.log
+grep -E "^PL_NPI_HLS:" Build/Logs/npi.log

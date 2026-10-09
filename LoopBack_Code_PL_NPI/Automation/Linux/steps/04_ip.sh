@@ -4,4 +4,4 @@ set -e
 cd "$(dirname "$0")/../../.."
 ./Automation/Linux/build_all.sh --from ip --to ip
 echo "---- check ----"
-grep -m1 IP_PACKAGE_OK Build/Logs/ip.log
+grep -E "^IP_PACKAGE_OK" Build/Logs/ip.log | tail -1

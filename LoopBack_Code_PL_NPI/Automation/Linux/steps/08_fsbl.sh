@@ -4,4 +4,4 @@ set -e
 cd "$(dirname "$0")/../../.."
 ./Automation/Linux/build_all.sh --from fsbl --to fsbl
 echo "---- check ----"
-grep -m1 "FSBL_RESULT" Build/Logs/fsbl.log
+grep -E "^FSBL_RESULT:" Build/Logs/fsbl.log | tail -1

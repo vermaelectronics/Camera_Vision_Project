@@ -4,4 +4,4 @@ set -e
 cd "$(dirname "$0")/../../.."
 ./Automation/Linux/build_all.sh --from smi --to smi
 echo "---- check ----"
-grep SMI_PI_HLS Build/Logs/smi.log
+grep -E "^SMI_PI_HLS:" Build/Logs/smi.log
