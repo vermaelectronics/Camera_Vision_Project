@@ -1,6 +1,6 @@
 `timescale 1ns/1ps
 // ============================================================================
-// uesprit_bfp_norm4  --  block-floating-point normaliser (combinational)
+// uesprit_bfp_norm4  --  block-floating-point normaliser (2-stage pipeline)
 //
 // Scales four signed W-bit values by one common power of two and returns
 // 32-bit mantissas in which the largest magnitude lies in [2^29, 2^30)
@@ -11,20 +11,28 @@
 // the exponent is simply discarded. This keeps every later multiplier at
 // 32-34 bits regardless of the received signal power.
 //
+// Stage 1: magnitude OR + leading-zero count (registered with the inputs)
+// Stage 2: common left shift, keep the top 32 bits (registered)
+// Latency: 2 cycles, fully pipelined.
+//
 // Requires |v| < 2^(W-2) for all inputs (headroom guaranteed by callers).
 // ============================================================================
 module uesprit_bfp_norm4 #(
     parameter integer W = 72
 )(
+    input  wire                clk,
+    input  wire                rst,
+    input  wire                in_valid,
     input  wire signed [W-1:0] v0,
     input  wire signed [W-1:0] v1,
     input  wire signed [W-1:0] v2,
     input  wire signed [W-1:0] v3,
-    output wire signed [31:0]  m0,
-    output wire signed [31:0]  m1,
-    output wire signed [31:0]  m2,
-    output wire signed [31:0]  m3,
-    output wire                zero      // all inputs are zero
+    output reg                 out_valid,
+    output reg  signed [31:0]  m0,
+    output reg  signed [31:0]  m1,
+    output reg  signed [31:0]  m2,
+    output reg  signed [31:0]  m3,
+    output reg                 zero      // all inputs are zero
 );
 
     function [W-1:0] absv;
@@ -34,10 +42,8 @@ module uesprit_bfp_norm4 #(
         end
     endfunction
 
-    wire [W-1:0] mag = absv(v0) | absv(v1) | absv(v2) | absv(v3);
-
     // leading-zero count of the OR of magnitudes = that of the maximum
-    function integer lzc;
+    function [7:0] lzc;
         input [W-1:0] x;
         integer k;
         reg     found;
@@ -52,19 +58,49 @@ module uesprit_bfp_norm4 #(
         end
     endfunction
 
-    // place the magnitude MSB at bit W-3, then keep the top 32 bits
-    wire [7:0] lz = lzc(mag);
-    wire [7:0] sh = (lz >= 8'd2 && lz < W) ? lz - 8'd2 : 8'd0;
+    wire [W-1:0] mag = absv(v0) | absv(v1) | absv(v2) | absv(v3);
+    wire [7:0]   lz  = lzc(mag);
 
-    wire signed [W-1:0] s0 = v0 <<< sh;
-    wire signed [W-1:0] s1 = v1 <<< sh;
-    wire signed [W-1:0] s2 = v2 <<< sh;
-    wire signed [W-1:0] s3 = v3 <<< sh;
+    // ---------------- stage 1 ----------------
+    reg signed [W-1:0] r0, r1, r2, r3;
+    reg [7:0]          sh;
+    reg                z1, v1r;
 
-    assign m0   = s0[W-1 -: 32];
-    assign m1   = s1[W-1 -: 32];
-    assign m2   = s2[W-1 -: 32];
-    assign m3   = s3[W-1 -: 32];
-    assign zero = (mag == {W{1'b0}});
+    always @(posedge clk) begin
+        if (rst) begin
+            v1r <= 1'b0; z1 <= 1'b0; sh <= 8'd0;
+            r0 <= 0; r1 <= 0; r2 <= 0; r3 <= 0;
+        end else begin
+            v1r <= in_valid;
+            if (in_valid) begin
+                r0 <= v0; r1 <= v1; r2 <= v2; r3 <= v3;
+                // place the magnitude MSB at bit W-3
+                sh <= (lz >= 8'd2 && lz < W) ? lz - 8'd2 : 8'd0;
+                z1 <= (mag == {W{1'b0}});
+            end
+        end
+    end
+
+    // ---------------- stage 2 ----------------
+    wire signed [W-1:0] s0 = r0 <<< sh;
+    wire signed [W-1:0] s1 = r1 <<< sh;
+    wire signed [W-1:0] s2 = r2 <<< sh;
+    wire signed [W-1:0] s3 = r3 <<< sh;
+
+    always @(posedge clk) begin
+        if (rst) begin
+            out_valid <= 1'b0; zero <= 1'b0;
+            m0 <= 0; m1 <= 0; m2 <= 0; m3 <= 0;
+        end else begin
+            out_valid <= v1r;
+            if (v1r) begin
+                m0   <= s0[W-1 -: 32];
+                m1   <= s1[W-1 -: 32];
+                m2   <= s2[W-1 -: 32];
+                m3   <= s3[W-1 -: 32];
+                zero <= z1;
+            end
+        end
+    end
 
 endmodule

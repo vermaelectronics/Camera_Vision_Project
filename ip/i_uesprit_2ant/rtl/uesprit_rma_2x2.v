@@ -30,7 +30,7 @@
 //
 // Output: N, D (signed Q60, NW bits), D > 0 for mu > 0.
 // Resources: one shared 34 x 34 multiplier (4 DSP48E2 on UltraScale+).
-// Latency : ~ 10*p_log2 + 9 clock cycles.
+// Latency : ~ 13*p_log2 + 10 clock cycles.
 // ============================================================================
 module uesprit_rma_2x2 #(
     parameter integer NW = 70
@@ -75,9 +75,9 @@ module uesprit_rma_2x2 #(
     reg signed [33:0] op_a, op_b;
     reg               op_v;
     reg [3:0]         op_idx;
-    reg signed [67:0] prod;
-    reg               prod_v;
-    reg [3:0]         prod_idx;
+    reg signed [67:0] prod_m, prod;      // two registers after the multiplier
+    reg               v_m, prod_v;       // (DSP MREG + PREG)
+    reg [3:0]         idx_m, prod_idx;
 
     wire signed [65:0] p66 = prod[65:0];
 
@@ -86,12 +86,15 @@ module uesprit_rma_2x2 #(
 
     wire signed [32:0] s_ad = a + d;        // a + d (33 bit)
 
-    // re-normalise C^2
+    // re-normalise C^2 (2-cycle pipelined normaliser)
     wire signed [31:0] mn0, mn1, mn2, mn3;
-    wire               mzero;
+    wire               mzero, mn_valid;
+    reg                norm_go, norm_wait;
 
     uesprit_bfp_norm4 #(.W(66)) u_norm (
+        .clk (clk), .rst (rst), .in_valid (norm_go),
         .v0 (na), .v1 (nd), .v2 (nbr), .v3 (nbi),
+        .out_valid (mn_valid),
         .m0 (mn0), .m1 (mn1), .m2 (mn2), .m3 (mn3),
         .zero (mzero)
     );
@@ -105,7 +108,9 @@ module uesprit_rma_2x2 #(
             a <= 0; d <= 0; br <= 0; bi <= 0;
             cr00 <= 0; cr01 <= 0; cr10 <= 0; cr11 <= 0;
             op_a <= 0; op_b <= 0; op_v <= 1'b0; op_idx <= 4'd0;
-            prod <= 0; prod_v <= 1'b0; prod_idx <= 4'd0;
+            prod_m <= 0; prod <= 0; v_m <= 1'b0; prod_v <= 1'b0;
+            idx_m <= 4'd0; prod_idx <= 4'd0;
+            norm_go <= 1'b0; norm_wait <= 1'b0;
             na <= 0; nd <= 0; nbr <= 0; nbi <= 0;
             out_valid <= 1'b0; num <= 0; den <= 0;
             cp_a <= 0; cp_d <= 0; cp_br <= 0; cp_bi <= 0;
@@ -113,9 +118,13 @@ module uesprit_rma_2x2 #(
             out_valid <= 1'b0;
 
             op_v     <= 1'b0;
-            prod     <= op_a * op_b;
-            prod_v   <= op_v;
-            prod_idx <= op_idx;
+            norm_go  <= 1'b0;
+            prod_m   <= op_a * op_b;
+            prod     <= prod_m;
+            v_m      <= op_v;
+            prod_v   <= v_m;
+            idx_m    <= op_idx;
+            prod_idx <= idx_m;
 
             case (state)
             // ---------------------------------------------------------
@@ -165,12 +174,18 @@ module uesprit_rma_2x2 #(
             end
             // ---------------------------------------------------------
             S_SQN: begin
-                a  <= mn0; d  <= mn1;
-                br <= mn2; bi <= mn3;
-                na <= 0; nd <= 0; nbr <= 0; nbi <= 0;
-                step <= 4'd0;
-                iter <= iter + 1'b1;
-                state <= (iter + 1'b1 == iter_n) ? S_FB : S_SQ;
+                if (!norm_wait) begin
+                    norm_go   <= 1'b1;            // na..nbi are final now
+                    norm_wait <= 1'b1;
+                end else if (mn_valid) begin
+                    norm_wait <= 1'b0;
+                    a  <= mn0; d  <= mn1;
+                    br <= mn2; bi <= mn3;
+                    na <= 0; nd <= 0; nbr <= 0; nbi <= 0;
+                    step <= 4'd0;
+                    iter <= iter + 1'b1;
+                    state <= (iter + 1'b1 == iter_n) ? S_FB : S_SQ;
+                end
             end
             // ---------------------------------------------------------
             // forward-backward average + unitary transform -> C_r

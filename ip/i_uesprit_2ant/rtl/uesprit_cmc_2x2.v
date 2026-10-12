@@ -144,7 +144,14 @@ module uesprit_cmc_2x2 #(
     // ------------------------------------------------------------------
     // Stage 3 : fourth-order instantaneous terms (Q4.60, 66 bit)
     //   g00 = |x0|^4, g11 = |x0|^2|x1|^2, g01 = |x0|^2 x0 x1*
+    // Two register levels after the 33 x 33 multipliers (3a, 3b) so that
+    // synthesis can use the DSP48 M and P pipeline registers.
     // ------------------------------------------------------------------
+    reg signed [65:0] g00_a, g11_a, g01r_a, g01i_a;
+    reg signed [32:0] e00_a, e11_a, e01r_a, e01i_a, f0r_a, f0i_a, f1r_a, f1i_a;
+    reg               v3a, l3a;
+    reg [4:0]         lsh3a;
+
     reg signed [65:0] g00, g11, g01r, g01i;
     reg signed [32:0] e00_3, e11_3, e01r_3, e01i_3, f0r_3, f0i_3, f1r_3, f1i_3;
     reg               v3, l3;
@@ -152,21 +159,35 @@ module uesprit_cmc_2x2 #(
 
     always @(posedge clk) begin
         if (rst) begin
+            v3a <= 1'b0; l3a <= 1'b0; lsh3a <= 5'd0;
+            g00_a <= 0; g11_a <= 0; g01r_a <= 0; g01i_a <= 0;
+            e00_a <= 0; e11_a <= 0; e01r_a <= 0; e01i_a <= 0;
+            f0r_a <= 0; f0i_a <= 0; f1r_a <= 0; f1i_a <= 0;
             v3 <= 1'b0; l3 <= 1'b0; lsh3 <= 5'd0;
             g00 <= 0; g11 <= 0; g01r <= 0; g01i <= 0;
             e00_3 <= 0; e11_3 <= 0; e01r_3 <= 0; e01i_3 <= 0;
             f0r_3 <= 0; f0i_3 <= 0; f1r_3 <= 0; f1i_3 <= 0;
         end else begin
-            v3   <= v2;
-            l3   <= l2;
-            lsh3 <= lsh2;
+            // 3a : multiply
+            v3a   <= v2;
+            l3a   <= l2;
+            lsh3a <= lsh2;
             if (v2) begin
-                g00  <= e00 * e00;
-                g11  <= e00 * e11;
-                g01r <= e00 * e01r;
-                g01i <= e00 * e01i;
-                e00_3 <= e00;  e11_3 <= e11;  e01r_3 <= e01r; e01i_3 <= e01i;
-                f0r_3 <= f0r;  f0i_3 <= f0i;  f1r_3  <= f1r;  f1i_3  <= f1i;
+                g00_a  <= e00 * e00;
+                g11_a  <= e00 * e11;
+                g01r_a <= e00 * e01r;
+                g01i_a <= e00 * e01i;
+                e00_a <= e00;  e11_a <= e11;  e01r_a <= e01r; e01i_a <= e01i;
+                f0r_a <= f0r;  f0i_a <= f0i;  f1r_a  <= f1r;  f1i_a  <= f1i;
+            end
+            // 3b : register
+            v3   <= v3a;
+            l3   <= l3a;
+            lsh3 <= lsh3a;
+            if (v3a) begin
+                g00 <= g00_a; g11 <= g11_a; g01r <= g01r_a; g01i <= g01i_a;
+                e00_3 <= e00_a; e11_3 <= e11_a; e01r_3 <= e01r_a; e01i_3 <= e01i_a;
+                f0r_3 <= f0r_a; f0i_3 <= f0i_a; f1r_3  <= f1r_a;  f1i_3  <= f1i_a;
             end
         end
     end
@@ -262,7 +283,7 @@ module uesprit_cmc_2x2 #(
 
     // ------------------------------------------------------------------
     // Combine FSM : C = M4 - (products of second-order moments)
-    // One shared 34 x 34 multiplier, two-cycle latency, 14 products.
+    // One shared 34 x 34 multiplier, three-cycle latency, 14 products.
     //
     //  step  product        contribution
     //   0    R00*R00        c00  -= 2x
@@ -288,9 +309,9 @@ module uesprit_cmc_2x2 #(
     reg signed [33:0] op_a_n, op_b_n;
     reg               op_v;
     reg [3:0]         op_idx;
-    reg signed [67:0] prod;
-    reg               prod_v;
-    reg [3:0]         prod_idx;
+    reg signed [67:0] prod_m, prod;   // two registers after the multiplier
+    reg               v_m, prod_v;
+    reg [3:0]         idx_m, prod_idx;
     reg               cov_mode;
     reg signed [CW-1:0] acc00, acc11, acc01r, acc01i;
 
@@ -319,7 +340,8 @@ module uesprit_cmc_2x2 #(
         if (rst) begin
             busy <= 1'b0; step <= 5'd0;
             op_a <= 0; op_b <= 0; op_v <= 1'b0; op_idx <= 4'd0;
-            prod <= 0; prod_v <= 1'b0; prod_idx <= 4'd0;
+            prod_m <= 0; prod <= 0; v_m <= 1'b0; prod_v <= 1'b0;
+            idx_m <= 4'd0; prod_idx <= 4'd0;
             cov_mode <= 1'b0;
             acc00 <= 0; acc11 <= 0; acc01r <= 0; acc01i <= 0;
             c00 <= 0; c11 <= 0; c01_re <= 0; c01_im <= 0;
@@ -330,9 +352,12 @@ module uesprit_cmc_2x2 #(
 
             // pipeline: operands -> product
             op_v     <= 1'b0;
-            prod_v   <= op_v;
-            prod_idx <= op_idx;
-            prod     <= op_a * op_b;
+            v_m      <= op_v;
+            prod_v   <= v_m;
+            idx_m    <= op_idx;
+            prod_idx <= idx_m;
+            prod_m   <= op_a * op_b;
+            prod     <= prod_m;
 
             if ((v3 && l3 && (shifting || busy)) || (stats_valid && busy))
                 overrun <= 1'b1;               // new window while previous one is still in use

@@ -6,7 +6,7 @@
 // Coarse table: 1024 segments over [0,1]; fine table: 1024 segments over
 // [1-1/32, 1]. Linear interpolation, odd symmetry for negative u.
 // Both tables share one 2048 x 30 dual-port ROM (block RAM).
-// Two-cycle latency (ROM read, interpolate).
+// Four-cycle latency (ROM read, slope, multiply, add), fully pipelined.
 // Max error 0.12 deg at |u| -> 1 (end-fire), < 0.0005 deg for |u| < 0.99.
 // ============================================================================
 module uesprit_asin_lut (
@@ -2090,8 +2090,11 @@ module uesprit_asin_lut (
     wire [19:0] frac  = fine ? {uf[14:0], 5'd0} : ua[19:0];
 
     reg  [29:0] t0, t1;
-    reg  [19:0] frac_r;
+    reg  [19:0] frac_r, frac2;
     reg         neg_r, one_r, v1;
+    reg  [29:0] base2, diff2, base3;
+    reg         neg2, one2, v2, neg3, one3, v3;
+    reg  [49:0] dlt3;
 
     // stage 1: dual-port synchronous ROM read (no reset -> block RAM)
     always @(posedge clk) begin
@@ -2099,35 +2102,40 @@ module uesprit_asin_lut (
         t1 <= rom[addr1];
     end
 
+    wire signed [31:0] mag4 = $signed({2'b00, base3}) + $signed({2'b00, dlt3[49:20]});
+
     always @(posedge clk) begin
         if (rst) begin
-            v1        <= 1'b0;
+            v1 <= 1'b0; v2 <= 1'b0; v3 <= 1'b0;
             valid_out <= 1'b0;
             theta_q28 <= 32'sd0;
             frac_r <= 20'd0; neg_r <= 1'b0; one_r <= 1'b0;
+            base2 <= 30'd0; diff2 <= 30'd0; frac2 <= 20'd0; neg2 <= 1'b0; one2 <= 1'b0;
+            base3 <= 30'd0; dlt3 <= 50'd0; neg3 <= 1'b0; one3 <= 1'b0;
         end else begin
             v1     <= valid_in;
             frac_r <= frac;
             neg_r  <= neg;
             one_r  <= one;
-            // stage 2: linear interpolation
-            valid_out <= v1;
-            if (v1)
-                theta_q28 <= neg_r ? -interp(t0, t1, frac_r, one_r) : interp(t0, t1, frac_r, one_r);
+            // stage 2: segment slope (asin is monotonic, t1 >= t0)
+            v2    <= v1;
+            base2 <= t0;
+            diff2 <= t1 - t0;
+            frac2 <= frac_r;
+            neg2  <= neg_r;
+            one2  <= one_r;
+            // stage 3: slope * fraction
+            v3    <= v2;
+            base3 <= base2;
+            dlt3  <= diff2 * frac2;
+            neg3  <= neg2;
+            one3  <= one2;
+            // stage 4: add, sign
+            valid_out <= v3;
+            if (v3)
+                theta_q28 <= one3 ? (neg3 ? -$signed({2'b00, HALF_PI}) : $signed({2'b00, HALF_PI}))
+                                  : (neg3 ? -mag4 : mag4);
         end
     end
-
-    function signed [31:0] interp;
-        input [29:0] a;
-        input [29:0] b;
-        input [19:0] f;
-        input        is_one;
-        reg   [49:0] dlt;
-        begin
-            dlt    = {20'd0, b - a} * f;     // b >= a (asin is monotonic)
-            interp = is_one ? $signed({2'b00, HALF_PI})
-                            : $signed({2'b00, a}) + $signed({2'b00, dlt[49:20]});
-        end
-    endfunction
 
 endmodule

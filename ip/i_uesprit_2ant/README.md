@@ -48,7 +48,7 @@ I-UESPRIT with a full EVD (max relative difference ≈ 1e-14).
 | `rtl/i_uesprit_2ant_axi.v` | **IP top**: AXI4-Stream in/out, AXI4-Lite registers, interrupt |
 | `rtl/i_uesprit_2ant_core.v` | Algorithm core (plain valid/data interface, usable without AXI) |
 | `rtl/uesprit_cmc_2x2.v` | CMC: streaming 4th-order cumulant / covariance |
-| `rtl/uesprit_bfp_norm4.v` | Block-floating-point normaliser |
+| `rtl/uesprit_bfp_norm4.v` | Block-floating-point normaliser (2-stage pipeline) |
 | `rtl/uesprit_rma_2x2.v` | RMA: C^p, forward–backward, unitary transform, Ψ_r numerator/denominator |
 | `rtl/uesprit_pie_dar.v` | PIE + DAR: ψ, φ, θ (rad and degrees) |
 | `rtl/uesprit_cordic_atan2.v` | 30-iteration vectoring CORDIC |
@@ -106,11 +106,16 @@ accuracy. In the regression, a −40 dBFS tone gives the same answer as the floa
 * **Throughput**: one snapshot per clock. Windows run back to back, and the next window accumulates while the
   previous one goes through CMC-combine → RMA → PIE/DAR. The minimum window is 128 snapshots: the
   PIE/DAR stage is busy for about 64 cycles, and the hardware enforces this minimum.
-* **Latency** after the last snapshot of a window (from simulation): 100 cycles for p = 1, 118 for p = 4, 127 for p = 8.
-  That is about 1.2 µs at 100 MHz; the paper reports 1008 cycles for M = 4.
+* **Latency** after the last snapshot of a window (from simulation): 105 cycles for p = 1, 131 for p = 4, 144 for p = 8.
+  That is about 1.3 µs at 100 MHz; the paper reports 1008 cycles for M = 4.
 * **Resources**: Yosys `synth_xilinx -family xcup` estimate for the full AXI IP: 45 DSP48E2, 2 RAMB36,
-  about 5.3 k FF, and about 12 k LUT before Vivado optimisation. Vivado usually reports fewer LUTs. Run
-  `scripts/synth_check.tcl` for real numbers and timing on your part. The design was not run through Vivado here.
+  about 7.0 k FF, and about 10.7 k LUT. Vivado usually reports fewer LUTs. Run `scripts/synth_check.tcl`
+  for real numbers and timing on your part. The design was not run through Vivado here.
+* **Timing (target 100 MHz, as in the paper)**: every wide multiplier has two output registers (DSP48
+  MREG + PREG); the block-floating-point normaliser is a 2-stage pipeline (leading-zero count, then
+  shift); and the arcsin interpolation is a 4-stage pipeline behind a registered block-RAM read. The
+  longest remaining combinational paths are a 35-bit CORDIC add with variable shift and an 80-bit
+  accumulator add.
 * **Accuracy vs. model**: worst |RTL − float model| = 0.0004° across all regression cases. The arcsin LUT error
   is below 0.0005° for |sin θ| < 0.99 and below 0.12° at end-fire.
 
@@ -177,6 +182,9 @@ Xil_Out32(DOA_BASE + 0x04, 1);             // clear result_valid
   gain per channel), or subtract a calibrated φ offset before using the angle.
 
 ## Relation to the earlier ESPRIT chain (`Espirit_Test`)
+
+A companion IP, `../m_esprit_2ant`, implements the paper's M-ESPRIT for the same setup. It has the same
+interfaces, adds a unit-circle "source present" test, and keeps the complex eigenvalue.
 
 The earlier chain (`complex_covariance_2x2 → eig2x2_hermitian → dominant_eigenvector_2x2 →
 esprit_1src_2ant_angle`) is conventional ESPRIT: complex covariance, an explicit EVD with square root and

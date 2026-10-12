@@ -19,8 +19,8 @@
 //   its trace, so the PIE power iteration collapses to one division.
 //
 // Single clock domain. One complex snapshot per clock maximum.
-// End-to-end latency after the last snapshot of a window ~ 120 cycles
-// (p = 4), i.e. 1.2 us at 100 MHz.
+// End-to-end latency after the last snapshot of a window ~ 131 cycles
+// (p = 4), i.e. 1.3 us at 100 MHz.
 // ============================================================================
 module i_uesprit_2ant_core #(
     parameter integer MAX_LOG2_SNAP = 14
@@ -79,33 +79,25 @@ module i_uesprit_2ant_core #(
     );
 
     // ------------------------------------------------------------------
-    // block-floating-point normalisation of C (registered)
+    // block-floating-point normalisation of C (2-cycle pipeline)
     // ------------------------------------------------------------------
-    wire signed [31:0] m00, m11, m01r, m01i;
-    wire               c_zero;
+    wire               cn_valid;
+    wire signed [31:0] cn00, cn11, cn01r, cn01i;
+    wire               cn_zero;
 
     uesprit_bfp_norm4 #(.W(CW)) u_norm (
+        .clk (clk), .rst (rst), .in_valid (c_valid),
         .v0 (c00), .v1 (c11), .v2 (c01r), .v3 (c01i),
-        .m0 (m00), .m1 (m11), .m2 (m01r), .m3 (m01i),
-        .zero (c_zero)
+        .out_valid (cn_valid),
+        .m0 (cn00), .m1 (cn11), .m2 (cn01r), .m3 (cn01i),
+        .zero (cn_zero)
     );
-
-    reg               cn_valid;
-    reg signed [31:0] cn00, cn11, cn01r, cn01i;
-    reg               cn_zero;
 
     always @(posedge clk) begin
         if (rst) begin
-            cn_valid <= 1'b0; cn_zero <= 1'b0;
-            cn00 <= 0; cn11 <= 0; cn01r <= 0; cn01i <= 0;
             dbg_c00 <= 0; dbg_c11 <= 0; dbg_c01_re <= 0; dbg_c01_im <= 0;
-        end else begin
-            cn_valid <= c_valid;
-            if (c_valid) begin
-                cn00 <= m00; cn11 <= m11; cn01r <= m01r; cn01i <= m01i;
-                cn_zero <= c_zero;
-                dbg_c00 <= m00; dbg_c11 <= m11; dbg_c01_re <= m01r; dbg_c01_im <= m01i;
-            end
+        end else if (cn_valid) begin
+            dbg_c00 <= cn00; dbg_c11 <= cn11; dbg_c01_re <= cn01r; dbg_c01_im <= cn01i;
         end
     end
 

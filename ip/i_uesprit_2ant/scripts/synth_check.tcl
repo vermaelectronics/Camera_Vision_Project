@@ -10,8 +10,12 @@ set out     [file join $ip_root build synth]
 file mkdir $out
 
 read_verilog [glob [file join $ip_root rtl *.v]]
+set xdc [file join $out timing.xdc]
+set fh [open $xdc w]
+puts $fh "create_clock -name aclk -period $period \[get_ports aclk\]"
+close $fh
+read_xdc -mode out_of_context $xdc
 synth_design -top i_uesprit_2ant_axi -part $part -mode out_of_context -retiming
-create_clock -name aclk -period $period [get_ports aclk]
 opt_design
 place_design
 phys_opt_design
