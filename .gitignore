@@ -25,3 +25,6 @@ xsim.dir/
 !*.tcl
 !*.xdc
 !*.sdc
+
+# full LoopBack tree incl. vendor code (delivered directly, not versioned)
+LoopBack_Code_ESPRIT_full.zip
