@@ -24,13 +24,30 @@
 # ============================================================================
 set here [file dirname [file normalize [info script]]]
 
-if {[llength $argv] < 2} {
+# vitis_hls puts its own options (-f <script> ...) into argv ahead of the
+# -tclargs values on some releases, so locate the arguments instead of
+# assuming positions: everything after -tclargs if present, then the first
+# "iu"/"m" token is the algorithm and the token after it the repository.
+# Environment fallback: ESPRIT_HLS_ALGO, ESPRIT_HLS_REPO.
+set args $argv
+set ti [lsearch -exact $args -tclargs]
+if {$ti >= 0} { set args [lrange $args [expr {$ti + 1}] end] }
+set ai -1
+for {set i 0} {$i < [llength $args]} {incr i} {
+  if {[string tolower [lindex $args $i]] in {iu m}} { set ai $i; break }
+}
+if {$ai >= 0 && [llength $args] > $ai + 1} {
+  set algo [string tolower [lindex $args $ai]]
+  set repo [file normalize [lindex $args [expr {$ai + 1}]]]
+} elseif {[info exists ::env(ESPRIT_HLS_ALGO)] && [info exists ::env(ESPRIT_HLS_REPO)]} {
+  set algo [string tolower $::env(ESPRIT_HLS_ALGO)]
+  set repo [file normalize $::env(ESPRIT_HLS_REPO)]
+} else {
   puts "HLS_RESULT: FAIL - usage: vitis_hls -f run_hls.tcl -tclargs <iu|m> <hls_ip_repo_dir> \[cosim\]"
+  puts "HLS_RESULT: (or set ESPRIT_HLS_ALGO=iu|m and ESPRIT_HLS_REPO=<dir>)  argv was: $argv"
   exit 2
 }
-set algo  [string tolower [lindex $argv 0]]
-set repo  [file normalize [lindex $argv 1]]
-set cosim [expr {[lsearch -exact $argv cosim] >= 0}]
+set cosim [expr {[lsearch -exact $args cosim] >= 0}]
 
 switch -- $algo {
   iu { set tb_algo 0; set disp "ESPRIT I-UESPRIT DOA (2 elements)" }
