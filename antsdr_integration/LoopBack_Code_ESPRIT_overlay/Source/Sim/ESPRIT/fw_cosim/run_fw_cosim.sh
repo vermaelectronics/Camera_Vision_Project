@@ -18,7 +18,7 @@ if [[ "$IMPL" == hls ]]; then
   if [[ "$ALGO" == iuesprit ]]; then HM=0; else HM=1; fi
   GEN+=(-GHLS_CORE=1)
   HLSC="-DHLS_MODEL=$HM -I$HD -I$HLS_INC ${HLS_EXTRA_INC:+-I$HLS_EXTRA_INC}"
-  HLSF=("$HD/esprit_iu_hls.cpp" "$HD/esprit_m_hls.cpp")
+  HLSF=("$HD/iuesprit_hls.cpp" "$HD/mesprit_hls.cpp")
 fi
 W="$SRC/../Build/fw_cosim"; [[ "$ALGO" != both ]] && W="${W}_$ALGO"; [[ "$IMPL" == hls ]] && W="${W}_hls"
 mkdir -p "$W/stub"; echo "FW_COSIM: estimators: $ALGO ($IMPL)"

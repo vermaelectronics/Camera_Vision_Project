@@ -177,7 +177,7 @@ module gnss_passthrough #(
   input               s_axi_rready,
 
   // ---- v1.2 external HLS DOA estimator (s_axi_aclk domain, HLS_CORE = 1) ----
-  //  m_axis_doa -> esprit_*_hls/s_axis_x,  esprit_*_hls/m_axis_y -> s_axis_res
+  //  m_axis_doa -> *esprit_hls/s_axis_x,  *esprit_hls/m_axis_y -> s_axis_res
   output     [63:0]   m_axis_doa_tdata,
   output              m_axis_doa_tvalid,
   input               m_axis_doa_tready,

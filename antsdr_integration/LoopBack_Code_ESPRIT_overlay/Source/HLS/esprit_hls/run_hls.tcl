@@ -3,23 +3,24 @@
 #
 #  USAGE (from any working directory; the HLS project is created there):
 #      vitis_hls -f <LoopBack_Code>/Source/HLS/esprit_hls/run_hls.tcl \
-#                -tclargs <iu|m> <hls_ip_repo_dir> [cosim]
+#                -tclargs <mesprit|iuesprit> <hls_ip_repo_dir> [cosim]
 #
-#      iu    -> esprit_iu_hls  (I-UESPRIT)
-#      m     -> esprit_m_hls   (M-ESPRIT)
+#      mesprit   -> mesprit_hls   (M-ESPRIT)
+#      iuesprit  -> iuesprit_hls  (I-UESPRIT)
+#      (the short forms m / iu are accepted too)
 #      <hls_ip_repo_dir>  e.g. <LoopBack_Code>/Build/hls_repo
-#                         the IP is unpacked to <dir>/esprit_<algo>_hls/
+#                         the IP is unpacked to <dir>/<algo>_hls/
 #      cosim (optional)   also run RTL/C co-simulation (slower)
 #
 #  Steps: C simulation (tb_esprit_hls.cpp) -> C synthesis at 100 MHz for
 #  xc7z020clg400-2 -> [co-simulation] -> export to the Vivado IP catalog
-#  (VLNV antsdr:hls:esprit_<algo>_hls:1.0).
+#  (VLNV antsdr:hls:mesprit_hls:1.0 / antsdr:hls:iuesprit_hls:1.0).
 #
 #  Console markers:
 #      HLS_CSIM:   PASS | FAIL
 #      HLS_SYNTH:  PASS | FAIL   (+ report path)
 #      HLS_COSIM:  PASS | FAIL | skipped
-#      HLS_EXPORT: <dir>/esprit_<algo>_hls/component.xml
+#      HLS_EXPORT: <dir>/<algo>_hls/component.xml
 #      HLS_RESULT: PASS | FAIL
 # ============================================================================
 set here [file dirname [file normalize [info script]]]
@@ -27,14 +28,14 @@ set here [file dirname [file normalize [info script]]]
 # vitis_hls puts its own options (-f <script> ...) into argv ahead of the
 # -tclargs values on some releases, so locate the arguments instead of
 # assuming positions: everything after -tclargs if present, then the first
-# "iu"/"m" token is the algorithm and the token after it the repository.
+# mesprit/iuesprit (or m/iu) token is the algorithm, the next the repository.
 # Environment fallback: ESPRIT_HLS_ALGO, ESPRIT_HLS_REPO.
 set args $argv
 set ti [lsearch -exact $args -tclargs]
 if {$ti >= 0} { set args [lrange $args [expr {$ti + 1}] end] }
 set ai -1
 for {set i 0} {$i < [llength $args]} {incr i} {
-  if {[string tolower [lindex $args $i]] in {iu m}} { set ai $i; break }
+  if {[string tolower [lindex $args $i]] in {mesprit iuesprit m iu}} { set ai $i; break }
 }
 if {$ai >= 0 && [llength $args] > $ai + 1} {
   set algo [string tolower [lindex $args $ai]]
@@ -43,18 +44,18 @@ if {$ai >= 0 && [llength $args] > $ai + 1} {
   set algo [string tolower $::env(ESPRIT_HLS_ALGO)]
   set repo [file normalize $::env(ESPRIT_HLS_REPO)]
 } else {
-  puts "HLS_RESULT: FAIL - usage: vitis_hls -f run_hls.tcl -tclargs <iu|m> <hls_ip_repo_dir> \[cosim\]"
-  puts "HLS_RESULT: (or set ESPRIT_HLS_ALGO=iu|m and ESPRIT_HLS_REPO=<dir>)  argv was: $argv"
+  puts "HLS_RESULT: FAIL - usage: vitis_hls -f run_hls.tcl -tclargs <mesprit|iuesprit> <hls_ip_repo_dir> \[cosim\]"
+  puts "HLS_RESULT: (or set ESPRIT_HLS_ALGO=mesprit|iuesprit and ESPRIT_HLS_REPO=<dir>)  argv was: $argv"
   exit 2
 }
 set cosim [expr {[lsearch -exact $args cosim] >= 0}]
 
 switch -- $algo {
-  iu { set tb_algo 0; set disp "ESPRIT I-UESPRIT DOA (2 elements)" }
-  m  { set tb_algo 1; set disp "ESPRIT M-ESPRIT DOA (2 elements)" }
-  default { puts "HLS_RESULT: FAIL - algorithm '$algo': use iu or m"; exit 2 }
+  iu - iuesprit { set algo iuesprit; set tb_algo 0; set disp "I-UESPRIT DOA (ESPRIT, 2 elements)" }
+  m  - mesprit  { set algo mesprit;  set tb_algo 1; set disp "M-ESPRIT DOA (ESPRIT, 2 elements)" }
+  default { puts "HLS_RESULT: FAIL - algorithm '$algo': use mesprit or iuesprit"; exit 2 }
 }
-set top "esprit_${algo}_hls"
+set top "${algo}_hls"
 puts "HLS_STAGE: building $top ($disp) into $repo"
 
 open_project -reset "hls_${top}"

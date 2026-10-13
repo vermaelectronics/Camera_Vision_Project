@@ -1,5 +1,5 @@
 // ============================================================================
-//  tb_esprit_hls.cpp -- C-simulation testbench for esprit_iu_hls / esprit_m_hls
+//  tb_esprit_hls.cpp -- C-simulation testbench for iuesprit_hls / mesprit_hls
 // ----------------------------------------------------------------------------
 //  Build selects the kernel:  -DTB_ALGO=0 (I-UESPRIT)  or  -DTB_ALGO=1 (M-ESPRIT)
 //  (run_hls.tcl passes it through add_files -tb -cflags).
@@ -122,10 +122,10 @@ static Res run_kernel(const Win &w, int log2_snap, int p_log2, bool cov, unsigne
         in.write(s);
     }
 #if TB_ALGO == 0
-    esprit_iu_hls(in, out, log2_snap, p_log2, cov ? 1 : 0, mu_q30, k_q30);
+    iuesprit_hls(in, out, log2_snap, p_log2, cov ? 1 : 0, mu_q30, k_q30);
     (void)uctol_q24;
 #else
-    esprit_m_hls(in, out, log2_snap, p_log2, cov ? 1 : 0, mu_q30, k_q30, uctol_q24);
+    mesprit_hls(in, out, log2_snap, p_log2, cov ? 1 : 0, mu_q30, k_q30, uctol_q24);
 #endif
     Res r = {0, 0, 0, 0, 0};
     *pkt_ok = (out.size() == (size_t)ESPRIT_PKT_WORDS) && in.empty();
@@ -142,7 +142,7 @@ static Res run_kernel(const Win &w, int log2_snap, int p_log2, bool cov, unsigne
 }
 
 int main() {
-    const char *name = TB_ALGO == 0 ? "I-UESPRIT (esprit_iu_hls)" : "M-ESPRIT (esprit_m_hls)";
+    const char *name = TB_ALGO == 0 ? "I-UESPRIT (iuesprit_hls)" : "M-ESPRIT (mesprit_hls)";
     std::printf("ESPRIT_HLS_TB: ===== %s C-simulation =====\n", name);
     const unsigned MU = 1024;            // mu = 2^-20
     const int K = 341782638;             // k = 1/pi (d = lambda/2), Q2.30

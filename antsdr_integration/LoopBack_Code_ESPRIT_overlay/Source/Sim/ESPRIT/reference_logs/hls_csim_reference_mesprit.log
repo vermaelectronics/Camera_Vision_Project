@@ -1,4 +1,4 @@
-ESPRIT_HLS_TB: ===== M-ESPRIT (esprit_m_hls) C-simulation =====
+ESPRIT_HLS_TB: ===== M-ESPRIT (mesprit_hls) C-simulation =====
 ESPRIT_HLS_TB:   sweep           true  -60.00  kernel  -60.0692  ref  -60.0692  |psi| 0.9994  flags 0x0
 ESPRIT_HLS_TB: sweep -60 deg: kernel = reference (< 0.01 deg)             PASS
 ESPRIT_HLS_TB: sweep -60 deg: within 0.5 deg of the true angle            PASS

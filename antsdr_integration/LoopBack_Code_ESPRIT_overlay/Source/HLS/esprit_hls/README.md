@@ -1,4 +1,4 @@
-# ESPRIT HLS IPs: `esprit_iu_hls` (I-UESPRIT) and `esprit_m_hls` (M-ESPRIT)
+# ESPRIT HLS IPs: `iuesprit_hls` (I-UESPRIT) and `mesprit_hls` (M-ESPRIT)
 
 These are Vitis HLS versions of the two ESPRIT DOA estimators from Li et al., *IEEE TIM* 74 (2025) 2003209. Each one sits in the
 block design as its **own cell**, the same way as the SMI power-inversion HLS IP:
@@ -14,7 +14,7 @@ block design as its **own cell**, the same way as the SMI power-inversion HLS IP
                  │                           │   doa_cfg_uctol_q24 ─────►│ uctol_q24[31:0]  (M)  │
                  │                           │   doa_hls_rst_n     ─────►│ ap_rst_n              │
                  │                           │◄──────────────────────────│ m_axis_y   (AXIS 32b) │
-                 └──────────────────────────┘   s_axis_res              │ esprit_m_hls_0        │
+                 └──────────────────────────┘   s_axis_res              │ mesprit_hls_0        │
                   sys_cpu_clk (100 MHz) ────────────────────────────────►│ ap_clk                │
                                                                           └──────────────────────┘
 ```
@@ -27,8 +27,8 @@ use. `DOA_CAPS` bit 2 tells the firmware that the estimator is an HLS IP.
 |---|---|
 | `esprit_hls.h` | interface, types, result-packet layout |
 | `esprit_core.h` | the algorithm, shared by both tops (moments, Eq. (7) cumulant, C^p, closed form, DOA) |
-| `esprit_iu_hls.cpp` | top function `esprit_iu_hls` (I-UESPRIT) |
-| `esprit_m_hls.cpp` | top function `esprit_m_hls` (M-ESPRIT, adds `uctol_q24` and the unit-circle flag) |
+| `iuesprit_hls.cpp` | top function `iuesprit_hls` (I-UESPRIT) |
+| `mesprit_hls.cpp` | top function `mesprit_hls` (M-ESPRIT, adds `uctol_q24` and the unit-circle flag) |
 | `tb_esprit_hls.cpp` | C-sim testbench: compares against an independent double-precision reference and the true angle |
 | `run_hls.tcl` | runs csim → csynth → (cosim) → export to the IP catalog |
 
@@ -46,7 +46,7 @@ use. `DOA_CAPS` bit 2 tells the firmware that the estimator is an HLS IP.
 
 ### Area history
 The first version used double precision and the HLS math library. Vitis HLS 2023.2 reported 260 DSP48 and 43.7k LUT for
-`esprit_m_hls`, which is 118% / 82% of the XC7Z020 and does not fit. The shared single-precision version replaces it.
+`mesprit_hls`, which is 118% / 82% of the XC7Z020 and does not fit. The shared single-precision version replaces it.
 
 ## Verified (here, with g++ and the Xilinx `ap_int` headers)
 - **C-sim:** I-UESPRIT 36/36 checks and M-ESPRIT 37/37. The kernel matches the double-precision reference within
@@ -62,8 +62,8 @@ The first version used double precision and the HLS math library. Vitis HLS 2023
 ```bash
 source <Vitis>/settings64.sh
 mkdir -p <LoopBack_Code>/Build/hls_work && cd <LoopBack_Code>/Build/hls_work
-vitis_hls -f <LoopBack_Code>/Source/HLS/esprit_hls/run_hls.tcl -tclargs m  <LoopBack_Code>/Build/hls_repo
-vitis_hls -f <LoopBack_Code>/Source/HLS/esprit_hls/run_hls.tcl -tclargs iu <LoopBack_Code>/Build/hls_repo
+vitis_hls -f <LoopBack_Code>/Source/HLS/esprit_hls/run_hls.tcl -tclargs mesprit  <LoopBack_Code>/Build/hls_repo
+vitis_hls -f <LoopBack_Code>/Source/HLS/esprit_hls/run_hls.tcl -tclargs iuesprit <LoopBack_Code>/Build/hls_repo
 ```
 Then create the project with `GNSS_DOA_IMPL=hls`, `GNSS_DOA_ALGO=mesprit|iuesprit` and
 `GNSS_HLS_IP_REPO=<LoopBack_Code>/Build/hls_repo` (see `Docs/ESPRIT/README_ESPRIT.md`, section 7.1c).

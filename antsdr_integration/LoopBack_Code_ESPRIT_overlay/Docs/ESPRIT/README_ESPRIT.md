@@ -450,19 +450,19 @@ Simulation of a single-estimator build: set `GNSS_DOA_ALGO` before
 
 ### 7.1c HLS variants: ESPRIT as a Vitis HLS IP in the block design
 
-`GNSS_DOA_IMPL=hls` moves the estimator out of `gnss_passthrough` into its own block-design cell, `esprit_iu_hls_0` or
-`esprit_m_hls_0`, built from `Source/HLS/esprit_hls` (see the README there for the diagram). `gnss_passthrough` is packaged
+`GNSS_DOA_IMPL=hls` moves the estimator out of `gnss_passthrough` into its own block-design cell, `iuesprit_hls_0` or
+`mesprit_hls_0`, built from `Source/HLS/esprit_hls` (see the README there for the diagram). `gnss_passthrough` is packaged
 once and serves every variant. With `HLS_CORE=1` it streams the calibrated snapshots out on `m_axis_doa`, drives the HLS
 IP's scalar configuration ports and reset, and takes the 9-word result packet back on `s_axis_res` into the usual registers.
 
 | Variant | Environment | Project directory | Block-design cell |
 |---|---|---|---|
-| M-ESPRIT HLS | `GNSS_DOA_IMPL=hls GNSS_DOA_ALGO=mesprit` | `Vivado/Project_HLS_MESPRIT` | `esprit_m_hls_0` |
-| I-UESPRIT HLS | `GNSS_DOA_IMPL=hls GNSS_DOA_ALGO=iuesprit` | `Vivado/Project_HLS_IUESPRIT` | `esprit_iu_hls_0` |
+| M-ESPRIT HLS | `GNSS_DOA_IMPL=hls GNSS_DOA_ALGO=mesprit` | `Vivado/Project_HLS_MESPRIT` | `mesprit_hls_0` |
+| I-UESPRIT HLS | `GNSS_DOA_IMPL=hls GNSS_DOA_ALGO=iuesprit` | `Vivado/Project_HLS_IUESPRIT` | `iuesprit_hls_0` |
 
 Both variants also need `GNSS_HLS_IP_REPO=<LoopBack_Code>/Build/hls_repo`, filled by
-`vitis_hls -f Source/HLS/esprit_hls/run_hls.tcl -tclargs <m|iu> <repo>`. Step 3 prints
-`GNSS_DOA_IMPL: hls (esprit_m_hls_0 ...)`. `report_doa.tcl` prints the HLS cell's utilisation, and the firmware boot line
+`vitis_hls -f Source/HLS/esprit_hls/run_hls.tcl -tclargs <mesprit|iuesprit> <repo>`. Step 3 prints
+`GNSS_DOA_IMPL: hls (mesprit_hls_0 ...)`. `report_doa.tcl` prints the HLS cell's utilisation, and the firmware boot line
 says `(Vitis HLS IP in the block design)`.
 
 ### 7.2 What to read in the Vivado Tcl console after step 5

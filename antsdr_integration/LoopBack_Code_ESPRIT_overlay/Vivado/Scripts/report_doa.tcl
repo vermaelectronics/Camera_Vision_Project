@@ -79,7 +79,7 @@ foreach sub {"" "/g_iuesprit.u_core" "/g_mesprit.u_core" "/u_afifo" "/u_tgen"} {
 }
 
 # HLS variant (GNSS_DOA_IMPL=hls): the estimator is its own block-design cell
-set hls [get_cells -quiet -hier -filter {NAME =~ */esprit_*_hls_0 && !IS_PRIMITIVE}]
+set hls [get_cells -quiet -hier -filter {NAME =~ */*esprit_hls_0 && !IS_PRIMITIVE}]
 foreach h $hls {
   set prims [get_cells -quiet -hier -filter "NAME =~ [get_property NAME $h]/* && IS_PRIMITIVE"]
   set lut  [llength [filter -quiet $prims {REF_NAME =~ LUT*}]]
@@ -93,7 +93,7 @@ foreach h $hls {
 }
 if {[llength $hls] == 0 && [llength [get_cells -quiet "[get_property NAME $doa]/g_iuesprit.u_core"]] == 0 \
     && [llength [get_cells -quiet "[get_property NAME $doa]/g_mesprit.u_core"]] == 0} {
-  puts "DOA_IMPL: WARNING - neither an RTL estimator core nor an esprit_*_hls_0 cell was found"
+  puts "DOA_IMPL: WARNING - neither an RTL estimator core nor an *esprit_hls_0 cell was found"
 }
 
 # constraint coverage (empty pattern = constraint silently unused)

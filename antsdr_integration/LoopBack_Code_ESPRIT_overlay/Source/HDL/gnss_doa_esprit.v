@@ -105,7 +105,7 @@ module gnss_doa_esprit #(
   parameter ENABLE_MESPRIT  = 1,
   parameter MAX_LOG2_SNAP   = 14,
   // 0: estimators are the RTL cores below.  1: the estimator is an external
-  // Vitis HLS IP (esprit_iu_hls / esprit_m_hls) in the block design, fed by
+  // Vitis HLS IP (iuesprit_hls / mesprit_hls) in the block design, fed by
   // m_axis_doa and answering on s_axis_res. Exactly one of ENABLE_IUESPRIT /
   // ENABLE_MESPRIT selects which result registers the HLS IP fills.
   parameter HLS_CORE        = 0

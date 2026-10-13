@@ -489,11 +489,11 @@ puts "GNSS_DOA_ALGO: $gnss_doa_algo (ENABLE_IUESPRIT=$gnss_en_i, ENABLE_MESPRIT=
 #                   AXI-Stream from gnss_passthrough (same pattern as the SMI
 #                   power-inversion HLS IP):
 #
-#     gnss_passthrough/m_axis_doa ---> esprit_*_hls/s_axis_x
-#     esprit_*_hls/m_axis_y       ---> gnss_passthrough/s_axis_res
-#     gnss_passthrough/doa_cfg_*  ---> esprit_*_hls/{log2_snap,p_log2,use_cov,mu_q30,k_q30[,uctol_q24]}
-#     gnss_passthrough/doa_hls_rst_n -> esprit_*_hls/ap_rst_n
-#     sys_cpu_clk                 ---> esprit_*_hls/ap_clk
+#     gnss_passthrough/m_axis_doa ---> *esprit_hls/s_axis_x
+#     *esprit_hls/m_axis_y       ---> gnss_passthrough/s_axis_res
+#     gnss_passthrough/doa_cfg_*  ---> *esprit_hls/{log2_snap,p_log2,use_cov,mu_q30,k_q30[,uctol_q24]}
+#     gnss_passthrough/doa_hls_rst_n -> *esprit_hls/ap_rst_n
+#     sys_cpu_clk                 ---> *esprit_hls/ap_clk
 #
 #   The HLS IP is built by Source/HLS/esprit_hls/run_hls.tcl into the
 #   directory named by GNSS_HLS_IP_REPO. Register map and firmware unchanged.
@@ -503,8 +503,8 @@ if {[info exists ::env(GNSS_DOA_IMPL)] && $::env(GNSS_DOA_IMPL) ne ""} {
 }
 if {$gnss_doa_impl eq "hls"} {
   switch -- $gnss_doa_algo {
-    iuesprit { set gnss_hls_ip esprit_iu_hls }
-    mesprit  { set gnss_hls_ip esprit_m_hls }
+    iuesprit { set gnss_hls_ip iuesprit_hls }
+    mesprit  { set gnss_hls_ip mesprit_hls }
     default  { error "ERROR: GNSS_DOA_IMPL=hls builds ONE HLS estimator: set GNSS_DOA_ALGO to iuesprit or mesprit" }
   }
   if {![info exists ::env(GNSS_HLS_IP_REPO)]} {
@@ -515,7 +515,7 @@ if {$gnss_doa_impl eq "hls"} {
   if {![file exists [file join $gnss_hls_repo $gnss_hls_ip component.xml]]} {
     error "ERROR: $gnss_hls_repo/$gnss_hls_ip/component.xml not found. Build it first:\
            vitis_hls -f <LoopBack_Code>/Source/HLS/esprit_hls/run_hls.tcl -tclargs\
-           [expr {$gnss_hls_ip eq "esprit_iu_hls" ? "iu" : "m"}] $gnss_hls_repo"
+           [expr {$gnss_hls_ip eq "iuesprit_hls" ? "iuesprit" : "mesprit"}] $gnss_hls_repo"
   }
   set gnss_repo_paths [get_property ip_repo_paths [current_fileset]]
   if {[lsearch -exact $gnss_repo_paths $gnss_hls_repo] < 0} {
@@ -536,7 +536,7 @@ if {$gnss_doa_impl eq "hls"} {
   ad_connect gnss_passthrough/doa_cfg_use_cov   $gnss_hls_cell/use_cov
   ad_connect gnss_passthrough/doa_cfg_mu_q30    $gnss_hls_cell/mu_q30
   ad_connect gnss_passthrough/doa_cfg_k_q30     $gnss_hls_cell/k_q30
-  if {$gnss_hls_ip eq "esprit_m_hls"} {
+  if {$gnss_hls_ip eq "mesprit_hls"} {
     ad_connect gnss_passthrough/doa_cfg_uctol_q24 $gnss_hls_cell/uctol_q24
   }
   puts "GNSS_DOA_IMPL: hls ($gnss_hls_cell from $gnss_hls_repo, gnss_passthrough HLS_CORE=1)"

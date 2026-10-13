@@ -15,7 +15,7 @@
 //
 //  HLS mode (-DHLS_MODEL=0|1, GNSS_DOA_IMPL=hls in run_fw_cosim.sh): the RTL
 //  is built with HLS_CORE = 1 and the Vitis HLS C++ kernel
-//  (Source/HLS/esprit_hls, esprit_iu_hls or esprit_m_hls) is called as the
+//  (Source/HLS/esprit_hls, iuesprit_hls or mesprit_hls) is called as the
 //  external HLS IP on m_axis_doa / s_axis_res, with a compute stall per
 //  window, so the same firmware runs against the HLS block-design variant.
 //
@@ -71,10 +71,10 @@ static void hls_after_rising_edge(bool pre_tvalid, uint64_t pre_tdata, bool pre_
             hls::stream<snap_t> in; hls::stream<word_t> out;
             for (size_t n = 0; n < N; n++) { in.write((snap_t)hls_in.front()); hls_in.pop_front(); }
 #if HLS_MODEL == 0
-            esprit_iu_hls(in, out, top->doa_cfg_log2_snap, top->doa_cfg_p_log2, top->doa_cfg_use_cov,
+            iuesprit_hls(in, out, top->doa_cfg_log2_snap, top->doa_cfg_p_log2, top->doa_cfg_use_cov,
                           top->doa_cfg_mu_q30, (int)top->doa_cfg_k_q30);
 #else
-            esprit_m_hls(in, out, top->doa_cfg_log2_snap, top->doa_cfg_p_log2, top->doa_cfg_use_cov,
+            mesprit_hls(in, out, top->doa_cfg_log2_snap, top->doa_cfg_p_log2, top->doa_cfg_use_cov,
                          top->doa_cfg_mu_q30, (int)top->doa_cfg_k_q30, top->doa_cfg_uctol_q24);
 #endif
             while (!out.empty()) hls_out.push_back((uint32_t)out.read());
@@ -282,7 +282,7 @@ int main(int argc, char **argv) {
 
 #ifdef HLS_MODEL
     printf("FW_COSIM: HLS kernel (%s) processed %lu windows\n",
-           HLS_MODEL == 0 ? "esprit_iu_hls" : "esprit_m_hls", hls_windows);
+           HLS_MODEL == 0 ? "iuesprit_hls" : "mesprit_hls", hls_windows);
     check("estimator results came from the HLS kernel (DOA_CAPS bit 2 set)",
           (gnss_pt_read(DOA_REG_CAPS) & 4U) != 0 && hls_windows > 0);
 #endif

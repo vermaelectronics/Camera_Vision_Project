@@ -63,8 +63,8 @@ only the estimator(s) present.
 ## 2c. HLS variants (estimator as a Vitis HLS IP cell)
 
 ```bash
-vitis_hls -f Source/HLS/esprit_hls/run_hls.tcl -tclargs m  $PWD/Build/hls_repo   # esprit_m_hls
-vitis_hls -f Source/HLS/esprit_hls/run_hls.tcl -tclargs iu $PWD/Build/hls_repo   # esprit_iu_hls
+vitis_hls -f Source/HLS/esprit_hls/run_hls.tcl -tclargs mesprit  $PWD/Build/hls_repo   # mesprit_hls
+vitis_hls -f Source/HLS/esprit_hls/run_hls.tcl -tclargs iuesprit $PWD/Build/hls_repo   # iuesprit_hls
 export GNSS_DOA_IMPL=hls GNSS_DOA_ALGO=mesprit GNSS_HLS_IP_REPO=$PWD/Build/hls_repo
 mkdir -p Vivado/Project_HLS_MESPRIT && cd Vivado/Project_HLS_MESPRIT
 vivado -mode batch -source ../Scripts/create_project.tcl

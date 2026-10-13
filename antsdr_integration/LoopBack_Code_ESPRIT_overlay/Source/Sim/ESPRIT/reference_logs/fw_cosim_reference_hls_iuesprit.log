@@ -72,7 +72,7 @@ DOA:   TG_FTW 0x0147ae14  TG_DPHASE 0x30fbffff  TG_CFG 0x00400064
 DOA: ---- ESPRIT direction of arrival (source: LIVE RX1/RX2, cumulant) ----
 DOA:   I-UESPRIT window #0        theta  0.000 deg   avg #0      mean  0.000 deg  std  0.000 deg  phi  0.0000 rad  psi  0.0000  flags 0x0
 DOA:   snapshots 9  peak |x0| 0  |x1| 0 (of 32767)
-FW_COSIM: HLS kernel (esprit_iu_hls) processed 1271 windows
+FW_COSIM: HLS kernel (iuesprit_hls) processed 1271 windows
 FW_COSIM: estimator results came from the HLS kernel (DOA_CAPS bit 2 set) PASS
 FW_COSIM: simulated time 113.700 ms
 FW_COSIM_RESULT: PASS

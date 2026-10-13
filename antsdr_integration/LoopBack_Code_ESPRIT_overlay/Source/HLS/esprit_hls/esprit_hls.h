@@ -6,8 +6,8 @@
 //  Unitary-Transformation Form for Computationally Efficient DOA Estimation
 //  on FPGA", IEEE Trans. Instrum. Meas., vol. 74, 2025, Art. 2003209.
 //
-//    esprit_iu_hls : I-UESPRIT (Sec. III-B, real-valued unitary form)
-//    esprit_m_hls  : M-ESPRIT  (Sec. III-A, complex, unit-circle test)
+//    iuesprit_hls : I-UESPRIT (Sec. III-B, real-valued unitary form)
+//    mesprit_hls  : M-ESPRIT  (Sec. III-A, complex, unit-circle test)
 //
 //  Both use the 4th-order cumulant matrix of Eq. (7) (or the covariance when
 //  use_cov = 1), the C^p sharpening of Eq. (38) and the closed forms for
@@ -62,21 +62,21 @@ const unsigned FLAG_NO_SIGNAL  = 1u << 0;
 const unsigned FLAG_AMBIGUOUS  = 1u << 1;
 const unsigned FLAG_OFF_CIRCLE = 1u << 3;   // M-ESPRIT only
 
-void esprit_iu_hls(hls::stream<snap_t> &s_axis_x,
-                   hls::stream<word_t> &m_axis_y,
-                   ap_uint<5>  log2_snap,
-                   ap_uint<2>  p_log2,
-                   ap_uint<1>  use_cov,
-                   ap_uint<32> mu_q30,
-                   ap_int<32>  k_q30);
-
-void esprit_m_hls(hls::stream<snap_t> &s_axis_x,
+void iuesprit_hls(hls::stream<snap_t> &s_axis_x,
                   hls::stream<word_t> &m_axis_y,
                   ap_uint<5>  log2_snap,
                   ap_uint<2>  p_log2,
                   ap_uint<1>  use_cov,
                   ap_uint<32> mu_q30,
-                  ap_int<32>  k_q30,
-                  ap_uint<32> uctol_q24);
+                  ap_int<32>  k_q30);
+
+void mesprit_hls(hls::stream<snap_t> &s_axis_x,
+                 hls::stream<word_t> &m_axis_y,
+                 ap_uint<5>  log2_snap,
+                 ap_uint<2>  p_log2,
+                 ap_uint<1>  use_cov,
+                 ap_uint<32> mu_q30,
+                 ap_int<32>  k_q30,
+                 ap_uint<32> uctol_q24);
 
 #endif
