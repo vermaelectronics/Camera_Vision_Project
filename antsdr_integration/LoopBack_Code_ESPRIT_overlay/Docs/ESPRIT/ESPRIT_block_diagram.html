@@ -1,0 +1,243 @@
+<!doctype html><html><head><meta charset="utf-8"><title>ESPRIT Block Diagram</title><style>
+:root{
+  --bg:#f7f7f5; --panel:#ffffff; --fg:#1d1f21; --muted:#5d6369; --line:#8a9096;
+  --box:#ffffff; --box-stroke:#9aa1a8; --soft:#eef0f2;
+  --accent:#0b7a75; --accent-bg:#e3f4f2; --accent-stroke:#0b7a75;
+  --warn:#9a5b00; --warn-bg:#fdf3e1; --code-bg:#f0f1f3;
+  --cdc:#7a4fb5; --cdc-bg:#f1eafb;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#15171a; --panel:#1d2024; --fg:#e6e7e9; --muted:#a3a9b0; --line:#7d848c;
+    --box:#23272c; --box-stroke:#59616a; --soft:#2a2e33;
+    --accent:#4fc7bf; --accent-bg:#14322f; --accent-stroke:#4fc7bf;
+    --warn:#f0b45a; --warn-bg:#3a2c14; --code-bg:#262a2f;
+    --cdc:#b897ec; --cdc-bg:#2c2340;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#15171a; --panel:#1d2024; --fg:#e6e7e9; --muted:#a3a9b0; --line:#7d848c;
+  --box:#23272c; --box-stroke:#59616a; --soft:#2a2e33;
+  --accent:#4fc7bf; --accent-bg:#14322f; --accent-stroke:#4fc7bf;
+  --warn:#f0b45a; --warn-bg:#3a2c14; --code-bg:#262a2f;
+  --cdc:#b897ec; --cdc-bg:#2c2340;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,Ubuntu,sans-serif}
+main{max-width:1060px;margin:0 auto;padding:28px 16px 64px}
+h1{font-size:1.9rem;line-height:1.25;margin:.2em 0 .3em}
+h2{font-size:1.35rem;margin:2.2em 0 .6em;padding-top:.4em;border-top:1px solid var(--soft)}
+h3{font-size:1.05rem;margin:1.4em 0 .4em}
+p,li{max-width:76ch}
+.lede{color:var(--muted);font-size:1.05rem;max-width:76ch}
+.key{background:var(--accent-bg);border-left:4px solid var(--accent);padding:14px 18px;border-radius:8px;margin:20px 0}
+.key strong{color:var(--accent)}
+.warn{background:var(--warn-bg);border-left:4px solid var(--warn);padding:12px 16px;border-radius:8px;margin:18px 0}
+.warn strong{color:var(--warn)}
+figure{margin:18px 0 8px;background:var(--panel);border:1px solid var(--soft);border-radius:12px;padding:12px;overflow-x:auto}
+figure svg{display:block;width:100%;height:auto;min-width:640px}
+figcaption{color:var(--muted);font-size:.9rem;margin-top:6px}
+code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.86em}
+code{background:var(--code-bg);padding:1px 5px;border-radius:4px;overflow-wrap:anywhere}
+pre{background:var(--code-bg);padding:12px 14px;border-radius:8px;overflow-x:auto;line-height:1.45;margin:8px 0 14px}
+pre code{background:none;padding:0}
+pre .c{color:var(--muted)} pre .h{color:var(--accent);font-weight:600}
+table{border-collapse:collapse;width:100%;margin:10px 0 16px;font-size:.93rem}
+th,td{border-bottom:1px solid var(--soft);padding:8px 10px;text-align:left;vertical-align:top}
+th{color:var(--muted);font-weight:600}
+.tablewrap{overflow-x:auto}
+ol.steps{list-style:none;padding:0;margin:14px 0;counter-reset:s}
+ol.steps>li{counter-increment:s;position:relative;background:var(--panel);border:1px solid var(--soft);
+  border-radius:10px;padding:14px 16px 10px 58px;margin:0 0 12px;max-width:none}
+ol.steps>li::before{content:counter(s);position:absolute;left:14px;top:13px;width:30px;height:30px;border-radius:50%;
+  background:var(--accent);color:var(--bg);font-weight:700;display:flex;align-items:center;justify-content:center}
+ol.steps>li.new{border-color:var(--accent)}
+.tag{display:inline-block;font-size:.72rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+  padding:1px 7px;border-radius:999px;margin-left:6px;vertical-align:2px}
+.tag.n{background:var(--accent-bg);color:var(--accent)}
+.tag.u{background:var(--soft);color:var(--muted)}
+.chain{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:10px 0 16px}
+.chip{background:var(--panel);border:1px solid var(--box-stroke);border-radius:8px;padding:6px 10px;font-size:.9rem}
+.arrow{color:var(--muted)}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}
+.card{background:var(--panel);border:1px solid var(--soft);border-radius:10px;padding:12px 16px}
+.card h3{margin-top:.2em}
+.muted{color:var(--muted)}
+.toc{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:.92rem;margin:12px 0 0}
+.toc a{color:var(--accent);text-decoration:none}
+.toc a:hover{text-decoration:underline}
+/* SVG */
+svg text{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;fill:var(--fg)}
+svg .t{font-size:14px} svg .tb{font-size:15px;font-weight:700} svg .ts{font-size:12px;fill:var(--muted)}
+svg .tm{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px}
+svg .box{fill:var(--box);stroke:var(--box-stroke);stroke-width:1.4}
+svg .soft{fill:var(--soft);stroke:var(--box-stroke);stroke-width:1}
+svg .new{fill:var(--accent-bg);stroke:var(--accent-stroke);stroke-width:2}
+svg .newtxt{fill:var(--accent);font-weight:700}
+svg .cdc{fill:var(--cdc-bg);stroke:var(--cdc);stroke-width:1.8;stroke-dasharray:5 3}
+svg .cdctxt{fill:var(--cdc);font-weight:700}
+svg .wire{stroke:var(--line);stroke-width:1.6;fill:none}
+svg .wireN{stroke:var(--accent);stroke-width:2.2;fill:none}
+svg .band{fill:var(--soft);opacity:.55}
+svg .dash{stroke:var(--cdc);stroke-width:1.5;stroke-dasharray:6 4;fill:none}
+</style>
+<style>main{max-width:1100px;padding:20px} figure svg{min-width:0} h1{font-size:1.4rem} h2{border:0;margin:1em 0 .2em;font-size:1.1rem}</style></head>
+<body><main><h1>ESPRIT DOA in the ANTSDR E310 LoopBack block design</h1>
+<h2>1. Block design: ESPRIT lives inside gnss_passthrough (v1.2)</h2><figure>
+<svg viewBox="0 0 1000 560" role="img" aria-label="Block design: PS7, AXI interconnect, AD9361, axi_ad9361, gnss_passthrough containing the new ESPRIT DOA block">
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="var(--line)"/></marker>
+    <marker id="arN" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/></marker>
+  </defs>
+
+  <!-- PS7 -->
+  <rect class="box" x="30" y="30" width="200" height="84" rx="8"/>
+  <text class="tb" x="130" y="64" text-anchor="middle">Zynq PS7 (ARM A9)</text>
+  <text class="ts" x="130" y="86" text-anchor="middle">firmware, sys_cpu_clk 100 MHz</text>
+
+  <!-- interconnect -->
+  <rect class="box" x="310" y="30" width="230" height="84" rx="8"/>
+  <text class="tb" x="425" y="64" text-anchor="middle">AXI CPU interconnect</text>
+  <text class="ts" x="425" y="86" text-anchor="middle">ad_cpu_interconnect</text>
+  <line class="wire" x1="230" y1="72" x2="308" y2="72" marker-end="url(#ar)"/>
+  <text class="ts" x="269" y="64" text-anchor="middle">M_AXI_GP0</text>
+
+  <!-- AD9361 chip -->
+  <rect class="soft" x="30" y="270" width="150" height="140" rx="8"/>
+  <text class="tb" x="105" y="318" text-anchor="middle">AD9361</text>
+  <text class="ts" x="105" y="340" text-anchor="middle">RF transceiver</text>
+  <text class="ts" x="105" y="358" text-anchor="middle">2 RX · 2 TX</text>
+  <text class="ts" x="105" y="384" text-anchor="middle">RX1 = element 0</text>
+  <text class="ts" x="105" y="400" text-anchor="middle">RX2 = element 1</text>
+
+  <!-- axi_ad9361 -->
+  <rect class="box" x="260" y="250" width="200" height="180" rx="8"/>
+  <text class="tb" x="360" y="282" text-anchor="middle">axi_ad9361</text>
+  <text class="ts" x="360" y="302" text-anchor="middle">ADI interface core</text>
+  <text class="ts" x="360" y="320" text-anchor="middle">l_clk = rx_clk (8 ns)</text>
+  <text class="ts" x="360" y="338" text-anchor="middle">regs 0x7902_0000</text>
+  <line class="wire" x1="180" y1="315" x2="258" y2="315" marker-end="url(#ar)"/>
+  <line class="wire" x1="258" y1="375" x2="182" y2="375" marker-end="url(#ar)"/>
+  <text class="ts" x="219" y="306" text-anchor="middle">LVDS RX</text>
+  <text class="ts" x="219" y="366" text-anchor="middle">LVDS TX</text>
+
+  <!-- IC to axi_ad9361 -->
+  <line class="wire" x1="360" y1="114" x2="360" y2="248" marker-end="url(#ar)"/>
+
+  <!-- gnss_passthrough -->
+  <rect class="box" x="600" y="200" width="370" height="262" rx="10" style="stroke-width:2"/>
+  <text class="tb" x="785" y="226" text-anchor="middle">gnss_passthrough  (custom IP, v1.2)</text>
+  <text class="ts" x="785" y="244" text-anchor="middle">VLNV antsdr:gnss:gnss_passthrough:1.0</text>
+  <rect class="soft" x="620" y="258" width="330" height="66" rx="6"/>
+  <text class="t" x="785" y="284" text-anchor="middle">RX→TX passthrough, elastic FIFOs, DAC mux</text>
+  <text class="ts" x="785" y="304" text-anchor="middle">v1.1 logic, unchanged</text>
+  <rect class="new" x="620" y="338" width="330" height="108" rx="6"/>
+  <text class="t newtxt" x="785" y="364" text-anchor="middle">u_doa = gnss_doa_esprit   (NEW)</text>
+  <text class="t" x="785" y="388" text-anchor="middle">I-UESPRIT  ·  M-ESPRIT</text>
+  <text class="ts" x="785" y="410" text-anchor="middle">registers 0x100–0x194 of the same AXI port</text>
+  <text class="ts" x="785" y="430" text-anchor="middle">receive-only: taps RX, never drives TX</text>
+
+  <!-- IC to gnss -->
+  <path class="wireN" d="M500,114 V160 H880 V198" marker-end="url(#arN)"/>
+  <text class="ts" x="690" y="152" text-anchor="middle" style="fill:var(--accent);font-weight:600">s_axi  ·  base 0x43C0_0000  (4 KB)</text>
+
+  <!-- RX tap -->
+  <line class="wireN" x1="460" y1="290" x2="598" y2="290" marker-end="url(#arN)"/>
+  <text class="ts" x="529" y="281" text-anchor="middle">adc_data_{i,q}{0,1}</text>
+  <text class="ts" x="529" y="304" text-anchor="middle">valid, enable (RX tap)</text>
+  <line class="wire" x1="460" y1="342" x2="598" y2="342" marker-end="url(#ar)"/>
+  <text class="ts" x="529" y="334" text-anchor="middle">l_clk, rst</text>
+  <line class="wire" x1="598" y1="400" x2="462" y2="400" marker-end="url(#ar)"/>
+  <text class="ts" x="529" y="392" text-anchor="middle">dac_data_{i,q}{0,1}</text>
+  <text class="ts" x="529" y="416" text-anchor="middle">(TX samples back)</text>
+
+  <!-- DAC FIFO -->
+  <rect class="box" x="600" y="492" width="370" height="50" rx="8"/>
+  <text class="t" x="785" y="522" text-anchor="middle">axi_ad9361_dac_fifo  (DMA / DDS TX data)</text>
+  <line class="wire" x1="785" y1="492" x2="785" y2="464" marker-end="url(#ar)"/>
+  <text class="ts" x="850" y="482" text-anchor="middle">dma_dac_data_*</text>
+
+  <!-- ADC DMA path -->
+  <rect class="soft" x="200" y="478" width="330" height="62" rx="8"/>
+  <text class="t" x="365" y="503" text-anchor="middle">ADC capture path (unchanged)</text>
+  <text class="ts" x="365" y="524" text-anchor="middle">util_wfifo → util_cpack2 → axi_dmac → DDR</text>
+  <line class="wire" x1="360" y1="430" x2="360" y2="476" marker-end="url(#ar)"/>
+</svg>
+
+</figure>
+<h2>2. Inside u_doa: DOA processing chain</h2><figure>
+<svg viewBox="0 0 1100 330" role="img" aria-label="DOA pipeline: capture and decimation in l_clk, async FIFO, source mux with test generator, calibration, two estimators, averaging, registers">
+  <defs>
+    <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="var(--line)"/></marker>
+  </defs>
+  <rect class="band" x="10" y="40" width="300" height="280" rx="10"/>
+  <rect class="band" x="330" y="40" width="760" height="280" rx="10"/>
+  <text class="ts" x="160" y="62" text-anchor="middle">l_clk  (rx_clk, 8 ns) — sample domain</text>
+  <text class="ts" x="710" y="62" text-anchor="middle">sys_cpu_clk (100 MHz) — AXI / processing domain</text>
+  <line class="dash" x1="320" y1="30" x2="320" y2="136"/>
+  <line class="dash" x1="320" y1="246" x2="320" y2="325"/>
+
+  <rect class="box" x="25" y="140" width="120" height="76" rx="8"/>
+  <text class="t" x="85" y="168" text-anchor="middle">RX1 / RX2</text>
+  <text class="ts" x="85" y="188" text-anchor="middle">12-bit → Q1.15</text>
+  <text class="ts" x="85" y="204" text-anchor="middle">I/Q × 2</text>
+
+  <rect class="box" x="168" y="140" width="110" height="76" rx="8"/>
+  <text class="t" x="223" y="172" text-anchor="middle">decimate</text>
+  <text class="ts" x="223" y="194" text-anchor="middle">keep 1 of N+1</text>
+  <line class="wire" x1="145" y1="178" x2="166" y2="178" marker-end="url(#ar2)"/>
+
+  <rect class="cdc" x="290" y="140" width="64" height="76" rx="8"/>
+  <text class="t cdctxt" x="322" y="170" text-anchor="middle">async</text>
+  <text class="t cdctxt" x="322" y="190" text-anchor="middle">FIFO</text>
+  <text class="ts" x="322" y="236" text-anchor="middle">gray ptrs</text>
+  <line class="wire" x1="278" y1="178" x2="288" y2="178" marker-end="url(#ar2)"/>
+
+  <rect class="box" x="378" y="140" width="96" height="76" rx="8"/>
+  <text class="t" x="426" y="172" text-anchor="middle">source</text>
+  <text class="t" x="426" y="192" text-anchor="middle">mux</text>
+  <line class="wire" x1="354" y1="178" x2="376" y2="178" marker-end="url(#ar2)"/>
+
+  <rect class="box" x="378" y="78" width="96" height="44" rx="8"/>
+  <text class="ts" x="426" y="98" text-anchor="middle">test gen</text>
+  <text class="ts" x="426" y="113" text-anchor="middle">known angle</text>
+  <line class="wire" x1="426" y1="122" x2="426" y2="138" marker-end="url(#ar2)"/>
+
+  <rect class="box" x="496" y="140" width="104" height="76" rx="8"/>
+  <text class="t" x="548" y="168" text-anchor="middle">CAL</text>
+  <text class="ts" x="548" y="188" text-anchor="middle">rotate RX2 by</text>
+  <text class="ts" x="548" y="203" text-anchor="middle">c + j·s</text>
+  <line class="wire" x1="474" y1="178" x2="494" y2="178" marker-end="url(#ar2)"/>
+
+  <rect class="new" x="630" y="92" width="170" height="70" rx="8"/>
+  <text class="t newtxt" x="715" y="120" text-anchor="middle">I-UESPRIT</text>
+  <text class="ts" x="715" y="142" text-anchor="middle">g_iuesprit.u_core</text>
+  <rect class="new" x="630" y="196" width="170" height="70" rx="8"/>
+  <text class="t newtxt" x="715" y="224" text-anchor="middle">M-ESPRIT</text>
+  <text class="ts" x="715" y="246" text-anchor="middle">g_mesprit.u_core</text>
+  <path class="wire" d="M600,178 H614 V127 H628" marker-end="url(#ar2)"/>
+  <path class="wire" d="M614,178 V231 H628" marker-end="url(#ar2)"/>
+
+  <rect class="box" x="826" y="140" width="110" height="76" rx="8"/>
+  <text class="t" x="881" y="168" text-anchor="middle">averaging</text>
+  <text class="ts" x="881" y="188" text-anchor="middle">mean, mean²</text>
+  <text class="ts" x="881" y="203" text-anchor="middle">→ std dev</text>
+  <path class="wire" d="M800,127 H812 V170 H824" marker-end="url(#ar2)"/>
+  <path class="wire" d="M800,231 H812 V188 H824" marker-end="url(#ar2)"/>
+
+  <rect class="box" x="958" y="132" width="118" height="92" rx="8"/>
+  <text class="t" x="1017" y="160" text-anchor="middle">registers</text>
+  <text class="ts" x="1017" y="180" text-anchor="middle">0x100–0x194</text>
+  <text class="ts" x="1017" y="198" text-anchor="middle">→ AXI read</text>
+  <text class="ts" x="1017" y="214" text-anchor="middle">→ firmware</text>
+  <line class="wire" x1="936" y1="178" x2="956" y2="178" marker-end="url(#ar2)"/>
+</svg>
+
+</figure>
+<p class="muted" style="font-size:.85rem">Teal = new for ESPRIT · purple dashed = clock-domain crossing · block-design wiring and AXI address 0x43C0_0000 unchanged from v1.1; only CONFIG.ENABLE_IUESPRIT / ENABLE_MESPRIT added.</p>
+</main></body></html>
