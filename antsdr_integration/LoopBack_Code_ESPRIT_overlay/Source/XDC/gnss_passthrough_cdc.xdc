@@ -92,9 +92,14 @@ set_max_delay -datapath_only \
 # 4b. FIFO storage (distributed RAM written in rx_clk) to the read register
 #     (clk_fpga_0). A word is only read after its write pointer has crossed
 #     the synchroniser (>= 2 read clocks later), so a bounded delay suffices.
+#     The storage is distributed RAM (RAM32M/RAM64M macros). get_cells on
+#     "mem_reg*" also returns the hierarchical macro wrappers, which are not
+#     valid timing startpoints, and the exception was observed NOT to apply
+#     (paths timed rx_clk -> clk_fpga_0 with clock skew, WNS -1.8 ns). Name
+#     the leaf RAM clock pins and the read-register D pins explicitly.
 set_max_delay -datapath_only \
-  -from [get_cells -quiet -hier -filter {NAME =~ *gnss_passthrough/inst/u_doa/u_afifo/mem_reg*}] \
-  -to   [get_cells -quiet -hier -filter {NAME =~ *gnss_passthrough/inst/u_doa/u_afifo/rd_data_reg*}] \
+  -from [get_pins -quiet -hier -filter {NAME =~ *gnss_passthrough/inst/u_doa/u_afifo/mem_reg*/CLK}] \
+  -to   [get_pins -quiet -hier -filter {NAME =~ *gnss_passthrough/inst/u_doa/u_afifo/rd_data_reg*/D}] \
   8.000
 
 # 4c. Sticky overflow flag into the processing domain (level, two-flop).

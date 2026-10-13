@@ -110,6 +110,17 @@ foreach {what pat} {
   puts [format "DOA_IMPL: CDC cells %-26s %4d  %s" $what $n [expr {$n > 0 ? "OK" : "MISSING - constraint has no effect"}]]
 }
 
+# is the FIFO storage exception really applied? (it must show MaxDelay ... 8.000)
+set fp [get_timing_paths -quiet -max_paths 1 \
+  -from [get_pins -quiet -hier -filter "NAME =~ [get_property NAME $doa]/u_afifo/mem_reg*/CLK"] \
+  -to   [get_pins -quiet -hier -filter "NAME =~ [get_property NAME $doa]/u_afifo/rd_data_reg*/D"]]
+if {[llength $fp]} {
+  set exc [get_property EXCEPTION $fp]
+  puts [format "DOA_IMPL: FIFO storage path exception: %s  slack %s ns  %s" \
+        [expr {$exc eq "" ? "(none)" : $exc}] [get_property SLACK $fp] \
+        [expr {[string match -nocase "*max*delay*" $exc] ? "OK" : "MISSING - CDC path timed as synchronous"}]]
+}
+
 # timing into the DOA block
 set into [get_cells -quiet -hier -filter "NAME =~ [get_property NAME $doa]/* && IS_SEQUENTIAL"]
 if {[llength $into] > 0} {

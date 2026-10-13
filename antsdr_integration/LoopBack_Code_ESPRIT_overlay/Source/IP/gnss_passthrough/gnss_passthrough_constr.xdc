@@ -62,9 +62,11 @@ set_max_delay -datapath_only \
   -from [get_cells -quiet -hier -filter {NAME =~ *u_doa/u_afifo/rgray_reg*}] \
   -to   [get_cells -quiet -hier -filter {NAME =~ *u_doa/u_afifo/gs_meta_r2w_reg*}] \
   8.000
+# distributed-RAM storage: leaf clock pins -> read-register D pins (pin-based;
+# the cell-based form also matched the RAM macro wrappers and did not apply)
 set_max_delay -datapath_only \
-  -from [get_cells -quiet -hier -filter {NAME =~ *u_doa/u_afifo/mem_reg*}] \
-  -to   [get_cells -quiet -hier -filter {NAME =~ *u_doa/u_afifo/rd_data_reg*}] \
+  -from [get_pins -quiet -hier -filter {NAME =~ *u_doa/u_afifo/mem_reg*/CLK}] \
+  -to   [get_pins -quiet -hier -filter {NAME =~ *u_doa/u_afifo/rd_data_reg*/D}] \
   8.000
 set_false_path -to [get_cells -quiet -hier -filter {NAME =~ *u_doa/u_afifo/ovf_meta_reg*}]
 set_false_path -to [get_cells -quiet -hier -filter {NAME =~ *u_doa/dsync_meta_reg*}]
