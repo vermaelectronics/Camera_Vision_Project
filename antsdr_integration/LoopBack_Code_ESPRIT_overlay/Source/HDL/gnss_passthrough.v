@@ -110,7 +110,8 @@
 module gnss_passthrough #(
   parameter FIFO_ADDR_WIDTH = 5,  // elastic buffer depth = 2**FIFO_ADDR_WIDTH
   parameter ENABLE_IUESPRIT = 1,  // v1.2: build the I-UESPRIT DOA estimator
-  parameter ENABLE_MESPRIT  = 1   // v1.2: build the M-ESPRIT DOA estimator
+  parameter ENABLE_MESPRIT  = 1,  // v1.2: build the M-ESPRIT DOA estimator
+  parameter HLS_CORE        = 0   // v1.2: 1 = estimator is an external HLS IP
 ) (
   // ---- sample-domain clock / reset (axi_ad9361 l_clk / rst) ----------------
   input               clk,
@@ -173,7 +174,23 @@ module gnss_passthrough #(
   output              s_axi_rvalid,
   output     [ 1:0]   s_axi_rresp,
   output     [31:0]   s_axi_rdata,
-  input               s_axi_rready
+  input               s_axi_rready,
+
+  // ---- v1.2 external HLS DOA estimator (s_axi_aclk domain, HLS_CORE = 1) ----
+  //  m_axis_doa -> esprit_*_hls/s_axis_x,  esprit_*_hls/m_axis_y -> s_axis_res
+  output     [63:0]   m_axis_doa_tdata,
+  output              m_axis_doa_tvalid,
+  input               m_axis_doa_tready,
+  input      [31:0]   s_axis_res_tdata,
+  input               s_axis_res_tvalid,
+  output              s_axis_res_tready,
+  output     [4:0]    doa_cfg_log2_snap,
+  output     [1:0]    doa_cfg_p_log2,
+  output              doa_cfg_use_cov,
+  output     [31:0]   doa_cfg_mu_q30,
+  output     [31:0]   doa_cfg_k_q30,
+  output     [31:0]   doa_cfg_uctol_q24,
+  output              doa_hls_rst_n
 );
 
   localparam [31:0] CORE_ID      = 32'h47435031;   // "GCP1"
@@ -279,7 +296,8 @@ module gnss_passthrough #(
   gnss_doa_esprit #(
     .ENABLE_IUESPRIT (ENABLE_IUESPRIT),
     .ENABLE_MESPRIT  (ENABLE_MESPRIT),
-    .MAX_LOG2_SNAP   (14)
+    .MAX_LOG2_SNAP   (14),
+    .HLS_CORE        (HLS_CORE)
   ) u_doa (
     .clk          (clk),
     .rst          (rst),
@@ -296,7 +314,20 @@ module gnss_passthrough #(
     .reg_widx     (reg_waddr[5:0]),
     .reg_wdata    (s_axi_wdata),
     .reg_ridx     (s_axi_araddr[7:2]),
-    .reg_rdata    (doa_rdata)
+    .reg_rdata    (doa_rdata),
+    .m_axis_doa_tdata  (m_axis_doa_tdata),
+    .m_axis_doa_tvalid (m_axis_doa_tvalid),
+    .m_axis_doa_tready (m_axis_doa_tready),
+    .s_axis_res_tdata  (s_axis_res_tdata),
+    .s_axis_res_tvalid (s_axis_res_tvalid),
+    .s_axis_res_tready (s_axis_res_tready),
+    .doa_cfg_log2_snap (doa_cfg_log2_snap),
+    .doa_cfg_p_log2    (doa_cfg_p_log2),
+    .doa_cfg_use_cov   (doa_cfg_use_cov),
+    .doa_cfg_mu_q30    (doa_cfg_mu_q30),
+    .doa_cfg_k_q30     (doa_cfg_k_q30),
+    .doa_cfg_uctol_q24 (doa_cfg_uctol_q24),
+    .doa_hls_rst_n     (doa_hls_rst_n)
   );
 
   // Status view, refreshed from the clk domain (see CDC section).

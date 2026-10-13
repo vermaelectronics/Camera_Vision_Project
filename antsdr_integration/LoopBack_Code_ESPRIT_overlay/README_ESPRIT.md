@@ -60,6 +60,17 @@ The same `GNSS_DOA_ALGO` selects the matching simulation (`sim_doa.tcl`,
 firmware is identical for all three: it reads `DOA_CAPS` and prints and tests
 only the estimator(s) present.
 
+## 2c. HLS variants (estimator as a Vitis HLS IP cell)
+
+```bash
+vitis_hls -f Source/HLS/esprit_hls/run_hls.tcl -tclargs m  $PWD/Build/hls_repo   # esprit_m_hls
+vitis_hls -f Source/HLS/esprit_hls/run_hls.tcl -tclargs iu $PWD/Build/hls_repo   # esprit_iu_hls
+export GNSS_DOA_IMPL=hls GNSS_DOA_ALGO=mesprit GNSS_HLS_IP_REPO=$PWD/Build/hls_repo
+mkdir -p Vivado/Project_HLS_MESPRIT && cd Vivado/Project_HLS_MESPRIT
+vivado -mode batch -source ../Scripts/create_project.tcl
+```
+See `Source/HLS/esprit_hls/README.md` and `Docs/ESPRIT/README_ESPRIT.md` section 7.1c.
+
 ## 3. Hardware (PuTTY, 115200 8N1)
 
 On boot, the console prints `DOA_SELFTEST: ... RESULT PASS (11/11 checks passed)`.

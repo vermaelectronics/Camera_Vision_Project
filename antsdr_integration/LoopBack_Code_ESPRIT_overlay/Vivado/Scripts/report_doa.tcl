@@ -78,6 +78,24 @@ foreach sub {"" "/g_iuesprit.u_core" "/g_mesprit.u_core" "/u_afifo" "/u_tgen"} {
         [expr {$sub eq "" ? "u_doa (total)" : [string trimleft $sub /]}] $lut $ff $dsp $bram $lram]
 }
 
+# HLS variant (GNSS_DOA_IMPL=hls): the estimator is its own block-design cell
+set hls [get_cells -quiet -hier -filter {NAME =~ */esprit_*_hls_0 && !IS_PRIMITIVE}]
+foreach h $hls {
+  set prims [get_cells -quiet -hier -filter "NAME =~ [get_property NAME $h]/* && IS_PRIMITIVE"]
+  set lut  [llength [filter -quiet $prims {REF_NAME =~ LUT*}]]
+  set ff   [llength [filter -quiet $prims {REF_NAME =~ FD*}]]
+  set dsp  [llength [filter -quiet $prims {REF_NAME =~ DSP48*}]]
+  set bram [llength [filter -quiet $prims {REF_NAME =~ RAMB*}]]
+  set lram [llength [filter -quiet $prims {REF_NAME =~ RAM32* || REF_NAME =~ RAM64*}]]
+  puts "DOA_IMPL: estimator is a Vitis HLS IP: [get_property NAME $h]"
+  puts [format "DOA_IMPL: %-28s LUT %6d  FF %6d  DSP48 %4d  RAMB %3d  LUTRAM %4d" \
+        "[file tail [get_property NAME $h]] (HLS)" $lut $ff $dsp $bram $lram]
+}
+if {[llength $hls] == 0 && [llength [get_cells -quiet "[get_property NAME $doa]/g_iuesprit.u_core"]] == 0 \
+    && [llength [get_cells -quiet "[get_property NAME $doa]/g_mesprit.u_core"]] == 0} {
+  puts "DOA_IMPL: WARNING - neither an RTL estimator core nor an esprit_*_hls_0 cell was found"
+}
+
 # constraint coverage (empty pattern = constraint silently unused)
 foreach {what pat} {
   "FIFO write gray pointer"    *u_doa/u_afifo/wgray_reg*

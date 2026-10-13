@@ -210,9 +210,10 @@ int32_t gnss_doa_probe(void)
                (unsigned long)id, (unsigned long)DOA_EXPECTED_ID);
         return DOA_ERR_ID;
     }
-    printf("DOA: ESPRIT DOA monitor present, version %lu.%lu, estimators:%s%s, max window 2^%lu\n",
+    printf("DOA: ESPRIT DOA monitor present, version %lu.%lu, estimators:%s%s (%s), max window 2^%lu\n",
            (unsigned long)(ver >> 16), (unsigned long)(ver & 0xFFFFU),
            (caps & 1U) ? " I-UESPRIT" : "", (caps & 2U) ? " M-ESPRIT" : "",
+           (caps & 4U) ? "Vitis HLS IP in the block design" : "RTL core in gnss_passthrough",
            (unsigned long)((caps >> 8) & 0xFFU));
     return DOA_OK;
 }

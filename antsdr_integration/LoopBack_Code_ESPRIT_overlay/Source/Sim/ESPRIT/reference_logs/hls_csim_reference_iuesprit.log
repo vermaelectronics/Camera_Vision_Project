@@ -1,0 +1,57 @@
+ESPRIT_HLS_TB: ===== I-UESPRIT (esprit_iu_hls) C-simulation =====
+ESPRIT_HLS_TB:   sweep           true  -60.00  kernel  -60.0691  ref  -60.0691  |psi| 4.7032  flags 0x0
+ESPRIT_HLS_TB: sweep -60 deg: kernel = reference (< 0.01 deg)             PASS
+ESPRIT_HLS_TB: sweep -60 deg: within 0.5 deg of the true angle            PASS
+ESPRIT_HLS_TB:   sweep           true  -45.00  kernel  -44.9086  ref  -44.9086  |psi| 2.0090  flags 0x0
+ESPRIT_HLS_TB: sweep -45 deg: kernel = reference (< 0.01 deg)             PASS
+ESPRIT_HLS_TB: sweep -45 deg: within 0.5 deg of the true angle            PASS
+ESPRIT_HLS_TB:   sweep           true  -30.00  kernel  -30.0105  ref  -30.0105  |psi| 1.0005  flags 0x0
+ESPRIT_HLS_TB: sweep -30 deg: kernel = reference (< 0.01 deg)             PASS
+ESPRIT_HLS_TB: sweep -30 deg: within 0.5 deg of the true angle            PASS
+ESPRIT_HLS_TB:   sweep           true  -15.00  kernel  -14.8815  ref  -14.8815  |psi| 0.4268  flags 0x0
+ESPRIT_HLS_TB: sweep -15 deg: kernel = reference (< 0.01 deg)             PASS
+ESPRIT_HLS_TB: sweep -15 deg: within 0.5 deg of the true angle            PASS
+ESPRIT_HLS_TB:   sweep           true    0.00  kernel   -0.0061  ref   -0.0061  |psi| 0.0002  flags 0x0
+ESPRIT_HLS_TB: sweep +0 deg: kernel = reference (< 0.01 deg)              PASS
+ESPRIT_HLS_TB: sweep +0 deg: within 0.5 deg of the true angle             PASS
+ESPRIT_HLS_TB:   sweep           true   15.00  kernel   14.9835  ref   14.9835  |psi| -0.4300  flags 0x0
+ESPRIT_HLS_TB: sweep +15 deg: kernel = reference (< 0.01 deg)             PASS
+ESPRIT_HLS_TB: sweep +15 deg: within 0.5 deg of the true angle            PASS
+ESPRIT_HLS_TB:   sweep           true   30.00  kernel   29.9974  ref   29.9974  |psi| -0.9999  flags 0x0
+ESPRIT_HLS_TB: sweep +30 deg: kernel = reference (< 0.01 deg)             PASS
+ESPRIT_HLS_TB: sweep +30 deg: within 0.5 deg of the true angle            PASS
+ESPRIT_HLS_TB:   sweep           true   45.00  kernel   45.0689  ref   45.0689  |psi| -2.0248  flags 0x0
+ESPRIT_HLS_TB: sweep +45 deg: kernel = reference (< 0.01 deg)             PASS
+ESPRIT_HLS_TB: sweep +45 deg: within 0.5 deg of the true angle            PASS
+ESPRIT_HLS_TB:   sweep           true   60.00  kernel   59.7881  ref   59.7881  |psi| -4.6155  flags 0x0
+ESPRIT_HLS_TB: sweep +60 deg: kernel = reference (< 0.01 deg)             PASS
+ESPRIT_HLS_TB: sweep +60 deg: within 0.5 deg of the true angle            PASS
+ESPRIT_HLS_TB:   p = 2^n         true   25.00  kernel   25.0312  ref   25.0312  |psi| -0.7835  flags 0x0
+ESPRIT_HLS_TB: p = 2^n +25 deg: kernel = reference (< 0.01 deg)           PASS
+ESPRIT_HLS_TB: p = 2^n +25 deg: within 0.5 deg of the true angle          PASS
+ESPRIT_HLS_TB:   p = 2^n         true   25.00  kernel   25.0219  ref   25.0219  |psi| -0.7832  flags 0x0
+ESPRIT_HLS_TB: p = 2^n +25 deg: kernel = reference (< 0.01 deg)           PASS
+ESPRIT_HLS_TB: p = 2^n +25 deg: within 0.5 deg of the true angle          PASS
+ESPRIT_HLS_TB:   p = 2^n         true   25.00  kernel   25.0598  ref   25.0598  |psi| -0.7847  flags 0x0
+ESPRIT_HLS_TB: p = 2^n +25 deg: kernel = reference (< 0.01 deg)           PASS
+ESPRIT_HLS_TB: p = 2^n +25 deg: within 0.5 deg of the true angle          PASS
+ESPRIT_HLS_TB:   p = 2^n         true   25.00  kernel   24.9198  ref   24.9198  |psi| -0.7791  flags 0x0
+ESPRIT_HLS_TB: p = 2^n +25 deg: kernel = reference (< 0.01 deg)           PASS
+ESPRIT_HLS_TB: p = 2^n +25 deg: within 0.5 deg of the true angle          PASS
+ESPRIT_HLS_TB:   128 snapshots   true  -40.00  kernel  -39.9186  ref  -39.9186  |psi| 1.5851  flags 0x0
+ESPRIT_HLS_TB: 128 snapshots -40 deg: kernel = reference (< 0.01 deg)     PASS
+ESPRIT_HLS_TB: 128 snapshots -40 deg: within 0.5 deg of the true angle    PASS
+ESPRIT_HLS_TB:   16384 snapshots true  -40.00  kernel  -39.9775  ref  -39.9775  |psi| 1.5894  flags 0x0
+ESPRIT_HLS_TB: 16384 snapshots -40 deg: kernel = reference (< 0.01 deg)   PASS
+ESPRIT_HLS_TB: 16384 snapshots -40 deg: within 0.5 deg of the true angle  PASS
+ESPRIT_HLS_TB:   covariance      true   10.00  kernel    9.9484  ref    9.9484  |psi| -0.2782  flags 0x0
+ESPRIT_HLS_TB: covariance +10 deg: kernel = reference (< 0.01 deg)        PASS
+ESPRIT_HLS_TB: covariance +10 deg: within 0.5 deg of the true angle       PASS
+ESPRIT_HLS_TB:   QPSK            true  -20.00  kernel  -19.8056  ref  -19.8056  |psi| 0.5889  flags 0x0
+ESPRIT_HLS_TB: QPSK -20 deg: kernel = reference (< 0.01 deg)              PASS
+ESPRIT_HLS_TB: QPSK -20 deg: within 0.5 deg of the true angle             PASS
+ESPRIT_HLS_TB: every window produced one 9-word packet with the magic word PASS
+ESPRIT_HLS_TB:   worst |kernel - reference| 0.00001 deg, worst |kernel - true| 0.2119 deg
+ESPRIT_HLS_TB: all-zero input sets the no_signal flag                     PASS
+ESPRIT_HLS_TB: ============================================
+ESPRIT_HLS_TB_RESULT: PASS (36 checks)

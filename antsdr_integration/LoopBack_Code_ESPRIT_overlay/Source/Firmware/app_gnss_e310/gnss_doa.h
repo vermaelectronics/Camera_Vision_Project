@@ -58,7 +58,7 @@
 #define DOA_REG_C11         0x188U
 #define DOA_REG_C01_RE      0x18CU
 #define DOA_REG_C01_IM      0x190U
-#define DOA_REG_CAPS        0x194U
+#define DOA_REG_CAPS        0x194U  /* RO [0] I [1] M [2] HLS IP [15:8] max log2 */
 
 #define DOA_EXPECTED_ID     0x444F4131U
 

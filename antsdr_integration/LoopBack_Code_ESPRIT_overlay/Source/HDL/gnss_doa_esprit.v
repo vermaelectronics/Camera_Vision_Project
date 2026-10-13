@@ -81,7 +81,8 @@
 //    0x188 DOA_C11         RO
 //    0x18C DOA_C01_RE      RO
 //    0x190 DOA_C01_IM      RO
-//    0x194 DOA_CAPS        RO  [0] I-UESPRIT built [1] M-ESPRIT built [15:8] MAX_LOG2_SNAP
+//    0x194 DOA_CAPS        RO  [0] I-UESPRIT built [1] M-ESPRIT built
+//                              [2] estimator is an external HLS IP [15:8] MAX_LOG2_SNAP
 //
 //  FLAGS (per estimator, 4 bits)
 //    I-UESPRIT: {0,          overrun, ambiguous, no_signal}
@@ -102,7 +103,12 @@
 module gnss_doa_esprit #(
   parameter ENABLE_IUESPRIT = 1,
   parameter ENABLE_MESPRIT  = 1,
-  parameter MAX_LOG2_SNAP   = 14
+  parameter MAX_LOG2_SNAP   = 14,
+  // 0: estimators are the RTL cores below.  1: the estimator is an external
+  // Vitis HLS IP (esprit_iu_hls / esprit_m_hls) in the block design, fed by
+  // m_axis_doa and answering on s_axis_res. Exactly one of ENABLE_IUESPRIT /
+  // ENABLE_MESPRIT selects which result registers the HLS IP fills.
+  parameter HLS_CORE        = 0
 ) (
   // ---- sample domain -------------------------------------------------------
   input               clk,
@@ -122,7 +128,22 @@ module gnss_doa_esprit #(
   input      [5:0]    reg_widx,        // word index inside the 0x100 window
   input      [31:0]   reg_wdata,
   input      [5:0]    reg_ridx,
-  output reg [31:0]   reg_rdata        // combinational read data
+  output reg [31:0]   reg_rdata,       // combinational read data
+
+  // ---- external HLS estimator (aclk domain, used when HLS_CORE = 1) ----------
+  output     [63:0]   m_axis_doa_tdata,   // {q1, i1, q0, i0}, Q1.15, after CAL
+  output              m_axis_doa_tvalid,
+  input               m_axis_doa_tready,
+  input      [31:0]   s_axis_res_tdata,   // 9-word result packet (esprit_hls.h)
+  input               s_axis_res_tvalid,
+  output              s_axis_res_tready,
+  output     [4:0]    doa_cfg_log2_snap,
+  output     [1:0]    doa_cfg_p_log2,
+  output              doa_cfg_use_cov,
+  output     [31:0]   doa_cfg_mu_q30,
+  output     [31:0]   doa_cfg_k_q30,
+  output     [31:0]   doa_cfg_uctol_q24,
+  output              doa_hls_rst_n       // HLS ap_rst_n: low while disabled
 );
 
   localparam [31:0] DOA_ID      = 32'h444F4131;   // "DOA1"
@@ -329,6 +350,102 @@ module gnss_doa_esprit #(
   wire [15:0] mag1 = mag16(r2_x1i, r2_x1q);
 
   // ==========================================================================
+  //  External HLS estimator interface (HLS_CORE = 1)
+  //    * 1024-snapshot stream buffer: holds the samples that arrive while the
+  //      HLS kernel computes the previous window (its input loop is II = 1,
+  //      so it drains the buffer far faster than samples arrive);
+  //    * result parser: 9-word packet -> the same valid/data signals the RTL
+  //      cores produce, so registers, averaging and firmware are unchanged.
+  // ==========================================================================
+  reg hls_rst_n_r = 1'b0;
+  always @(posedge aclk) hls_rst_n_r <= ~proc_rst;
+
+  assign doa_cfg_log2_snap = c_log2_snap;
+  assign doa_cfg_p_log2    = c_p_log2;
+  assign doa_cfg_use_cov   = c_use_cov;
+  assign doa_cfg_mu_q30    = r_mu;
+  assign doa_cfg_k_q30     = r_k;
+  assign doa_cfg_uctol_q24 = r_uctol;
+  assign doa_hls_rst_n     = hls_rst_n_r;
+
+  wire               h_valid;
+  wire signed [31:0] h_phi, h_psi, h_th, h_deg;
+  wire [3:0]         h_flags;
+  wire signed [31:0] h_c00, h_c11, h_c01r, h_c01i;
+
+  generate
+    if (HLS_CORE != 0) begin : g_hls
+      // ---- stream buffer -------------------------------------------------
+      (* ram_style = "block" *) reg [63:0] sb_mem [0:1023];
+      reg  [10:0] sb_wp = 11'd0, sb_rp = 11'd0;
+      reg  [63:0] sb_out = 64'd0;
+      reg         sb_out_v = 1'b0;
+      reg         sb_drop = 1'b0;          // sticky until the next result
+      wire        sb_full  = (sb_wp[10] != sb_rp[10]) && (sb_wp[9:0] == sb_rp[9:0]);
+      wire        sb_empty = (sb_wp == sb_rp);
+      wire        sb_take  = !sb_empty && (!sb_out_v || m_axis_doa_tready);
+      reg         hp_done = 1'b0;
+
+      always @(posedge aclk) begin
+        if (r2_valid && !sb_full) sb_mem[sb_wp[9:0]] <= {r2_x1q, r2_x1i, r2_x0q, r2_x0i};
+        if (sb_take) sb_out <= sb_mem[sb_rp[9:0]];
+      end
+      always @(posedge aclk) begin
+        if (proc_rst) begin
+          sb_wp <= 11'd0; sb_rp <= 11'd0; sb_out_v <= 1'b0; sb_drop <= 1'b0;
+        end else begin
+          if (r2_valid && !sb_full) sb_wp <= sb_wp + 1'b1;
+          if (r2_valid && sb_full)  sb_drop <= 1'b1;
+          else if (hp_done)         sb_drop <= 1'b0;
+          if (sb_take)                            begin sb_rp <= sb_rp + 1'b1; sb_out_v <= 1'b1; end
+          else if (sb_out_v && m_axis_doa_tready) sb_out_v <= 1'b0;
+        end
+      end
+      assign m_axis_doa_tdata  = sb_out;
+      assign m_axis_doa_tvalid = sb_out_v;
+
+      // ---- result parser -------------------------------------------------
+      reg  [3:0]  hp_idx = 4'd0;
+      reg  [31:0] hp_w [1:8];
+      reg  [3:0]  hp_fl = 4'd0;
+      reg         hp_ovr = 1'b0;
+      always @(posedge aclk) begin
+        hp_done <= 1'b0;
+        if (proc_rst) begin
+          hp_idx <= 4'd0;
+        end else if (s_axis_res_tvalid) begin
+          if (hp_idx == 4'd0) begin
+            if (s_axis_res_tdata[31:16] == 16'hE5A1) begin    // magic: start of packet
+              hp_fl  <= s_axis_res_tdata[11:8];
+              hp_ovr <= sb_drop;
+              hp_idx <= 4'd1;
+            end
+          end else begin
+            hp_w[hp_idx] <= s_axis_res_tdata;
+            if (hp_idx == 4'd8) begin hp_idx <= 4'd0; hp_done <= 1'b1; end
+            else                       hp_idx <= hp_idx + 1'b1;
+          end
+        end
+      end
+      assign s_axis_res_tready = 1'b1;
+      assign h_valid = hp_done;
+      assign h_phi   = hp_w[1];  assign h_psi  = hp_w[2];
+      assign h_th    = hp_w[3];  assign h_deg  = hp_w[4];
+      assign h_c00   = hp_w[5];  assign h_c11  = hp_w[6];
+      assign h_c01r  = hp_w[7];  assign h_c01i = hp_w[8];
+      assign h_flags = {hp_fl[3], hp_ovr, hp_fl[1:0]};
+    end else begin : g_no_hls
+      assign m_axis_doa_tdata  = 64'd0;
+      assign m_axis_doa_tvalid = 1'b0;
+      assign s_axis_res_tready = 1'b1;
+      assign h_valid = 1'b0;
+      assign h_phi = 32'sd0; assign h_psi = 32'sd0; assign h_th = 32'sd0; assign h_deg = 32'sd0;
+      assign h_c00 = 32'sd0; assign h_c11 = 32'sd0; assign h_c01r = 32'sd0; assign h_c01i = 32'sd0;
+      assign h_flags = 4'd0;
+    end
+  endgenerate
+
+  // ==========================================================================
   //  Estimators
   // ==========================================================================
   wire               i_res_valid, m_res_valid;
@@ -339,7 +456,7 @@ module gnss_doa_esprit #(
   wire signed [31:0] m_c00, m_c11, m_c01r, m_c01i;
 
   generate
-    if (ENABLE_IUESPRIT) begin : g_iuesprit
+    if (ENABLE_IUESPRIT && HLS_CORE == 0) begin : g_iuesprit
       i_uesprit_2ant_core #(.MAX_LOG2_SNAP(MAX_LOG2_SNAP)) u_core (
         .clk (aclk), .rst (proc_rst),
         .cfg_log2_snap (c_log2_snap), .cfg_p_log2 (c_p_log2),
@@ -352,6 +469,11 @@ module gnss_doa_esprit #(
         .res_flags (i_flags),
         .dbg_c00 (i_c00), .dbg_c11 (i_c11), .dbg_c01_re (i_c01r), .dbg_c01_im (i_c01i)
       );
+    end else if (ENABLE_IUESPRIT) begin : g_hls_iuesprit   // external HLS IP
+      assign i_res_valid = h_valid;
+      assign i_phi = h_phi; assign i_psi = h_psi; assign i_th = h_th; assign i_deg = h_deg;
+      assign i_flags = h_flags;
+      assign i_c00 = h_c00; assign i_c11 = h_c11; assign i_c01r = h_c01r; assign i_c01i = h_c01i;
     end else begin : g_no_iuesprit
       assign i_res_valid = 1'b0;
       assign i_phi = 32'sd0; assign i_psi = 32'sd0; assign i_th = 32'sd0; assign i_deg = 32'sd0;
@@ -359,7 +481,7 @@ module gnss_doa_esprit #(
       assign i_c00 = 32'sd0; assign i_c11 = 32'sd0; assign i_c01r = 32'sd0; assign i_c01i = 32'sd0;
     end
 
-    if (ENABLE_MESPRIT) begin : g_mesprit
+    if (ENABLE_MESPRIT && HLS_CORE == 0) begin : g_mesprit
       m_esprit_2ant_core #(.MAX_LOG2_SNAP(MAX_LOG2_SNAP)) u_core (
         .clk (aclk), .rst (proc_rst),
         .cfg_log2_snap (c_log2_snap), .cfg_p_log2 (c_p_log2),
@@ -373,6 +495,11 @@ module gnss_doa_esprit #(
         .res_flags (m_flags),
         .dbg_c00 (m_c00), .dbg_c11 (m_c11), .dbg_c01_re (m_c01r), .dbg_c01_im (m_c01i)
       );
+    end else if (ENABLE_MESPRIT && !ENABLE_IUESPRIT) begin : g_hls_mesprit   // external HLS IP
+      assign m_res_valid = h_valid;
+      assign m_phi = h_phi; assign m_psi = h_psi; assign m_th = h_th; assign m_deg = h_deg;
+      assign m_flags = h_flags;
+      assign m_c00 = h_c00; assign m_c11 = h_c11; assign m_c01r = h_c01r; assign m_c01i = h_c01i;
     end else begin : g_no_mesprit
       assign m_res_valid = 1'b0;
       assign m_phi = 32'sd0; assign m_psi = 32'sd0; assign m_th = 32'sd0; assign m_deg = 32'sd0;
@@ -509,8 +636,9 @@ module gnss_doa_esprit #(
   wire [31:0] status_w = {16'd0, m_flags_r, i_flags_r, 3'd0,
                           c_src_test, c_enable,
                           (ENABLE_MESPRIT != 0), (ENABLE_IUESPRIT != 0), ovf_sticky};
-  wire [31:0] caps_w   = {16'd0, MLS, 6'd0,
-                          (ENABLE_MESPRIT != 0), (ENABLE_IUESPRIT != 0)};
+  wire [31:0] caps_w   = {16'd0, MLS, 5'd0, (HLS_CORE != 0),
+                          (ENABLE_MESPRIT != 0) && !(HLS_CORE != 0 && ENABLE_IUESPRIT != 0),
+                          (ENABLE_IUESPRIT != 0)};
 
   always @(*) begin
     case (reg_ridx)

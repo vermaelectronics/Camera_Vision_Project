@@ -92,7 +92,11 @@ module tb_gnss_doa #(
     .s_axi_wvalid (wvalid), .s_axi_wdata (wdata), .s_axi_wstrb (4'hF), .s_axi_wready (wready),
     .s_axi_bvalid (bvalid), .s_axi_bresp (bresp), .s_axi_bready (1'b1),
     .s_axi_arvalid (arvalid), .s_axi_araddr (araddr), .s_axi_arprot (3'd0), .s_axi_arready (arready),
-    .s_axi_rvalid (rvalid), .s_axi_rresp (rresp), .s_axi_rdata (rdata), .s_axi_rready (1'b1)
+    .s_axi_rvalid (rvalid), .s_axi_rresp (rresp), .s_axi_rdata (rdata), .s_axi_rready (1'b1),
+    .m_axis_doa_tdata (), .m_axis_doa_tvalid (), .m_axis_doa_tready (1'b1),
+    .s_axis_res_tdata (32'd0), .s_axis_res_tvalid (1'b0), .s_axis_res_tready (),
+    .doa_cfg_log2_snap (), .doa_cfg_p_log2 (), .doa_cfg_use_cov (), .doa_cfg_mu_q30 (),
+    .doa_cfg_k_q30 (), .doa_cfg_uctol_q24 (), .doa_hls_rst_n ()
   );
 
   task wr(input [15:0] a, input [31:0] d);

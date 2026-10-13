@@ -76,7 +76,7 @@ set core [ipx::current_core]
 set_property name           $ip_name                                  $core
 set_property version        1.0                                       $core
 set_property display_name   "GNSS CRPA Passthrough"                   $core
-set_property description    "RX->TX I/Q passthrough and CRPA insertion point for ANTSDR E310 V1, with ESPRIT (I-UESPRIT + M-ESPRIT) direction-of-arrival monitor on RX1/RX2 (v1.2)" $core
+set_property description    "RX->TX I/Q passthrough and CRPA insertion point for ANTSDR E310 V1, with ESPRIT (I-UESPRIT + M-ESPRIT) direction-of-arrival monitor on RX1/RX2 (v1.2); HLS_CORE=1 streams to an external ESPRIT HLS IP" $core
 set_property vendor_display_name "ANTSDR GNSS CRPA project"           $core
 set_property company_url    "https://github.com/MicroPhase"           $core
 
@@ -101,10 +101,30 @@ proc set_bus_param {bif name value} {
   set_property value $value [ipx::get_bus_parameters $name -of_objects $bif]
 }
 
+# v1.2: the two AXI-Stream ports to/from an external ESPRIT HLS IP
+# (HLS_CORE = 1) run on s_axi_aclk. The packager normally infers them from the
+# _tdata/_tvalid/_tready names; infer them explicitly if it did not.
+foreach {bif ports} {
+  m_axis_doa {m_axis_doa_tdata m_axis_doa_tvalid m_axis_doa_tready}
+  s_axis_res {s_axis_res_tdata s_axis_res_tvalid s_axis_res_tready}
+} {
+  if {[llength [ipx::get_bus_interfaces $bif -of_objects $core]] == 0} {
+    catch {ipx::infer_bus_interface $ports xilinx.com:interface:axis_rtl:1.0 $core}
+  }
+  if {[llength [ipx::get_bus_interfaces $bif -of_objects $core]] == 0} {
+    # inference may pick its own name; find the interface that owns the tdata port
+    foreach b [ipx::get_bus_interfaces -of_objects $core] {
+      foreach pm [ipx::get_port_maps -of_objects $b] {
+        if {[get_property physical_name $pm] eq [lindex $ports 0]} { set_property name $bif $b }
+      }
+    }
+  }
+}
+
 set clk_if [ensure_bus_if $core s_axi_aclk    xilinx.com:signal:clock_rtl:1.0]
 set rst_if [ensure_bus_if $core s_axi_aresetn xilinx.com:signal:reset_rtl:1.0]
 
-set_bus_param $clk_if ASSOCIATED_BUSIF s_axi
+set_bus_param $clk_if ASSOCIATED_BUSIF s_axi:m_axis_doa:s_axis_res
 set_bus_param $clk_if ASSOCIATED_RESET s_axi_aresetn
 set_bus_param $rst_if POLARITY         ACTIVE_LOW
 
@@ -122,6 +142,14 @@ set srst_if [ensure_bus_if $core rst xilinx.com:signal:reset_rtl:1.0]
 set_bus_param $srst_if POLARITY         ACTIVE_HIGH
 set_bus_param $sclk_if ASSOCIATED_RESET rst
 set_bus_param $sclk_if ASSOCIATED_BUSIF ""
+
+# v1.2: doa_hls_rst_n drives the HLS IP's ap_rst_n (active low). If the
+# packager inferred it as a reset interface, give it the right polarity.
+foreach b [ipx::get_bus_interfaces -of_objects $core] {
+  foreach pm [ipx::get_port_maps -of_objects $b] {
+    if {[get_property physical_name $pm] eq "doa_hls_rst_n"} { set_bus_param $b POLARITY ACTIVE_LOW }
+  }
+}
 
 # ---------------------------------------------------------------------------
 #  Memory map: 4 kB aperture.  The actual base address is assigned by the
@@ -152,7 +180,7 @@ foreach bif [ipx::get_bus_interfaces -of_objects $core] {
   set bname [get_property name $bif]
   set p [ipx::get_bus_parameters ASSOCIATED_BUSIF -of_objects $bif]
   if {[llength $p] == 0} { continue }
-  if {[get_property value $p] eq "s_axi"} { lappend claimants $bname }
+  if {[lsearch -exact [split [get_property value $p] :] s_axi] >= 0} { lappend claimants $bname }
 }
 if {[llength $claimants] != 1 || [lindex $claimants 0] ne "s_axi_aclk"} {
   puts "IP_PACKAGE_SELFCHECK: FAIL - expected exactly s_axi_aclk to be associated\
@@ -161,6 +189,14 @@ if {[llength $claimants] != 1 || [lindex $claimants 0] ne "s_axi_aclk"} {
   exit 2
 }
 puts "IP_PACKAGE_SELFCHECK: OK - s_axi is claimed only by s_axi_aclk"
+foreach bif {m_axis_doa s_axis_res} {
+  if {[llength [ipx::get_bus_interfaces $bif -of_objects $core]] == 0} {
+    puts "IP_PACKAGE_SELFCHECK: FAIL - AXI-Stream interface $bif missing (needed for the HLS variant)"
+    close_project
+    exit 2
+  }
+}
+puts "IP_PACKAGE_SELFCHECK: OK - AXI-Stream interfaces m_axis_doa / s_axis_res on s_axi_aclk"
 
 # The CDC constraints are what keep the design timing-clean. If they silently
 # failed to package, the only symptom would be a setup violation much later.

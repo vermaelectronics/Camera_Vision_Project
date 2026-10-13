@@ -13,6 +13,12 @@
 //  (true phase 0), live readout at several angles after calibration, and
 //  the test-generator command. Prints FW_COSIM_RESULT: PASS|FAIL.
 //
+//  HLS mode (-DHLS_MODEL=0|1, GNSS_DOA_IMPL=hls in run_fw_cosim.sh): the RTL
+//  is built with HLS_CORE = 1 and the Vitis HLS C++ kernel
+//  (Source/HLS/esprit_hls, esprit_iu_hls or esprit_m_hls) is called as the
+//  external HLS IP on m_axis_doa / s_axis_res, with a compute stall per
+//  window, so the same firmware runs against the HLS block-design variant.
+//
 //  Build/run: ./run_fw_cosim.sh  (needs verilator >= 4.2 and g++)
 // ============================================================================
 #include "Vgnss_passthrough.h"
@@ -26,12 +32,63 @@ extern "C" {
 #include "gnss_doa.h"
 }
 
+
+
 static Vgnss_passthrough *top;
 static uint64_t t_ps = 0;                       // simulated time
 static const uint64_t ACLK_HALF = 5000;         // 100 MHz
 static const uint64_t LCLK_HALF = 4069;         // 122.88 MHz
 static uint64_t next_a = ACLK_HALF, next_l = LCLK_HALF;
 static unsigned lph = 0;
+
+#ifdef HLS_MODEL
+#include <deque>
+#include "esprit_hls.h"
+// ---- the HLS IP as a cycle-level stand-in ------------------------------------
+//  s_axis_x : accepts one snapshot per aclk while not busy (tready = !busy)
+//  compute  : when 2^log2_snap snapshots are buffered, run the C++ kernel
+//             (exactly what Vitis HLS synthesises) and stall HLS_BUSY cycles
+//  m_axis_y : one result word per aclk
+static std::deque<uint64_t> hls_in;
+static std::deque<uint32_t> hls_out;
+static int  hls_busy = 0;
+static bool hls_res_driven = false;
+static const int HLS_BUSY = 400;               // ~ 4 us at 100 MHz per window
+static unsigned long hls_windows = 0;
+
+static void hls_after_rising_edge(bool pre_tvalid, uint64_t pre_tdata, bool pre_rst_n) {
+    if (!pre_rst_n) {
+        hls_in.clear(); hls_out.clear(); hls_busy = 0; hls_res_driven = false;
+    } else {
+        if (hls_res_driven && !hls_out.empty()) hls_out.pop_front();    // consumed (tready = 1)
+        if (pre_tvalid && top->m_axis_doa_tready) hls_in.push_back(pre_tdata);
+        if (hls_busy > 0) hls_busy--;
+        int L = top->doa_cfg_log2_snap;
+        if (L < ESPRIT_MIN_LOG2) L = ESPRIT_MIN_LOG2;
+        if (L > ESPRIT_MAX_LOG2) L = ESPRIT_MAX_LOG2;
+        size_t N = (size_t)1 << L;
+        if (hls_busy == 0 && hls_in.size() >= N) {
+            hls::stream<snap_t> in; hls::stream<word_t> out;
+            for (size_t n = 0; n < N; n++) { in.write((snap_t)hls_in.front()); hls_in.pop_front(); }
+#if HLS_MODEL == 0
+            esprit_iu_hls(in, out, top->doa_cfg_log2_snap, top->doa_cfg_p_log2, top->doa_cfg_use_cov,
+                          top->doa_cfg_mu_q30, (int)top->doa_cfg_k_q30);
+#else
+            esprit_m_hls(in, out, top->doa_cfg_log2_snap, top->doa_cfg_p_log2, top->doa_cfg_use_cov,
+                         top->doa_cfg_mu_q30, (int)top->doa_cfg_k_q30, top->doa_cfg_uctol_q24);
+#endif
+            while (!out.empty()) hls_out.push_back((uint32_t)out.read());
+            hls_busy = HLS_BUSY;
+            hls_windows++;
+        }
+    }
+    bool rst_n = top->doa_hls_rst_n;
+    top->m_axis_doa_tready = (rst_n && hls_busy == 0) ? 1 : 0;
+    hls_res_driven = rst_n && !hls_out.empty();
+    top->s_axis_res_tvalid = hls_res_driven ? 1 : 0;
+    top->s_axis_res_tdata  = hls_res_driven ? hls_out.front() : 0;
+}
+#endif
 
 // ---- RF scene ---------------------------------------------------------------
 static double scene_theta_deg = 0.0;            // true DOA
@@ -73,7 +130,17 @@ static void drive_adc() {
 static void step_edge() {
     if (next_a <= next_l) {
         t_ps = next_a; next_a += ACLK_HALF;
+#ifdef HLS_MODEL
+        bool rising = !top->s_axi_aclk;
+        bool pre_tvalid = top->m_axis_doa_tvalid;
+        uint64_t pre_tdata = top->m_axis_doa_tdata;
+        bool pre_rst_n = top->doa_hls_rst_n;
         top->s_axi_aclk = !top->s_axi_aclk;
+        top->eval();
+        if (rising) hls_after_rising_edge(pre_tvalid, pre_tdata, pre_rst_n);
+#else
+        top->s_axi_aclk = !top->s_axi_aclk;
+#endif
     } else {
         t_ps = next_l; next_l += LCLK_HALF;
         top->clk = !top->clk;
@@ -213,6 +280,12 @@ int main(int argc, char **argv) {
     }
     gnss_doa_print_status();
 
+#ifdef HLS_MODEL
+    printf("FW_COSIM: HLS kernel (%s) processed %lu windows\n",
+           HLS_MODEL == 0 ? "esprit_iu_hls" : "esprit_m_hls", hls_windows);
+    check("estimator results came from the HLS kernel (DOA_CAPS bit 2 set)",
+          (gnss_pt_read(DOA_REG_CAPS) & 4U) != 0 && hls_windows > 0);
+#endif
     printf("FW_COSIM: simulated time %.3f ms\n", t_ps / 1e9);
     printf("FW_COSIM_RESULT: %s\n", fails ? "FAIL" : "PASS");
     delete top;
