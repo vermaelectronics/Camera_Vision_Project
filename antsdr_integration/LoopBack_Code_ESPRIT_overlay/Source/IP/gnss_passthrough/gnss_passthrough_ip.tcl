@@ -177,6 +177,19 @@ if {!$xdc_packaged} {
 }
 puts "IP_PACKAGE_SELFCHECK: OK - CDC constraints packaged with the IP"
 
+set doa_packaged 0
+foreach fg [ipx::get_file_groups -of_objects $core] {
+  foreach fl [ipx::get_files -of_objects $fg] {
+    if {[string match "*gnss_doa_esprit.v" [get_property name $fl]]} { set doa_packaged 1 }
+  }
+}
+if {!$doa_packaged} {
+  puts "IP_PACKAGE_SELFCHECK: FAIL - gnss_doa_esprit.v was not packaged into the IP"
+  close_project
+  exit 2
+}
+puts "IP_PACKAGE_SELFCHECK: OK - ESPRIT DOA monitor packaged (v1.2)"
+
 close_project
 file delete -force [file join $ip_dir ".pkg_project"]
 

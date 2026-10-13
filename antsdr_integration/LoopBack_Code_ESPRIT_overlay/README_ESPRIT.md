@@ -53,6 +53,6 @@ doa_help?              every DOA command
 
 JTAG alternative: `xsdb Vitis/Scripts/doa_jtag_test.tcl` (prints `DOA_JTAG_RESULT: PASS`).
 
-The files under `Build/ip_repo/gnss_passthrough` and `Vivado/Project/` are the
-old v1.1 outputs from the original archive. Re-package and re-create the
-project before building.
+`Build/ip_repo` is empty: package the IP (step above) before creating the
+project, or `system_bd.tcl` stops with "OLD v1.1 package". The files in
+`Vivado/Project/` are old v1.1 outputs: re-create the project before building.
