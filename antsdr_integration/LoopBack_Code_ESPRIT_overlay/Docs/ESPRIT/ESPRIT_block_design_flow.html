@@ -1,0 +1,457 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ESPRIT Block Design Flow</title>
+<style>
+:root{
+  --bg:#f7f7f5; --panel:#ffffff; --fg:#1d1f21; --muted:#5d6369; --line:#8a9096;
+  --box:#ffffff; --box-stroke:#9aa1a8; --soft:#eef0f2;
+  --accent:#0b7a75; --accent-bg:#e3f4f2; --accent-stroke:#0b7a75;
+  --warn:#9a5b00; --warn-bg:#fdf3e1; --code-bg:#f0f1f3;
+  --cdc:#7a4fb5; --cdc-bg:#f1eafb;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#15171a; --panel:#1d2024; --fg:#e6e7e9; --muted:#a3a9b0; --line:#7d848c;
+    --box:#23272c; --box-stroke:#59616a; --soft:#2a2e33;
+    --accent:#4fc7bf; --accent-bg:#14322f; --accent-stroke:#4fc7bf;
+    --warn:#f0b45a; --warn-bg:#3a2c14; --code-bg:#262a2f;
+    --cdc:#b897ec; --cdc-bg:#2c2340;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#15171a; --panel:#1d2024; --fg:#e6e7e9; --muted:#a3a9b0; --line:#7d848c;
+  --box:#23272c; --box-stroke:#59616a; --soft:#2a2e33;
+  --accent:#4fc7bf; --accent-bg:#14322f; --accent-stroke:#4fc7bf;
+  --warn:#f0b45a; --warn-bg:#3a2c14; --code-bg:#262a2f;
+  --cdc:#b897ec; --cdc-bg:#2c2340;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,Ubuntu,sans-serif}
+main{max-width:1060px;margin:0 auto;padding:28px 16px 64px}
+h1{font-size:1.9rem;line-height:1.25;margin:.2em 0 .3em}
+h2{font-size:1.35rem;margin:2.2em 0 .6em;padding-top:.4em;border-top:1px solid var(--soft)}
+h3{font-size:1.05rem;margin:1.4em 0 .4em}
+p,li{max-width:76ch}
+.lede{color:var(--muted);font-size:1.05rem;max-width:76ch}
+.key{background:var(--accent-bg);border-left:4px solid var(--accent);padding:14px 18px;border-radius:8px;margin:20px 0}
+.key strong{color:var(--accent)}
+.warn{background:var(--warn-bg);border-left:4px solid var(--warn);padding:12px 16px;border-radius:8px;margin:18px 0}
+.warn strong{color:var(--warn)}
+figure{margin:18px 0 8px;background:var(--panel);border:1px solid var(--soft);border-radius:12px;padding:12px;overflow-x:auto}
+figure svg{display:block;width:100%;height:auto;min-width:640px}
+figcaption{color:var(--muted);font-size:.9rem;margin-top:6px}
+code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.86em}
+code{background:var(--code-bg);padding:1px 5px;border-radius:4px;overflow-wrap:anywhere}
+pre{background:var(--code-bg);padding:12px 14px;border-radius:8px;overflow-x:auto;line-height:1.45;margin:8px 0 14px}
+pre code{background:none;padding:0}
+pre .c{color:var(--muted)} pre .h{color:var(--accent);font-weight:600}
+table{border-collapse:collapse;width:100%;margin:10px 0 16px;font-size:.93rem}
+th,td{border-bottom:1px solid var(--soft);padding:8px 10px;text-align:left;vertical-align:top}
+th{color:var(--muted);font-weight:600}
+.tablewrap{overflow-x:auto}
+ol.steps{list-style:none;padding:0;margin:14px 0;counter-reset:s}
+ol.steps>li{counter-increment:s;position:relative;background:var(--panel);border:1px solid var(--soft);
+  border-radius:10px;padding:14px 16px 10px 58px;margin:0 0 12px;max-width:none}
+ol.steps>li::before{content:counter(s);position:absolute;left:14px;top:13px;width:30px;height:30px;border-radius:50%;
+  background:var(--accent);color:var(--bg);font-weight:700;display:flex;align-items:center;justify-content:center}
+ol.steps>li.new{border-color:var(--accent)}
+.tag{display:inline-block;font-size:.72rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+  padding:1px 7px;border-radius:999px;margin-left:6px;vertical-align:2px}
+.tag.n{background:var(--accent-bg);color:var(--accent)}
+.tag.u{background:var(--soft);color:var(--muted)}
+.chain{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:10px 0 16px}
+.chip{background:var(--panel);border:1px solid var(--box-stroke);border-radius:8px;padding:6px 10px;font-size:.9rem}
+.arrow{color:var(--muted)}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}
+.card{background:var(--panel);border:1px solid var(--soft);border-radius:10px;padding:12px 16px}
+.card h3{margin-top:.2em}
+.muted{color:var(--muted)}
+.toc{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:.92rem;margin:12px 0 0}
+.toc a{color:var(--accent);text-decoration:none}
+.toc a:hover{text-decoration:underline}
+/* SVG */
+svg text{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;fill:var(--fg)}
+svg .t{font-size:14px} svg .tb{font-size:15px;font-weight:700} svg .ts{font-size:12px;fill:var(--muted)}
+svg .tm{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px}
+svg .box{fill:var(--box);stroke:var(--box-stroke);stroke-width:1.4}
+svg .soft{fill:var(--soft);stroke:var(--box-stroke);stroke-width:1}
+svg .new{fill:var(--accent-bg);stroke:var(--accent-stroke);stroke-width:2}
+svg .newtxt{fill:var(--accent);font-weight:700}
+svg .cdc{fill:var(--cdc-bg);stroke:var(--cdc);stroke-width:1.8;stroke-dasharray:5 3}
+svg .cdctxt{fill:var(--cdc);font-weight:700}
+svg .wire{stroke:var(--line);stroke-width:1.6;fill:none}
+svg .wireN{stroke:var(--accent);stroke-width:2.2;fill:none}
+svg .band{fill:var(--soft);opacity:.55}
+svg .dash{stroke:var(--cdc);stroke-width:1.5;stroke-dasharray:6 4;fill:none}
+</style>
+</head>
+<body>
+<main>
+
+<h1>How the ESPRIT IP is added to the block design</h1>
+<p class="lede">The ANTSDR E310 LoopBack pipeline with the I-UESPRIT and M-ESPRIT direction-of-arrival estimators
+(Li et al., IEEE TIM vol. 74, 2025, Art. 2003209). This page covers where the ESPRIT block sits in the Vivado block design,
+how it is connected, and what each build script does to get it there.</p>
+
+<div class="key">
+<strong>The key idea:</strong> ESPRIT is <em>not</em> a new cell in the block design. It lives <em>inside</em> the existing
+custom IP <code>gnss_passthrough</code>, which went from v1.1 to v1.2. In the block design the wiring, the cell and its AXI
+address (<code>0x43C0_0000</code>) are all unchanged. The only new block-design lines are two IP parameters,
+<code>ENABLE_IUESPRIT</code> and <code>ENABLE_MESPRIT</code>, which choose which estimators are built.
+</div>
+
+<nav class="toc">
+<a href="#bd">1. Block design</a><a href="#inside">2. Inside gnss_passthrough</a><a href="#pipe">3. DOA pipeline</a>
+<a href="#flow">4. Build flow, step by step</a><a href="#variants">5. Three project variants</a>
+<a href="#regs">6. Software view</a><a href="#gui">7. Seeing it in Vivado</a><a href="#why">8. Why this way</a>
+</nav>
+
+<!-- ============================================================ 1 -->
+<h2 id="bd">1. Where it sits in the block design</h2>
+<p>The block design, built by <code>Source/BlockDesign/system_bd.tcl</code>, is the standard Analog Devices AD9361 design plus one
+custom cell, <code>gnss_passthrough</code>. That cell sits between the AD9361 interface core and the TX data path. It sees
+both RX channels, drives the TX data, and has an AXI4-Lite register port on the processor's interconnect.</p>
+
+<figure>
+<svg viewBox="0 0 1000 560" role="img" aria-label="Block design: PS7, AXI interconnect, AD9361, axi_ad9361, gnss_passthrough containing the new ESPRIT DOA block">
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="var(--line)"/></marker>
+    <marker id="arN" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/></marker>
+  </defs>
+
+  <!-- PS7 -->
+  <rect class="box" x="30" y="30" width="200" height="84" rx="8"/>
+  <text class="tb" x="130" y="64" text-anchor="middle">Zynq PS7 (ARM A9)</text>
+  <text class="ts" x="130" y="86" text-anchor="middle">firmware, sys_cpu_clk 100 MHz</text>
+
+  <!-- interconnect -->
+  <rect class="box" x="310" y="30" width="230" height="84" rx="8"/>
+  <text class="tb" x="425" y="64" text-anchor="middle">AXI CPU interconnect</text>
+  <text class="ts" x="425" y="86" text-anchor="middle">ad_cpu_interconnect</text>
+  <line class="wire" x1="230" y1="72" x2="308" y2="72" marker-end="url(#ar)"/>
+  <text class="ts" x="269" y="64" text-anchor="middle">M_AXI_GP0</text>
+
+  <!-- AD9361 chip -->
+  <rect class="soft" x="30" y="270" width="150" height="140" rx="8"/>
+  <text class="tb" x="105" y="318" text-anchor="middle">AD9361</text>
+  <text class="ts" x="105" y="340" text-anchor="middle">RF transceiver</text>
+  <text class="ts" x="105" y="358" text-anchor="middle">2 RX · 2 TX</text>
+  <text class="ts" x="105" y="384" text-anchor="middle">RX1 = element 0</text>
+  <text class="ts" x="105" y="400" text-anchor="middle">RX2 = element 1</text>
+
+  <!-- axi_ad9361 -->
+  <rect class="box" x="260" y="250" width="200" height="180" rx="8"/>
+  <text class="tb" x="360" y="282" text-anchor="middle">axi_ad9361</text>
+  <text class="ts" x="360" y="302" text-anchor="middle">ADI interface core</text>
+  <text class="ts" x="360" y="320" text-anchor="middle">l_clk = rx_clk (8 ns)</text>
+  <text class="ts" x="360" y="338" text-anchor="middle">regs 0x7902_0000</text>
+  <line class="wire" x1="180" y1="315" x2="258" y2="315" marker-end="url(#ar)"/>
+  <line class="wire" x1="258" y1="375" x2="182" y2="375" marker-end="url(#ar)"/>
+  <text class="ts" x="219" y="306" text-anchor="middle">LVDS RX</text>
+  <text class="ts" x="219" y="366" text-anchor="middle">LVDS TX</text>
+
+  <!-- IC to axi_ad9361 -->
+  <line class="wire" x1="360" y1="114" x2="360" y2="248" marker-end="url(#ar)"/>
+
+  <!-- gnss_passthrough -->
+  <rect class="box" x="600" y="200" width="370" height="262" rx="10" style="stroke-width:2"/>
+  <text class="tb" x="785" y="226" text-anchor="middle">gnss_passthrough  (custom IP, v1.2)</text>
+  <text class="ts" x="785" y="244" text-anchor="middle">VLNV antsdr:gnss:gnss_passthrough:1.0</text>
+  <rect class="soft" x="620" y="258" width="330" height="66" rx="6"/>
+  <text class="t" x="785" y="284" text-anchor="middle">RX→TX passthrough, elastic FIFOs, DAC mux</text>
+  <text class="ts" x="785" y="304" text-anchor="middle">v1.1 logic, unchanged</text>
+  <rect class="new" x="620" y="338" width="330" height="108" rx="6"/>
+  <text class="t newtxt" x="785" y="364" text-anchor="middle">u_doa = gnss_doa_esprit   (NEW)</text>
+  <text class="t" x="785" y="388" text-anchor="middle">I-UESPRIT  ·  M-ESPRIT</text>
+  <text class="ts" x="785" y="410" text-anchor="middle">registers 0x100–0x194 of the same AXI port</text>
+  <text class="ts" x="785" y="430" text-anchor="middle">receive-only: taps RX, never drives TX</text>
+
+  <!-- IC to gnss -->
+  <path class="wireN" d="M500,114 V160 H880 V198" marker-end="url(#arN)"/>
+  <text class="ts" x="690" y="152" text-anchor="middle" style="fill:var(--accent);font-weight:600">s_axi  ·  base 0x43C0_0000  (4 KB)</text>
+
+  <!-- RX tap -->
+  <line class="wireN" x1="460" y1="290" x2="598" y2="290" marker-end="url(#arN)"/>
+  <text class="ts" x="529" y="281" text-anchor="middle">adc_data_{i,q}{0,1}</text>
+  <text class="ts" x="529" y="304" text-anchor="middle">valid, enable (RX tap)</text>
+  <line class="wire" x1="460" y1="342" x2="598" y2="342" marker-end="url(#ar)"/>
+  <text class="ts" x="529" y="334" text-anchor="middle">l_clk, rst</text>
+  <line class="wire" x1="598" y1="400" x2="462" y2="400" marker-end="url(#ar)"/>
+  <text class="ts" x="529" y="392" text-anchor="middle">dac_data_{i,q}{0,1}</text>
+  <text class="ts" x="529" y="416" text-anchor="middle">(TX samples back)</text>
+
+  <!-- DAC FIFO -->
+  <rect class="box" x="600" y="492" width="370" height="50" rx="8"/>
+  <text class="t" x="785" y="522" text-anchor="middle">axi_ad9361_dac_fifo  (DMA / DDS TX data)</text>
+  <line class="wire" x1="785" y1="492" x2="785" y2="464" marker-end="url(#ar)"/>
+  <text class="ts" x="850" y="482" text-anchor="middle">dma_dac_data_*</text>
+
+  <!-- ADC DMA path -->
+  <rect class="soft" x="200" y="478" width="330" height="62" rx="8"/>
+  <text class="t" x="365" y="503" text-anchor="middle">ADC capture path (unchanged)</text>
+  <text class="ts" x="365" y="524" text-anchor="middle">util_wfifo → util_cpack2 → axi_dmac → DDR</text>
+  <line class="wire" x1="360" y1="430" x2="360" y2="476" marker-end="url(#ar)"/>
+</svg>
+<figcaption>Teal = what the ESPRIT work touches. The new logic is the <code>u_doa</code> instance <em>inside</em>
+<code>gnss_passthrough</code>; the block-design wires shown are the ones that already existed for v1.1.</figcaption>
+</figure>
+
+<p>The RX tap is the key connection. In <code>system_bd.tcl</code> the ADC pins of <code>axi_ad9361</code> already feed the
+vendor capture FIFO. <code>ad_connect</code> fans the same nets out to <code>gnss_passthrough</code> as well, so the DMA capture
+path keeps working and ESPRIT sees exactly the same samples.</p>
+
+<!-- ============================================================ 2 -->
+<h2 id="inside">2. Inside <code>gnss_passthrough</code>: where <code>u_doa</code> is instantiated</h2>
+<p>All of the ESPRIT integration is plain Verilog in <code>Source/HDL/gnss_passthrough.v</code>. It instantiates the DOA
+wrapper next to the original passthrough logic and shares the AXI4-Lite port with it, using a different address range.</p>
+
+<pre><code><span class="c">// Source/HDL/gnss_passthrough.v  (v1.2, abridged)</span>
+module gnss_passthrough #(
+  parameter FIFO_ADDR_WIDTH = 5,
+  parameter <span class="h">ENABLE_IUESPRIT</span> = 1,   <span class="c">// build the I-UESPRIT estimator</span>
+  parameter <span class="h">ENABLE_MESPRIT</span>  = 1    <span class="c">// build the M-ESPRIT estimator</span>
+) ( ... same ports as v1.1 ... );
+
+  localparam [31:0] CORE_VERSION = 32'h<span class="h">00010002</span>;   <span class="c">// v1.2</span>
+
+  <span class="c">// writes to 0x100..0x1FC go to the DOA block</span>
+  wire doa_wr = reg_wr &amp;&amp; (reg_waddr[11:6] == 6'h01);
+
+  gnss_doa_esprit #(
+    .ENABLE_IUESPRIT (ENABLE_IUESPRIT),
+    .ENABLE_MESPRIT  (ENABLE_MESPRIT),
+    .MAX_LOG2_SNAP   (14)
+  ) <span class="h">u_doa</span> (
+    .clk (clk), .rst (rst),                          <span class="c">// l_clk domain: RX samples</span>
+    .adc_valid (adc_valid_i0),
+    .adc_data_i0 (adc_data_i0), .adc_data_q0 (adc_data_q0),
+    .adc_data_i1 (adc_data_i1), .adc_data_q1 (adc_data_q1),
+    .aclk (s_axi_aclk), .aresetn (s_axi_aresetn),    <span class="c">// AXI domain: processing + registers</span>
+    .reg_wr (doa_wr), .reg_widx (reg_waddr[5:0]), .reg_wdata (s_axi_wdata),
+    .reg_ridx (s_axi_araddr[7:2]), .reg_rdata (doa_rdata)
+  );
+
+  <span class="c">// read mux: anything in 0x100..0x1FF comes from the DOA block</span>
+  default: axi_rdata &lt;= (s_axi_araddr[13:8] == 6'h01) ? doa_rdata : 32'd0;</code></pre>
+
+<p>The full hierarchy path, as Vivado reports it after implementation (and as <code>report_doa.tcl</code> prints it):</p>
+<pre><code>i_system_wrapper/system_i/<span class="h">gnss_passthrough</span>/inst/<span class="h">u_doa</span>
+                                               ├── g_iuesprit.u_core   (i_uesprit_2ant_core, if ENABLE_IUESPRIT=1)
+                                               ├── g_mesprit.u_core    (m_esprit_2ant_core,  if ENABLE_MESPRIT=1)
+                                               ├── u_afifo             (doa_async_fifo, clock crossing)
+                                               └── u_tgen              (doa_test_gen, known-angle test source)</code></pre>
+
+<!-- ============================================================ 3 -->
+<h2 id="pipe">3. The DOA pipeline inside <code>u_doa</code></h2>
+<figure>
+<svg viewBox="0 0 1100 330" role="img" aria-label="DOA pipeline: capture and decimation in l_clk, async FIFO, source mux with test generator, calibration, two estimators, averaging, registers">
+  <defs>
+    <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="var(--line)"/></marker>
+  </defs>
+  <rect class="band" x="10" y="40" width="300" height="280" rx="10"/>
+  <rect class="band" x="330" y="40" width="760" height="280" rx="10"/>
+  <text class="ts" x="160" y="62" text-anchor="middle">l_clk  (rx_clk, 8 ns) — sample domain</text>
+  <text class="ts" x="710" y="62" text-anchor="middle">sys_cpu_clk (100 MHz) — AXI / processing domain</text>
+  <line class="dash" x1="320" y1="30" x2="320" y2="136"/>
+  <line class="dash" x1="320" y1="246" x2="320" y2="325"/>
+
+  <rect class="box" x="25" y="140" width="120" height="76" rx="8"/>
+  <text class="t" x="85" y="168" text-anchor="middle">RX1 / RX2</text>
+  <text class="ts" x="85" y="188" text-anchor="middle">12-bit → Q1.15</text>
+  <text class="ts" x="85" y="204" text-anchor="middle">I/Q × 2</text>
+
+  <rect class="box" x="168" y="140" width="110" height="76" rx="8"/>
+  <text class="t" x="223" y="172" text-anchor="middle">decimate</text>
+  <text class="ts" x="223" y="194" text-anchor="middle">keep 1 of N+1</text>
+  <line class="wire" x1="145" y1="178" x2="166" y2="178" marker-end="url(#ar2)"/>
+
+  <rect class="cdc" x="290" y="140" width="64" height="76" rx="8"/>
+  <text class="t cdctxt" x="322" y="170" text-anchor="middle">async</text>
+  <text class="t cdctxt" x="322" y="190" text-anchor="middle">FIFO</text>
+  <text class="ts" x="322" y="236" text-anchor="middle">gray ptrs</text>
+  <line class="wire" x1="278" y1="178" x2="288" y2="178" marker-end="url(#ar2)"/>
+
+  <rect class="box" x="378" y="140" width="96" height="76" rx="8"/>
+  <text class="t" x="426" y="172" text-anchor="middle">source</text>
+  <text class="t" x="426" y="192" text-anchor="middle">mux</text>
+  <line class="wire" x1="354" y1="178" x2="376" y2="178" marker-end="url(#ar2)"/>
+
+  <rect class="box" x="378" y="78" width="96" height="44" rx="8"/>
+  <text class="ts" x="426" y="98" text-anchor="middle">test gen</text>
+  <text class="ts" x="426" y="113" text-anchor="middle">known angle</text>
+  <line class="wire" x1="426" y1="122" x2="426" y2="138" marker-end="url(#ar2)"/>
+
+  <rect class="box" x="496" y="140" width="104" height="76" rx="8"/>
+  <text class="t" x="548" y="168" text-anchor="middle">CAL</text>
+  <text class="ts" x="548" y="188" text-anchor="middle">rotate RX2 by</text>
+  <text class="ts" x="548" y="203" text-anchor="middle">c + j·s</text>
+  <line class="wire" x1="474" y1="178" x2="494" y2="178" marker-end="url(#ar2)"/>
+
+  <rect class="new" x="630" y="92" width="170" height="70" rx="8"/>
+  <text class="t newtxt" x="715" y="120" text-anchor="middle">I-UESPRIT</text>
+  <text class="ts" x="715" y="142" text-anchor="middle">g_iuesprit.u_core</text>
+  <rect class="new" x="630" y="196" width="170" height="70" rx="8"/>
+  <text class="t newtxt" x="715" y="224" text-anchor="middle">M-ESPRIT</text>
+  <text class="ts" x="715" y="246" text-anchor="middle">g_mesprit.u_core</text>
+  <path class="wire" d="M600,178 H614 V127 H628" marker-end="url(#ar2)"/>
+  <path class="wire" d="M614,178 V231 H628" marker-end="url(#ar2)"/>
+
+  <rect class="box" x="826" y="140" width="110" height="76" rx="8"/>
+  <text class="t" x="881" y="168" text-anchor="middle">averaging</text>
+  <text class="ts" x="881" y="188" text-anchor="middle">mean, mean²</text>
+  <text class="ts" x="881" y="203" text-anchor="middle">→ std dev</text>
+  <path class="wire" d="M800,127 H812 V170 H824" marker-end="url(#ar2)"/>
+  <path class="wire" d="M800,231 H812 V188 H824" marker-end="url(#ar2)"/>
+
+  <rect class="box" x="958" y="132" width="118" height="92" rx="8"/>
+  <text class="t" x="1017" y="160" text-anchor="middle">registers</text>
+  <text class="ts" x="1017" y="180" text-anchor="middle">0x100–0x194</text>
+  <text class="ts" x="1017" y="198" text-anchor="middle">→ AXI read</text>
+  <text class="ts" x="1017" y="214" text-anchor="middle">→ firmware</text>
+  <line class="wire" x1="936" y1="178" x2="956" y2="178" marker-end="url(#ar2)"/>
+</svg>
+<figcaption>Only capture and decimation run on the fast sample clock. Everything else runs at 100 MHz on the AXI clock.
+The single clock crossing is the gray-pointer FIFO, which has its own constraints in <code>gnss_passthrough_cdc.xdc</code>, section 4.</figcaption>
+</figure>
+
+<h3>What happens inside each estimator (two-antenna closed form from the paper)</h3>
+<div class="chain">
+  <span class="chip">moments over 2<sup>n</sup> snapshots<br><span class="muted">covariance / 4th-order cumulant</span></span><span class="arrow">→</span>
+  <span class="chip">block-floating normalise<br><span class="muted">C<sup>p</sup>, p = 4</span></span><span class="arrow">→</span>
+  <span class="chip">closed-form ψ<br><span class="muted">2×2, regulariser μ</span></span><span class="arrow">→</span>
+  <span class="chip">CORDIC atan2<br><span class="muted">φ = arg ψ  (I: 2·atan)</span></span><span class="arrow">→</span>
+  <span class="chip">θ = asin(−k·φ)<br><span class="muted">BRAM LUT, k = λ/2πd</span></span>
+</div>
+<p class="muted">M-ESPRIT also reports |ψ|. A real source gives |ψ| ≈ 1; noise falls off the unit circle and is flagged, which is the paper's Remark A.</p>
+
+<!-- ============================================================ 4 -->
+<h2 id="flow">4. The build flow, step by step</h2>
+<p>These are the steps you ran, in order. Steps marked <span class="tag n">ESPRIT</span> are where the ESPRIT work comes in;
+<span class="tag u">unchanged</span> steps are the original LoopBack flow.</p>
+
+<ol class="steps">
+<li class="new"><strong>RTL sources</strong> <span class="tag n">ESPRIT</span><br>
+<code>Source/HDL/gnss_passthrough.v</code> (v1.2), <code>gnss_doa_esprit.v</code>, <code>doa_async_fifo.v</code>,
+<code>doa_test_gen.v</code>, and the 16 core files in <code>Source/HDL/esprit/</code>. The list lives in one place,
+<code>Source/Sim/ESPRIT/doa_files.tcl</code>, and both simulation and packaging read it.</li>
+
+<li class="new"><strong>Package the IP</strong>: <code>gnss_passthrough_ip.tcl</code> <span class="tag n">ESPRIT</span><br>
+Packs all <strong>20 RTL files</strong> plus the CDC constraints into <code>Build/ip_repo/gnss_passthrough/component.xml</code>.
+Vivado's IP packager turns the top-level parameters into IP options, so the IP now has user parameters
+<code>ENABLE_IUESPRIT</code> and <code>ENABLE_MESPRIT</code>.
+<pre><code>IP_PACKAGE_SOURCES: 20 RTL files (gnss_passthrough + ESPRIT DOA)
+IP_PACKAGE_OK: .../Build/ip_repo/gnss_passthrough/component.xml</code></pre></li>
+
+<li class="new"><strong>Create the project</strong>: <code>create_project.tcl</code> → <code>system_bd.tcl</code> <span class="tag n">ESPRIT</span><br>
+The block-design script adds <code>Build/ip_repo</code> to the IP catalog, <strong>refuses an old v1.1 package</strong>, places the
+cell, sets the two parameters, wires it and maps its address:
+<pre><code><span class="c"># 1. guard: the packaged IP must contain the ESPRIT RTL</span>
+if {[string first "gnss_doa_esprit" $gnss_cx_txt] &lt; 0} { error "... OLD v1.1 package ..." }
+
+<span class="c"># 2. place the cell (same as v1.1)</span>
+ad_ip_instance gnss_passthrough gnss_passthrough
+
+<span class="c"># 3. NEW: choose the estimators for this project (GNSS_DOA_ALGO)</span>
+<span class="h">ad_ip_parameter gnss_passthrough CONFIG.ENABLE_IUESPRIT $gnss_en_i
+ad_ip_parameter gnss_passthrough CONFIG.ENABLE_MESPRIT  $gnss_en_m</span>
+
+<span class="c"># 4. wiring (same as v1.1)</span>
+ad_connect axi_ad9361/l_clk          gnss_passthrough/clk
+ad_connect axi_ad9361/adc_data_i0    gnss_passthrough/adc_data_i0    <span class="c">;# ... i0 q0 i1 q1</span>
+ad_connect gnss_passthrough/dac_data_i0 axi_ad9361/dac_data_i0       <span class="c">;# ... TX back</span>
+ad_connect axi_ad9361_dac_fifo/dout_data_0 gnss_passthrough/dma_dac_data_i0
+
+<span class="c"># 5. AXI address (same as v1.1)</span>
+ad_cpu_interconnect 0x43C00000 gnss_passthrough</code></pre>
+Console proof: <code>GNSS_IP_CHECK: ... (v1.2)</code> and <code>GNSS_DOA_ALGO: mesprit (ENABLE_IUESPRIT=0, ENABLE_MESPRIT=1)</code>.</li>
+
+<li><strong>Generate the block design and synthesise the IP out of context</strong> <span class="tag u">unchanged</span><br>
+Vivado copies the packaged sources into <code>antsdr_e310_gnss.gen/…/ipshared/</code> and synthesises
+<code>system_gnss_passthrough_0</code> on its own, with the chosen parameters. A generate block in the RTL leaves out the
+disabled estimator completely. Check: <code>CORE_VERSION = 32'h00010002</code> in the generated
+<code>gnss_passthrough.v</code>, and <code>gnss_doa_esprit</code> appearing in that run's <code>runme.log</code>.</li>
+
+<li><strong>Synthesis, implementation, bitstream and XSA</strong>: <code>build.tcl</code> <span class="tag u">unchanged</span><br>
+The ESPRIT CDC constraints are applied here: the packaged XDC plus <code>gnss_passthrough_cdc.xdc</code> section 4.
+Your M-ESPRIT build: <code>BUILD_TIMING: MET</code>, WNS 0.005 ns.</li>
+
+<li class="new"><strong>Post-implementation check</strong>: <code>report_doa.tcl</code> <span class="tag n">ESPRIT</span><br>
+Finds <code>u_doa</code>, prints utilisation for each estimator, checks every CDC constraint found its cells, and reports timing into the block.
+<pre><code>DOA_IMPL: estimators built: M-ESPRIT
+DOA_IMPL: u_doa (total)     LUT 11743  FF 7528  DSP48 56  RAMB 5
+DOA_IMPL: g_mesprit.u_core  LUT  9460  FF 5882  DSP48 50  RAMB 4</code></pre></li>
+
+<li class="new"><strong>Firmware</strong>: <code>build_software.py</code>, adding <code>gnss_doa.c</code> <span class="tag n">ESPRIT</span><br>
+The driver reads <code>DOA_CAPS</code> at <code>0x43C0_0194</code> to learn which estimators are in the bitstream. It runs the
+self-test at boot and adds the <code>doa…</code> console commands.</li>
+
+<li><strong>Boot</strong>: FSBL + bitstream + ELF → <code>BOOT.BIN</code> on SD → PuTTY <span class="tag u">unchanged</span></li>
+</ol>
+
+<div class="warn"><strong>What went wrong earlier, and the guard added for it:</strong> your first build used the old v1.1
+package that was still in <code>Build/ip_repo</code>. The block design looked identical, because the cell, ports and address
+are the same, so nothing failed, but the bitstream had no ESPRIT logic (0 DSP48 under <code>gnss_passthrough</code>).
+<code>system_bd.tcl</code> now stops with <em>"OLD v1.1 package"</em> in that case.</div>
+
+<!-- ============================================================ 5 -->
+<h2 id="variants">5. Three project variants from one IP</h2>
+<p>The packaged IP is the same for all three. Only the two block-design parameters differ, chosen by the environment variable
+<code>GNSS_DOA_ALGO</code> when the project is created:</p>
+<div class="tablewrap"><table>
+<tr><th>GNSS_DOA_ALGO</th><th>Project folder</th><th>ENABLE_IUESPRIT</th><th>ENABLE_MESPRIT</th><th>Self-test on board</th></tr>
+<tr><td><code>mesprit</code></td><td><code>Vivado/Project_MESPRIT</code></td><td>0</td><td>1</td><td>9 checks</td></tr>
+<tr><td><code>iuesprit</code></td><td><code>Vivado/Project_IUESPRIT</code></td><td>1</td><td>0</td><td>8 checks</td></tr>
+<tr><td>unset / <code>both</code></td><td><code>Vivado/Project</code></td><td>1</td><td>1</td><td>11 checks</td></tr>
+</table></div>
+<p class="muted">You can also see and change the same setting in the Vivado GUI: double-click the <code>gnss_passthrough</code> cell
+to open <em>Customize IP</em>. GUI edits are lost the next time <code>create_project.tcl</code> runs, though, so use the variable.</p>
+
+<!-- ============================================================ 6 -->
+<h2 id="regs">6. The software view: same AXI port, new address range</h2>
+<div class="grid2">
+<div class="card"><h3>0x43C0_0000 – 0x43C0_00FF</h3>
+<p>Original passthrough registers: ID <code>GCP1</code>, version (now <code>0x00010002</code>), control, RX counters, CRPA coefficients.
+<span class="muted">Unchanged apart from the version.</span></p></div>
+<div class="card"><h3>0x43C0_0100 – 0x43C0_0194 <span class="tag n">new</span></h3>
+<p>ESPRIT DOA: ID <code>DOA1</code>, CTRL (enable, test source, p, window, averaging), μ, k = λ/2πd, CAL, test generator,
+results for each estimator (φ, ψ, θ, degrees, mean, mean²), status, and CAPS.</p></div>
+</div>
+<p>When <code>DOA_CTRL.enable = 0</code> (the reset value) the DOA block is held in reset, and the design behaves exactly like v1.1.</p>
+
+<!-- ============================================================ 7 -->
+<h2 id="gui">7. How to see it yourself in Vivado</h2>
+<ol>
+<li><strong>Block design:</strong> open the project, then <em>Open Block Design</em>. <code>gnss_passthrough</code> looks the same as
+before. Double-click it to see <code>ENABLE_IUESPRIT</code> and <code>ENABLE_MESPRIT</code>.</li>
+<li><strong>Inside the IP:</strong> <em>Open Implemented Design</em>, then in the <em>Netlist</em> pane expand
+<code>system_i → gnss_passthrough → inst → u_doa</code>. Right-click → <em>Highlight Leaf Cells</em> shows where the ESPRIT logic was placed on the device.</li>
+<li><strong>Numbers:</strong> in the Tcl console, <code>open_run impl_1</code> then <code>source Vivado/Scripts/report_doa.tcl</code>.</li>
+<li><strong>Address:</strong> the <em>Address Editor</em> tab shows <code>gnss_passthrough/s_axi</code> at <code>0x43C0_0000</code>.</li>
+</ol>
+
+<!-- ============================================================ 8 -->
+<h2 id="why">8. Why it was integrated this way</h2>
+<div class="grid2">
+<div class="card"><h3>Block design untouched</h3><p>No new AXI slave, no new address, no rewiring. The ADI script flow and the
+firmware's base address keep working, and the risk to the proven LoopBack path is small.</p></div>
+<div class="card"><h3>Same samples as the passthrough</h3><p>ESPRIT taps the RX nets that already exist, so it measures exactly
+what the CRPA insertion point sees, on the same clock.</p></div>
+<div class="card"><h3>Receive-only</h3><p>The DOA block never drives TX or the DAC mux. A fault in ESPRIT cannot change what is transmitted.</p></div>
+<div class="card"><h3>One clean clock crossing</h3><p>Heavy maths runs at 100 MHz on the AXI clock. Only capture runs on rx_clk,
+and a single constrained FIFO joins the two clock domains.</p></div>
+</div>
+
+<p class="muted" style="margin-top:28px">Sources: <code>Source/BlockDesign/system_bd.tcl</code> · <code>Source/HDL/gnss_passthrough.v</code> ·
+<code>Source/HDL/gnss_doa_esprit.v</code> · <code>Source/IP/gnss_passthrough/gnss_passthrough_ip.tcl</code> ·
+<code>Vivado/Scripts/report_doa.tcl</code> · full maths and register map: <code>Docs/ESPRIT/README_ESPRIT.md</code>.</p>
+</main>
+</body>
+</html>
