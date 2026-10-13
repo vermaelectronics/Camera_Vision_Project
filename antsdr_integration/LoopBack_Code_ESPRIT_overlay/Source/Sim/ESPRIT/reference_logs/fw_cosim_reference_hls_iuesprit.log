@@ -3,7 +3,7 @@ FW_COSIM: scene: QPSK source, SNR 20 dB, RX2 board offset +37.0 deg
 FW_COSIM: estimators built: I-UESPRIT 
 
 === ESPRIT DOA monitor (gnss_passthrough v1.2) ===
-DOA: ESPRIT DOA monitor present, version 1.0, estimators: I-UESPRIT, max window 2^14
+DOA: ESPRIT DOA monitor present, version 1.0, estimators: I-UESPRIT (Vitis HLS IP in the block design), max window 2^14
 DOA_SELFTEST: ===== ESPRIT DOA hardware self-test =====
 DOA_SELFTEST: S1 DOA block present (DOA_ID = 0x444F4131)                 PASS
 DOA_SELFTEST: S1 at least one estimator built                            PASS
@@ -54,9 +54,9 @@ FW_COSIM: live true  +50.0 deg -> I-UESPRIT  +50.040  M-ESPRIT  +50.040
 FW_COSIM: live +50 deg after calibration, built estimators within 0.5 deg PASS
 FW_COSIM: --- doa_monitor=3 ---
 DOA: monitoring 3 averaged results (Ctrl-C does not abort; keep N small)
-DOA: #1    I-UESPRIT  49.999 (std  0.076)  pk 10848/13989  fl 0/0
-DOA: #2    I-UESPRIT  50.054 (std  0.105)  pk 10912/13845  fl 0/0
-DOA: #3    I-UESPRIT  50.036 (std  0.087)  pk 11008/13950  fl 0/0
+DOA: #1    I-UESPRIT  49.999 (std  0.072)  pk 10848/13989  fl 0/0
+DOA: #2    I-UESPRIT  50.054 (std  0.101)  pk 10912/13845  fl 0/0
+DOA: #3    I-UESPRIT  50.036 (std  0.091)  pk 11008/13950  fl 0/0
 FW_COSIM: --- doa_test=-22.5 ---
 DOA: test generator set to -22.500 deg (DPHASE 0x30fbffff, current K)
 DOA:   I-UESPRIT mean -22.503  error -0.003 deg

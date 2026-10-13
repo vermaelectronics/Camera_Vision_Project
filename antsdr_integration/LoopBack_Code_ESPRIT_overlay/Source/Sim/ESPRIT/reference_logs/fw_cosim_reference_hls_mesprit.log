@@ -3,7 +3,7 @@ FW_COSIM: scene: QPSK source, SNR 20 dB, RX2 board offset +37.0 deg
 FW_COSIM: estimators built: M-ESPRIT
 
 === ESPRIT DOA monitor (gnss_passthrough v1.2) ===
-DOA: ESPRIT DOA monitor present, version 1.0, estimators: M-ESPRIT, max window 2^14
+DOA: ESPRIT DOA monitor present, version 1.0, estimators: M-ESPRIT (Vitis HLS IP in the block design), max window 2^14
 DOA_SELFTEST: ===== ESPRIT DOA hardware self-test =====
 DOA_SELFTEST: S1 DOA block present (DOA_ID = 0x444F4131)                 PASS
 DOA_SELFTEST: S1 at least one estimator built                            PASS
@@ -19,7 +19,7 @@ DOA_SELFTEST:     30 deg |      n/a         | 30.000 (-0.000)  1.0000
 DOA_SELFTEST:     45 deg |      n/a         | 45.000 ( 0.000)  1.0000
 DOA_SELFTEST:     60 deg |      n/a         | 59.999 (-0.001)  1.0000
 DOA_SELFTEST: S2 M-ESPRIT  sweep -60..60 deg, every error < 0.05 deg     PASS
-DOA_SELFTEST: S3 noisy +20 deg: I mean  0.000 std  0.000 | M mean  19.977 std  0.122
+DOA_SELFTEST: S3 noisy +20 deg: I mean  0.000 std  0.000 | M mean  19.977 std  0.123
 DOA_SELFTEST: S3 M-ESPRIT  with noise within 0.5 deg                     PASS
 DOA_SELFTEST: S4 -90 deg phase + CAL +90 deg -> I  0.000  M -0.000 (expect 0)
 DOA_SELFTEST: S4 calibration rotation cancels the phase (|theta| < 0.05) PASS
@@ -56,9 +56,9 @@ FW_COSIM: live true  +50.0 deg -> I-UESPRIT   +0.000  M-ESPRIT  +49.990
 FW_COSIM: live +50 deg after calibration, built estimators within 0.5 deg PASS
 FW_COSIM: --- doa_monitor=3 ---
 DOA: monitoring 3 averaged results (Ctrl-C does not abort; keep N small)
-DOA: #1     M-ESPRIT  50.023 (std  0.096) |psi|  0.9971 offc 0/16  pk 11024/14112  fl 0/0
-DOA: #2     M-ESPRIT  50.036 (std  0.083) |psi|  0.9995 offc 0/16  pk 11504/13793  fl 0/0
-DOA: #3     M-ESPRIT  50.008 (std  0.091) |psi|  0.9983 offc 0/16  pk 10784/13971  fl 0/0
+DOA: #1     M-ESPRIT  50.023 (std  0.098) |psi|  0.9971 offc 0/16  pk 11024/14112  fl 0/0
+DOA: #2     M-ESPRIT  50.036 (std  0.079) |psi|  0.9995 offc 0/16  pk 11504/13793  fl 0/0
+DOA: #3     M-ESPRIT  50.008 (std  0.087) |psi|  0.9983 offc 0/16  pk 10784/13971  fl 0/0
 FW_COSIM: --- doa_test=-22.5 ---
 DOA: test generator set to -22.500 deg (DPHASE 0x30fbffff, current K)
 DOA:   M-ESPRIT  mean -22.503  error -0.003 deg  |psi|  1.0000

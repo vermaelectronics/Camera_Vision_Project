@@ -53,7 +53,7 @@ static std::deque<uint64_t> hls_in;
 static std::deque<uint32_t> hls_out;
 static int  hls_busy = 0;
 static bool hls_res_driven = false;
-static const int HLS_BUSY = 400;               // ~ 4 us at 100 MHz per window
+static const int HLS_BUSY = 2000;              // ~20 us at 100 MHz per window (worst case)
 static unsigned long hls_windows = 0;
 
 static void hls_after_rising_edge(bool pre_tvalid, uint64_t pre_tdata, bool pre_rst_n) {

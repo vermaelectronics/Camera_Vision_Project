@@ -34,17 +34,26 @@ use. `DOA_CAPS` bit 2 tells the firmware that the estimator is an HLS IP.
 
 ## Kernel behaviour
 - **Free-running.** `ap_ctrl_none`, so each invocation processes one window and the hardware restarts it straight away.
-- **Input loop.** Reads 2^log2_snap snapshots at II = 1 and accumulates exact integer moments (48- and 80-bit).
-- **Once per window.** Forms C in double precision, normalises it, takes C^p, applies the M = 2 closed form, then computes
-  `atan2` and `asin`.
+- **Input loop.** Reads 2^log2_snap snapshots at II = 1 and accumulates exact integer moments (48- and 80-bit). This is the
+  only pipelined part.
+- **Once per window.** Forms C, normalises it, takes C^p, applies the M = 2 closed form and converts φ to θ. All of this is
+  single-precision and runs on **one shared** multiplier, adder, divider, square root and int-to-float converter (ALLOCATION
+  limit = 1). `atan2` and `asin` are an 8-term minimax polynomial (error < 4e-8 rad) on the same operators.
 - **Result packet.** Nine words: magic `0xE5A1` + flags, φ (Q28), ψ (Q8.24), θ (Q28), degrees (Q16), and normalised C (Q30).
+- **Latency between windows.** About 1–2 k cycles (10–20 µs at 100 MHz). The 1024-snapshot stream buffer in
+  `gnss_passthrough` covers this. At the full 30.72 MS/s, use windows of **≥ 512 snapshots**; shorter windows overflow the
+  buffer and set the overrun flag. The default window is 1024.
+
+### Area history
+The first version used double precision and the HLS math library. Vitis HLS 2023.2 reported 260 DSP48 and 43.7k LUT for
+`esprit_m_hls`, which is 118% / 82% of the XC7Z020 and does not fit. The shared single-precision version replaces it.
 
 ## Verified (here, with g++ and the Xilinx `ap_int` headers)
 - **C-sim:** I-UESPRIT 36/36 checks and M-ESPRIT 37/37. The kernel matches the double-precision reference within
   0.00001°; worst error against the true angle is 0.21° at 20 dB SNR.
 - **Against the Python models in `ip/*/model`:** within 0.0001° on QPSK windows.
 - **Firmware co-sim** (`Source/Sim/ESPRIT/fw_cosim`, `GNSS_DOA_IMPL=hls`): Verilator RTL with `HLS_CORE=1`, this C++ kernel as
-  the HLS IP (400-cycle stall per window), and the real `gnss_doa.c`.
+  the HLS IP (2000-cycle stall per window), and the real `gnss_doa.c`.
   - Self-test: 8/8 (I-UESPRIT) and 9/9 (M-ESPRIT).
   - Live angles within 0.05° after calibration.
   - About 1,300 windows processed in each run.

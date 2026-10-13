@@ -51,7 +51,7 @@ ESPRIT_HLS_TB:   QPSK            true  -20.00  kernel  -19.8056  ref  -19.8056  
 ESPRIT_HLS_TB: QPSK -20 deg: kernel = reference (< 0.01 deg)              PASS
 ESPRIT_HLS_TB: QPSK -20 deg: within 0.5 deg of the true angle             PASS
 ESPRIT_HLS_TB: every window produced one 9-word packet with the magic word PASS
-ESPRIT_HLS_TB:   worst |kernel - reference| 0.00001 deg, worst |kernel - true| 0.2119 deg
+ESPRIT_HLS_TB:   worst |kernel - reference| 0.00002 deg, worst |kernel - true| 0.2119 deg
 ESPRIT_HLS_TB: all-zero input sets the no_signal flag                     PASS
 ESPRIT_HLS_TB: ============================================
 ESPRIT_HLS_TB_RESULT: PASS (36 checks)

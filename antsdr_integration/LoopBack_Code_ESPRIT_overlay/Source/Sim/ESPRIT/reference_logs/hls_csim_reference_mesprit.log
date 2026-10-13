@@ -38,7 +38,7 @@ ESPRIT_HLS_TB: p = 2^n +25 deg: within 0.5 deg of the true angle          PASS
 ESPRIT_HLS_TB:   p = 2^n         true   25.00  kernel   24.9198  ref   24.9198  |psi| 1.0011  flags 0x0
 ESPRIT_HLS_TB: p = 2^n +25 deg: kernel = reference (< 0.01 deg)           PASS
 ESPRIT_HLS_TB: p = 2^n +25 deg: within 0.5 deg of the true angle          PASS
-ESPRIT_HLS_TB:   128 snapshots   true  -40.00  kernel  -39.9186  ref  -39.9187  |psi| 1.0135  flags 0x0
+ESPRIT_HLS_TB:   128 snapshots   true  -40.00  kernel  -39.9187  ref  -39.9187  |psi| 1.0135  flags 0x0
 ESPRIT_HLS_TB: 128 snapshots -40 deg: kernel = reference (< 0.01 deg)     PASS
 ESPRIT_HLS_TB: 128 snapshots -40 deg: within 0.5 deg of the true angle    PASS
 ESPRIT_HLS_TB:   16384 snapshots true  -40.00  kernel  -39.9775  ref  -39.9775  |psi| 0.9996  flags 0x0
