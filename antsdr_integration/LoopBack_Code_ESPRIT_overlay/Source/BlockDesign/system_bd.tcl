@@ -466,6 +466,23 @@ ad_connect sys_cpu_resetn axi_ad9361_dac_dma/m_src_axi_aresetn
 
 ad_ip_instance gnss_passthrough gnss_passthrough
 
+# GNSS-CRPA MOD-11: which ESPRIT estimator(s) this project builds, chosen per
+# project with the environment variable GNSS_DOA_ALGO:
+#   both (default) | iuesprit (I-UESPRIT only) | mesprit (M-ESPRIT only)
+set gnss_doa_algo "both"
+if {[info exists ::env(GNSS_DOA_ALGO)] && $::env(GNSS_DOA_ALGO) ne ""} {
+  set gnss_doa_algo [string tolower $::env(GNSS_DOA_ALGO)]
+}
+switch -- $gnss_doa_algo {
+  both     { set gnss_en_i 1; set gnss_en_m 1 }
+  iuesprit { set gnss_en_i 1; set gnss_en_m 0 }
+  mesprit  { set gnss_en_i 0; set gnss_en_m 1 }
+  default  { error "ERROR: GNSS_DOA_ALGO='$gnss_doa_algo' - use both, iuesprit or mesprit" }
+}
+ad_ip_parameter gnss_passthrough CONFIG.ENABLE_IUESPRIT $gnss_en_i
+ad_ip_parameter gnss_passthrough CONFIG.ENABLE_MESPRIT  $gnss_en_m
+puts "GNSS_DOA_ALGO: $gnss_doa_algo (ENABLE_IUESPRIT=$gnss_en_i, ENABLE_MESPRIT=$gnss_en_m)"
+
 # sample-domain clock and reset (same domain as the AD9361 core interface)
 ad_connect axi_ad9361/l_clk gnss_passthrough/clk
 ad_connect axi_ad9361/rst   gnss_passthrough/rst

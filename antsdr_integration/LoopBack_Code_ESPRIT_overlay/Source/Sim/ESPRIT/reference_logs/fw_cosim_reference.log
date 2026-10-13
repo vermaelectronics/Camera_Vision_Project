@@ -1,0 +1,84 @@
+FW_COSIM: ===== firmware gnss_doa.c  <->  RTL gnss_passthrough v1.2 =====
+FW_COSIM: scene: QPSK source, SNR 20 dB, RX2 board offset +37.0 deg
+FW_COSIM: estimators built: I-UESPRIT M-ESPRIT
+
+=== ESPRIT DOA monitor (gnss_passthrough v1.2) ===
+DOA: ESPRIT DOA monitor present, version 1.0, estimators: I-UESPRIT M-ESPRIT, max window 2^14
+DOA_SELFTEST: ===== ESPRIT DOA hardware self-test =====
+DOA_SELFTEST: S1 DOA block present (DOA_ID = 0x444F4131)                 PASS
+DOA_SELFTEST: S1 at least one estimator built                            PASS
+DOA_SELFTEST: S1 gnss_passthrough reports v1.2                           PASS
+DOA_SELFTEST: S2 sweep: set angle | I-UESPRIT (error) | M-ESPRIT (error) |psi|
+DOA_SELFTEST:    -60 deg |-60.008 (-0.008) |-60.008 (-0.008)  1.0000
+DOA_SELFTEST:    -45 deg |-45.000 (-0.000) |-45.000 (-0.000)  1.0000
+DOA_SELFTEST:    -30 deg |-30.000 (-0.000) |-30.000 (-0.000)  1.0000
+DOA_SELFTEST:    -15 deg |-15.001 (-0.001) |-15.001 (-0.001)  1.0000
+DOA_SELFTEST:      0 deg |-0.000 (-0.000) |-0.000 (-0.000)  1.0000
+DOA_SELFTEST:     15 deg | 15.000 ( 0.000) | 15.000 ( 0.000)  1.0000
+DOA_SELFTEST:     30 deg | 30.000 (-0.000) | 30.000 (-0.000)  1.0000
+DOA_SELFTEST:     45 deg | 45.000 ( 0.000) | 45.000 ( 0.000)  1.0000
+DOA_SELFTEST:     60 deg | 59.999 (-0.001) | 59.999 (-0.001)  1.0000
+DOA_SELFTEST: S2 I-UESPRIT sweep -60..60 deg, every error < 0.05 deg     PASS
+DOA_SELFTEST: S2 M-ESPRIT  sweep -60..60 deg, every error < 0.05 deg     PASS
+DOA_SELFTEST: S3 noisy +20 deg: I mean  19.977 std  0.123 | M mean  19.977 std  0.122
+DOA_SELFTEST: S3 I-UESPRIT with noise within 0.5 deg                     PASS
+DOA_SELFTEST: S3 M-ESPRIT  with noise within 0.5 deg                     PASS
+DOA_SELFTEST: S4 -90 deg phase + CAL +90 deg -> I -0.000  M -0.000 (expect 0)
+DOA_SELFTEST: S4 calibration rotation cancels the phase (|theta| < 0.05) PASS
+DOA_SELFTEST: S5 noise only: |psi|  0.1087  off-circle 16/16
+DOA_SELFTEST: S5 M-ESPRIT flags 'no source' (off-circle >= 8/16)         PASS
+DOA_SELFTEST: S6 live RX1/RX2 snapshots in 10 ms: 307126 (expect ~ fs/100)
+DOA_SELFTEST: S6 live RX1/RX2 samples reach the estimators               PASS
+DOA_SELFTEST: S6 no CDC FIFO overflow                                    PASS
+DOA_SELFTEST: ===== RESULT PASS (11/11 checks passed) =====
+DOA: live RX1/RX2 DOA ENABLED (receive-only, TX path untouched)
+DOA: type  doa?  for the live angle,  doa_selftest?  to re-run the test,
+     doa_help?  for every DOA command.
+FW_COSIM: boot: gnss_doa_boot_check() self-test S1..S6 returns DOA_OK    PASS
+FW_COSIM: --- doa?  (live, true 10 deg, NOT calibrated) ---
+DOA: ---- ESPRIT direction of arrival (source: LIVE RX1/RX2, cumulant) ----
+DOA:   I-UESPRIT window #32       theta -1.719 deg   avg #2      mean -1.805 deg  std  0.071 deg  phi  0.0943 rad  psi  0.0472  flags 0x0
+DOA:   M-ESPRIT  window #32       theta -1.719 deg   avg #2      mean -1.805 deg  std  0.071 deg  phi  0.0943 rad  |psi|  0.9979  flags 0x0  off-circle 0/16
+DOA:   snapshots 33807  peak |x0| 10928  |x1| 11600 (of 32767)
+FW_COSIM: uncalibrated M-ESPRIT -1.805 deg, expected with offset -1.828 deg
+FW_COSIM: live uncalibrated angle shows the board offset (within 0.5 deg) PASS
+FW_COSIM: --- doa_cal=1 (splitter: both RX see the same signal) ---
+DOA: calibrating RX1/RX2 phase. RX1 and RX2 must see the SAME signal
+     (splitter, equal cables). Collecting 64 windows ...
+DOA: measured RX2-RX1 offset  36.985 deg over 64 windows -> DOA_CAL = 0xb2ff663f (cos 26175, sin -19713)
+DOA: after calibration the common signal reads  0.011 deg (expect ~0). Calibration is lost at power-off.
+FW_COSIM: calibration completes                                          PASS
+FW_COSIM: after calibration the common signal reads 0 deg (within 0.3)   PASS
+FW_COSIM: live true  -40.0 deg -> I-UESPRIT  -40.030  M-ESPRIT  -40.030
+FW_COSIM: live -40 deg after calibration, built estimators within 0.5 deg PASS
+FW_COSIM: live true  -15.0 deg -> I-UESPRIT  -15.001  M-ESPRIT  -15.001
+FW_COSIM: live -15 deg after calibration, built estimators within 0.5 deg PASS
+FW_COSIM: live true  +25.0 deg -> I-UESPRIT  +25.008  M-ESPRIT  +25.008
+FW_COSIM: live +25 deg after calibration, built estimators within 0.5 deg PASS
+FW_COSIM: live true  +50.0 deg -> I-UESPRIT  +49.966  M-ESPRIT  +49.966
+FW_COSIM: live +50 deg after calibration, built estimators within 0.5 deg PASS
+FW_COSIM: --- doa_monitor=3 ---
+DOA: monitoring 3 averaged results (Ctrl-C does not abort; keep N small)
+DOA: #1    I-UESPRIT  49.999 (std  0.095)  M-ESPRIT  49.999 (std  0.094) |psi|  0.9971 offc 0/16  pk 11024/14112  fl 0/0
+DOA: #2    I-UESPRIT  50.011 (std  0.079)  M-ESPRIT  50.011 (std  0.078) |psi|  0.9995 offc 0/16  pk 10704/13865  fl 0/0
+DOA: #3    I-UESPRIT  49.983 (std  0.083)  M-ESPRIT  49.983 (std  0.083) |psi|  0.9983 offc 0/16  pk 10976/13970  fl 0/0
+FW_COSIM: --- doa_test=-22.5 ---
+DOA: test generator set to -22.500 deg (DPHASE 0x30fbffff, current K)
+DOA:   I-UESPRIT mean -22.503  error -0.003 deg
+DOA:   M-ESPRIT  mean -22.503  error -0.003 deg  |psi|  1.0000
+DOA: previous mode and calibration restored
+FW_COSIM: doa_test=-22.5 completes                                       PASS
+FW_COSIM: doa_test restores live mode and calibration                    PASS
+FW_COSIM: test generator at -22.5 deg: M-ESPRIT within 0.05 deg          PASS
+FW_COSIM: test generator at -22.5 deg: I-UESPRIT within 0.05 deg         PASS
+DOA: ---- configuration ----
+DOA:   enable 1  source live RX  subspace cumulant  p = 4  window 1024  average 16
+DOA:   MU_Q30 1024  K_Q30 341782638 (1/pi = 341782638 for d = lambda/2)  UCTOL_Q24 0x00400000
+DOA:   DECIM 0  CAL cos 26175 sin -19713 (rotation -36.985 deg)
+DOA:   TG_FTW 0x0147ae14  TG_DPHASE 0x30fbffff  TG_CFG 0x00400064
+DOA: ---- ESPRIT direction of arrival (source: LIVE RX1/RX2, cumulant) ----
+DOA:   I-UESPRIT window #0        theta  0.000 deg   avg #0      mean  0.000 deg  std  0.000 deg  phi  0.0000 rad  psi  0.0000  flags 0x0
+DOA:   M-ESPRIT  window #0        theta  0.000 deg   avg #0      mean  0.000 deg  std  0.000 deg  phi  0.0000 rad  |psi|  0.0000  flags 0x0  off-circle 0/16
+DOA:   snapshots 9  peak |x0| 0  |x1| 0 (of 32767)
+FW_COSIM: simulated time 116.706 ms
+FW_COSIM_RESULT: PASS

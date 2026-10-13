@@ -4,11 +4,15 @@ set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SRC="$(cd "$HERE/../../.." && pwd)"
 FW="$SRC/Firmware/app_gnss_e310"
-W="$SRC/../Build/fw_cosim"; mkdir -p "$W/stub"
+ALGO="${GNSS_DOA_ALGO:-both}"          # both | iuesprit | mesprit
+case "$ALGO" in both) GEN=();; iuesprit) GEN=(-GENABLE_MESPRIT=0);; mesprit) GEN=(-GENABLE_IUESPRIT=0);;
+  *) echo "GNSS_DOA_ALGO=$ALGO - use both, iuesprit or mesprit"; exit 2;; esac
+W="$SRC/../Build/fw_cosim"; [[ "$ALGO" != both ]] && W="${W}_$ALGO"
+mkdir -p "$W/stub"; echo "FW_COSIM: estimators: $ALGO"
 touch "$W/stub/xparameters.h"
 # the firmware is C: compile it with gcc so it keeps C linkage
 gcc -c -O2 -std=gnu99 -w -I"$FW" -I"$W/stub" "$FW/gnss_doa.c" -o "$W/gnss_doa.o"
-verilator --cc --exe --build -O2 -j 4 --top-module gnss_passthrough \
+verilator --cc --exe --build -O2 -j 4 --top-module gnss_passthrough "${GEN[@]}" \
   -Wno-fatal -Wno-lint -Wno-style -Wno-TIMESCALEMOD \
   -CFLAGS "-I$FW -I$W/stub -std=gnu++14 -w" --Mdir "$W/obj" \
   "$SRC/HDL/gnss_passthrough.v" "$SRC/HDL/gnss_doa_esprit.v" "$SRC/HDL/doa_async_fifo.v" \

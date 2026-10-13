@@ -4,10 +4,14 @@
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SRC="$(cd "$HERE/../.." && pwd)"
-W="$SRC/../Build/sim_doa"; mkdir -p "$W"; cd "$W"
+ALGO="${GNSS_DOA_ALGO:-both}"          # both | iuesprit | mesprit
+case "$ALGO" in both) GEN=();; iuesprit) GEN=(-generic_top EN_M=0);; mesprit) GEN=(-generic_top EN_I=0);;
+  *) echo "GNSS_DOA_ALGO=$ALGO - use both, iuesprit or mesprit"; exit 2;; esac
+W="$SRC/../Build/sim_doa"; [[ "$ALGO" != both ]] && W="${W}_$ALGO"
+mkdir -p "$W"; cd "$W"; echo "DOA_SIM: estimators: $ALGO"
 xvlog -i "$HERE" "$HERE/tb_gnss_doa.v" "$SRC/HDL/gnss_passthrough.v" "$SRC/HDL/gnss_doa_esprit.v" \
       "$SRC/HDL/doa_async_fifo.v" "$SRC/HDL/doa_test_gen.v" "$SRC"/HDL/esprit/*.v
-xelab -debug typical -s tb_doa tb_gnss_doa
+xelab -debug typical "${GEN[@]}" -s tb_doa tb_gnss_doa
 if [[ "${1:-}" == "gui" ]]; then
   xsim tb_doa -gui -testplusarg STIM="$HERE/doa_stim.hex" -tclbatch "$HERE/waves_doa.tcl"
 else

@@ -14,6 +14,10 @@
 # ============================================================================
 set root [file normalize [file join [file dirname [info script]] .. ..]]
 set out  [file join $root Build reports]
+# one report folder per project (Project, Project_IUESPRIT, Project_MESPRIT)
+if {[llength [current_project -quiet]]} {
+  set out [file join $out [file tail [get_property DIRECTORY [current_project]]]]
+}
 file mkdir $out
 
 # Locate the DOA block. Try the expected path first, then any instance of the
@@ -45,7 +49,7 @@ if {[llength $doa] == 0} {
   set prims [get_cells -quiet -hier -filter {NAME =~ *gnss_passthrough* && IS_PRIMITIVE}]
   set ndsp  [llength [filter -quiet $prims {REF_NAME =~ DSP48*}]]
   set ndoa  [llength [get_cells -quiet -hier -filter {NAME =~ *doa*}]]
-  puts "DOA_IMPL: primitives under gnss_passthrough: [llength $prims], DSP48: $ndsp (v1.2 with ESPRIT uses ~77)"
+  puts "DOA_IMPL: primitives under gnss_passthrough: [llength $prims], DSP48: $ndsp (v1.2: tens of DSP48 per estimator)"
   puts "DOA_IMPL: cells whose name contains 'doa': $ndoa"
   if {$ndoa > 0 && $ndsp > 20} {
     puts "DOA_IMPL: the DOA logic is present but its hierarchy was flattened."
@@ -58,6 +62,7 @@ if {[llength $doa] == 0} {
 }
 set doa [lindex $doa 0]
 puts "DOA_IMPL: ===== ESPRIT DOA block: [get_property NAME $doa] ====="
+puts "DOA_IMPL: estimators built: [expr {[llength [get_cells -quiet "[get_property NAME $doa]/g_iuesprit.u_core"]] ? "I-UESPRIT " : ""}][expr {[llength [get_cells -quiet "[get_property NAME $doa]/g_mesprit.u_core"]] ? "M-ESPRIT" : ""}]"
 
 report_utilization -hierarchical -hierarchical_depth 4 -cells $doa -file [file join $out doa_utilization.rpt]
 foreach sub {"" "/g_iuesprit.u_core" "/g_mesprit.u_core" "/u_afifo" "/u_tgen"} {

@@ -425,6 +425,29 @@ On Windows, the existing `Automation/PowerShell/Build_All.ps1` flow is unchanged
 Its IP-packaging step calls the same `gnss_passthrough_ip.tcl`, which now picks
 up the ESPRIT files automatically.
 
+### 7.1b Separate projects for I-UESPRIT and M-ESPRIT
+
+The same packaged IP builds either estimator alone. `system_bd.tcl` reads the
+environment variable `GNSS_DOA_ALGO` and sets the block-design IP parameters
+`ENABLE_IUESPRIT` / `ENABLE_MESPRIT`:
+
+| `GNSS_DOA_ALGO` | Project directory | Estimators | Console line in step 3 |
+|---|---|---|---|
+| unset / `both` | `Vivado/Project` | both | `GNSS_DOA_ALGO: both (ENABLE_IUESPRIT=1, ENABLE_MESPRIT=1)` |
+| `iuesprit` | `Vivado/Project_IUESPRIT` | I-UESPRIT | `GNSS_DOA_ALGO: iuesprit (ENABLE_IUESPRIT=1, ENABLE_MESPRIT=0)` |
+| `mesprit` | `Vivado/Project_MESPRIT` | M-ESPRIT | `GNSS_DOA_ALGO: mesprit (ENABLE_IUESPRIT=0, ENABLE_MESPRIT=1)` |
+
+`create_project.tcl` creates the project in the current directory, so each
+variant lives in its own directory with its own runs, bitstream and XSA. Use a
+separate Vitis workspace per XSA. The firmware source is identical: it reads
+`DOA_CAPS` and tests and prints only the estimator(s) present (self-test
+8 checks I-UESPRIT only, 9 M-ESPRIT only, 11 both). `report_doa.tcl` writes to
+`Build/reports/<project directory>/`.
+
+Simulation of a single-estimator build: set `GNSS_DOA_ALGO` before
+`sim_doa.tcl`, `run_xsim.sh`, `run_iverilog.sh` or `fw_cosim/run_fw_cosim.sh`
+(system testbench: 41 checks I-UESPRIT only, 47 M-ESPRIT only, 61 both).
+
 ### 7.2 What to read in the Vivado Tcl console after step 5
 
 ```

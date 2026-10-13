@@ -20,12 +20,19 @@
 //  Every check prints  "DOA_TB: <name> ... PASS|FAIL"  and the run ends with
 //  "DOA_TB_RESULT: PASS" or "DOA_TB_RESULT: FAIL (<n> failures)".
 //
+//  Parameters: EN_I / EN_M (default 1) build and check only I-UESPRIT or only
+//              M-ESPRIT, e.g. iverilog -P tb_gnss_doa.EN_M=0, or
+//              xelab -generic_top "EN_M=0". Checks of an absent estimator are
+//              replaced by a check that it reports nothing.
 //  Plusargs:  +STIM=<path to doa_stim.hex>
 //  Include :  doa_tb_expected.vh (pass its directory with -i / -I)
 // ============================================================================
 `timescale 1ns/1ps
 
-module tb_gnss_doa;
+module tb_gnss_doa #(
+  parameter EN_I = 1,          // build / check I-UESPRIT
+  parameter EN_M = 1           // build / check M-ESPRIT
+);
 
   // ---------------------------------------------------------------- clocks
   reg l_clk = 1'b0;   always #4.069 l_clk = ~l_clk;     // 122.88 MHz
@@ -66,7 +73,7 @@ module tb_gnss_doa;
   reg         dac_valid = 1'b0;
   always @(posedge l_clk) dac_valid <= (ph == 2'd2);
 
-  gnss_passthrough dut (
+  gnss_passthrough #(.ENABLE_IUESPRIT(EN_I), .ENABLE_MESPRIT(EN_M)) dut (
     .clk (l_clk), .rst (rst),
     .adc_enable_i0 (1'b1), .adc_valid_i0 (adc_valid), .adc_data_i0 (adc_i0),
     .adc_enable_q0 (1'b1), .adc_valid_q0 (adc_valid), .adc_data_q0 (adc_q0),
@@ -150,6 +157,16 @@ module tb_gnss_doa;
 
   integer fails = 0, checks = 0;
 
+  // T5 reads I-UESPRIT (M-ESPRIT if I is absent); T6/T7 read M-ESPRIT
+  // (I-UESPRIT if M is absent) -- with both built this is the original test.
+  localparam [15:0] S_ASEQ = EN_I ? 16'h14C : 16'h170,
+                    S_ADEG = EN_I ? 16'h150 : 16'h174;
+  localparam [15:0] P_SEQ  = EN_M ? 16'h15C : 16'h138,
+                    P_ASEQ = EN_M ? 16'h170 : 16'h14C,
+                    P_ADEG = EN_M ? 16'h174 : 16'h150,
+                    P_ASQL = EN_M ? 16'h178 : 16'h154,
+                    P_ASQH = EN_M ? 16'h17C : 16'h158;
+
   task check(input [8*64-1:0] name, input ok);
     begin
       checks = checks + 1;
@@ -191,6 +208,8 @@ module tb_gnss_doa;
     load_expected;
     n_stim = LIVE_WINDOWS << LIVE_LOG2_SNAP;
     $display("DOA_TB: ===== gnss_passthrough v1.2 + ESPRIT DOA system test =====");
+    $display("DOA_TB: configuration: I-UESPRIT %0s, M-ESPRIT %0s",
+             EN_I ? "built" : "NOT built", EN_M ? "built" : "NOT built");
     $display("DOA_TB: stimulus %0d snapshots from %0s", n_stim, stim_file);
 
     repeat (10) @(posedge aclk);
@@ -201,7 +220,7 @@ module tb_gnss_doa;
     rd(PT_ID, r);       check("T1 passthrough ID = GCP1", r == 32'h47435031);
     rd(PT_VER, r);      check("T1 passthrough VERSION = 1.2", r == 32'h00010002);
     rd(DOA_ID, r);      check("T1 DOA_ID = DOA1", r == 32'h444F4131);
-    rd(DOA_CAPS, r);    check("T1 CAPS: both estimators built", r[1:0] == 2'b11 && r[15:8] == 8'd14);
+    rd(DOA_CAPS, r);    check("T1 CAPS: built estimators reported", r[1:0] == {EN_M[0], EN_I[0]} && r[15:8] == 8'd14);
     rd(DOA_CTRL, r);    check("T1 DOA_CTRL reset value 0x00040A20", r == 32'h00040A20);
     wr(PT_SCRATCH, 32'hC0FFEE01); rd(PT_SCRATCH, r);
     check("T1 SCRATCH read/write", r == 32'hC0FFEE01);
@@ -214,17 +233,18 @@ module tb_gnss_doa;
     repeat (20) @(posedge aclk);                  // let the control bits cross
     stream_idx = 0; stream_end = n_stim; stream_go = 1'b1;
     for (w = 0; w < LIVE_WINDOWS; w = w + 1) begin
-      wait_seq(I_SEQ, w + 1, si);
-      wait_seq(M_SEQ, w + 1, sm);
+      si = w + 1; sm = w + 1;
+      if (EN_I) wait_seq(I_SEQ, w + 1, si);
+      if (EN_M) wait_seq(M_SEQ, w + 1, sm);
       rd(I_DEG, d_i); rd(M_DEG, d_m); rd(M_PSI, mag);
       e_i = absr(q16(d_i) - live_exp_i[w]);
       e_m = absr(q16(d_m) - live_exp_m[w]);
       $display("DOA_TB:   win %0d true %7.2f | I-UESPRIT %9.4f (model %9.4f, err %.4f) | M-ESPRIT %9.4f (model %9.4f, err %.4f) |psi| %.4f",
                w, live_true[w], q16(d_i), live_exp_i[w], e_i, q16(d_m), live_exp_m[w], e_m, q24(mag));
       check("T2 live window sequence (no window lost)", si == w + 1 && sm == w + 1);
-      check("T2 I-UESPRIT angle within 0.05 deg of model", e_i < 0.05);
-      check("T2 M-ESPRIT angle within 0.05 deg of model", e_m < 0.05);
-      check("T2 M-ESPRIT |psi| within 0.01 of model", absr(q24(mag) - live_exp_mag[w]) < 0.01);
+      if (EN_I) check("T2 I-UESPRIT angle within 0.05 deg of model", e_i < 0.05);
+      if (EN_M) check("T2 M-ESPRIT angle within 0.05 deg of model", e_m < 0.05);
+      if (EN_M) check("T2 M-ESPRIT |psi| within 0.01 of model", absr(q24(mag) - live_exp_mag[w]) < 0.01);
     end
     while (stream_idx < stream_end) @(posedge l_clk);
     repeat (50) @(posedge aclk);
@@ -232,7 +252,9 @@ module tb_gnss_doa;
     // ---------------- T3 stream integrity ----------------
     rd(DOA_INCNT, r);  check("T3 IN_COUNT equals snapshots streamed", r == n_stim);
     rd(DOA_STATUS, r); check("T3 no CDC FIFO overflow", r[0] == 1'b0);
-    check("T3 STATUS shows enable, live source, both cores", r[4:1] == 4'b0111);
+    check("T3 STATUS shows enable, live source, built cores", r[4:1] == {2'b01, EN_M[0], EN_I[0]});
+    if (!EN_I) begin rd(I_SEQ, s); check("T3 absent I-UESPRIT reports no results", s == 0); end
+    if (!EN_M) begin rd(M_SEQ, s); check("T3 absent M-ESPRIT reports no results", s == 0); end
     rd(DOA_PEAK, r);
     $display("DOA_TB:   peak |x0| = %0d, peak |x1| = %0d (Q1.15)", r[15:0], r[31:16]);
     check("T3 peak detector sees the signal", r[15:0] > 16'd4000 && r[31:16] > 16'd4000);
@@ -248,15 +270,15 @@ module tb_gnss_doa;
     for (k = 0; k < TG_POINTS; k = k + 1) begin
       wr(DOA_DPH, tg_dphase[k]);
       rd(I_ASEQ, base_i); rd(M_ASEQ, base_m);
-      wait_seq(I_ASEQ, base_i + 2, s);             // 1st block may straddle the change
-      wait_seq(M_ASEQ, base_m + 2, s);
+      if (EN_I) wait_seq(I_ASEQ, base_i + 2, s);   // 1st block may straddle the change
+      if (EN_M) wait_seq(M_ASEQ, base_m + 2, s);
       rd(I_ADEG, d_i); rd(M_ADEG, d_m);
       e_i = absr(q16(d_i) - tg_theta[k]);
       e_m = absr(q16(d_m) - tg_theta[k]);
       $display("DOA_TB:   set %7.2f deg (DPHASE 0x%08h) | I-UESPRIT %9.4f (err %.4f) | M-ESPRIT %9.4f (err %.4f)",
                tg_theta[k], tg_dphase[k], q16(d_i), e_i, q16(d_m), e_m);
-      check("T4 test-gen I-UESPRIT within 0.05 deg", e_i < 0.05);
-      check("T4 test-gen M-ESPRIT within 0.05 deg", e_m < 0.05);
+      if (EN_I) check("T4 test-gen I-UESPRIT within 0.05 deg", e_i < 0.05);
+      if (EN_M) check("T4 test-gen M-ESPRIT within 0.05 deg", e_m < 0.05);
     end
 
     // ---------------- T5 calibration rotation ----------------
@@ -266,15 +288,16 @@ module tb_gnss_doa;
     wr(DOA_DPH, 32'hC0000000);
     wr(DOA_CAL, 32'h7FFF0000);
     rd(I_ASEQ, base_i); rd(M_ASEQ, base_m);
-    wait_seq(I_ASEQ, base_i + 2, s); wait_seq(M_ASEQ, base_m + 2, s);
+    if (EN_I) wait_seq(I_ASEQ, base_i + 2, s);
+    if (EN_M) wait_seq(M_ASEQ, base_m + 2, s);
     rd(I_ADEG, d_i); rd(M_ADEG, d_m);
     $display("DOA_TB:   raw phase -90 deg + CAL +90 deg -> I %8.4f  M %8.4f deg (expect 0)", q16(d_i), q16(d_m));
-    check("T5 CAL cancels the phase (I-UESPRIT, |theta| < 0.05)", absr(q16(d_i)) < 0.05);
-    check("T5 CAL cancels the phase (M-ESPRIT,  |theta| < 0.05)", absr(q16(d_m)) < 0.05);
+    if (EN_I) check("T5 CAL cancels the phase (I-UESPRIT, |theta| < 0.05)", absr(q16(d_i)) < 0.05);
+    if (EN_M) check("T5 CAL cancels the phase (M-ESPRIT,  |theta| < 0.05)", absr(q16(d_m)) < 0.05);
     wr(DOA_CAL, 32'h00007FFF);
-    rd(I_ASEQ, base_i); wait_seq(I_ASEQ, base_i + 2, s);
-    rd(I_ADEG, d_i);
-    $display("DOA_TB:   CAL removed -> I %8.4f deg (expect 30)", q16(d_i));
+    rd(S_ASEQ, base_i); wait_seq(S_ASEQ, base_i + 2, s);
+    rd(S_ADEG, d_i);
+    $display("DOA_TB:   CAL removed -> %8.4f deg (expect 30)", q16(d_i));
     check("T5 CAL identity restores +30 deg", absr(q16(d_i) - 30.0) < 0.05);
 
     // ---------------- T6 averaging statistics ----------------
@@ -283,13 +306,14 @@ module tb_gnss_doa;
     wr(DOA_TGCFG, 32'h00300008);                 // noise >> 3
     wr(DOA_DPH, tg_dphase[5]);                   // +30 deg
     wr(DOA_CTRL, ctrl(1, 1, 2'd2, 5'd7, 4'd4) | 32'h8);   // noise enable, 128-snapshot windows
-    rd(M_ASEQ, base_m);
-    wait_seq(M_ASEQ, base_m + 2, s);
-    rd(M_ADEG, d_m); rd(M_ASQL, sql); rd(M_ASQH, sqh); rd(M_OFFC, r);
+    rd(P_ASEQ, base_m);
+    wait_seq(P_ASEQ, base_m + 2, s);
+    rd(P_ADEG, d_m); rd(P_ASQL, sql); rd(P_ASQH, sqh); rd(M_OFFC, r);
     avg   = q16(d_m);
     var_q = (sqh * 4294967296.0 + sql) / 4294967296.0 - avg * avg;
     sd    = (var_q > 0.0) ? $sqrt(var_q) : 0.0;
-    $display("DOA_TB:   M-ESPRIT mean %8.4f deg, std %.4f deg, off-circle %0d/16", avg, sd, r);
+    $display("DOA_TB:   %0s mean %8.4f deg, std %.4f deg, off-circle %0d/16",
+             EN_M ? "M-ESPRIT" : "I-UESPRIT", avg, sd, r);
     check("T6 noisy mean within 0.5 deg of 30", absr(avg - 30.0) < 0.5);
     check("T6 std deviation computed and small (< 1 deg)", sd < 1.0);
 
@@ -305,7 +329,7 @@ module tb_gnss_doa;
     rd(DOA_INCNT, r);
     $display("DOA_TB:   4096 snapshots streamed, %0d delivered", r);
     check("T7 DECIM=3 delivers exactly 1 of 4 (1024)", r == 32'd1024);
-    wait_seq(M_SEQ, 1, s);
+    wait_seq(P_SEQ, 1, s);
     check("T7 one window completed from decimated data", s == 32'd1);
     stream_go = 1'b0;
     wr(DOA_DECIM, 32'd0);

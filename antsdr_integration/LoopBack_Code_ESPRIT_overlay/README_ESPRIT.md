@@ -37,6 +37,29 @@ source Vivado/Scripts/report_doa.tcl
 
 It prints `DOA_IMPL:` lines with utilisation, timing and CDC-constraint coverage.
 
+## 2b. Separate projects: I-UESPRIT only / M-ESPRIT only
+
+One packaged IP serves all three builds; `GNSS_DOA_ALGO` (read by
+`Source/BlockDesign/system_bd.tcl`) sets the IP's `ENABLE_IUESPRIT` /
+`ENABLE_MESPRIT` per project. Create each project from its own directory:
+
+| GNSS_DOA_ALGO | project directory          | estimators        |
+|---------------|----------------------------|-------------------|
+| `both` (default) | `Vivado/Project`        | I-UESPRIT + M-ESPRIT |
+| `iuesprit`    | `Vivado/Project_IUESPRIT`  | I-UESPRIT only    |
+| `mesprit`     | `Vivado/Project_MESPRIT`   | M-ESPRIT only     |
+
+```bash
+export GNSS_DOA_ALGO=mesprit                 # or iuesprit
+mkdir -p Vivado/Project_MESPRIT && cd Vivado/Project_MESPRIT
+vivado -mode batch -source ../Scripts/create_project.tcl   # prints GNSS_DOA_ALGO: mesprit (...)
+```
+
+The same `GNSS_DOA_ALGO` selects the matching simulation (`sim_doa.tcl`,
+`run_xsim.sh`, `run_iverilog.sh`, `fw_cosim/run_fw_cosim.sh`). The
+firmware is identical for all three: it reads `DOA_CAPS` and prints and tests
+only the estimator(s) present.
+
 ## 3. Hardware (PuTTY, 115200 8N1)
 
 On boot, the console prints `DOA_SELFTEST: ... RESULT PASS (11/11 checks passed)`.

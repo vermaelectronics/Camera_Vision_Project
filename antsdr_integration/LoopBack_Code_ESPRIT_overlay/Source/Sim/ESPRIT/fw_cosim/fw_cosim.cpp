@@ -123,12 +123,18 @@ static void check(const char *what, bool ok) {
     if (!ok) fails++;
 }
 
+// estimators present in this build (DOA_CAPS bit 0 = I-UESPRIT, bit 1 = M-ESPRIT)
+static bool has_i = true, has_m = true;
+
+// avg_deg(true) = the primary estimator: M-ESPRIT if built, else I-UESPRIT
 static double avg_deg(bool m) {
+    if (m && !has_m) m = false;
     return (int32_t)gnss_pt_read(m ? DOA_REG_M_AVG_DEG : DOA_REG_I_AVG_DEG) / 65536.0;
 }
 static void wait_blocks(int n) {
-    uint32_t b = gnss_pt_read(DOA_REG_M_AVG_SEQ);
-    while ((int)(gnss_pt_read(DOA_REG_M_AVG_SEQ) - b) < n) no_os_udelay(50);
+    uint32_t reg = has_m ? DOA_REG_M_AVG_SEQ : DOA_REG_I_AVG_SEQ;
+    uint32_t b = gnss_pt_read(reg);
+    while ((int)(gnss_pt_read(reg) - b) < n) no_os_udelay(50);
 }
 
 int main(int argc, char **argv) {
@@ -146,6 +152,11 @@ int main(int argc, char **argv) {
     printf("FW_COSIM: ===== firmware gnss_doa.c  <->  RTL gnss_passthrough v1.2 =====\n");
     printf("FW_COSIM: scene: QPSK source, SNR %.0f dB, RX2 board offset %+.1f deg\n",
            scene_snr_db, scene_offset_deg);
+    {
+        uint32_t caps = gnss_pt_read(DOA_REG_CAPS);
+        has_i = (caps & 1U) != 0; has_m = (caps & 2U) != 0;
+        printf("FW_COSIM: estimators built: %s%s\n", has_i ? "I-UESPRIT " : "", has_m ? "M-ESPRIT" : "");
+    }
 
     // 1. boot check exactly as main.c calls it
     scene_theta_deg = 10.0;
@@ -158,7 +169,7 @@ int main(int argc, char **argv) {
     gnss_doa_print_result();
     double unc = avg_deg(true);
     double exp_unc = -asin(fmin(1.0, fmax(-1.0, (-M_PI * sin(10.0 * M_PI / 180) + scene_offset_deg * M_PI / 180) / M_PI))) * 180 / M_PI;
-    printf("FW_COSIM: uncalibrated M-ESPRIT %.3f deg, expected with offset %.3f deg\n", unc, exp_unc);
+    printf("FW_COSIM: uncalibrated %s %.3f deg, expected with offset %.3f deg\n", has_m ? "M-ESPRIT" : "I-UESPRIT", unc, exp_unc);
     check("live uncalibrated angle shows the board offset (within 0.5 deg)", fabs(unc - exp_unc) < 0.5);
 
     // 3. calibration with a common signal (true phase 0)
@@ -177,8 +188,8 @@ int main(int argc, char **argv) {
         double di = avg_deg(false), dm = avg_deg(true);
         printf("FW_COSIM: live true %+6.1f deg -> I-UESPRIT %+8.3f  M-ESPRIT %+8.3f\n", a, di, dm);
         char msg[96];
-        snprintf(msg, sizeof msg, "live %+.0f deg after calibration, both within 0.5 deg", a);
-        check(msg, fabs(di - a) < 0.5 && fabs(dm - a) < 0.5);
+        snprintf(msg, sizeof msg, "live %+.0f deg after calibration, built estimators within 0.5 deg", a);
+        check(msg, (!has_i || fabs(di - a) < 0.5) && (!has_m || fabs(dm - a) < 0.5));
     }
     printf("FW_COSIM: --- doa_monitor=3 ---\n");
     gnss_doa_monitor(3);
@@ -196,8 +207,8 @@ int main(int argc, char **argv) {
         gnss_pt_write(DOA_REG_CTRL, 0); gnss_pt_write(DOA_REG_CAL, 0x00007FFF);
         gnss_pt_write(DOA_REG_CTRL, c | DOA_CTRL_SRC_TEST);
         wait_blocks(2);
-        check("test generator at -22.5 deg: M-ESPRIT within 0.05 deg", fabs(avg_deg(true) + 22.5) < 0.05);
-        check("test generator at -22.5 deg: I-UESPRIT within 0.05 deg", fabs(avg_deg(false) + 22.5) < 0.05);
+        if (has_m) check("test generator at -22.5 deg: M-ESPRIT within 0.05 deg", fabs(avg_deg(true) + 22.5) < 0.05);
+        if (has_i) check("test generator at -22.5 deg: I-UESPRIT within 0.05 deg", fabs(avg_deg(false) + 22.5) < 0.05);
         gnss_pt_write(DOA_REG_CTRL, 0); gnss_pt_write(DOA_REG_CAL, cal); gnss_pt_write(DOA_REG_CTRL, c);
     }
     gnss_doa_print_status();

@@ -7,6 +7,8 @@
 #  Waveform GUI instead of batch:
 #      set DOA_SIM_GUI 1
 #      source <LoopBack_Code>/Source/Sim/ESPRIT/sim_doa.tcl
+#  One estimator only (matches a GNSS_DOA_ALGO project):
+#      set ::env(GNSS_DOA_ALGO) mesprit     ;# or iuesprit; default both
 #  Batch from a shell:
 #      vivado -mode batch -source Source/Sim/ESPRIT/sim_doa.tcl
 #
@@ -20,7 +22,18 @@ set doa_src_root [file normalize [file join $doa_here .. ..]]
 set doa_root     [file normalize [file join $doa_src_root ..]]
 source [file join $doa_here doa_files.tcl]
 
-set doa_work [file join $doa_root Build sim_doa]
+set doa_algo "both"
+if {[info exists ::env(GNSS_DOA_ALGO)] && $::env(GNSS_DOA_ALGO) ne ""} {
+  set doa_algo [string tolower $::env(GNSS_DOA_ALGO)]
+}
+switch -- $doa_algo {
+  both     { set doa_generics {} }
+  iuesprit { set doa_generics [list -generic_top EN_M=0] }
+  mesprit  { set doa_generics [list -generic_top EN_I=0] }
+  default  { error "GNSS_DOA_ALGO='$doa_algo' - use both, iuesprit or mesprit" }
+}
+puts "DOA_SIM: estimators: $doa_algo"
+set doa_work [file join $doa_root Build [expr {$doa_algo eq "both" ? "sim_doa" : "sim_doa_$doa_algo"}]]
 file mkdir $doa_work
 set doa_old_pwd [pwd]
 cd $doa_work
@@ -39,7 +52,7 @@ proc doa_run {tag args} {
 
 set ok 1
 if {![doa_run xvlog xvlog -i $doa_here {*}$doa_rtl_files {*}$doa_tb_files]} { set ok 0 }
-if {$ok && ![doa_run xelab xelab -debug typical -s tb_doa tb_gnss_doa]} { set ok 0 }
+if {$ok && ![doa_run xelab xelab -debug typical {*}$doa_generics -s tb_doa tb_gnss_doa]} { set ok 0 }
 
 if {!$ok} {
   puts "DOA_SIM_RESULT: FAIL - compile/elaborate error, see $doa_work/*.log"

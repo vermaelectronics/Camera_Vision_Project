@@ -1,0 +1,92 @@
+WARNING: tb_gnss_doa.v:207: $readmemh(doa_stim.hex): Not enough words in the file for the requested range [0:8191].
+DOA_TB: ===== gnss_passthrough v1.2 + ESPRIT DOA system test =====
+DOA_TB: configuration: I-UESPRIT , M-ESPRIT 
+DOA_TB: stimulus 6144 snapshots from doa_stim.hex
+DOA_TB: T1 passthrough ID = GCP1 ... PASS
+DOA_TB: T1 passthrough VERSION = 1.2 ... PASS
+DOA_TB: T1 DOA_ID = DOA1 ... PASS
+DOA_TB: T1 CAPS: built estimators reported ... PASS
+DOA_TB: T1 DOA_CTRL reset value 0x00040A20 ... PASS
+DOA_TB: T1 SCRATCH read/write ... PASS
+DOA_TB: T1 DOA_K write/read ... PASS
+DOA_TB: --- T2 live RX, 6 windows of 1024 snapshots, p = 4 ---
+DOA_TB:   win 0 true  -50.00 | I-UESPRIT  -50.2101 (model  -50.2101, err 0.0000) | M-ESPRIT  -50.2101 (model  -50.2101, err 0.0000) |psi| 0.9982
+DOA_TB: T2 live window sequence (no window lost) ... PASS
+DOA_TB: T2 I-UESPRIT angle within 0.05 deg of model ... PASS
+DOA_TB: T2 M-ESPRIT angle within 0.05 deg of model ... PASS
+DOA_TB: T2 M-ESPRIT |psi| within 0.01 of model ... PASS
+DOA_TB:   win 1 true  -20.00 | I-UESPRIT  -19.9176 (model  -19.9181, err 0.0006) | M-ESPRIT  -19.9176 (model  -19.9182, err 0.0006) |psi| 0.9934
+DOA_TB: T2 live window sequence (no window lost) ... PASS
+DOA_TB: T2 I-UESPRIT angle within 0.05 deg of model ... PASS
+DOA_TB: T2 M-ESPRIT angle within 0.05 deg of model ... PASS
+DOA_TB: T2 M-ESPRIT |psi| within 0.01 of model ... PASS
+DOA_TB:   win 2 true    0.00 | I-UESPRIT    0.1860 (model    0.1860, err 0.0000) | M-ESPRIT    0.1860 (model    0.1860, err 0.0000) |psi| 0.9913
+DOA_TB: T2 live window sequence (no window lost) ... PASS
+DOA_TB: T2 I-UESPRIT angle within 0.05 deg of model ... PASS
+DOA_TB: T2 M-ESPRIT angle within 0.05 deg of model ... PASS
+DOA_TB: T2 M-ESPRIT |psi| within 0.01 of model ... PASS
+DOA_TB:   win 3 true   15.00 | I-UESPRIT   15.1732 (model   15.1733, err 0.0000) | M-ESPRIT   15.1732 (model   15.1733, err 0.0000) |psi| 1.0048
+DOA_TB: T2 live window sequence (no window lost) ... PASS
+DOA_TB: T2 I-UESPRIT angle within 0.05 deg of model ... PASS
+DOA_TB: T2 M-ESPRIT angle within 0.05 deg of model ... PASS
+DOA_TB: T2 M-ESPRIT |psi| within 0.01 of model ... PASS
+DOA_TB:   win 4 true   40.00 | I-UESPRIT   40.1216 (model   40.1209, err 0.0007) | M-ESPRIT   40.1216 (model   40.1209, err 0.0007) |psi| 0.9958
+DOA_TB: T2 live window sequence (no window lost) ... PASS
+DOA_TB: T2 I-UESPRIT angle within 0.05 deg of model ... PASS
+DOA_TB: T2 M-ESPRIT angle within 0.05 deg of model ... PASS
+DOA_TB: T2 M-ESPRIT |psi| within 0.01 of model ... PASS
+DOA_TB:   win 5 true   65.00 | I-UESPRIT   64.7826 (model   64.7826, err 0.0000) | M-ESPRIT   64.7828 (model   64.7827, err 0.0001) |psi| 0.9979
+DOA_TB: T2 live window sequence (no window lost) ... PASS
+DOA_TB: T2 I-UESPRIT angle within 0.05 deg of model ... PASS
+DOA_TB: T2 M-ESPRIT angle within 0.05 deg of model ... PASS
+DOA_TB: T2 M-ESPRIT |psi| within 0.01 of model ... PASS
+DOA_TB: T3 IN_COUNT equals snapshots streamed ... PASS
+DOA_TB: T3 no CDC FIFO overflow ... PASS
+DOA_TB: T3 STATUS shows enable, live source, built cores ... PASS
+DOA_TB:   peak |x0| = 15952, peak |x1| = 16176 (Q1.15)
+DOA_TB: T3 peak detector sees the signal ... PASS
+DOA_TB: --- T4 built-in test generator, 8 angles, 512-snapshot windows, average of 2 ---
+DOA_TB:   set  -60.00 deg (DPHASE 0x6ed9eba1) | I-UESPRIT  -60.0078 (err 0.0078) | M-ESPRIT  -60.0078 (err 0.0078)
+DOA_TB: T4 test-gen I-UESPRIT within 0.05 deg ... PASS
+DOA_TB: T4 test-gen M-ESPRIT within 0.05 deg ... PASS
+DOA_TB:   set  -30.00 deg (DPHASE 0x40000000) | I-UESPRIT  -30.0000 (err 0.0000) | M-ESPRIT  -30.0000 (err 0.0000)
+DOA_TB: T4 test-gen I-UESPRIT within 0.05 deg ... PASS
+DOA_TB: T4 test-gen M-ESPRIT within 0.05 deg ... PASS
+DOA_TB:   set  -10.00 deg (DPHASE 0x163a1a7e) | I-UESPRIT  -10.0014 (err 0.0014) | M-ESPRIT  -10.0014 (err 0.0014)
+DOA_TB: T4 test-gen I-UESPRIT within 0.05 deg ... PASS
+DOA_TB: T4 test-gen M-ESPRIT within 0.05 deg ... PASS
+DOA_TB:   set    0.00 deg (DPHASE 0x00000000) | I-UESPRIT   -0.0000 (err 0.0000) | M-ESPRIT   -0.0000 (err 0.0000)
+DOA_TB: T4 test-gen I-UESPRIT within 0.05 deg ... PASS
+DOA_TB: T4 test-gen M-ESPRIT within 0.05 deg ... PASS
+DOA_TB:   set   10.00 deg (DPHASE 0xe9c5e582) | I-UESPRIT    9.9968 (err 0.0032) | M-ESPRIT    9.9968 (err 0.0032)
+DOA_TB: T4 test-gen I-UESPRIT within 0.05 deg ... PASS
+DOA_TB: T4 test-gen M-ESPRIT within 0.05 deg ... PASS
+DOA_TB:   set   30.00 deg (DPHASE 0xc0000000) | I-UESPRIT   30.0000 (err 0.0000) | M-ESPRIT   30.0000 (err 0.0000)
+DOA_TB: T4 test-gen I-UESPRIT within 0.05 deg ... PASS
+DOA_TB: T4 test-gen M-ESPRIT within 0.05 deg ... PASS
+DOA_TB:   set   45.00 deg (DPHASE 0xa57d8666) | I-UESPRIT   45.0001 (err 0.0001) | M-ESPRIT   45.0001 (err 0.0001)
+DOA_TB: T4 test-gen I-UESPRIT within 0.05 deg ... PASS
+DOA_TB: T4 test-gen M-ESPRIT within 0.05 deg ... PASS
+DOA_TB:   set   60.00 deg (DPHASE 0x9126145f) | I-UESPRIT   59.9985 (err 0.0015) | M-ESPRIT   59.9986 (err 0.0014)
+DOA_TB: T4 test-gen I-UESPRIT within 0.05 deg ... PASS
+DOA_TB: T4 test-gen M-ESPRIT within 0.05 deg ... PASS
+DOA_TB: --- T5 calibration rotation ---
+DOA_TB:   raw phase -90 deg + CAL +90 deg -> I  -0.0000  M  -0.0000 deg (expect 0)
+DOA_TB: T5 CAL cancels the phase (I-UESPRIT, |theta| < 0.05) ... PASS
+DOA_TB: T5 CAL cancels the phase (M-ESPRIT,  |theta| < 0.05) ... PASS
+DOA_TB:   CAL removed ->  30.0000 deg (expect 30)
+DOA_TB: T5 CAL identity restores +30 deg ... PASS
+DOA_TB: --- T6 averaging statistics (noise on, average of 16) ---
+DOA_TB:    mean  29.9146 deg, std 0.3524 deg, off-circle 0/16
+DOA_TB: T6 noisy mean within 0.5 deg of 30 ... PASS
+DOA_TB: T6 std deviation computed and small (< 1 deg) ... PASS
+DOA_TB: --- T7 decimation, DECIM = 3 ---
+DOA_TB:   4096 snapshots streamed, 1024 delivered
+DOA_TB: T7 DECIM=3 delivers exactly 1 of 4 (1024) ... PASS
+DOA_TB: T7 one window completed from decimated data ... PASS
+DOA_TB: T8 passthrough RX counter advances ... PASS
+DOA_TB: T8 passthrough DAC output is left-aligned (low nibble 0) ... PASS
+DOA_TB: T8 passthrough registers still respond ... PASS
+DOA_TB: ============================================================
+DOA_TB_RESULT: PASS (61 checks)
+tb_gnss_doa.v:351: $finish called at 2383805000 (1ps)
