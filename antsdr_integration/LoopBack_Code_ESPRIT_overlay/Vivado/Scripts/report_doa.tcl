@@ -16,12 +16,47 @@ set root [file normalize [file join [file dirname [info script]] .. ..]]
 set out  [file join $root Build reports]
 file mkdir $out
 
-set doa [get_cells -quiet -hier -filter {NAME =~ *gnss_passthrough/inst/u_doa}]
+# Locate the DOA block. Try the expected path first, then any instance of the
+# gnss_doa_esprit module (REF_NAME / ORIG_REF_NAME), so a different block-design
+# hierarchy or cell name still works.
+set doa [get_cells -quiet -hier -filter {NAME =~ *gnss_passthrough*/u_doa}]
 if {[llength $doa] == 0} {
-  puts "DOA_IMPL: FAIL - no gnss_passthrough/inst/u_doa in the open design."
-  puts "DOA_IMPL: the IP was not re-packaged (v1.2) before the project was built."
+  set doa [get_cells -quiet -hier -filter {REF_NAME =~ *gnss_doa_esprit* || ORIG_REF_NAME =~ *gnss_doa_esprit*}]
+}
+if {[llength $doa] == 0} {
+  set doa [get_cells -quiet -hier -filter {NAME =~ */u_doa && !IS_PRIMITIVE}]
+}
+if {[llength $doa] == 0} {
+  puts "DOA_IMPL: FAIL - no gnss_doa_esprit (u_doa) instance in the open design."
+  puts "DOA_IMPL: ---- diagnosis ----"
+  if {[llength [current_project -quiet]]} {
+    foreach r [get_runs -quiet] {
+      if {[string match *gnss_passthrough* $r] || $r eq "synth_1" || $r eq "impl_1"} {
+        puts [format "DOA_IMPL: run %-36s STATUS %s" $r [get_property STATUS $r]]
+      }
+    }
+  }
+  puts "DOA_IMPL: open design: [current_design -quiet]"
+  set gp [get_cells -quiet -hier -filter {NAME =~ *gnss_passthrough* && !IS_PRIMITIVE}]
+  puts "DOA_IMPL: hierarchical cells named *gnss_passthrough*: [llength $gp]"
+  foreach c [lrange $gp 0 7] {
+    puts "DOA_IMPL:   $c  (REF_NAME [get_property REF_NAME $c], ORIG_REF_NAME [get_property ORIG_REF_NAME $c])"
+  }
+  set prims [get_cells -quiet -hier -filter {NAME =~ *gnss_passthrough* && IS_PRIMITIVE}]
+  set ndsp  [llength [filter -quiet $prims {REF_NAME =~ DSP48*}]]
+  set ndoa  [llength [get_cells -quiet -hier -filter {NAME =~ *doa*}]]
+  puts "DOA_IMPL: primitives under gnss_passthrough: [llength $prims], DSP48: $ndsp (v1.2 with ESPRIT uses ~77)"
+  puts "DOA_IMPL: cells whose name contains 'doa': $ndoa"
+  if {$ndoa > 0 && $ndsp > 20} {
+    puts "DOA_IMPL: the DOA logic is present but its hierarchy was flattened."
+  } elseif {[llength $gp] == 0} {
+    puts "DOA_IMPL: gnss_passthrough itself is missing: open_run opened the wrong run, or synthesis failed."
+  } else {
+    puts "DOA_IMPL: gnss_passthrough has no DOA logic: the build used the old v1.1 IP (stale ip_repo or IP cache)."
+  }
   return
 }
+set doa [lindex $doa 0]
 puts "DOA_IMPL: ===== ESPRIT DOA block: [get_property NAME $doa] ====="
 
 report_utilization -hierarchical -hierarchical_depth 4 -cells $doa -file [file join $out doa_utilization.rpt]
@@ -53,7 +88,7 @@ foreach {what pat} {
 }
 
 # timing into the DOA block
-set into [get_cells -quiet -hier -filter {NAME =~ *gnss_passthrough/inst/u_doa/* && IS_SEQUENTIAL}]
+set into [get_cells -quiet -hier -filter "NAME =~ [get_property NAME $doa]/* && IS_SEQUENTIAL"]
 if {[llength $into] > 0} {
   set ps [get_timing_paths -quiet -to $into -setup -max_paths 1]
   set ph [get_timing_paths -quiet -to $into -hold  -max_paths 1]
