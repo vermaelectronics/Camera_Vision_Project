@@ -142,7 +142,14 @@ if {[llength $gnss_cdc_xdc] == 0} {
   exit 2
 }
 set_property PROCESSING_ORDER LATE $gnss_cdc_xdc
-puts "CREATE_CDC_XDC: gnss_passthrough_cdc.xdc added with PROCESSING_ORDER LATE"
+# IMPLEMENTATION ONLY. gnss_passthrough is synthesised out of context, so at
+# top-level synthesis it is a black box: every get_cells pattern in this file
+# matched nothing, was dropped (-quiet), and the empty result was carried into
+# implementation through the synthesis checkpoint. Read in implementation, the
+# full netlist exists and every pattern resolves.
+set_property USED_IN_SYNTHESIS      false $gnss_cdc_xdc
+set_property USED_IN_IMPLEMENTATION true  $gnss_cdc_xdc
+puts "CREATE_CDC_XDC: gnss_passthrough_cdc.xdc added (implementation only, PROCESSING_ORDER LATE)"
 
 # This project drives implementation from Vivado/Scripts/build.tcl rather than
 # adi_project_run, so the run properties adi_project_run would have set must be

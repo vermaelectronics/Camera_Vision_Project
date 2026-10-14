@@ -109,3 +109,16 @@ set_false_path \
 # 4d. Quasi-static DOA control (enable, reset, DECIM) into the sample domain.
 set_false_path \
   -to [get_cells -quiet -hier -filter {NAME =~ *gnss_passthrough/inst/u_doa/dsync_meta_reg*}]
+
+# ============================================================================
+# --- 5. Clock-level bound between the two asynchronous clocks ---------------
+# ============================================================================
+# rx_clk (AD9361 data clock) and clk_fpga_0 (PS FCLK0) are independent, so
+# every path between them must be a synchronised crossing. Bound all of them
+# datapath-only at 8 ns (one rx_clk period): this keeps gray-pointer skew
+# below a source period and covers any crossing a name pattern above misses.
+# More specific exceptions (set_false_path on synchronisers, here and in the
+# ADI cores) take precedence. Verified in Vivado on the M-ESPRIT HLS build:
+# all rx_clk <-> clk_fpga_0 violations removed.
+set_max_delay -datapath_only -from [get_clocks rx_clk]     -to [get_clocks clk_fpga_0] 8.000
+set_max_delay -datapath_only -from [get_clocks clk_fpga_0] -to [get_clocks rx_clk]     8.000
