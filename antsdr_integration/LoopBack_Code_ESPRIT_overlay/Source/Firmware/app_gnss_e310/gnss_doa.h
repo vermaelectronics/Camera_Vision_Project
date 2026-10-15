@@ -79,6 +79,14 @@
 #define DOA_ERR_TIMEOUT     -2
 #define DOA_ERR_SELFTEST    -3
 #define DOA_ERR_NO_INPUT    -4
+#define DOA_ERR_INCOHERENT  -5      /* calibration refused: RX1/RX2 not the same signal */
+
+/* ---- phase / jammer verdict (doa_phase?, doa_watch=) ----------------------- */
+#define DOA_VERDICT_NO_DATA    0    /* no estimator results (DOA off / RX idle)  */
+#define DOA_VERDICT_NO_SIGNAL  1    /* all-zero input                            */
+#define DOA_VERDICT_NOISE      2    /* noise only: no jammer (satellites are below noise) */
+#define DOA_VERDICT_UNCERTAIN  3    /* partly coherent / unequal gains / 2 sources */
+#define DOA_VERDICT_SOURCE     4    /* one strong coherent source = jammer / test signal */
 
 /* ---- one estimator's view ------------------------------------------------- */
 typedef struct {
@@ -119,6 +127,9 @@ int32_t gnss_doa_test_angle(double theta_deg);       /* test generator, 1 angle*
 int32_t gnss_doa_selftest(int verbose);              /* full PASS/FAIL sweep   */
 int32_t gnss_doa_calibrate(void);                    /* zero the RX1/RX2 phase */
 void    gnss_doa_cal_reset(void);
+void    gnss_doa_print_cal(void);                    /* "doa_cal?"             */
+int32_t gnss_doa_print_phase(uint32_t nwin);         /* "doa_phase?" -> verdict */
+int32_t gnss_doa_watch(uint32_t n);                  /* "doa_watch=N"          */
 int32_t gnss_doa_boot_check(void);                   /* probe + quick selftest */
 
 /* fixed-point helpers (no libm) */

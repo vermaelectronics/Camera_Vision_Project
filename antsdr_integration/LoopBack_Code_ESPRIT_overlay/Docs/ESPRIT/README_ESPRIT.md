@@ -45,7 +45,7 @@ It is based on:
 | Built-in two-element test source | `Source/HDL/doa_test_gen.v` | Known-angle hardware test without RF. |
 | RX2 phase calibration, decimation, hardware averaging, peak meter | `gnss_doa_esprit.v` | |
 | Registers 0x100–0x194 | `gnss_passthrough` aperture, **0x43C0_0100** | Block design **unchanged** (same ports, same address). |
-| Firmware driver + self-test + 15 console commands | `gnss_doa.c/.h`, `command.c/.h`, `main.c`, `gnss_info.c/.h` | Boot self-test, `doa?`, `doa_cal=1`, … |
+| Firmware driver + self-test + 18 console commands | `gnss_doa.c/.h`, `command.c/.h`, `main.c`, `gnss_info.c/.h` | Boot self-test, `doa?`, `doa_cal=1`, … |
 | System testbench (61 checks) | `Source/Sim/ESPRIT/tb_gnss_doa.v` | Runs from the **Vivado Tcl console**. |
 | Firmware ↔ RTL co-simulation | `Source/Sim/ESPRIT/fw_cosim/` | Runs the real `gnss_doa.c` against the real RTL. |
 | Vivado post-implementation report | `Vivado/Scripts/report_doa.tcl` | Utilisation, timing, CDC coverage. |
@@ -672,6 +672,77 @@ DOA: after calibration the common signal reads  0.010 deg (expect ~0). Calibrati
 Pass criterion: after calibration, \|mean\| < 0.3° and std < 0.3° on both
 estimators, `off-circle 0/16`, and no flags.
 
+`doa_cal=1` first checks the **coherence** of the 64 windows it measures (see
+9.3b). Below 0.900, RX1 and RX2 are not carrying the same signal (nothing
+connected, a cable missing, or sky antennas that only see satellites below the
+noise). The calibration is then **refused** and the previous `DOA_CAL` is kept:
+
+```
+DOA:   coherence  0.035  RX1 peak 8000 (-12.2 dBFS)  RX2 peak 7376 (-12.9 dBFS)
+DOA: calibration REFUSED - coherence below 0.900: RX1 and RX2 do not carry
+     the same signal ... Previous calibration kept.
+```
+
+### 9.3b Phase, calibration and jammer check (`doa_phase?`, `doa_watch=N`, `doa_cal?`)
+
+Firmware only: these commands use registers the FPGA already has, so no
+bitstream rebuild is needed (rebuild only the Vitis application / BOOT.BIN).
+
+- **Phase RX2−RX1.** `raw` is the phase as received, including the board and
+  cable offset. `calibrated` is the phase after `DOA_CAL`; this is the phase
+  the angle is computed from (θ = asin(−kφ)). raw = calibrated − (CAL rotation).
+- **Calibration.** The offset `doa_cal=1` removed, how many windows it used
+  and how coherent the calibration signal was.
+- **Coherence.** The length of the mean unit vector e^{jφ} over N windows.
+  It is 1.000 when one signal reaches both elements with a stable phase, and
+  about 1/√N for independent noise.
+- **|psi| (M-ESPRIT).** For one source |ψ| = |x1|/|x0|, so it reads the RX2/RX1
+  amplitude ratio. A stable phase with |ψ| far from 1 usually means unequal RX
+  gains.
+- **Level.** Peak sample per channel in dBFS (0 dBFS = 32767).
+- **Verdict.**
+
+| Verdict | Condition | Meaning |
+|---|---|---|
+| `JAMMER / STRONG COHERENT SOURCE at θ` | coherence ≥ 0.90 (and M-ESPRIT off-circle ≤ 25 %) | one strong signal; θ is its DOA |
+| `NO JAMMER` | coherence < 0.50 | noise only; satellites are ~20 dB below the noise and are not visible to ESPRIT on raw samples |
+| `UNCERTAIN` | otherwise | weak source, two sources / multipath, or (stable phase, \|ψ\| ≠ 1) unequal RX gains |
+| `NO SIGNAL` | no_signal flag | all-zero input |
+
+`doa_phase?` collects 32 windows. Example (co-simulation, jammer at 25° after
+calibration, board offset 37°):
+
+```
+DOA: ==== PHASE / CALIBRATION / JAMMER CHECK  (M-ESPRIT, 32 windows of 1024 snapshots) ====
+DOA:   calibration    : ACTIVE  offset removed  37.033 deg  (doa_cal=1, 64 windows, coherence  1.000)
+DOA:   phase RX2-RX1  : raw        -39.068 deg   as received (includes the board/cable offset)
+DOA:                    calibrated -76.101 deg   after CAL; this phase gives the DOA
+DOA:   coherence      :  1.000   (1.000 = same signal on RX1 and RX2, ~0 = independent noise)
+DOA:   |psi|          :  1.0004   = RX2/RX1 amplitude ratio for one source; off-circle 0/32 windows
+DOA:   level          : RX1 peak 11584 (-9.0 dBFS)   RX2 peak 13351 (-7.7 dBFS)
+DOA:   DOA            : mean  25.018 deg  std  0.069 deg  (average of 16 windows)
+DOA:   VERDICT        : >>> JAMMER / STRONG COHERENT SOURCE at  25.018 deg <<<
+```
+
+Noise only (no jammer):
+
+```
+DOA:   coherence      :  0.058   (1.000 = same signal on RX1 and RX2, ~0 = independent noise)
+DOA:   VERDICT        : NO JAMMER - RX1 and RX2 see independent noise only.
+```
+
+`doa_watch=N` prints one line per 16 windows:
+
+```
+DOA: #1    raw -39.1  cal -76.2 deg  coh  1.00  |psi|  1.00  RX1 -9.2 RX2 -8.2 dBFS  DOA  25.021  JAMMER
+```
+
+`doa?` also prints a phase line for the last window:
+
+```
+DOA:   phase RX2-RX1 (last window): raw -39.0xx deg  calibrated -76.0xx deg  (CAL removes 37.033 deg)
+```
+
 ### 9.4 HW-4: known angle by cable delay (fully conducted DOA test)
 
 After HW-3, insert an extra length $\Delta L$ of coax in the **RX2** path only.
@@ -777,6 +848,9 @@ Type `doa_help?` on the board for this list. All DOA commands are receive-only.
 | `doa_test=<deg>` | test generator at a known angle, prints the errors |
 | `doa_monitor=<N>` | N averaged results, one line each |
 | `doa_cal=1` / `doa_cal=0` | calibrate the RX2-RX1 phase (same signal on both) / clear |
+| `doa_cal?` | calibration in use: offset removed, windows, coherence (or NONE) |
+| `doa_phase?` | phase RX2−RX1 raw and calibrated, coherence, \|ψ\|, dBFS levels, DOA, JAMMER / NO JAMMER verdict (9.3b) |
+| `doa_watch=<N>` | the same as one line per 16 windows, N lines |
 | `doa_spacing_mm=<mm>` | antenna spacing, sets k = λ/(2πd) at the current RX LO |
 | `doa_window=<n>` | 2ⁿ snapshots per window, n = 7..14 |
 | `doa_p=<n>` | Cᵖ with p = 2ⁿ, n = 0..3 (paper: 2) |

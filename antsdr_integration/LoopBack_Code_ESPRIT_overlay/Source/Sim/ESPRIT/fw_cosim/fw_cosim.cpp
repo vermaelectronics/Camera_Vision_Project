@@ -94,6 +94,8 @@ static void hls_after_rising_edge(bool pre_tvalid, uint64_t pre_tdata, bool pre_
 static double scene_theta_deg = 0.0;            // true DOA
 static double scene_offset_deg = 37.0;          // RX2 board/cable phase offset
 static double scene_snr_db = 20.0;
+static bool   scene_signal = true;              // false: independent noise only (no jammer)
+static double scene_gain1  = 1.0;               // RX2 amplitude relative to RX1
 static std::mt19937 rng(7);
 static std::normal_distribution<double> gauss(0.0, 1.0);
 static std::uniform_int_distribution<int> sym(0, 3);
@@ -114,8 +116,10 @@ static void drive_adc() {
         double amp = 0.35;
         double dphi = -M_PI * sin(scene_theta_deg * M_PI / 180.0) + scene_offset_deg * M_PI / 180.0;
         double ns  = amp * pow(10.0, -scene_snr_db / 20.0) / sqrt(2.0);
-        double x0i = amp * cos(ph) + ns * gauss(rng), x0q = amp * sin(ph) + ns * gauss(rng);
-        double x1i = amp * cos(ph + dphi) + ns * gauss(rng), x1q = amp * sin(ph + dphi) + ns * gauss(rng);
+        double a0  = amp, a1 = amp * scene_gain1;
+        if (!scene_signal) { a0 = a1 = 0.0; ns = 0.05; }
+        double x0i = a0 * cos(ph) + ns * gauss(rng), x0q = a0 * sin(ph) + ns * gauss(rng);
+        double x1i = a1 * cos(ph + dphi) + ns * gauss(rng), x1q = a1 * sin(ph + dphi) + ns * gauss(rng);
         top->adc_data_i0 = (uint16_t)q12(x0i); top->adc_data_q0 = (uint16_t)q12(x0q);
         top->adc_data_i1 = (uint16_t)q12(x1i); top->adc_data_q1 = (uint16_t)q12(x1q);
         top->adc_valid_i0 = top->adc_valid_q0 = top->adc_valid_i1 = top->adc_valid_q1 = 1;
@@ -260,6 +264,52 @@ int main(int argc, char **argv) {
     }
     printf("FW_COSIM: --- doa_monitor=3 ---\n");
     gnss_doa_monitor(3);
+
+    // 4b. phase / calibration / jammer view (doa_phase?, doa_watch=, doa_cal?)
+    printf("FW_COSIM: --- doa_cal? ---\n");
+    gnss_doa_print_cal();
+    scene_theta_deg = 25.0;
+    wait_blocks(2);
+    printf("FW_COSIM: --- doa_phase?  (strong source at 25 deg = jammer) ---\n");
+    r = gnss_doa_print_phase(32);
+    check("doa_phase?: strong coherent source -> verdict JAMMER", r == DOA_VERDICT_SOURCE);
+    {
+        // calibrated phase = -180 sin(25 deg); raw = calibrated + board offset
+        double exp_cal = -180.0 * sin(25.0 * M_PI / 180.0);
+        double phi = (int32_t)gnss_pt_read(has_m ? DOA_REG_M_PHI : DOA_REG_I_PHI) / 268435456.0 * 180.0 / M_PI;
+        printf("FW_COSIM: calibrated phase %.3f deg, expected %.3f deg (raw expected %.3f)\n",
+               phi, exp_cal, exp_cal + scene_offset_deg);
+        check("calibrated phase register matches -180*sin(theta) (within 1 deg)", fabs(phi - exp_cal) < 1.0);
+    }
+    printf("FW_COSIM: --- doa_watch=2 ---\n");
+    gnss_doa_watch(2);
+
+    printf("FW_COSIM: --- noise only on RX1/RX2 (no jammer; satellites below noise) ---\n");
+    scene_signal = false;
+    wait_blocks(2);
+    r = gnss_doa_print_phase(32);
+    check("doa_phase?: independent noise -> verdict NO JAMMER", r == DOA_VERDICT_NOISE);
+    {
+        uint32_t cal_before = gnss_pt_read(DOA_REG_CAL);
+        r = gnss_doa_calibrate();
+        check("doa_cal=1 on noise is REFUSED and keeps the old calibration",
+              r == DOA_ERR_INCOHERENT && gnss_pt_read(DOA_REG_CAL) == cal_before);
+    }
+    scene_signal = true;
+
+    if (has_m) {
+        printf("FW_COSIM: --- RX2 6 dB stronger than RX1 (|psi| = amplitude ratio) ---\n");
+        scene_gain1 = 2.0;
+        wait_blocks(2);
+        r = gnss_doa_print_phase(32);
+        double pm = (int32_t)gnss_pt_read(DOA_REG_M_PSIMAG) / 16777216.0;
+        printf("FW_COSIM: |psi| %.3f (expected ~2.0)\n", pm);
+        check("M-ESPRIT |psi| tracks the RX2/RX1 amplitude ratio (2.0 +/- 0.2)", fabs(pm - 2.0) < 0.2);
+        check("unequal gains -> verdict UNCERTAIN with gain advice", r == DOA_VERDICT_UNCERTAIN);
+        scene_gain1 = 1.0;
+    }
+    scene_theta_deg = 25.0;
+    wait_blocks(2);
 
     // 5. test-generator command and register dump paths
     printf("FW_COSIM: --- doa_test=-22.5 ---\n");

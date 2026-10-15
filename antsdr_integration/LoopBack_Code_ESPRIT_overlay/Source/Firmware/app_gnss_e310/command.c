@@ -148,6 +148,9 @@ command cmd_list[] = {
 	{"doa_test=", "Built-in test source at a known angle [deg].", "doa_test=-30", set_doa_test},
 	{"doa_monitor=", "Print N averaged DOA results.", "doa_monitor=10", set_doa_monitor},
 	{"doa_cal=", "1 = calibrate RX1/RX2 phase (same signal on both), 0 = clear.", "doa_cal=1", set_doa_cal},
+	{"doa_cal?", "Current RX1/RX2 phase calibration (offset removed).", "doa_cal?", get_doa_cal},
+	{"doa_phase?", "Phase RX2-RX1 raw + calibrated, coherence, level, JAMMER verdict.", "doa_phase?", get_doa_phase},
+	{"doa_watch=", "N lines of raw/cal phase, coherence, dBFS, DOA, verdict.", "doa_watch=20", set_doa_watch},
 	{"doa_spacing_mm=", "Antenna spacing [mm] at the current RX LO (95 = lambda/2 at L1).", "doa_spacing_mm=95", set_doa_spacing},
 	{"doa_window=", "Snapshots per window = 2^N, N = 7..14.", "doa_window=10", set_doa_window},
 	{"doa_p=", "C^p sharpening, p = 2^N, N = 0..3 (paper: p = 4 -> N = 2).", "doa_p=2", set_doa_p},
@@ -335,6 +338,16 @@ void set_doa_cal(double* param, char param_no)
 	else                   { gnss_doa_cal_reset(); }
 }
 
+void get_doa_cal(double* param, char param_no)   { gnss_doa_print_cal(); }
+void get_doa_phase(double* param, char param_no) { (void)gnss_doa_print_phase(32U); }
+
+void set_doa_watch(double* param, char param_no)
+{
+	uint32_t n = (param_no >= 1 && param[0] >= 1.0) ? (uint32_t)param[0] : 10U;
+	if(n > 1000U) { n = 1000U; }
+	(void)gnss_doa_watch(n);
+}
+
 void set_doa_spacing(double* param, char param_no)
 {
 	uint64_t lo = 0;
@@ -363,7 +376,7 @@ void get_doa_help(double* param, char param_no)
 				      (char*)cmd_list[k].description, (char*)cmd_list[k].example);
 		}
 	}
-	console_print("Typical bench session:  doa_selftest?   doa_spacing_mm=95   doa_cal=1   doa?   doa_monitor=20\n");
+	console_print("Typical bench session:  doa_selftest?   doa_spacing_mm=95   doa_cal=1   doa_phase?   doa_watch=20\n");
 }
 
 /**************************************************************************//***
