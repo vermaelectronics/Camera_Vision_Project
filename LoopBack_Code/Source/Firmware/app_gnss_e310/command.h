@@ -251,4 +251,21 @@ void get_gnss_ddr_tx(double* param, char param_no);
  * gnss_ddr_tx=0 is the abort path and is safe to issue at any time. */
 void set_gnss_ddr_tx(double* param, char param_no);
 
+/* GNSS-CRPA MOD-11: 2-element LCMV CRPA (gnss_passthrough v2.0). */
+
+/* Prints the LCMV CRPA state, angles and weights. */
+void get_lcmv(double* param, char param_no);
+
+/* 1 = LCMV CRPA on TX1 (TX2 = RX1 reference), 0 = identity passthrough. */
+void set_lcmv(double* param, char param_no);
+
+/* lcmv_angles=<gps_deg> <jam_deg>: look and null directions, -90..90. */
+void set_lcmv_angles(double* param, char param_no);
+
+/* lcmv_eps=<0..0.1>: residual gain toward the jammer (0 = ideal null). */
+void set_lcmv_eps(double* param, char param_no);
+
+/* lcmv_cal=<re> <im>: RX2 channel calibration, multiplies RX2 (1 0 = none). */
+void set_lcmv_cal(double* param, char param_no);
+
 #endif  // __COMMAND_H__

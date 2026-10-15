@@ -134,6 +134,14 @@ command cmd_list[] = {
 	 * real sample. See gnss_txdma.h. */
 	{"gnss_ddr_tx?", "Gets the DDR round-trip replay state.", "", get_gnss_ddr_tx},
 	{"gnss_ddr_tx=", "1 = capture RX to DDR and replay it cyclically on TX1, 0 = stop.", "gnss_ddr_tx=0", set_gnss_ddr_tx},
+	/* GNSS-CRPA MOD-11: 2-element LCMV CRPA in gnss_passthrough v2.0.
+	 * TX1 = beamformed (gain 1 to GPS angle, null on jammer angle),
+	 * TX2 = RX1 unprocessed. Angles are supplied here; no DOA in the FPGA. */
+	{"lcmv?", "Prints the LCMV CRPA state, angles and weights.", "", get_lcmv},
+	{"lcmv=", "1 = LCMV CRPA on TX1, 0 = identity passthrough.", "lcmv=0", set_lcmv},
+	{"lcmv_angles=", "GPS look and jammer null angles [deg], e.g. lcmv_angles=10 40", "lcmv_angles=0 45", set_lcmv_angles},
+	{"lcmv_eps=", "Residual gain toward the jammer, 0 .. 0.1 (0 = ideal null).", "lcmv_eps=0", set_lcmv_eps},
+	{"lcmv_cal=", "RX2 calibration re im, e.g. lcmv_cal=1 0 (= none).", "lcmv_cal=1 0", set_lcmv_cal},
 };
 const char cmd_no = (sizeof(cmd_list) / sizeof(command));
 
@@ -272,6 +280,73 @@ void get_gnss_status(double* param, char param_no)
 	}
 	gnss_l1_print_status(ad9361_phy);
 	gnss_pt_print_state();
+}
+
+/**************************************************************************//***
+ * @brief GNSS-CRPA MOD-11. LCMV CRPA control.
+ *
+ * The LCMV only changes what goes OUT of gnss_passthrough. It does not open
+ * the TX path: that is still gnss_tx=1, with its attenuation interlock.
+*******************************************************************************/
+void get_lcmv(double* param, char param_no)
+{
+	gnss_pt_lcmv_print_state();
+}
+
+void set_lcmv(double* param, char param_no)
+{
+	if(param_no < 1) {
+		console_print("lcmv= needs 0 or 1\n");
+		return;
+	}
+	gnss_pt_lcmv_enable(((int)param[0] != 0) ? 1 : 0);
+}
+
+void set_lcmv_angles(double* param, char param_no)
+{
+	int gps, jam;
+
+	if(param_no < 2) {
+		console_print("lcmv_angles= needs two values: <gps_deg> <jam_deg>\n");
+		return;
+	}
+	gps = (int)((param[0] < 0) ? param[0] - 0.5 : param[0] + 0.5);
+	jam = (int)((param[1] < 0) ? param[1] - 0.5 : param[1] + 0.5);
+	if(gnss_pt_lcmv_set_angles(gps, jam) == GNSS_PT_OK)
+		console_print("LCMV: look %d deg, null %d deg\n", (long)gps, (long)jam);
+}
+
+void set_lcmv_eps(double* param, char param_no)
+{
+	uint32_t q;
+
+	if(param_no < 1 || param[0] < 0.0 || param[0] > 0.1) {
+		console_print("lcmv_eps= needs a value 0 .. 0.1\n");
+		return;
+	}
+	q = (uint32_t)(param[0] * 65536.0 + 0.5);
+	gnss_pt_lcmv_set_eps(q);
+	console_print("LCMV: eps = %d / 65536\n", (long)q);
+}
+
+void set_lcmv_cal(double* param, char param_no)
+{
+	double re, im;
+
+	if(param_no < 2) {
+		console_print("lcmv_cal= needs two values: <re> <im>  (1 0 = none)\n");
+		return;
+	}
+	re = param[0];
+	im = param[1];
+	/* Q2.14: representable range -2 .. +1.99994 */
+	if(re > 1.99993) re = 1.99993;
+	if(re < -2.0)    re = -2.0;
+	if(im > 1.99993) im = 1.99993;
+	if(im < -2.0)    im = -2.0;
+	gnss_pt_lcmv_set_rx2_cal((int16_t)(re * 16384.0), (int16_t)(im * 16384.0));
+	console_print("LCMV: RX2 calibration re %d im %d (Q2.14, 16384 = 1.0)\n",
+		      (long)(int16_t)(re * 16384.0), (long)(int16_t)(im * 16384.0));
 }
 
 /* GNSS-CRPA MOD-7: the DDR round trip.

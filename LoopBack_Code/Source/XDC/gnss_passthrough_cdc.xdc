@@ -67,3 +67,18 @@ set_false_path \
 # Quasi-static software settings through two-flop synchronisers.
 set_false_path \
   -to [get_cells -quiet -hier -filter {NAME =~ *gnss_passthrough/inst/ctrl_meta_reg*}]
+
+# --- 4. LCMV configuration: s_axi_aclk -> clk (v2.0) ------------------------
+# crpa_coef[0..3] (angles, EPS, RX2 calibration) is written on the AXI clock and
+# copied into cfgc_* in the sample domain only on the edge of a synchronised
+# toggle (cfg_toggle -> cfg_tog_meta -> cfg_tog_sync). The source word is held
+# from the write until the next write, so, as for the status capture, a bounded
+# datapath delay is required rather than a synchronous relationship.
+set_max_delay -datapath_only \
+  -from [get_cells -quiet -hier -filter {NAME =~ *gnss_passthrough/inst/crpa_coef_reg*}] \
+  -to   [get_cells -quiet -hier -filter {NAME =~ *gnss_passthrough/inst/cfgc_*_reg*}] \
+  8.000
+
+# --- 5. LCMV configuration toggle into the sample domain --------------------
+set_false_path \
+  -to [get_cells -quiet -hier -filter {NAME =~ *gnss_passthrough/inst/cfg_tog_meta_reg*}]

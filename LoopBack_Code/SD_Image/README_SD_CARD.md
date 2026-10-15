@@ -2,6 +2,13 @@
 
 Built 2026-09-15_214608 by `Automation/PowerShell/New-Deployment.ps1`.
 
+> **LCMV v2.0 note.** This BOOT.BIN (V08) was built **before** the LCMV CRPA
+> was added. Its bitstream reports `gnss_passthrough` VERSION 1.1 and has no
+> LCMV; the firmware v2.0 `lcmv` commands will warn and do nothing on it.
+> Rebuild the IP, bitstream, firmware and BOOT.BIN from the v2.0 sources
+> (see `Docs/LCMV_CRPA.md`). LCMV is **off at boot** (CONTROL[4] = 0), so the
+> v2.0 image boots and transmits exactly as described below until `lcmv=1`.
+
 ---
 
 ## ⚠️ READ THIS FIRST — THIS BOARD TRANSMITS BY ITSELF

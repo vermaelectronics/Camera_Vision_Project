@@ -176,10 +176,11 @@ static void info_hardware(struct ad9361_rf_phy *phy)
     console_print("   base address    : 0x43C00000, 4 kB aperture\n");
     console_print("   ID register     : 0x%08x  (expect 0x47435031, ASCII 'GCP1')\n",
                   (long)gnss_pt_read(GNSS_PT_REG_ID));
-    console_print("   VERSION         : 0x%08x  (expect 0x00010001 = v1.1)\n",
+    console_print("   VERSION         : 0x%08x  (expect 0x00020000 = v2.0)\n",
                   (long)gnss_pt_read(GNSS_PT_REG_VERSION));
     console_print("     v1.0 is the original identity passthrough and transmits\n");
     console_print("     24 dB LOW. v1.1 adds the RX->TX sample alignment stage.\n");
+    console_print("     v2.0 adds the 2-element LCMV CRPA (lcmv=1).\n");
     rule();
 
     console_print(" RF FRONT END                                            [cfg]\n");
@@ -512,11 +513,11 @@ static void info_registers(void)
     head("6  gnss_passthrough REGISTER MAP  (base 0x43C00000, 4 kB)");
 
     console_print("   0x00  ID              RO  0x47435031, ASCII 'GCP1'\n");
-    console_print("   0x04  VERSION         RO  0x00010001 = v1.1\n");
+    console_print("   0x04  VERSION         RO  0x00020000 = v2.0\n");
     console_print("   0x08  SCRATCH         RW  read/write test\n");
     console_print("   0x0C  CONTROL         RW  [0] pass_en  [1] mute\n");
     console_print("                             [2] swap_iq  [3] ch1_copy\n");
-    console_print("                             [8] cnt_clear\n");
+    console_print("                             [4] lcmv_en  [8] cnt_clear\n");
     console_print("   0x10  STATUS          RO  [0] adc_enable_i0  [1] adc_enable_q0\n");
     console_print("                             [2] dac_enable_i0  [3] dac_enable_q0\n");
     console_print("                             [4] fifo0_empty    [5] fifo0_full\n");
@@ -524,6 +525,8 @@ static void info_registers(void)
     console_print("                             [8] overflow_sticky\n");
     console_print("                             [9] underflow_sticky\n");
     console_print("                            [16] pass_en in the sample domain\n");
+    console_print("                            [17] lcmv_en  [18] lcmv_active\n");
+    console_print("                            [19] lcmv output clipped (sticky)\n");
     console_print("   0x14  RX_COUNT_CH0    RO\n");
     console_print("   0x18  TX_COUNT_CH0    RO\n");
     console_print("   0x1C  OVERFLOW_COUNT  RO\n");
@@ -534,8 +537,14 @@ static void info_registers(void)
     console_print("   0x30  RX_COUNT_CH1    RO\n");
     console_print("   0x34  TX_COUNT_CH1    RO\n");
     console_print("   0x38  RX_SNAPSHOT_CH1 RO\n");
-    console_print("   0x40  CRPA_COEF0..15  RW  0x40-0x7C, reserved for the CRPA.\n");
-    console_print("                             Stored but unused today.\n");
+    console_print("   0x40  LCMV_GPS_ANGLE  RW  [15:0] signed deg (look, gain 1)\n");
+    console_print("   0x44  LCMV_JAM_ANGLE  RW  [15:0] signed deg (null)\n");
+    console_print("   0x48  LCMV_EPS        RW  [15:0] Q0.16 gain toward jammer\n");
+    console_print("   0x4C  LCMV_RX2_CAL    RW  {im,re} Q2.14, reset 0x00004000\n");
+    console_print("   0x50  LCMV_W1_RE..    RO  0x50-0x5C weights w1, w2, Q16.16\n");
+    console_print("   0x60  LCMV_STATUS     RO  [0] en [1] valid [2] busy [3] sat\n");
+    console_print("   0x64  LCMV_UPDATES    RO  weight sets computed\n");
+    console_print("   0x68  LCMV_SAT_COUNT  RO  output samples clipped\n");
     rule();
     console_print(" STATUS BITS [2] AND [3] ARE THE IMPORTANT ONES.\n");
     console_print("   They are axi_ad9361's read-back of (dac_data_sel == 4'h2),\n");
@@ -582,7 +591,7 @@ static void info_health(struct ad9361_rf_phy *phy)
     console_print("   overflow       : 0 / 0    a non-zero sticky flag means the\n");
     console_print("   underflow      : 0 / 0    elastic buffer lost samples\n");
     console_print("   last tx sample : low nibble ZERO -- proves the RX->TX\n");
-    console_print("                    alignment stage is present (v1.1). If the\n");
+    console_print("                    alignment stage is present (v1.1+). If the\n");
     console_print("                    low nibble is non-zero you are running v1.0\n");
     console_print("                    and transmitting 24 dB low.\n");
 }
@@ -772,6 +781,12 @@ void gnss_info_menu(void)
     console_print("    tx1_attenuation=N          mdB. BIGGER = QUIETER.\n");
     console_print("                               89750 quietest, 70000 known good\n");
     console_print("    gnss_tx? gnss_ddr_tx? gnss_status?   read back from hardware\n");
+    console_print("\n");
+    console_print("  LCMV CRPA  (2 antennas: TX1 = beamformed, TX2 = RX1)\n");
+    console_print("    lcmv_angles=G J            GPS look / jammer null [deg]\n");
+    console_print("    lcmv=1 / lcmv=0            LCMV on / identity\n");
+    console_print("    lcmv_eps=E  lcmv_cal=R I   null depth / RX2 calibration\n");
+    console_print("    lcmv?                      angles, weights, clipping\n");
     console_print("\n");
     console_print("    ?        this menu            help?    every command (long)\n");
     console_print("===============================================================\n");

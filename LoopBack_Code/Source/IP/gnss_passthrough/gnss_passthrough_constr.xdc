@@ -51,3 +51,15 @@ set_false_path \
 # --- 3. Control crossing into the sample domain -----------------------------
 set_false_path \
   -to [get_cells -quiet -hier -filter {NAME =~ *ctrl_meta_reg*}]
+
+# --- 4. LCMV configuration crossing, s_axi_aclk -> clk (v2.0) ---------------
+# crpa_coef[] is copied into cfgc_* only on a synchronised toggle edge; the
+# source is held between writes. Bounded delay, as for the status capture.
+set_max_delay -datapath_only \
+  -from [get_cells -quiet -hier -filter {NAME =~ *crpa_coef_reg*}] \
+  -to   [get_cells -quiet -hier -filter {NAME =~ *cfgc_*_reg*}] \
+  8.000
+
+# --- 5. LCMV configuration toggle -------------------------------------------
+set_false_path \
+  -to [get_cells -quiet -hier -filter {NAME =~ *cfg_tog_meta_reg*}]

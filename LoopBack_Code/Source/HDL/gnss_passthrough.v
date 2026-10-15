@@ -1,6 +1,9 @@
 // ============================================================================
 //  gnss_passthrough.v
-//  ANTSDR E310 V1 / GNSS CRPA project  --  Phase 1 custom processing block
+//  ANTSDR E310 V1 / GNSS CRPA project  --  custom processing block
+//  v2.0: 2-element robust LCMV CRPA (PIER C vol. 4, 2008) in the PROCESSING
+//        CORE, selectable at run time with CONTROL[4]. With CONTROL[4] = 0
+//        the block is the Phase-1 identity passthrough, bit-for-bit.
 // ----------------------------------------------------------------------------
 //  PURPOSE
 //    This module is the single, stable insertion point for custom FPGA
@@ -13,11 +16,17 @@
 //    No scaling, no filtering, no rotation is applied.  The sample values that
 //    leave this block are bit-for-bit the sample values that entered it.
 //
-//    A future CRPA (Controlled Reception Pattern Antenna) algorithm replaces
-//    the body of the "PROCESSING CORE" section below.  Everything outside that
-//    section -- the port list, the AXI4-Lite register map, the elastic buffer
-//    and the status counters -- is intended to stay unchanged, so that CRPA can
-//    be dropped in without redesigning the radio datapath (requirement 44).
+//    v2.0 fills the "PROCESSING CORE" section with the LCMV CRPA
+//    (Source/HDL/crpa/). The port list, the elastic buffer, the output
+//    alignment and the status counters are unchanged (requirement 44).
+//
+//    LCMV MODE  (CONTROL[4] = 1, needs RX1 and RX2 enabled, 2R2T)
+//        TX ch0 = y = conj(w1)*RX1 + conj(w2)*RX2   (beamformed, saturated)
+//        TX ch1 = RX1 unprocessed, same latency     (A/B reference)
+//      Weights satisfy  gain 1 toward GPS_ANGLE  and  gain EPS toward
+//      JAM_ANGLE (null). Angles come from software; no DOA in the FPGA.
+//      Both TX channels are delayed by the beamformer latency (5 clk) in
+//      either mode, so switching CONTROL[4] never changes the timing.
 //
 //  DATAPATH POSITION  (requirement 45)
 //    axi_ad9361 (ADC) --> gnss_passthrough --> axi_ad9361 (DAC)
@@ -48,6 +57,7 @@
 //                                    [1]  mute       1 = drive 0x0000 to DAC
 //                                    [2]  swap_iq    1 = exchange I and Q
 //                                    [3]  ch1_copy   1 = ch1 DAC fed from ch0
+//                                    [4]  lcmv_en    1 = LCMV CRPA on TX ch0
 //                                    [8]  cnt_clear  1 = hold counters cleared
 //    0x10    STATUS          RO      [0]  adc_enable_i0   [1]  adc_enable_q0
 //                                    [2]  dac_enable_i0   [3]  dac_enable_q0
@@ -55,6 +65,9 @@
 //                                    [6]  fifo1_empty     [7]  fifo1_full
 //                                    [8]  overflow_sticky [9]  underflow_sticky
 //                                    [16] pass_en (as seen in the clk domain)
+//                                    [17] lcmv_en (as seen in the clk domain)
+//                                    [18] lcmv_active (lcmv_en & weights valid)
+//                                    [19] lcmv_sat_sticky (output clipped)
 //
 //            READ [2]/[3] CAREFULLY. dac_enable_* is NOT an enable this block
 //            drives, and it is NOT derived from the valid strobes. It is a
@@ -90,9 +103,26 @@
 //    0x34    TX_COUNT_CH1    RO      dac_valid_i1 pulses served
 //    0x38    RX_SNAPSHOT_CH1 RO      {adc_data_q1, adc_data_i1} last accepted
 //    0x3C    RESERVED        RO      reads 0
-//    0x40..  CRPA_COEF[0..15] RW     reserved for the future CRPA algorithm;
-//                                    Phase 1 stores and returns them, and no
-//                                    logic consumes them.
+//    0x40    LCMV_GPS_ANGLE  RW      [15:0] signed integer deg, -90..90 (look)
+//    0x44    LCMV_JAM_ANGLE  RW      [15:0] signed integer deg, -90..90 (null)
+//    0x48    LCMV_EPS        RW      [15:0] Q0.16 gain toward the jammer
+//                                           (0 = ideal null; paper 0.001-0.006)
+//    0x4C    LCMV_RX2_CAL    RW      {im[31:16], re[15:0]} Q2.14 (|c| < 2),
+//                                    multiplies RX2 before beamforming. Reset
+//                                    0x00004000
+//                                    (1.0). Corrects RX2/RX1 gain and phase.
+//    0x50    LCMV_W1_RE      RO      active weights, Q16.16 sign-extended
+//    0x54    LCMV_W1_IM      RO
+//    0x58    LCMV_W2_RE      RO      (includes the RX2 calibration)
+//    0x5C    LCMV_W2_IM      RO
+//    0x60    LCMV_STATUS     RO      [0] lcmv_en  [1] weights_valid
+//                                    [2] solver busy  [3] sat_sticky
+//    0x64    LCMV_UPDATES    RO      weight sets computed since enable
+//    0x68    LCMV_SAT_COUNT  RO      output samples clipped to 12 bits
+//    0x6C..0x7C              RO      read 0
+//
+//    0x40-0x4C cross into the sample domain through a toggle handshake (see
+//    CDC: LCMV configuration). A write takes effect within ~1 us.
 //
 //  LICENCE
 //    Original work for this project.  Not derived from Analog Devices or
@@ -169,9 +199,9 @@ module gnss_passthrough #(
 );
 
   localparam [31:0] CORE_ID      = 32'h47435031;   // "GCP1"
-  // v1.1 -- adds the RX->TX sample alignment stage. Bumped so a running board
-  // reports which of the two behaviours its bitstream actually has.
-  localparam [31:0] CORE_VERSION = 32'h00010001;   // v1.1
+  // v1.1 -- adds the RX->TX sample alignment stage.
+  // v2.0 -- adds the 2-element LCMV CRPA (CONTROL[4]) and its registers.
+  localparam [31:0] CORE_VERSION = 32'h00020000;   // v2.0
   localparam        AW           = FIFO_ADDR_WIDTH;
 
   // ==========================================================================
@@ -239,29 +269,55 @@ module gnss_passthrough #(
   // ---- software-writable state --------------------------------------------
   reg  [31:0] reg_scratch = 32'd0;
   reg  [31:0] reg_control = 32'd0;
-  reg  [31:0] crpa_coef [0:15];
 
-  integer ci;
-  initial for (ci = 0; ci < 16; ci = ci + 1) crpa_coef[ci] = 32'd0;
+  // LCMV configuration, 0x40..0x4C: [0] GPS angle  [1] JAM angle  [2] EPS
+  // [3] RX2 calibration. cfg_toggle flips on every write so the sample domain
+  // knows to take a fresh, stable copy (see CDC: LCMV configuration).
+  localparam [31:0] RX2_CAL_ONE = 32'h0000_4000;   // 1.0 + j0, Q2.14
+  reg  [31:0] crpa_coef [0:3];
+  reg         cfg_toggle = 1'b0;
+  reg         cfg_published = 1'b0;   // reset values sent once after reset
+
+  initial begin
+    crpa_coef[0] = 32'd0;
+    crpa_coef[1] = 32'd0;
+    crpa_coef[2] = 32'd0;
+    crpa_coef[3] = RX2_CAL_ONE;
+  end
 
   always @(posedge s_axi_aclk) begin
     if (s_axi_aresetn == 1'b0) begin
-      reg_scratch <= 32'd0;
-      reg_control <= 32'd0;
-    end else if (reg_wr) begin
-      case (reg_waddr)
-        12'h002: reg_scratch <= s_axi_wdata;   // 0x08
-        12'h003: reg_control <= s_axi_wdata;   // 0x0C
-        default: ;
-      endcase
-      if (reg_waddr >= 12'h010 && reg_waddr <= 12'h01F)   // 0x40..0x7C
-        crpa_coef[reg_waddr[3:0]] <= s_axi_wdata;
+      reg_scratch  <= 32'd0;
+      reg_control  <= 32'd0;
+      crpa_coef[0] <= 32'd0;
+      crpa_coef[1] <= 32'd0;
+      crpa_coef[2] <= 32'd0;
+      crpa_coef[3] <= RX2_CAL_ONE;
+      cfg_published <= 1'b0;
+    end else begin
+      if (!cfg_published) begin           // publish the reset values once
+        cfg_published <= 1'b1;
+        cfg_toggle    <= ~cfg_toggle;
+      end
+      if (reg_wr) begin
+        case (reg_waddr)
+          12'h002: reg_scratch <= s_axi_wdata;   // 0x08
+          12'h003: reg_control <= s_axi_wdata;   // 0x0C
+          default: ;
+        endcase
+        if (reg_waddr >= 12'h010 && reg_waddr <= 12'h013) begin   // 0x40..0x4C
+          crpa_coef[reg_waddr[1:0]] <= s_axi_wdata;
+          cfg_toggle <= ~cfg_toggle;
+        end
+      end
     end
   end
 
   // Status view, refreshed from the clk domain (see CDC section).
   wire [31:0] v_status, v_rx_cnt0, v_tx_cnt0, v_ovf_cnt, v_unf_cnt;
   wire [31:0] v_rx_snap0, v_tx_snap0, v_level, v_rx_cnt1, v_tx_cnt1, v_rx_snap1;
+  wire [31:0] v_w1_re, v_w1_im, v_w2_re, v_w2_im;
+  wire [31:0] v_lcmv_st, v_lcmv_upd, v_lcmv_sat;
 
   // Read data is captured on the SAME edge that accepts the address, using the
   // live s_axi_araddr rather than the registered copy.
@@ -291,11 +347,15 @@ module gnss_passthrough #(
       12'h00C: axi_rdata <= v_rx_cnt1;
       12'h00D: axi_rdata <= v_tx_cnt1;
       12'h00E: axi_rdata <= v_rx_snap1;
-      12'h010, 12'h011, 12'h012, 12'h013,
-      12'h014, 12'h015, 12'h016, 12'h017,
-      12'h018, 12'h019, 12'h01A, 12'h01B,
-      12'h01C, 12'h01D, 12'h01E, 12'h01F:
-               axi_rdata <= crpa_coef[s_axi_araddr[5:2]];
+      12'h010, 12'h011, 12'h012, 12'h013:
+               axi_rdata <= crpa_coef[s_axi_araddr[3:2]];
+      12'h014: axi_rdata <= v_w1_re;      // 0x50
+      12'h015: axi_rdata <= v_w1_im;      // 0x54
+      12'h016: axi_rdata <= v_w2_re;      // 0x58
+      12'h017: axi_rdata <= v_w2_im;      // 0x5C
+      12'h018: axi_rdata <= v_lcmv_st;    // 0x60
+      12'h019: axi_rdata <= v_lcmv_upd;   // 0x64
+      12'h01A: axi_rdata <= v_lcmv_sat;   // 0x68
       default: axi_rdata <= 32'd0;
     endcase
     end
@@ -308,7 +368,7 @@ module gnss_passthrough #(
   // ==========================================================================
   (* ASYNC_REG = "TRUE" *) reg [8:0] ctrl_meta = 9'd0;
   (* ASYNC_REG = "TRUE" *) reg [8:0] ctrl_sync = 9'd0;
-  wire [8:0] ctrl_raw = {reg_control[8], 4'b0000, reg_control[3:0]};
+  wire [8:0] ctrl_raw = {reg_control[8], 3'b000, reg_control[4:0]};
 
   always @(posedge clk) begin
     ctrl_meta <= ctrl_raw;
@@ -319,7 +379,40 @@ module gnss_passthrough #(
   wire mute      = ctrl_sync[1];
   wire swap_iq   = ctrl_sync[2];
   wire ch1_copy  = ctrl_sync[3];
+  wire lcmv_en   = ctrl_sync[4];
   wire cnt_clear = ctrl_sync[8];
+
+  // ==========================================================================
+  //  CDC: LCMV configuration  s_axi_aclk -> clk   (toggle handshake)
+  //  The angles, EPS and calibration are multi-bit words, so bit-wise
+  //  synchronisers could deliver a torn value. Instead cfg_toggle is
+  //  synchronised, and only on its edge are crpa_coef[] copied into cfgc_*.
+  //  crpa_coef[] was written on the same AXI edge that flipped the toggle and
+  //  is held until the next write, so it is stable when copied. The copy path
+  //  is bounded with set_max_delay -datapath_only in the CDC XDC.
+  // ==========================================================================
+  (* ASYNC_REG = "TRUE" *) reg cfg_tog_meta = 1'b0;
+  (* ASYNC_REG = "TRUE" *) reg cfg_tog_sync = 1'b0;
+  reg                         cfg_tog_prev = 1'b0;
+
+  reg signed [15:0] cfgc_gps   = 16'sd0;
+  reg signed [15:0] cfgc_jam   = 16'sd0;
+  reg        [15:0] cfgc_eps   = 16'd0;
+  reg signed [15:0] cfgc_cal_r = 16'sd16384;
+  reg signed [15:0] cfgc_cal_i = 16'sd0;
+
+  always @(posedge clk) begin
+    cfg_tog_meta <= cfg_toggle;
+    cfg_tog_sync <= cfg_tog_meta;
+    cfg_tog_prev <= cfg_tog_sync;
+    if (cfg_tog_sync != cfg_tog_prev) begin
+      cfgc_gps   <= crpa_coef[0][15:0];
+      cfgc_jam   <= crpa_coef[1][15:0];
+      cfgc_eps   <= crpa_coef[2][15:0];
+      cfgc_cal_r <= crpa_coef[3][15:0];
+      cfgc_cal_i <= crpa_coef[3][31:16];
+    end
+  end
 
   // ==========================================================================
   //  Elastic buffer (one per channel)
@@ -356,20 +449,110 @@ module gnss_passthrough #(
     end
   end
 
-  wire wr_en0 = pass_en & adc_valid_i0 & adc_enable_i0;
+  // RX strobes delayed by the PROCESSING CORE latency (proc_v*, below), so
+  // the buffer is written with the processed sample that belongs to them.
+  wire proc_v0, proc_v1;
+  wire wr_en0 = pass_en & proc_v0;
   wire rd_en0 = pass_en & dac_valid_i0 & primed0;
-  wire wr_en1 = pass_en & adc_valid_i1 & adc_enable_i1;
+  wire wr_en1 = pass_en & proc_v1;
   wire rd_en1 = pass_en & dac_valid_i1 & primed1;
 
   // ==========================================================================
-  //  PROCESSING CORE  --  replace this section with the CRPA algorithm.
-  //  Phase 1: identity.  proc_i/proc_q are the values written into the
-  //  elastic buffer; they are the raw RX samples, unmodified.
+  //  PROCESSING CORE  --  2-element LCMV CRPA  (Source/HDL/crpa/)
+  //
+  //  Input format: 12-bit sample right-aligned in 16 bits. Only [11:0] is
+  //  used, sign-extended here, so the result does not depend on whether the
+  //  ADC data-format control sign-extends or zero-fills [15:12].
+  //
+  //  Both channels go through a LATENCY-clock delay in every mode, so the
+  //  RX->TX timing is identical with LCMV on or off.
+  //
+  //  lcmv_active = 0 :  ch0 = RX1, ch1 = RX2                  (identity)
+  //  lcmv_active = 1 :  ch0 = conj(w1) RX1 + conj(w2) RX2      (LCMV)
+  //                     ch1 = RX1                              (reference)
+  //  The beamformer output is saturated to 12 bits inside the core, so it
+  //  can never wrap in the output alignment stage.
   // ==========================================================================
-  wire [15:0] proc_i0 = adc_data_i0;
-  wire [15:0] proc_q0 = adc_data_q0;
-  wire [15:0] proc_i1 = adc_data_i1;
-  wire [15:0] proc_q1 = adc_data_q1;
+  localparam LATENCY = 5;                 // crpa_beamformer_2ch
+
+  wire signed [11:0] x1_re = adc_data_i0[11:0];
+  wire signed [11:0] x1_im = adc_data_q0[11:0];
+  wire signed [11:0] x2_re = adc_data_i1[11:0];
+  wire signed [11:0] x2_im = adc_data_q1[11:0];
+
+  wire               lcmv_out_valid;
+  wire signed [11:0] lcmv_y_re, lcmv_y_im;
+  wire               lcmv_out_sat;
+  wire               lcmv_wvalid, lcmv_busy;
+  wire [31:0]        lcmv_updates;
+  wire signed [24:0] lcmv_w1_re, lcmv_w1_im, lcmv_w2_re, lcmv_w2_im;
+
+  crpa_lcmv_2ch u_lcmv (
+    .clk           (clk),
+    .rst           (rst),
+    .enable        (lcmv_en),
+    .gps_angle     (cfgc_gps),
+    .jam_angle     (cfgc_jam),
+    .eps           (cfgc_eps),
+    .cal_re        (cfgc_cal_r),
+    .cal_im        (cfgc_cal_i),
+    .in_valid      (adc_valid_i0 & adc_valid_i1),
+    .x1_re         (x1_re),
+    .x1_im         (x1_im),
+    .x2_re         (x2_re),
+    .x2_im         (x2_im),
+    .out_valid     (lcmv_out_valid),
+    .y_re          (lcmv_y_re),
+    .y_im          (lcmv_y_im),
+    .out_sat       (lcmv_out_sat),
+    .weights_valid (lcmv_wvalid),
+    .busy          (lcmv_busy),
+    .update_count  (lcmv_updates),
+    .w1_re         (lcmv_w1_re),
+    .w1_im         (lcmv_w1_im),
+    .w2_re         (lcmv_w2_re),
+    .w2_im         (lcmv_w2_im)
+  );
+
+  wire lcmv_active = lcmv_en & lcmv_wvalid;
+
+  // Raw samples and strobes delayed to match the beamformer.
+  reg [31:0] raw0_d [0:LATENCY-1];
+  reg [31:0] raw1_d [0:LATENCY-1];
+  reg [LATENCY-1:0] v0_d = {LATENCY{1'b0}};
+  reg [LATENCY-1:0] v1_d = {LATENCY{1'b0}};
+  reg [LATENCY-1:0] act_d = {LATENCY{1'b0}};
+  integer di;
+
+  always @(posedge clk) begin
+    raw0_d[0] <= {adc_data_q0, adc_data_i0};
+    raw1_d[0] <= {adc_data_q1, adc_data_i1};
+    for (di = 1; di < LATENCY; di = di + 1) begin
+      raw0_d[di] <= raw0_d[di-1];
+      raw1_d[di] <= raw1_d[di-1];
+    end
+    if (rst) begin
+      v0_d  <= {LATENCY{1'b0}};
+      v1_d  <= {LATENCY{1'b0}};
+      act_d <= {LATENCY{1'b0}};
+    end else begin
+      v0_d  <= {v0_d[LATENCY-2:0],  adc_valid_i0 & adc_enable_i0};
+      v1_d  <= {v1_d[LATENCY-2:0],  adc_valid_i1 & adc_enable_i1};
+      act_d <= {act_d[LATENCY-2:0], lcmv_active};
+    end
+  end
+
+  wire        use_lcmv = act_d[LATENCY-1];
+  wire [31:0] raw0     = raw0_d[LATENCY-1];
+  wire [31:0] raw1     = raw1_d[LATENCY-1];
+
+  assign proc_v0 = v0_d[LATENCY-1];
+  assign proc_v1 = v1_d[LATENCY-1];
+
+  wire [15:0] proc_i0 = use_lcmv ? {{4{lcmv_y_re[11]}}, lcmv_y_re} : raw0[15:0];
+  wire [15:0] proc_q0 = use_lcmv ? {{4{lcmv_y_im[11]}}, lcmv_y_im} : raw0[31:16];
+  wire [15:0] proc_i1 = use_lcmv ? raw0[15:0]  : raw1[15:0];
+  wire [15:0] proc_q1 = use_lcmv ? raw0[31:16] : raw1[31:16];
   // ======================= END PROCESSING CORE ==============================
 
   reg  [31:0] rd_data0 = 32'd0;
@@ -462,6 +645,8 @@ module gnss_passthrough #(
   reg [31:0] ovf_cnt = 32'd0, unf_cnt = 32'd0;
   reg [31:0] rx_snap0 = 32'd0, tx_snap0 = 32'd0, rx_snap1 = 32'd0;
   reg        ovf_sticky = 1'b0, unf_sticky = 1'b0;
+  reg [31:0] sat_cnt = 32'd0;
+  reg        sat_sticky = 1'b0;
 
   always @(posedge clk) begin
     if (rst || cnt_clear) begin
@@ -470,7 +655,12 @@ module gnss_passthrough #(
       ovf_cnt <= 32'd0; unf_cnt <= 32'd0;
       ovf_sticky <= 1'b0; unf_sticky <= 1'b0;
       rx_snap0 <= 32'd0; tx_snap0 <= 32'd0; rx_snap1 <= 32'd0;
+      sat_cnt <= 32'd0; sat_sticky <= 1'b0;
     end else begin
+      if (use_lcmv && proc_v0 && lcmv_out_sat) begin
+        sat_cnt    <= sat_cnt + 1'b1;
+        sat_sticky <= 1'b1;
+      end
       if (adc_valid_i0) begin
         rx_cnt0  <= rx_cnt0 + 1'b1;
         rx_snap0 <= {adc_data_q0, adc_data_i0};
@@ -498,7 +688,7 @@ module gnss_passthrough #(
   end
 
   wire [31:0] status_w;
-  assign status_w = { 15'd0, pass_en,
+  assign status_w = { 12'd0, sat_sticky, lcmv_active, lcmv_en, pass_en,
                       6'd0, unf_sticky, ovf_sticky,
                       full1, empty1, full0, empty0,
                       dac_enable_q0, dac_enable_i0,
@@ -521,6 +711,8 @@ module gnss_passthrough #(
   reg         cap_toggle = 1'b0;
   reg  [31:0] cap_status, cap_rx0, cap_tx0, cap_ovf, cap_unf;
   reg  [31:0] cap_rxs0, cap_txs0, cap_lvl, cap_rx1, cap_tx1, cap_rxs1;
+  reg  [31:0] cap_w1r, cap_w1i, cap_w2r, cap_w2i;
+  reg  [31:0] cap_lst, cap_lupd, cap_lsat;
 
   always @(posedge clk) begin
     cap_div <= cap_div + 1'b1;
@@ -536,6 +728,13 @@ module gnss_passthrough #(
       cap_rx1    <= rx_cnt1;
       cap_tx1    <= tx_cnt1;
       cap_rxs1   <= rx_snap1;
+      cap_w1r    <= {{7{lcmv_w1_re[24]}}, lcmv_w1_re};
+      cap_w1i    <= {{7{lcmv_w1_im[24]}}, lcmv_w1_im};
+      cap_w2r    <= {{7{lcmv_w2_re[24]}}, lcmv_w2_re};
+      cap_w2i    <= {{7{lcmv_w2_im[24]}}, lcmv_w2_im};
+      cap_lst    <= {28'd0, sat_sticky, lcmv_busy, lcmv_wvalid, lcmv_en};
+      cap_lupd   <= lcmv_updates;
+      cap_lsat   <= sat_cnt;
       cap_toggle <= ~cap_toggle;
     end
   end
@@ -547,6 +746,8 @@ module gnss_passthrough #(
   reg [31:0] h_status = 32'd0, h_rx0 = 32'd0, h_tx0 = 32'd0;
   reg [31:0] h_ovf = 32'd0, h_unf = 32'd0, h_rxs0 = 32'd0, h_txs0 = 32'd0;
   reg [31:0] h_lvl = 32'd0, h_rx1 = 32'd0, h_tx1 = 32'd0, h_rxs1 = 32'd0;
+  reg [31:0] h_w1r = 32'd0, h_w1i = 32'd0, h_w2r = 32'd0, h_w2i = 32'd0;
+  reg [31:0] h_lst = 32'd0, h_lupd = 32'd0, h_lsat = 32'd0;
 
   always @(posedge s_axi_aclk) begin
     tog_meta <= cap_toggle;
@@ -564,6 +765,13 @@ module gnss_passthrough #(
       h_rx1    <= cap_rx1;
       h_tx1    <= cap_tx1;
       h_rxs1   <= cap_rxs1;
+      h_w1r    <= cap_w1r;
+      h_w1i    <= cap_w1i;
+      h_w2r    <= cap_w2r;
+      h_w2i    <= cap_w2i;
+      h_lst    <= cap_lst;
+      h_lupd   <= cap_lupd;
+      h_lsat   <= cap_lsat;
     end
   end
 
@@ -578,5 +786,12 @@ module gnss_passthrough #(
   assign v_rx_cnt1  = h_rx1;
   assign v_tx_cnt1  = h_tx1;
   assign v_rx_snap1 = h_rxs1;
+  assign v_w1_re    = h_w1r;
+  assign v_w1_im    = h_w1i;
+  assign v_w2_re    = h_w2r;
+  assign v_w2_im    = h_w2i;
+  assign v_lcmv_st  = h_lst;
+  assign v_lcmv_upd = h_lupd;
+  assign v_lcmv_sat = h_lsat;
 
 endmodule

@@ -3,6 +3,10 @@
 #  Packages Source/HDL/gnss_passthrough.v as a Vivado IP so the block design
 #  can instantiate it (requirement 41).
 #
+#  v2.0: the IP also packages the LCMV CRPA sources in Source/HDL/crpa/.
+#  They are listed explicitly (not globbed) so a missing file fails here, at
+#  packaging time, instead of as an unresolved module deep inside synthesis.
+#
 #  This script is deliberately self-contained: it uses only standard Vivado
 #  IP-packager commands and does NOT depend on the Analog Devices library
 #  scripts.  That keeps the custom IP buildable even if the vendor tree is
@@ -31,7 +35,15 @@ set ip_dir     [file join $ip_repo_dir $ip_name]
 set rtl_file   [file join $src_dir "HDL" "${ip_name}.v"]
 set xdc_file   [file join $src_dir "IP" $ip_name "${ip_name}_constr.xdc"]
 
-foreach f [list $rtl_file $xdc_file] {
+set crpa_dir   [file join $src_dir "HDL" "crpa"]
+set crpa_files [list \
+  [file join $crpa_dir "crpa_lcmv_2ch.v"] \
+  [file join $crpa_dir "crpa_lcmv_weight_2ch.v"] \
+  [file join $crpa_dir "crpa_sdiv_serial.v"] \
+  [file join $crpa_dir "crpa_beamformer_2ch.v"] \
+  [file join $crpa_dir "steering_vector_2x2.v"] ]
+
+foreach f [concat [list $rtl_file $xdc_file] $crpa_files] {
   if {![file exists $f]} {
     puts "ERROR: required source not found: $f"
     exit 2
@@ -47,6 +59,7 @@ create_project -force ${ip_name}_pkg [file join $ip_dir ".pkg_project"] -part xc
 set_property target_language Verilog [current_project]
 
 add_files -norecurse $rtl_file
+add_files -norecurse $crpa_files
 set_property top $ip_name [current_fileset]
 update_compile_order -fileset sources_1
 
@@ -65,7 +78,7 @@ set core [ipx::current_core]
 set_property name           $ip_name                                  $core
 set_property version        1.0                                       $core
 set_property display_name   "GNSS CRPA Passthrough"                   $core
-set_property description    "Phase-1 transparent RX->TX I/Q passthrough and CRPA insertion point for ANTSDR E310 V1" $core
+set_property description    "RX->TX I/Q passthrough with 2-element LCMV CRPA (v2.0) for ANTSDR E310 V1" $core
 set_property vendor_display_name "ANTSDR GNSS CRPA project"           $core
 set_property company_url    "https://github.com/MicroPhase"           $core
 
@@ -165,6 +178,26 @@ if {!$xdc_packaged} {
   exit 2
 }
 puts "IP_PACKAGE_SELFCHECK: OK - CDC constraints packaged with the IP"
+
+# The LCMV sources must travel with the IP, or the block design synthesises a
+# gnss_passthrough with unresolved crpa_* modules.
+set missing {}
+foreach f $crpa_files {
+  set want [file tail $f]
+  set found 0
+  foreach fg [ipx::get_file_groups -of_objects $core] {
+    foreach fl [ipx::get_files -of_objects $fg] {
+      if {[string match "*$want" [get_property name $fl]]} { set found 1 }
+    }
+  }
+  if {!$found} { lappend missing $want }
+}
+if {[llength $missing] > 0} {
+  puts "IP_PACKAGE_SELFCHECK: FAIL - LCMV sources not packaged: $missing"
+  close_project
+  exit 2
+}
+puts "IP_PACKAGE_SELFCHECK: OK - LCMV CRPA sources packaged with the IP"
 
 close_project
 file delete -force [file join $ip_dir ".pkg_project"]

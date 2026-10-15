@@ -1,0 +1,16 @@
+T1 ID      = 0x47435031
+T1 VERSION = 0x00020000
+T1 RX2_CAL reset = 0x00004000
+T2 STATUS = 0x0007000f  (pass_en=1 lcmv_en=1 lcmv_active=1)
+T2 weights  w1 = 0.50000 +0.55098j   w2 = 0.71333 -0.21156j
+T2 LCMV_UPDATES = 63
+T2 LCMV on : jammer+noise residual  -45.3 dB re RX1, tone gain  0.00 dB, nibble errors 0
+T3 LCMV on : TX1/RX1 power   0.00 dB (TX1 = RX1 reference)
+T4 LCMV off: TX0/RX1 power   0.00 dB (identity)
+T5 RX2 error 0.85/190 deg, no cal : residual    2.7 dB re RX1
+T5 RX2_CAL = 0x0d13b5da
+T5 RX2 error 0.85/190 deg, cal on : residual  -44.6 dB re RX1, tone gain -0.01 dB
+LCMV_STATUS = 0x0000000f
+LCMV_SAT_COUNT = 3
+PASS
+tb_gnss_passthrough_lcmv.v:307: $finish called at 741575000 (1ps)

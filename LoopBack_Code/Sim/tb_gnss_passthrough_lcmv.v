@@ -1,0 +1,310 @@
+// ============================================================================
+//  tb_gnss_passthrough_lcmv.v
+//  System-level, self-checking testbench for gnss_passthrough v2.0 with the
+//  2-element LCMV CRPA. Exercises the block exactly as the firmware does:
+//  AXI4-Lite register writes/reads (100 MHz) and ADC/DAC strobes (125 MHz).
+//
+//  Scene: 2-element array, d = lambda/2, a(theta) = [1, exp(j*pi*sin(theta))]
+//    jammer   : noise-like, 40 deg, 400 LSB rms per I/Q (JNR ~ 46 dB)
+//    GPS-like : CW tone at 10 deg, 20 LSB  (stands in for the look direction)
+//    noise    : 2 LSB rms per I/Q per channel
+//
+//  Tests
+//    T1  ID = 0x47435031, VERSION = 0x00020000
+//    T2  LCMV on (GPS 10, JAM 40): STATUS[18] lcmv_active, weights readable,
+//        TX0 jammer suppression < -40 dB, tone gain 0 dB +/- 1 dB,
+//        TX0 samples left-aligned (low nibble 0)
+//    T3  LCMV on: TX1 carries RX1 (output/input power 0 dB +/- 0.5 dB)
+//    T4  LCMV off: identity passthrough, TX0 power = RX1 power
+//    T5  RX2 channel error 0.85 x exp(j190 deg) (-1.4 dB, 190 deg): null lost;
+//        LCMV_RX2_CAL = 1/(0.85 exp(j190 deg)) restores suppression < -40 dB
+//
+//  Run (from LoopBack_Code/Sim):
+//    iverilog -g2012 -o tb.vvp -s tb_gnss_passthrough_lcmv \
+//      ../Source/HDL/gnss_passthrough.v ../Source/HDL/crpa/*.v \
+//      tb_gnss_passthrough_lcmv.v && vvp -n tb.vvp
+// ============================================================================
+
+`timescale 1ns/100ps
+
+module tb_gnss_passthrough_lcmv;
+
+  localparam real PI        = 3.14159265358979;
+  localparam real JAM_AMP   = 400.0;
+  localparam real TONE_AMP  = 20.0;
+  localparam real NOISE_AMP = 2.0;
+  localparam real TONE_CYC  = 0.0371;     // cycles per sample
+  localparam integer DECIM  = 4;          // one sample every 4 clk
+
+  // ---- clocks / resets -----------------------------------------------------
+  reg clk = 0;        always #4 clk = ~clk;          // 125 MHz l_clk
+  reg aclk = 0;       always #5 aclk = ~aclk;        // 100 MHz sys_cpu_clk
+  reg rst = 1;
+  reg aresetn = 0;
+
+  // ---- DUT ports --------------------------------------------------------------
+  reg  [15:0] adc_i0 = 0, adc_q0 = 0, adc_i1 = 0, adc_q1 = 0;
+  reg         adc_v  = 0;
+  reg         dac_v  = 0;
+  wire [15:0] dac_i0, dac_q0, dac_i1, dac_q1;
+
+  reg  [15:0] awaddr = 0, araddr = 0;
+  reg         awvalid = 0, wvalid = 0, bready = 1, arvalid = 0, rready = 1;
+  reg  [31:0] wdata = 0;
+  wire        awready, wready, bvalid, arready, rvalid;
+  wire [1:0]  bresp, rresp;
+  wire [31:0] rdata;
+
+  gnss_passthrough dut (
+    .clk(clk), .rst(rst),
+    .adc_enable_i0(1'b1), .adc_valid_i0(adc_v), .adc_data_i0(adc_i0),
+    .adc_enable_q0(1'b1), .adc_valid_q0(adc_v), .adc_data_q0(adc_q0),
+    .adc_enable_i1(1'b1), .adc_valid_i1(adc_v), .adc_data_i1(adc_i1),
+    .adc_enable_q1(1'b1), .adc_valid_q1(adc_v), .adc_data_q1(adc_q1),
+    .dac_enable_i0(1'b1), .dac_valid_i0(dac_v),
+    .dac_enable_q0(1'b1), .dac_valid_q0(dac_v),
+    .dac_enable_i1(1'b1), .dac_valid_i1(dac_v),
+    .dac_enable_q1(1'b1), .dac_valid_q1(dac_v),
+    .dma_dac_data_i0(16'h1230), .dma_dac_data_q0(16'h4560),
+    .dma_dac_data_i1(16'h7890), .dma_dac_data_q1(16'hABC0),
+    .dac_data_i0(dac_i0), .dac_data_q0(dac_q0),
+    .dac_data_i1(dac_i1), .dac_data_q1(dac_q1),
+    .s_axi_aclk(aclk), .s_axi_aresetn(aresetn),
+    .s_axi_awvalid(awvalid), .s_axi_awaddr(awaddr), .s_axi_awprot(3'd0),
+    .s_axi_awready(awready),
+    .s_axi_wvalid(wvalid), .s_axi_wdata(wdata), .s_axi_wstrb(4'hF),
+    .s_axi_wready(wready),
+    .s_axi_bvalid(bvalid), .s_axi_bresp(bresp), .s_axi_bready(bready),
+    .s_axi_arvalid(arvalid), .s_axi_araddr(araddr), .s_axi_arprot(3'd0),
+    .s_axi_arready(arready),
+    .s_axi_rvalid(rvalid), .s_axi_rresp(rresp), .s_axi_rdata(rdata),
+    .s_axi_rready(rready)
+  );
+
+  // ---- AXI4-Lite master tasks ------------------------------------------------
+  task axi_write(input [15:0] a, input [31:0] d);
+    begin
+      @(posedge aclk);
+      awaddr <= a; wdata <= d; awvalid <= 1; wvalid <= 1;
+      @(posedge aclk);
+      while (!awready) @(posedge aclk);
+      awvalid <= 0; wvalid <= 0;
+      while (!bvalid) @(posedge aclk);
+      @(posedge aclk);
+    end
+  endtask
+
+  task axi_read(input [15:0] a, output [31:0] d);
+    begin
+      @(posedge aclk);
+      araddr <= a; arvalid <= 1;
+      @(posedge aclk);
+      while (!arready) @(posedge aclk);
+      arvalid <= 0;
+      while (!rvalid) @(posedge aclk);
+      d = rdata;
+      @(posedge aclk);
+    end
+  endtask
+
+  // ---- scene generator (sample clock) ----------------------------------------
+  integer seed = 777;
+  real    jam_deg  = 40.0;
+  real    tone_deg = 10.0;
+  real    rx2_err_deg  = 0.0;    // RX2 channel phase error (hardware mismatch)
+  real    rx2_err_gain = 1.0;    // RX2 channel gain error
+  integer n = 0;
+  integer div = 0;
+
+  function real gauss(input integer dummy);
+    gauss = $dist_normal(seed, 0, 10000) / 10000.0;
+  endfunction
+
+  function [15:0] adc12(input real v);       // 12-bit, right-aligned, sign-ext
+    real r;
+    integer k;
+    begin
+      r = (v >= 0.0) ? v + 0.5 : v - 0.5;
+      if (r > 2047.0)  r = 2047.0;
+      if (r < -2048.0) r = -2048.0;
+      k = $rtoi(r);
+      adc12 = {{4{k[11]}}, k[11:0]};
+    end
+  endfunction
+
+  real jr, ji, tr, ti, pj, pt, x2r, x2i, er, ei, x1r, x1i;
+
+  always @(posedge clk) begin
+    adc_v <= 1'b0;
+    dac_v <= 1'b0;
+    div   <= (div == DECIM-1) ? 0 : div + 1;
+
+    if (div == 0) begin
+      jr = JAM_AMP * gauss(0);
+      ji = JAM_AMP * gauss(0);
+      tr = TONE_AMP * $cos(2.0*PI*TONE_CYC*n);
+      ti = TONE_AMP * $sin(2.0*PI*TONE_CYC*n);
+      pj = PI * $sin(jam_deg  * PI / 180.0);
+      pt = PI * $sin(tone_deg * PI / 180.0);
+
+      x1r = jr + tr + NOISE_AMP * gauss(0);
+      x1i = ji + ti + NOISE_AMP * gauss(0);
+      // element 2: jammer and tone with their spatial phases
+      x2r = (jr*$cos(pj) - ji*$sin(pj)) + (tr*$cos(pt) - ti*$sin(pt));
+      x2i = (jr*$sin(pj) + ji*$cos(pj)) + (tr*$sin(pt) + ti*$cos(pt));
+      // RX2 channel phase error
+      er  = rx2_err_gain * (x2r*$cos(rx2_err_deg*PI/180.0) - x2i*$sin(rx2_err_deg*PI/180.0));
+      ei  = rx2_err_gain * (x2r*$sin(rx2_err_deg*PI/180.0) + x2i*$cos(rx2_err_deg*PI/180.0));
+
+      adc_i0 <= adc12(x1r);
+      adc_q0 <= adc12(x1i);
+      adc_i1 <= adc12(er + NOISE_AMP * gauss(0));
+      adc_q1 <= adc12(ei + NOISE_AMP * gauss(0));
+      adc_v  <= 1'b1;
+      n = n + 1;
+    end
+    if (div == 2) dac_v <= 1'b1;            // DAC request, different phase
+  end
+
+  // ---- measurement on the DAC side --------------------------------------------
+  real    p_in, p_out0, p_out1, c_re, c_im;
+  integer m_in, m_out, k_out;
+  integer nib_err;
+  reg     measuring = 0;
+  real    yr, yi, y1r, y1i;
+
+  always @(posedge clk) begin
+    if (measuring && adc_v) begin
+      p_in = p_in + 1.0*$signed(adc_i0[11:0])*$signed(adc_i0[11:0])
+                  + 1.0*$signed(adc_q0[11:0])*$signed(adc_q0[11:0]);
+      m_in = m_in + 1;
+    end
+    if (measuring && dac_v) begin
+      yr  = $signed(dac_i0[15:4]);
+      yi  = $signed(dac_q0[15:4]);
+      y1r = $signed(dac_i1[15:4]);
+      y1i = $signed(dac_q1[15:4]);
+      if (dac_i0[3:0] != 0 || dac_q0[3:0] != 0) nib_err = nib_err + 1;
+      p_out0 = p_out0 + yr*yr + yi*yi;
+      p_out1 = p_out1 + y1r*y1r + y1i*y1i;
+      // tone correlation (TX index k_out)
+      c_re = c_re + yr*$cos(2.0*PI*TONE_CYC*k_out) + yi*$sin(2.0*PI*TONE_CYC*k_out);
+      c_im = c_im + yi*$cos(2.0*PI*TONE_CYC*k_out) - yr*$sin(2.0*PI*TONE_CYC*k_out);
+      k_out = k_out + 1;
+      m_out = m_out + 1;
+    end
+  end
+
+  real out_db, out1_db, tone_db, res_db, tone_pow;
+
+  task measure(input integer nsamp);
+    begin
+      p_in = 0; p_out0 = 0; p_out1 = 0; c_re = 0; c_im = 0;
+      m_in = 0; m_out = 0; k_out = 0; nib_err = 0;
+      measuring = 1;
+      repeat (nsamp * DECIM) @(posedge clk);
+      measuring = 0;
+      out_db  = 10.0*$log10((p_out0/m_out + 1e-9) / (p_in/m_in));
+      out1_db = 10.0*$log10((p_out1/m_out + 1e-9) / (p_in/m_in));
+      tone_db = 20.0*$log10($sqrt(c_re*c_re + c_im*c_im) / m_out / TONE_AMP + 1e-12);
+      // residual = output minus the (wanted) look-direction tone
+      tone_pow = (c_re*c_re + c_im*c_im) / (1.0*m_out*m_out);
+      res_db  = 10.0*$log10((p_out0/m_out - tone_pow + 1e-9) / (p_in/m_in));
+    end
+  endtask
+
+  // ---- checks -----------------------------------------------------------------
+  integer errors = 0;
+  reg [31:0] r;
+
+  task check(input cond, input [8*64-1:0] what);
+    begin
+      if (!cond) begin
+        errors = errors + 1;
+        $display("  FAIL: %0s", what);
+      end
+    end
+  endtask
+
+  reg signed [31:0] w1r, w1i, w2r, w2i;
+
+  initial begin
+    repeat (20) @(posedge aclk);
+    aresetn = 1;
+    repeat (5) @(posedge clk);
+    rst = 0;
+    repeat (50) @(posedge clk);
+
+    // ---------------- T1 ----------------
+    axi_read(16'h00, r);  $display("T1 ID      = 0x%08h", r);
+    check(r == 32'h47435031, "ID");
+    axi_read(16'h04, r);  $display("T1 VERSION = 0x%08h", r);
+    check(r == 32'h00020000, "VERSION 2.0");
+    axi_read(16'h4C, r);  $display("T1 RX2_CAL reset = 0x%08h", r);
+    check(r == 32'h00004000, "RX2_CAL reset value (1.0, Q2.14)");
+
+    // ---------------- T2 ----------------
+    axi_write(16'h40, 32'd10);                 // GPS angle
+    axi_write(16'h44, 32'd40);                 // JAM angle
+    axi_write(16'h48, 32'd0);                  // EPS
+    axi_write(16'h0C, 32'h11);                 // pass_en | lcmv_en
+    repeat (4000) @(posedge clk);
+
+    axi_read(16'h10, r);
+    $display("T2 STATUS = 0x%08h  (pass_en=%0d lcmv_en=%0d lcmv_active=%0d)", r, r[16], r[17], r[18]);
+    check(r[18] == 1'b1, "STATUS[18] lcmv_active");
+    axi_read(16'h50, w1r); axi_read(16'h54, w1i);
+    axi_read(16'h58, w2r); axi_read(16'h5C, w2i);
+    $display("T2 weights  w1 = %0.5f %+0.5fj   w2 = %0.5f %+0.5fj",
+             w1r/65536.0, w1i/65536.0, w2r/65536.0, w2i/65536.0);
+    axi_read(16'h64, r); $display("T2 LCMV_UPDATES = %0d", r);
+    check(r > 0, "LCMV_UPDATES > 0");
+
+    measure(6000);
+    $display("T2 LCMV on : jammer+noise residual %6.1f dB re RX1, tone gain %5.2f dB, nibble errors %0d",
+             res_db, tone_db, nib_err);
+    check(res_db < -40.0, "jammer suppression < -40 dB");
+    check(tone_db > -1.0 && tone_db < 1.0, "look-direction gain 0 dB +/- 1 dB");
+    check(nib_err == 0, "TX0 left-aligned");
+
+    // ---------------- T3 ----------------
+    $display("T3 LCMV on : TX1/RX1 power %6.2f dB (TX1 = RX1 reference)", out1_db);
+    check(out1_db > -0.5 && out1_db < 0.5, "TX1 carries RX1");
+
+    // ---------------- T4 ----------------
+    axi_write(16'h0C, 32'h01);                 // pass_en only
+    repeat (500) @(posedge clk);
+    measure(4000);
+    $display("T4 LCMV off: TX0/RX1 power %6.2f dB (identity)", out_db);
+    check(out_db > -0.2 && out_db < 0.2, "identity passthrough");
+    axi_read(16'h10, r);
+    check(r[18] == 1'b0, "STATUS[18] clear with LCMV off");
+
+    // ---------------- T5 ----------------
+    rx2_err_deg  = 190.0;                      // e.g. inversion + 10 deg skew
+    rx2_err_gain = 0.85;                       // RX2 1.4 dB weaker
+    axi_write(16'h0C, 32'h11);
+    repeat (4000) @(posedge clk);
+    measure(4000);
+    $display("T5 RX2 error 0.85/190 deg, no cal : residual %6.1f dB re RX1", res_db);
+    check(res_db > -20.0, "uncalibrated phase error degrades the null");
+
+    // c = 1/(0.85 exp(j190 deg)) = -1.15860 + j0.20429  ->  Q2.14 re -18982, im 3347
+    axi_write(16'h4C, {16'sd3347, -16'sd18982});
+    axi_read(16'h4C, r); $display("T5 RX2_CAL = 0x%08h", r);
+    repeat (4000) @(posedge clk);
+    measure(6000);
+    $display("T5 RX2 error 0.85/190 deg, cal on : residual %6.1f dB re RX1, tone gain %5.2f dB",
+             res_db, tone_db);
+    check(res_db < -40.0, "calibration restores the null");
+    check(tone_db > -1.0 && tone_db < 1.0, "look gain with calibration");
+
+    axi_read(16'h60, r);  $display("LCMV_STATUS = 0x%08h", r);
+    axi_read(16'h68, r);  $display("LCMV_SAT_COUNT = %0d", r);
+
+    if (errors == 0) $display("PASS");
+    else             $display("FAIL (%0d errors)", errors);
+    $finish;
+  end
+
+endmodule
