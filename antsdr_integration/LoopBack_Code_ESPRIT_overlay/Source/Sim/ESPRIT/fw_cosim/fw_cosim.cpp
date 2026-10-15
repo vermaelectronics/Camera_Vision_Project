@@ -270,6 +270,10 @@ int main(int argc, char **argv) {
     gnss_doa_print_cal();
     scene_theta_deg = 25.0;
     wait_blocks(2);
+    printf("FW_COSIM: --- doa_expect=25 ---\n");
+    gnss_doa_set_expect(25.0);
+    printf("FW_COSIM: --- doa?  (jammer at 25 deg) ---\n");
+    gnss_doa_print_result();
     printf("FW_COSIM: --- doa_phase?  (strong source at 25 deg = jammer) ---\n");
     r = gnss_doa_print_phase(32);
     check("doa_phase?: strong coherent source -> verdict JAMMER", r == DOA_VERDICT_SOURCE);
@@ -289,6 +293,8 @@ int main(int argc, char **argv) {
     wait_blocks(2);
     r = gnss_doa_print_phase(32);
     check("doa_phase?: independent noise -> verdict NO JAMMER", r == DOA_VERDICT_NOISE);
+    printf("FW_COSIM: --- doa?  (noise only) ---\n");
+    gnss_doa_print_result();
     {
         uint32_t cal_before = gnss_pt_read(DOA_REG_CAL);
         r = gnss_doa_calibrate();

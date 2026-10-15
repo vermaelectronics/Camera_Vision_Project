@@ -160,6 +160,9 @@ static struct {
     int32_t  offset_q16;              /* measured RX2-RX1 offset, deg Q16       */
     int32_t  coh_q15;                 /* coherence of the calibration signal    */
     uint32_t n;                       /* windows averaged                       */
+    int      check_valid;             /* re-measured right after calibrating    */
+    int32_t  check_phase_q16;         /* residual phase vs expected 0, deg Q16  */
+    int32_t  check_doa_q16;           /* residual DOA vs expected 0, deg Q16    */
 } cal_info;
 
 static int32_t q28_to_degq16(int32_t a)
@@ -199,6 +202,13 @@ static int32_t dbfs_x10(uint32_t peak)
 {
     if (peak == 0U) { return -999; }
     return (int32_t)(((int64_t)(log2_q16(peak) - DOA_LOG2_FS_Q16) * 60206) / 65536000);
+}
+
+/* deg Q16 -> tenths of a degree, rounded */
+static int32_t degq16_x10(int32_t q16)
+{
+    int64_t v = (int64_t)q16 * 10;
+    return (int32_t)((v + ((v >= 0) ? 32768 : -32768)) / 65536);
 }
 
 static void put_x10(int32_t v)
@@ -409,6 +419,8 @@ static void print_flags_legend(uint32_t fi, uint32_t fm)
     if (fm & 8U)        { printf("DOA:   ! off_circle: |psi| far from 1 -> no coherent source (Remark A)\n"); }
 }
 
+static void quick_jammer(void);
+
 void gnss_doa_print_result(void)
 {
     doa_state_t s;
@@ -435,8 +447,9 @@ void gnss_doa_print_result(void)
         put_deg(q28_to_degq16(pcal));
         printf(" deg  (CAL removes ");
         put_deg(q28_to_degq16(-alpha));
-        printf(" deg)   doa_phase? = jammer check\n");
+        printf(" deg)\n");
     }
+    if (s.ctrl & DOA_CTRL_ENABLE) { quick_jammer(); }
     print_flags_legend(s.i.flags, s.m.flags);
 }
 
@@ -761,12 +774,97 @@ static int32_t phase_verdict(const doa_phase_t *p)
 static const char *verdict_word(int32_t v)
 {
     switch (v) {
-    case DOA_VERDICT_SOURCE:    return "JAMMER";
-    case DOA_VERDICT_NOISE:     return "no-jammer";
-    case DOA_VERDICT_UNCERTAIN: return "uncertain";
-    case DOA_VERDICT_NO_SIGNAL: return "no-signal";
-    default:                    return "no-data";
+    case DOA_VERDICT_SOURCE:    return "JAMMER:YES";
+    case DOA_VERDICT_NOISE:     return "JAMMER:NO";
+    case DOA_VERDICT_UNCERTAIN: return "JAMMER:??";
+    case DOA_VERDICT_NO_SIGNAL: return "NO-SIGNAL";
+    default:                    return "NO-DATA";
     }
+}
+
+/* --------------------------------------------------------------------------
+ * expected DOA and "measured - expected" differences
+ *
+ * doa_expect=<deg> sets the bearing you KNOW the source has (cable-delay
+ * table, turntable position, ...). The default 0 deg is the splitter /
+ * broadside case, which is also what the calibration aims for.
+ * -------------------------------------------------------------------------- */
+static int32_t expect_q16  = 0;
+static int     expect_user = 0;
+
+/* phase (Q28 rad) that a source at theta (deg Q16) gives for the current K:
+ * theta = asin(-k phi)  ->  phi = -sin(theta) / k */
+static int32_t phase_for_deg(int32_t deg_q16)
+{
+    int32_t k   = (int32_t)rd(DOA_REG_K);
+    int32_t ang = (int32_t)(((int64_t)deg_q16 * DOA_DEG2RAD_Q28) >> 16);
+    int64_t s   = gnss_doa_sin_q15(ang);
+    if (k <= 0) { return 0; }
+    return wrap_q28(-(s << 43) / k);
+}
+
+void gnss_doa_set_expect(double deg)
+{
+    if (deg >  89.0) { deg =  89.0; }
+    if (deg < -89.0) { deg = -89.0; }
+    expect_q16  = (int32_t)(deg * 65536.0 + ((deg < 0) ? -0.5 : 0.5));
+    expect_user = 1;
+    printf("DOA: expected DOA set to ");
+    put_deg(expect_q16);
+    printf(" deg -> expected phase RX2-RX1 ");
+    put_deg(q28_to_degq16(phase_for_deg(expect_q16)));
+    printf(" deg (current K). doa_phase? / doa_watch= / doa? now show measured - expected.\n");
+}
+
+static void print_jammer_line(int32_t v, int32_t deg_q16, int32_t coh_q15)
+{
+    switch (v) {
+    case DOA_VERDICT_SOURCE:
+        printf("DOA:   JAMMER DETECTED: YES - strong coherent source at ");
+        put_deg(deg_q16);
+        printf(" deg (coherence ");
+        put_fixed(coh_q15, 15, 3);
+        printf(")\n");
+        break;
+    case DOA_VERDICT_NOISE:
+        printf("DOA:   JAMMER DETECTED: NO  - noise only (coherence ");
+        put_fixed(coh_q15, 15, 3);
+        printf("); satellites are below the noise\n");
+        break;
+    case DOA_VERDICT_UNCERTAIN:
+        printf("DOA:   JAMMER DETECTED: UNCERTAIN - partly coherent (coherence ");
+        put_fixed(coh_q15, 15, 3);
+        printf("), see doa_phase?\n");
+        break;
+    case DOA_VERDICT_NO_SIGNAL:
+        printf("DOA:   JAMMER DETECTED: NO  - no signal (all-zero input)\n");
+        break;
+    default:
+        printf("DOA:   JAMMER DETECTED: no data (doa=1? RX running?)\n");
+        break;
+    }
+}
+
+static void print_expect(int32_t meas_deg_q16, int32_t meas_phase_q28, int32_t v)
+{
+    int32_t exp_ph = phase_for_deg(expect_q16);
+    int32_t d_deg  = meas_deg_q16 - expect_q16;
+    int32_t d_ph   = q28_to_degq16(wrap_q28((int64_t)meas_phase_q28 - exp_ph));
+    printf("DOA:   expected       : DOA ");
+    put_deg(expect_q16);
+    printf(" deg  phase ");
+    put_deg(q28_to_degq16(exp_ph));
+    printf(" deg   %s\n", expect_user ? "(your known bearing, doa_expect)" : "(default 0 = splitter/broadside; set doa_expect=<deg>)");
+    if (v != DOA_VERDICT_SOURCE && v != DOA_VERDICT_UNCERTAIN) {
+        printf("DOA:   difference     : n/a - no coherent source, the measured angle is noise\n");
+        return;
+    }
+    printf("DOA:   difference     : DOA ");
+    put_deg(d_deg);
+    printf(" deg  phase ");
+    put_deg(d_ph);
+    printf(" deg   (measured - expected)  %s\n",
+           (iabs32(d_deg) <= 65536) ? "-> within 1 deg" : "-> OFF by more than 1 deg");
 }
 
 /* --------------------------------------------------------------------------
@@ -825,15 +923,33 @@ int32_t gnss_doa_calibrate(void)
     cal_info.offset_q16 = q16;
     cal_info.coh_q15    = p.coh_q15;
     cal_info.n          = p.n;
+    cal_info.check_valid = 0;
     printf("DOA: measured RX2-RX1 offset ");
     put_deg(q16);
-    printf(" deg over %lu windows -> DOA_CAL = 0x%08lx (cos %ld, sin %ld)\n",
-           (unsigned long)p.n, (unsigned long)rd(DOA_REG_CAL), (long)c, (long)s);
-    if (wait_avg(2) == DOA_OK) {
+    printf(" deg over %lu windows\n", (unsigned long)p.n);
+    printf("DOA:   = difference from the expected 0.000 deg (same signal, equal cables)\n");
+    printf("DOA:   -> DOA_CAL = 0x%08lx (cos %ld, sin %ld) removes it\n",
+           (unsigned long)rd(DOA_REG_CAL), (long)c, (long)s);
+    if (wait_avg(2) == DOA_OK && collect_phase(32, &p) == DOA_OK) {
+        int32_t dq;
         gnss_doa_get_state(&st);
-        printf("DOA: after calibration the common signal reads ");
-        put_deg((caps & 2U) ? st.m.avg_deg_q16 : st.i.avg_deg_q16);
-        printf(" deg (expect ~0). Calibration is lost at power-off.\n");
+        dq = (caps & 2U) ? st.m.avg_deg_q16 : st.i.avg_deg_q16;
+        cal_info.check_valid     = 1;
+        cal_info.check_phase_q16 = q28_to_degq16(p.cal_q28);
+        cal_info.check_doa_q16   = dq;
+        printf("DOA: calibration check (same signal, expected 0.000 deg):\n");
+        printf("DOA:   phase  measured ");
+        put_deg(cal_info.check_phase_q16);
+        printf(" deg   difference ");
+        put_deg(cal_info.check_phase_q16);
+        printf(" deg\n");
+        printf("DOA:   DOA    measured ");
+        put_deg(dq);
+        printf(" deg   difference ");
+        put_deg(dq);
+        printf(" deg   -> %s\n", (iabs32(dq) <= 32768) ? "GOOD (within 0.5 deg)"
+                                                          : "CHECK (more than 0.5 deg off)");
+        printf("DOA: calibration is lost at power-off.\n");
     }
     return DOA_OK;
 }
@@ -842,6 +958,7 @@ void gnss_doa_cal_reset(void)
 {
     wr(DOA_REG_CAL, 0x00007FFFU);
     cal_info.valid = 0;
+    cal_info.check_valid = 0;
     printf("DOA: calibration cleared (identity)\n");
 }
 
@@ -859,6 +976,13 @@ static void print_cal_line(void)
         printf(" deg  (doa_cal=1, %lu windows, coherence ", (unsigned long)cal_info.n);
         put_fixed(cal_info.coh_q15, 15, 3);
         printf(")\n");
+        if (cal_info.check_valid) {
+            printf("DOA:   calibration chk: right after doa_cal=1 the common signal read phase ");
+            put_deg(cal_info.check_phase_q16);
+            printf(" deg,\n                        DOA ");
+            put_deg(cal_info.check_doa_q16);
+            printf(" deg (difference from the expected 0.000 deg)\n");
+        }
     } else {
         printf("DOA:   calibration    : ACTIVE  offset removed ");
         put_deg(q28_to_degq16(-alpha));
@@ -922,6 +1046,8 @@ int32_t gnss_doa_print_phase(uint32_t nwin)
     printf(" deg  std ");
     put_mdeg(p.is_m ? st.m.std_mdeg : st.i.std_mdeg);
     printf(" deg  (average of %lu windows)\n", (unsigned long)navg);
+    print_expect(p.is_m ? st.m.avg_deg_q16 : st.i.avg_deg_q16, p.cal_q28, v);
+    print_jammer_line(v, p.is_m ? st.m.avg_deg_q16 : st.i.avg_deg_q16, p.coh_q15);
 
     switch (v) {
     case DOA_VERDICT_SOURCE:
@@ -979,10 +1105,13 @@ int32_t gnss_doa_watch(uint32_t n)
     doa_phase_t p;
     doa_state_t st;
     uint32_t    k;
+    int32_t     v;
     if (n == 0U)    { n = 10U; }
     if (n > 1000U)  { n = 1000U; }
-    printf("DOA: watching %lu x 16 windows  (raw / calibrated phase RX2-RX1, coherence, level, DOA)\n",
-           (unsigned long)n);
+    printf("DOA: watching %lu x 16 windows  (raw / calibrated phase RX2-RX1, coherence, level,\n"
+           "     DOA, err = DOA - expected ", (unsigned long)n);
+    put_deg(expect_q16);
+    printf(" deg, jammer detected)\n");
     print_cal_line();
     for (k = 0; k < n; k++) {
         if (collect_phase(16, &p) != DOA_OK) {
@@ -991,9 +1120,9 @@ int32_t gnss_doa_watch(uint32_t n)
         }
         gnss_doa_get_state(&st);
         printf("DOA: #%-4lu raw ", (unsigned long)(k + 1));
-        put_x10((int32_t)(((int64_t)q28_to_degq16(p.raw_q28) * 10) >> 16));
+        put_x10(degq16_x10(q28_to_degq16(p.raw_q28)));
         printf("  cal ");
-        put_x10((int32_t)(((int64_t)q28_to_degq16(p.cal_q28) * 10) >> 16));
+        put_x10(degq16_x10(q28_to_degq16(p.cal_q28)));
         printf(" deg  coh ");
         put_fixed(p.coh_q15, 15, 2);
         if (p.is_m) { printf("  |psi| "); put_fixed(p.psi_q24, 24, 2); }
@@ -1001,9 +1130,32 @@ int32_t gnss_doa_watch(uint32_t n)
         printf(" RX2 "); put_x10(dbfs_x10(p.pk1));
         printf(" dBFS  DOA ");
         put_deg(p.is_m ? st.m.avg_deg_q16 : st.i.avg_deg_q16);
-        printf("  %s\n", verdict_word(phase_verdict(&p)));
+        printf(" err");
+        v = phase_verdict(&p);
+        if (v == DOA_VERDICT_SOURCE || v == DOA_VERDICT_UNCERTAIN) {
+            put_deg((p.is_m ? st.m.avg_deg_q16 : st.i.avg_deg_q16) - expect_q16);
+        } else {
+            printf("    ---");
+        }
+        printf("  %s\n", verdict_word(v));
     }
     return DOA_OK;
+}
+
+/* the jammer and expected/difference lines of doa? (16 windows) */
+static void quick_jammer(void)
+{
+    doa_phase_t p;
+    doa_state_t st;
+    int32_t     deg;
+    if (collect_phase(16, &p) != DOA_OK) {
+        print_jammer_line(DOA_VERDICT_NO_DATA, 0, 0);
+        return;
+    }
+    gnss_doa_get_state(&st);
+    deg = p.is_m ? st.m.avg_deg_q16 : st.i.avg_deg_q16;
+    print_jammer_line(phase_verdict(&p), deg, p.coh_q15);
+    print_expect(deg, p.cal_q28, phase_verdict(&p));
 }
 
 /* --------------------------------------------------------------------------

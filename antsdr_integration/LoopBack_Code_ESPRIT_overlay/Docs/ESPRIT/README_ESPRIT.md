@@ -45,7 +45,7 @@ It is based on:
 | Built-in two-element test source | `Source/HDL/doa_test_gen.v` | Known-angle hardware test without RF. |
 | RX2 phase calibration, decimation, hardware averaging, peak meter | `gnss_doa_esprit.v` | |
 | Registers 0x100–0x194 | `gnss_passthrough` aperture, **0x43C0_0100** | Block design **unchanged** (same ports, same address). |
-| Firmware driver + self-test + 18 console commands | `gnss_doa.c/.h`, `command.c/.h`, `main.c`, `gnss_info.c/.h` | Boot self-test, `doa?`, `doa_cal=1`, … |
+| Firmware driver + self-test + 19 console commands | `gnss_doa.c/.h`, `command.c/.h`, `main.c`, `gnss_info.c/.h` | Boot self-test, `doa?`, `doa_cal=1`, … |
 | System testbench (61 checks) | `Source/Sim/ESPRIT/tb_gnss_doa.v` | Runs from the **Vivado Tcl console**. |
 | Firmware ↔ RTL co-simulation | `Source/Sim/ESPRIT/fw_cosim/` | Runs the real `gnss_doa.c` against the real RTL. |
 | Vivado post-implementation report | `Vivado/Scripts/report_doa.tcl` | Utilisation, timing, CDC coverage. |
@@ -731,10 +731,40 @@ DOA:   coherence      :  0.058   (1.000 = same signal on RX1 and RX2, ~0 = indep
 DOA:   VERDICT        : NO JAMMER - RX1 and RX2 see independent noise only.
 ```
 
-`doa_watch=N` prints one line per 16 windows:
+**JAMMER DETECTED line.** `doa?`, `doa_phase?` and `doa_watch=` state it
+explicitly: `JAMMER DETECTED: YES - strong coherent source at θ`, `NO - noise
+only`, or `UNCERTAIN` (same rules as the verdict table).
+
+**Expected vs measured.** `doa_expect=<deg>` sets the bearing you know the
+source has (cable-delay table, turntable). Without it the expected value is
+0° (the splitter / broadside case). The reports then show the expected DOA
+and its phase (φ = −sin θ / k), and the **difference** (measured − expected)
+for both. The difference is shown only when a coherent source is present.
 
 ```
-DOA: #1    raw -39.1  cal -76.2 deg  coh  1.00  |psi|  1.00  RX1 -9.2 RX2 -8.2 dBFS  DOA  25.021  JAMMER
+DOA:   expected       : DOA  25.000 deg  phase -76.069 deg   (your known bearing, doa_expect)
+DOA:   difference     : DOA  0.025 deg  phase -0.028 deg   (measured - expected)  -> within 1 deg
+DOA:   JAMMER DETECTED: YES - strong coherent source at  25.025 deg (coherence  1.000)
+```
+
+**Calibration offset and check.** `doa_cal=1` reports the measured offset as
+the difference from the expected 0° (same signal, equal cables), then
+re-measures with the new calibration and reports the remaining difference
+(GOOD within 0.5°). `doa_cal?` repeats both:
+
+```
+DOA: measured RX2-RX1 offset  37.021 deg over 64 windows
+DOA:   = difference from the expected 0.000 deg (same signal, equal cables)
+DOA:   -> DOA_CAL = 0xb2ee6632 (cos 26162, sin -19730) removes it
+DOA: calibration check (same signal, expected 0.000 deg):
+DOA:   phase  measured -0.075 deg   difference -0.075 deg
+DOA:   DOA    measured  0.006 deg   difference  0.006 deg   -> GOOD (within 0.5 deg)
+```
+
+`doa_watch=N` prints one line per 16 windows (err = DOA − expected):
+
+```
+DOA: #1    raw -39.1  cal -76.2 deg  coh  1.00  |psi|  1.00  RX1 -9.3 RX2 -8.2 dBFS  DOA  24.974 err-0.026  JAMMER:YES
 ```
 
 `doa?` also prints a phase line for the last window:
@@ -850,7 +880,8 @@ Type `doa_help?` on the board for this list. All DOA commands are receive-only.
 | `doa_cal=1` / `doa_cal=0` | calibrate the RX2-RX1 phase (same signal on both) / clear |
 | `doa_cal?` | calibration in use: offset removed, windows, coherence (or NONE) |
 | `doa_phase?` | phase RX2−RX1 raw and calibrated, coherence, \|ψ\|, dBFS levels, DOA, JAMMER / NO JAMMER verdict (9.3b) |
-| `doa_watch=<N>` | the same as one line per 16 windows, N lines |
+| `doa_watch=<N>` | the same as one line per 16 windows (with err = DOA − expected and JAMMER:YES/NO), N lines |
+| `doa_expect=<deg>` | the bearing you know the source has; reports show measured − expected (default 0°) |
 | `doa_spacing_mm=<mm>` | antenna spacing, sets k = λ/(2πd) at the current RX LO |
 | `doa_window=<n>` | 2ⁿ snapshots per window, n = 7..14 |
 | `doa_p=<n>` | Cᵖ with p = 2ⁿ, n = 0..3 (paper: 2) |

@@ -130,6 +130,7 @@ void    gnss_doa_cal_reset(void);
 void    gnss_doa_print_cal(void);                    /* "doa_cal?"             */
 int32_t gnss_doa_print_phase(uint32_t nwin);         /* "doa_phase?" -> verdict */
 int32_t gnss_doa_watch(uint32_t n);                  /* "doa_watch=N"          */
+void    gnss_doa_set_expect(double theta_deg);       /* "doa_expect=<deg>"     */
 int32_t gnss_doa_boot_check(void);                   /* probe + quick selftest */
 
 /* fixed-point helpers (no libm) */

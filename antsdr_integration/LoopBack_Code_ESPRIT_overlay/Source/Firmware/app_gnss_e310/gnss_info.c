@@ -775,7 +775,7 @@ void gnss_info_menu(void)
     console_print("                               89750 quietest, 70000 known good\n");
     console_print("    gnss_tx? gnss_ddr_tx? gnss_status?   read back from hardware\n");
     console_print("    doa?  doa_selftest?  doa_help?        ESPRIT direction of arrival\n");
-    console_print("    doa_phase?  doa_watch=N  doa_cal?     phase, calibration, jammer check\n");
+    console_print("    doa_phase?  doa_watch=N  doa_cal?     phase, calibration, jammer yes/no\n");
     console_print("\n");
     console_print("    ?        this menu            help?    every command (long)\n");
     console_print("===============================================================\n");
@@ -801,6 +801,7 @@ static void info_doa(void)
     console_print("                            level and JAMMER / NO JAMMER verdict\n");
     console_print("         doa_watch=20       the same, one line per 16 windows\n");
     console_print("         doa_cal?           calibration in use (offset removed)\n");
+    console_print("         doa_expect=25      known bearing: show measured - expected\n");
     console_print("         doa?  doa_monitor=20   read the angle\n");
     console_print("         doa_test=-30       inject a known angle (test generator)\n");
     console_print("  Full guide: Docs/ESPRIT/README_ESPRIT.md\n\n");
