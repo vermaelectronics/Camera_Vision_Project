@@ -1,0 +1,11 @@
+block 0  jam=40.0  null@40.00 deg  w2=(28429,-59042)  depth=-80.6 dB  out/in=-42.1 dB
+block 1  jam=40.0  null@40.00 deg  w2=(28434,-59056)  depth=-80.4 dB  out/in=-43.0 dB
+block 2  jam=40.0  null@40.00 deg  w2=(28403,-59068)  depth=-74.4 dB  out/in=-42.4 dB
+block 3  jam=40.0  null@40.00 deg  w2=(28419,-59058)  depth=-85.9 dB  out/in=-42.7 dB
+---- jammer moves 40.0 -> 46.0 deg (no angle given to the core) ----
+block 4  jam=46.0  null@46.00 deg  w2=(41668,-50588)  depth=-87.9 dB  out/in=-28.9 dB
+block 5  jam=46.0  null@46.00 deg  w2=(41657,-50577)  depth=-79.6 dB  out/in=-43.0 dB
+block 6  jam=46.0  null@46.00 deg  w2=(41688,-50557)  depth=-72.3 dB  out/in=-42.9 dB
+block 7  jam=46.0  null@46.00 deg  w2=(41673,-50591)  depth=-83.4 dB  out/in=-42.9 dB
+PASS
+tb_lcmv_crpa_core.v:214: $finish called at 166375000 (1ps)
