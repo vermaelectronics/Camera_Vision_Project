@@ -1,0 +1,157 @@
+﻿{
+  "_comment": [
+    "Authoritative, portable description of the ANTSDR E310 V1 target.",
+    "Every value in the 'verified_from_upstream' sections was read directly out of",
+    "the pinned upstream sources listed in VERSION.json. Nothing here is inferred.",
+    "Values under 'project_assigned' are decisions made by THIS project and are not",
+    "vendor facts; they are recorded here so HDL, firmware, scripts and tests agree.",
+    "Machine-specific settings (COM port, tool paths, JTAG target) do NOT belong in",
+    "this file - they live in Source/Config/local.settings.json, which is per-PC and",
+    "is not part of the portable handoff (requirements 69, 70)."
+  ],
+
+  "board": {
+    "name": "ANTSDR E310",
+    "hardware_revision_supported": "V1 / Rev 1.x only",
+    "explicitly_out_of_scope": [
+      "ANTSDR E310 V2 (upstream project directory 'e310v2')",
+      "ANTSDR E316",
+      "ANTSDR E200 (upstream project directory 'antsdre200')"
+    ],
+    "vendor": "MicroPhase"
+  },
+
+  "fpga": {
+    "_source": "Vendor/MicroPhase_E310_V1/hdl/projects/antsdre310/system_project.tcl line 6",
+    "part": "xc7z020clg400-2",
+    "family": "zynq",
+    "package": "clg400",
+    "speed_grade": "-2",
+    "verified_present_in_installed_vivado": true,
+    "verified_on": "2026-09-11",
+    "verified_how": "get_parts xc7z020clg400-2 returned the part under Vivado 2026.1"
+  },
+
+  "rf_frontend": {
+    "_source": "Vendor/MicroPhase_E310_V1/hdl/projects/antsdre310/system_bd.tcl",
+    "device": "AD9361",
+    "digital_interface": "LVDS",
+    "mode": "2R2T",
+    "mode_1r1t_parameter": 0,
+    "cmos_or_lvds_n_parameter": 0,
+    "adc_init_delay": 29,
+    "rx_clk_constraint_ns": 8,
+    "rx_clk_constraint_source": "Source/XDC/system.xdc: create_clock -name rx_clk -period 8",
+    "spi_control": "PS7 SPI0 routed over EMIO to the AD9361 (spi_csn/spi_clk/spi_mosi/spi_miso)",
+    "note_on_sample_rate": "Sample rate, bandwidth, LO and gain are NOT fixed by the FPGA design. They are set at runtime by software over SPI. See Source/Firmware."
+  },
+
+  "processing_system": {
+    "_source": "Vendor/MicroPhase_E310_V1/hdl/projects/antsdre310/system_bd.tcl",
+    "ddr_part": "MT41J256M16 RE-125",
+    "ddr_bus_width_bits": 32,
+    "fclk_clk0_mhz": 100.0,
+    "fclk_clk1_mhz": 200.0,
+    "fclk_clk2_mhz": 200.0,
+    "console_uart": {
+      "peripheral": "UART1",
+      "mio": "MIO 12 .. 13",
+      "baudrate": 115200,
+      "_baud_source": "MEASURED from the live board 2026-09-11, not taken from the vendor header. Read UART1 registers over JTAG: BAUDGEN(0xE0001018)=0xAD=173, BAUDDIV(0xE0001034)=0x04, so divisor=(4+1)*173=865. UART_CLK_CTRL(0xF8000154) selects the IO PLL with divisor 10 -> 100 MHz reference. 100e6/865 = 115607 baud, i.e. 115200.",
+  "_baud_caution": "The vendor header defines UART_BAUDRATE 921600, but that constant is used by the no-OS UART driver in IIO mode. The console (console.c / xil_printf) goes through the BSP stdout, which is 115200. Capturing at 921600 yields unreadable bytes.",
+      "data_bits": 8,
+      "parity": "none",
+      "stop_bits": 1,
+      "flow_control": "none"
+    },
+    "ethernet": { "peripheral": "ENET0", "mio": "MIO 16 .. 27", "mdio": "MIO 52 .. 53", "reset_mio": 46 },
+    "sd": { "peripheral": "SD0", "freq_mhz": 50 },
+    "usb": { "peripheral": "USB0", "reset_mio": 47 },
+    "qspi_enabled": true,
+    "emio_gpio_width": 64
+  },
+
+  "address_map": {
+    "_comment": "Byte addresses on the PS7 M_AXI_GP0 control path.",
+    "verified_from_upstream": {
+      "axi_gpreg":            "0x41200000",
+      "axi_iic_main":         "0x41600000",
+      "axi_sysid_0":          "0x45000000",
+      "axi_ad9361":           "0x79020000",
+      "axi_ad9361_adc_dma":   "0x7C400000",
+      "axi_ad9361_dac_dma":   "0x7C420000"
+    },
+    "project_assigned": {
+      "gnss_passthrough":     "0x43C00000",
+      "_rationale": "0x43C0_0000 is the conventional free Zynq-7000 GP0 slot and collides with none of the upstream apertures above. Assigned by this project, not by MicroPhase."
+    }
+  },
+
+  "interrupts": {
+    "_source": "Vendor/MicroPhase_E310_V1/hdl/projects/antsdre310/system_bd.tcl",
+    "adc_dma_irq": "ps-13",
+    "dac_dma_irq": "ps-12",
+    "gps_pps_irq": "ps-11",
+    "iic_irq": "concat In14",
+    "custom_ip_irq": "none - gnss_passthrough is polled, it raises no interrupt"
+  },
+
+  "rf_switch_gpio": {
+    "_comment": "EMIO GPIO indices as used by the standalone firmware, cross-checked against system_top.v gpio_o bit assignments.",
+    "_source_firmware": "Vendor/MicroPhase_E310_V1/antsdr_standalone/app_e310/parameters.h",
+    "_source_hdl": "Vendor/MicroPhase_E310_V1/hdl/projects/antsdre310/system_top.v lines 119-126",
+    "rx1_band_sel_h": { "emio_pin": 54, "gpio_o_bit": 0, "package_pin": "G14" },
+    "rx1_band_sel_l": { "emio_pin": 55, "gpio_o_bit": 1, "package_pin": "C20" },
+    "tx1_band_sel_h": { "emio_pin": 56, "gpio_o_bit": 2, "package_pin": "B19" },
+    "tx1_band_sel_l": { "emio_pin": 57, "gpio_o_bit": 3, "package_pin": "B20" },
+    "rx2_band_sel_h": { "emio_pin": 58, "gpio_o_bit": 4, "package_pin": "E17" },
+    "rx2_band_sel_l": { "emio_pin": 59, "gpio_o_bit": 5, "package_pin": "A20" },
+    "tx2_band_sel_h": { "emio_pin": 60, "gpio_o_bit": 6, "package_pin": "D18" },
+    "tx2_band_sel_l": { "emio_pin": 61, "gpio_o_bit": 7, "package_pin": "D19" },
+    "ad9361_resetb":  { "emio_pin": 100 },
+    "ad9361_sync":    { "emio_pin": 99 },
+    "ad9361_enable":  { "emio_pin": 101, "gpio_o_bit": 47 },
+    "ad9361_txnrx":   { "emio_pin": 102, "gpio_o_bit": 48 },
+    "WARNING": "The band-select decode (which H/L combination selects which RF filter path) is a BOARD schematic property and is NOT derivable from the HDL or firmware sources in this repository. It must be read off the E310 V1 schematic before any assumption is made about which band is selected for 1575.42 MHz. Do not guess (requirement 32)."
+  },
+
+  "gnss_application": {
+    "_comment": "Targets for the Phase-1 proof of concept. These are project requirements, not vendor facts.",
+    "signal": "GPS L1 C/A",
+    "centre_frequency_hz": 1575420000,
+    "rx_port": "RX1",
+    "tx_port": "TX1",
+    "datapath": "AD9361 RX1 -> axi_ad9361 -> gnss_passthrough -> axi_ad9361 -> AD9361 TX1",
+    "phase1_processing": "identity (Iout = Iin, Qout = Qin)",
+    "test_method": "conducted, coaxial, with external attenuation between TX1 and the GNSS receiver",
+    "UNRESOLVED": [
+      "Sample rate and RF bandwidth for the L1 capture have not been chosen yet.",
+      "TX attenuation value and the resulting power at the GNSS receiver input have not been calculated yet.",
+      "These must be decided and recorded here before any RF test is run."
+    ]
+  },
+
+  "custom_ip_register_map": {
+    "_comment": "Mirrors the header comment in Source/HDL/gnss_passthrough.v. Offsets are from the base address in address_map.project_assigned.gnss_passthrough.",
+    "base_address": "0x43C00000",
+    "aperture_bytes": 4096,
+    "registers": [
+      { "offset": "0x00", "name": "ID",              "access": "RO", "reset": "0x47435031", "note": "ASCII 'GCP1'" },
+      { "offset": "0x04", "name": "VERSION",         "access": "RO", "reset": "0x00010001", "note": "1.0 = Phase-1 identity passthrough. 1.1 = adds the RX->TX sample alignment stage; a board reporting 1.0 transmits 24 dB low." },
+      { "offset": "0x08", "name": "SCRATCH",         "access": "RW" },
+      { "offset": "0x0C", "name": "CONTROL",         "access": "RW", "bits": { "0": "pass_en", "1": "mute", "2": "swap_iq", "3": "ch1_copy", "8": "cnt_clear" } },
+      { "offset": "0x10", "name": "STATUS",          "access": "RO", "bits": { "0": "adc_enable_i0", "1": "adc_enable_q0", "2": "dac_enable_i0", "3": "dac_enable_q0", "4": "fifo0_empty", "5": "fifo0_full", "6": "fifo1_empty", "7": "fifo1_full", "8": "overflow_sticky", "9": "underflow_sticky", "16": "pass_en_in_sample_domain" }, "note": "Bits [2]/[3] are axi_ad9361's read-back of (dac_data_sel == 4'h2), NOT an enable this block drives and NOT derived from the valid strobes (axi_ad9361_tx_channel.v:272). 0 means the DAC core is sourcing DDS and DISCARDING everything gnss_passthrough outputs, while TX_COUNT still advances. Firmware must write CHAN_CNTRL_7 (0x0418 + c*0x40) = 2." },
+      { "offset": "0x14", "name": "RX_COUNT_CH0",    "access": "RO" },
+      { "offset": "0x18", "name": "TX_COUNT_CH0",    "access": "RO" },
+      { "offset": "0x1C", "name": "OVERFLOW_COUNT",  "access": "RO" },
+      { "offset": "0x20", "name": "UNDERFLOW_COUNT", "access": "RO" },
+      { "offset": "0x24", "name": "RX_SNAPSHOT_CH0", "access": "RO", "note": "{Q[31:16], I[15:0]}. RX format: 12-bit sample right-aligned in 16 bits, sign-extended into [15:12] (ad_datafmt.v with DATA_WIDTH 12)." },
+      { "offset": "0x28", "name": "TX_SNAPSHOT_CH0", "access": "RO", "note": "{Q[31:16], I[15:0]}. TX format: 12-bit sample left-aligned, [15:4], because axi_ad9361_tx_channel.v:301 consumes dma_data[15:4]. In passthrough this reads 16x RX_SNAPSHOT_CH0; equal values mean the alignment stage is missing." },
+      { "offset": "0x2C", "name": "FIFO_LEVEL",      "access": "RO", "note": "[5:0] ch0, [13:8] ch1" },
+      { "offset": "0x30", "name": "RX_COUNT_CH1",    "access": "RO" },
+      { "offset": "0x34", "name": "TX_COUNT_CH1",    "access": "RO" },
+      { "offset": "0x38", "name": "RX_SNAPSHOT_CH1", "access": "RO" },
+      { "offset": "0x40", "name": "CRPA_COEF0..15",  "access": "RW", "note": "0x40-0x7C reserved for the future CRPA algorithm; stored but unused in Phase 1" }
+    ]
+  }
+}
