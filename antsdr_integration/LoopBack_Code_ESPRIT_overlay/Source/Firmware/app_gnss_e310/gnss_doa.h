@@ -79,6 +79,7 @@
 #define DOA_ERR_TIMEOUT     -2
 #define DOA_ERR_SELFTEST    -3
 #define DOA_ERR_NO_INPUT    -4
+#define DOA_OFFSET_INVALID  ((int32_t)0x80000000)  /* doa_offset?: not measurable */
 #define DOA_ERR_INCOHERENT  -5      /* calibration refused: RX1/RX2 not the same signal */
 
 /* ---- phase / jammer verdict (doa_phase?, doa_watch=) ----------------------- */
@@ -131,6 +132,7 @@ void    gnss_doa_print_cal(void);                    /* "doa_cal?"             *
 int32_t gnss_doa_print_phase(uint32_t nwin);         /* "doa_phase?" -> verdict */
 int32_t gnss_doa_watch(uint32_t n);                  /* "doa_watch=N"          */
 void    gnss_doa_set_expect(double theta_deg);       /* "doa_expect=<deg>"     */
+int32_t gnss_doa_print_offset(void);                 /* "doa_offset?" measure only */
 int32_t gnss_doa_boot_check(void);                   /* probe + quick selftest */
 
 /* fixed-point helpers (no libm) */

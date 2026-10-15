@@ -243,6 +243,19 @@ int main(int argc, char **argv) {
     printf("FW_COSIM: uncalibrated %s %.3f deg, expected with offset %.3f deg\n", has_m ? "M-ESPRIT" : "I-UESPRIT", unc, exp_unc);
     check("live uncalibrated angle shows the board offset (within 0.5 deg)", fabs(unc - exp_unc) < 0.5);
 
+    // 2b. doa_offset?: MEASURE the offset only (splitter, true phase 0), nothing applied
+    printf("FW_COSIM: --- doa_offset?  (measure only, not calibrated, same signal on both) ---\n");
+    scene_theta_deg = 0.0;
+    wait_blocks(2);
+    {
+        uint32_t cal_before = gnss_pt_read(DOA_REG_CAL);
+        int32_t off = gnss_doa_print_offset();
+        printf("FW_COSIM: measured offset %.3f deg, true %.3f deg\n", off / 65536.0, scene_offset_deg);
+        check("doa_offset? measures the board offset (within 1 deg)",
+              off != DOA_OFFSET_INVALID && fabs(off / 65536.0 - scene_offset_deg) < 1.0);
+        check("doa_offset? is measure-only: DOA_CAL unchanged", gnss_pt_read(DOA_REG_CAL) == cal_before);
+    }
+
     // 3. calibration with a common signal (true phase 0)
     printf("FW_COSIM: --- doa_cal=1 (splitter: both RX see the same signal) ---\n");
     scene_theta_deg = 0.0;
@@ -268,6 +281,16 @@ int main(int argc, char **argv) {
     // 4b. phase / calibration / jammer view (doa_phase?, doa_watch=, doa_cal?)
     printf("FW_COSIM: --- doa_cal? ---\n");
     gnss_doa_print_cal();
+    printf("FW_COSIM: --- doa_offset?  (after doa_cal=1, source at 0 deg) ---\n");
+    scene_theta_deg = 0.0;
+    wait_blocks(2);
+    {
+        uint32_t cal_before = gnss_pt_read(DOA_REG_CAL);
+        int32_t off = gnss_doa_print_offset();
+        check("doa_offset? after calibration still measures the raw offset (within 1 deg)",
+              off != DOA_OFFSET_INVALID && fabs(off / 65536.0 - scene_offset_deg) < 1.0);
+        check("doa_offset? leaves the loaded calibration unchanged", gnss_pt_read(DOA_REG_CAL) == cal_before);
+    }
     scene_theta_deg = 25.0;
     wait_blocks(2);
     printf("FW_COSIM: --- doa_expect=25 ---\n");
@@ -295,6 +318,8 @@ int main(int argc, char **argv) {
     check("doa_phase?: independent noise -> verdict NO JAMMER", r == DOA_VERDICT_NOISE);
     printf("FW_COSIM: --- doa?  (noise only) ---\n");
     gnss_doa_print_result();
+    printf("FW_COSIM: --- doa_offset?  (noise only) ---\n");
+    check("doa_offset? on noise reports 'cannot be measured'", gnss_doa_print_offset() == DOA_OFFSET_INVALID);
     {
         uint32_t cal_before = gnss_pt_read(DOA_REG_CAL);
         r = gnss_doa_calibrate();

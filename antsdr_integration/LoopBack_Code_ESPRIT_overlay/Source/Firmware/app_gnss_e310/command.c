@@ -149,6 +149,7 @@ command cmd_list[] = {
 	{"doa_monitor=", "Print N averaged DOA results.", "doa_monitor=10", set_doa_monitor},
 	{"doa_cal=", "1 = calibrate RX1/RX2 phase (same signal on both), 0 = clear.", "doa_cal=1", set_doa_cal},
 	{"doa_cal?", "Current RX1/RX2 phase calibration (offset removed).", "doa_cal?", get_doa_cal},
+	{"doa_offset?", "MEASURE the RX2-RX1 phase offset only (nothing applied): raw - expected, DOA error.", "doa_offset?", get_doa_offset},
 	{"doa_phase?", "Phase raw + calibrated, expected vs measured, JAMMER DETECTED yes/no.", "doa_phase?", get_doa_phase},
 	{"doa_watch=", "N lines of raw/cal phase, coherence, dBFS, DOA, error, jammer yes/no.", "doa_watch=20", set_doa_watch},
 	{"doa_expect=", "Known source bearing [deg]; reports show measured - expected.", "doa_expect=25", set_doa_expect},
@@ -340,6 +341,7 @@ void set_doa_cal(double* param, char param_no)
 }
 
 void get_doa_cal(double* param, char param_no)   { gnss_doa_print_cal(); }
+void get_doa_offset(double* param, char param_no) { (void)gnss_doa_print_offset(); }
 void get_doa_phase(double* param, char param_no) { (void)gnss_doa_print_phase(32U); }
 
 void set_doa_watch(double* param, char param_no)

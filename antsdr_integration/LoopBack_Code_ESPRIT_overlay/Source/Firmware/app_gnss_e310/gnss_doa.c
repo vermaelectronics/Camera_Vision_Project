@@ -163,6 +163,7 @@ static struct {
     int      check_valid;             /* re-measured right after calibrating    */
     int32_t  check_phase_q16;         /* residual phase vs expected 0, deg Q16  */
     int32_t  check_doa_q16;           /* residual DOA vs expected 0, deg Q16    */
+    uint32_t pk0, pk1;                /* RX1 / RX2 peak during calibration      */
 } cal_info;
 
 static int32_t q28_to_degq16(int32_t a)
@@ -539,8 +540,10 @@ int32_t gnss_doa_monitor(uint32_t n)
             printf(") |psi| "); put_q24(s.m.psi_q24);
             printf(" offc %lu/%lu", (unsigned long)s.m_offcirc, (unsigned long)navg);
         }
-        printf("  pk %lu/%lu  fl %lx/%lx\n", (unsigned long)(s.peak & 0xFFFFU),
+        printf("  pk %lu/%lu  fl %lx/%lx  cal ", (unsigned long)(s.peak & 0xFFFFU),
                (unsigned long)(s.peak >> 16), (unsigned long)s.i.flags, (unsigned long)s.m.flags);
+        if (rd(DOA_REG_CAL) == 0x00007FFFU) { printf("none\n"); }
+        else { put_x10(degq16_x10(q28_to_degq16(-cal_alpha_q28(rd(DOA_REG_CAL))))); printf(" deg\n"); }
     }
     return DOA_OK;
 }
@@ -953,6 +956,8 @@ int32_t gnss_doa_calibrate(void)
     cal_info.offset_q16 = q16;
     cal_info.coh_q15    = p.coh_q15;
     cal_info.n          = p.n;
+    cal_info.pk0        = p.pk0;
+    cal_info.pk1        = p.pk1;
     cal_info.check_valid = 0;
     printf("DOA: measured RX2-RX1 offset ");
     put_deg(q16);
@@ -1033,6 +1038,101 @@ void gnss_doa_print_cal(void)
 {
     printf("DOA: ---- RX1/RX2 phase calibration ----\n");
     print_cal_line();
+}
+
+/* "doa_offset?" -- MEASURE the RX2-RX1 phase offset. Measure only: no
+ * register is written, the calibration (DOA_CAL) is NOT changed.
+ *
+ *   offset = raw phase (as received, before any calibration)
+ *            - phase expected for the source position (doa_expect, default
+ *              0 deg = the same signal on RX1 and RX2 through a splitter)
+ *
+ * Returns the measured offset in deg Q16, or DOA_OFFSET_INVALID when there is
+ * no coherent common signal to measure it from. */
+int32_t gnss_doa_print_offset(void)
+{
+    uint32_t cal   = rd(DOA_REG_CAL);
+    int32_t  alpha = cal_alpha_q28(cal);
+    int32_t  k     = (int32_t)rd(DOA_REG_K);
+    int32_t  exp_ph, off_q28, off_q16, v, deg;
+    doa_phase_t p;
+    doa_state_t st;
+
+    printf("DOA: ============ RX1/RX2 PHASE OFFSET - MEASUREMENT (measure only) ============\n");
+    printf("DOA:   nothing is written: DOA_CAL is NOT changed by this command\n");
+    if (collect_phase(64, &p) != DOA_OK) {
+        printf("DOA:   no estimator results - doa=1 and RX running?\n");
+        return DOA_OFFSET_INVALID;
+    }
+    gnss_doa_get_state(&st);
+    v      = phase_verdict(&p);
+    deg    = p.is_m ? st.m.avg_deg_q16 : st.i.avg_deg_q16;
+    exp_ph = phase_for_deg(expect_q16);
+
+    /* [1] the measurement */
+    printf("DOA: [1] measured over %lu windows (%s)\n", (unsigned long)p.n,
+           p.is_m ? "M-ESPRIT" : "I-UESPRIT");
+    printf("DOA:     raw phase RX2-RX1     : ");
+    put_deg(q28_to_degq16(p.raw_q28));
+    printf(" deg   (as received, no calibration)\n");
+    printf("DOA:     expected phase        : ");
+    put_deg(q28_to_degq16(exp_ph));
+    printf(" deg   (source at ");
+    put_deg(expect_q16);
+    printf(" deg%s)\n", expect_user ? ", doa_expect" : " = same signal via splitter; doa_expect=<deg> otherwise");
+    printf("DOA:     coherence             : ");
+    put_fixed(p.coh_q15, 15, 3);
+    printf("   levels RX1 %lu (", (unsigned long)p.pk0);
+    put_x10(dbfs_x10(p.pk0));
+    printf(" dBFS)  RX2 %lu (", (unsigned long)p.pk1);
+    put_x10(dbfs_x10(p.pk1));
+    printf(" dBFS)\n");
+    if (p.coh_q15 < DOA_COH_SOURCE_Q15) {
+        printf("DOA:     OFFSET                : cannot be measured - coherence below 0.900,\n"
+               "DOA:                             RX1 and RX2 do not carry the same signal.\n"
+               "DOA:                             Feed one strong signal through a splitter.\n");
+        off_q16 = DOA_OFFSET_INVALID;
+    } else {
+        off_q28 = wrap_q28((int64_t)p.raw_q28 - exp_ph);
+        off_q16 = q28_to_degq16(off_q28);
+        printf("DOA:     >>> OFFSET = raw - expected = ");
+        put_deg(off_q16);
+        printf(" deg (phase) <<<\n");
+        printf("DOA:     as DOA error          : ");
+        put_deg(doa_shift_for_phase(off_q28));
+        printf(" deg   (how far the angle is off at broadside if not corrected)\n");
+        printf("DOA:     spread                : DOA std ");
+        put_mdeg(p.is_m ? st.m.std_mdeg : st.i.std_mdeg);
+        printf(" deg over the last average block\n");
+    }
+
+    /* [2] compare with the correction that is loaded (if any) */
+    printf("DOA: [2] correction currently loaded in DOA_CAL (for comparison only)\n");
+    if (cal == 0x00007FFFU) {
+        printf("DOA:     none - no correction applied (DOA_CAL = identity)\n");
+    } else {
+        printf("DOA:     correction loaded     : ");
+        put_deg(q28_to_degq16(-alpha));
+        printf(" deg phase (DOA_CAL 0x%08lx%s)\n", (unsigned long)cal,
+               (cal_info.valid && cal_info.reg == cal) ? ", from doa_cal=1" : ", written directly");
+        if (off_q16 != DOA_OFFSET_INVALID) {
+            printf("DOA:     measured - loaded     : ");
+            put_deg(q28_to_degq16(wrap_q28((int64_t)off_q28 + alpha)));
+            printf(" deg   (change of the offset since that correction)\n");
+        }
+    }
+
+    /* [3] geometry and result */
+    printf("DOA: [3] geometry: K_Q30 %ld -> d/lambda = ", (long)k);
+    if (k > 0) { put_fixed((int64_t)((1ULL << 30) * 1000ULL / (uint64_t)k) * 65536 / 6283, 16, 3); }
+    printf("  (0.500 = lambda/2, 95 mm at L1)\n");
+    printf("DOA: [4] DOA reported now      : ");
+    put_deg(deg);
+    printf(" deg (%s)\n", (cal == 0x00007FFFU) ? "uncorrected" : "with the loaded correction");
+    print_jammer_line(v, deg, p.coh_q15);
+    printf("DOA:   To APPLY a correction use doa_cal=1 (optional); doa_cal=0 removes it.\n");
+    printf("DOA: ==============================================================================\n");
+    return off_q16;
 }
 
 /* "doa_phase?" -- phase, calibration, level, coherence and a jammer verdict */

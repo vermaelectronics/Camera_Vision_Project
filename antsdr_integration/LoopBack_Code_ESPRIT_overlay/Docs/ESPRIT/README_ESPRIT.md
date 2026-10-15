@@ -45,7 +45,7 @@ It is based on:
 | Built-in two-element test source | `Source/HDL/doa_test_gen.v` | Known-angle hardware test without RF. |
 | RX2 phase calibration, decimation, hardware averaging, peak meter | `gnss_doa_esprit.v` | |
 | Registers 0x100–0x194 | `gnss_passthrough` aperture, **0x43C0_0100** | Block design **unchanged** (same ports, same address). |
-| Firmware driver + self-test + 19 console commands | `gnss_doa.c/.h`, `command.c/.h`, `main.c`, `gnss_info.c/.h` | Boot self-test, `doa?`, `doa_cal=1`, … |
+| Firmware driver + self-test + 20 console commands | `gnss_doa.c/.h`, `command.c/.h`, `main.c`, `gnss_info.c/.h` | Boot self-test, `doa?`, `doa_cal=1`, … |
 | System testbench (61 checks) | `Source/Sim/ESPRIT/tb_gnss_doa.v` | Runs from the **Vivado Tcl console**. |
 | Firmware ↔ RTL co-simulation | `Source/Sim/ESPRIT/fw_cosim/` | Runs the real `gnss_doa.c` against the real RTL. |
 | Vivado post-implementation report | `Vivado/Scripts/report_doa.tcl` | Utilisation, timing, CDC coverage. |
@@ -771,6 +771,40 @@ printed by `doa_cal=1`, `doa_cal?`, `doa_phase?`, `doa_watch=` and `doa?`:
 DOA:   calibration offset removed  37.023 deg phase = -11.870 deg DOA error if not removed (broadside)
 ```
 
+**Measure the offset only — `doa_offset?`.** Measures the RX2−RX1 phase
+offset and **writes nothing** (`DOA_CAL` is not changed). With the same signal
+on RX1 and RX2 (splitter, expected phase 0°), or a source at the bearing set
+with `doa_expect=<deg>`:
+
+  offset = raw phase (as received) − expected phase
+
+It also shows the offset as a DOA error at broadside, the coherence and
+levels, and compares with any correction that is loaded. Applying a
+correction is a separate, optional step (`doa_cal=1`; `doa_cal=0` removes
+it). Without a coherent common signal it reports "cannot be measured".
+Example (co-simulation, true board offset 37.000°, not calibrated):
+
+```
+DOA: ============ RX1/RX2 PHASE OFFSET - MEASUREMENT (measure only) ============
+DOA:   nothing is written: DOA_CAL is NOT changed by this command
+DOA: [1] measured over 64 windows (M-ESPRIT)
+DOA:     raw phase RX2-RX1     :  36.993 deg   (as received, no calibration)
+DOA:     expected phase        :  0.000 deg   (source at  0.000 deg = same signal via splitter; doa_expect=<deg> otherwise)
+DOA:     coherence             :  1.000   levels RX1 11504 (-9.0 dBFS)  RX2 15024 (-6.7 dBFS)
+DOA:     >>> OFFSET = raw - expected =  36.993 deg (phase) <<<
+DOA:     as DOA error          : -11.860 deg   (how far the angle is off at broadside if not corrected)
+DOA:     spread                : DOA std  0.065 deg over the last average block
+DOA: [2] correction currently loaded in DOA_CAL (for comparison only)
+DOA:     none - no correction applied (DOA_CAL = identity)
+DOA: [3] geometry: K_Q30 341782638 -> d/lambda =  0.500  (0.500 = lambda/2, 95 mm at L1)
+DOA: [4] DOA reported now      : -11.864 deg (uncorrected)
+DOA:   JAMMER DETECTED: YES - strong coherent source at -11.864 deg (coherence  1.000)
+DOA:   To APPLY a correction use doa_cal=1 (optional); doa_cal=0 removes it.
+DOA: ==============================================================================
+```
+
+`doa_monitor=N` lines also end with `cal <offset> deg` (or `cal none`).
+
 `doa_watch=N` prints one line per 16 windows (err = DOA − expected):
 
 ```
@@ -889,6 +923,7 @@ Type `doa_help?` on the board for this list. All DOA commands are receive-only.
 | `doa_monitor=<N>` | N averaged results, one line each |
 | `doa_cal=1` / `doa_cal=0` | calibrate the RX2-RX1 phase (same signal on both) / clear |
 | `doa_cal?` | calibration in use: offset removed, windows, coherence (or NONE) |
+| `doa_offset?` | MEASURE the RX2−RX1 phase offset only (nothing applied): raw − expected, as DOA error, vs the loaded correction |
 | `doa_phase?` | phase RX2−RX1 raw and calibrated, coherence, \|ψ\|, dBFS levels, DOA, JAMMER / NO JAMMER verdict (9.3b) |
 | `doa_watch=<N>` | the same as one line per 16 windows (with err = DOA − expected and JAMMER:YES/NO), N lines |
 | `doa_expect=<deg>` | the bearing you know the source has; reports show measured − expected (default 0°) |

@@ -262,6 +262,7 @@ void set_doa_test(double* param, char param_no);
 void set_doa_monitor(double* param, char param_no);
 void set_doa_cal(double* param, char param_no);
 void get_doa_cal(double* param, char param_no);
+void get_doa_offset(double* param, char param_no);
 void get_doa_phase(double* param, char param_no);
 void set_doa_watch(double* param, char param_no);
 void set_doa_expect(double* param, char param_no);
