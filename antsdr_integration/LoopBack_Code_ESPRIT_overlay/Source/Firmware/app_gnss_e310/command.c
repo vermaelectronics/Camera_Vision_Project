@@ -153,6 +153,7 @@ command cmd_list[] = {
 	{"doa_phase?", "Phase raw + calibrated, expected vs measured, JAMMER DETECTED yes/no.", "doa_phase?", get_doa_phase},
 	{"doa_watch=", "N lines of raw/cal phase, coherence, dBFS, DOA, error, jammer yes/no.", "doa_watch=20", set_doa_watch},
 	{"doa_expect=", "Known source bearing [deg]; reports show measured - expected.", "doa_expect=25", set_doa_expect},
+	{"doa_baseline=", "1 = record the jammer-OFF background (needed for jammer yes/no), 0 = clear.", "doa_baseline=1", set_doa_baseline},
 	{"doa_spacing_mm=", "Antenna spacing [mm] at the current RX LO (95 = lambda/2 at L1).", "doa_spacing_mm=95", set_doa_spacing},
 	{"doa_window=", "Snapshots per window = 2^N, N = 7..14.", "doa_window=10", set_doa_window},
 	{"doa_p=", "C^p sharpening, p = 2^N, N = 0..3 (paper: p = 4 -> N = 2).", "doa_p=2", set_doa_p},
@@ -349,6 +350,12 @@ void set_doa_watch(double* param, char param_no)
 	uint32_t n = (param_no >= 1 && param[0] >= 1.0) ? (uint32_t)param[0] : 10U;
 	if(n > 1000U) { n = 1000U; }
 	(void)gnss_doa_watch(n);
+}
+
+void set_doa_baseline(double* param, char param_no)
+{
+	if(param_no < 1) { console_print("doa_baseline= needs 1 (take, jammer OFF) or 0 (clear)\n"); return; }
+	gnss_doa_set_baseline((int)param[0] != 0);
 }
 
 void set_doa_expect(double* param, char param_no)

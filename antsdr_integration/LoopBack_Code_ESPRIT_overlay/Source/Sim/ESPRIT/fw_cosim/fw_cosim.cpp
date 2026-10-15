@@ -96,6 +96,8 @@ static double scene_offset_deg = 37.0;          // RX2 board/cable phase offset
 static double scene_snr_db = 20.0;
 static bool   scene_signal = true;              // false: independent noise only (no jammer)
 static double scene_gain1  = 1.0;               // RX2 amplitude relative to RX1
+static double scene_leak   = 0.0;               // common internal tone on BOTH RX (LO leakage / spur)
+static double leak_ph      = 0.0;
 static std::mt19937 rng(7);
 static std::normal_distribution<double> gauss(0.0, 1.0);
 static std::uniform_int_distribution<int> sym(0, 3);
@@ -120,6 +122,11 @@ static void drive_adc() {
         if (!scene_signal) { a0 = a1 = 0.0; ns = 0.05; }
         double x0i = a0 * cos(ph) + ns * gauss(rng), x0q = a0 * sin(ph) + ns * gauss(rng);
         double x1i = a1 * cos(ph + dphi) + ns * gauss(rng), x1q = a1 * sin(ph + dphi) + ns * gauss(rng);
+        if (scene_leak > 0.0) {                 // same tone, same phase on both channels
+            leak_ph += 0.0123;
+            x0i += scene_leak * cos(leak_ph); x0q += scene_leak * sin(leak_ph);
+            x1i += scene_leak * cos(leak_ph); x1q += scene_leak * sin(leak_ph);
+        }
         top->adc_data_i0 = (uint16_t)q12(x0i); top->adc_data_q0 = (uint16_t)q12(x0q);
         top->adc_data_i1 = (uint16_t)q12(x1i); top->adc_data_q1 = (uint16_t)q12(x1q);
         top->adc_valid_i0 = top->adc_valid_q0 = top->adc_valid_i1 = top->adc_valid_q1 = 1;
@@ -326,6 +333,29 @@ int main(int argc, char **argv) {
         check("doa_cal=1 on noise is REFUSED and keeps the old calibration",
               r == DOA_ERR_INCOHERENT && gnss_pt_read(DOA_REG_CAL) == cal_before);
     }
+    // coherent INTERNAL background with nothing connected (common tone on both RX)
+    printf("FW_COSIM: --- nothing connected, but a common internal tone on RX1+RX2 ---\n");
+    scene_leak = 0.08;
+    wait_blocks(2);
+    r = gnss_doa_print_phase(32);
+    check("coherent background without baseline -> YES with 'no baseline' warning", r == DOA_VERDICT_SOURCE);
+    printf("FW_COSIM: --- doa_baseline=1 (jammer OFF) ---\n");
+    gnss_doa_set_baseline(1);
+    r = gnss_doa_print_phase(32);
+    check("after doa_baseline=1 the same background -> JAMMER NO (background)", r == DOA_VERDICT_BACKGROUND);
+    printf("FW_COSIM: --- jammer ON (on top of the background) ---\n");
+    scene_signal = true;
+    wait_blocks(2);
+    r = gnss_doa_print_phase(32);
+    check("jammer ON over the baseline -> JAMMER YES", r == DOA_VERDICT_SOURCE);
+    printf("FW_COSIM: --- doa_watch=2 with baseline ---\n");
+    gnss_doa_watch(2);
+    scene_signal = false;
+    wait_blocks(2);
+    r = gnss_doa_print_phase(32);
+    check("jammer OFF again -> JAMMER NO (background)", r == DOA_VERDICT_BACKGROUND);
+    scene_leak = 0.0;
+    gnss_doa_set_baseline(0);
     scene_signal = true;
 
     if (has_m) {
@@ -336,7 +366,8 @@ int main(int argc, char **argv) {
         double pm = (int32_t)gnss_pt_read(DOA_REG_M_PSIMAG) / 16777216.0;
         printf("FW_COSIM: |psi| %.3f (expected ~2.0)\n", pm);
         check("M-ESPRIT |psi| tracks the RX2/RX1 amplitude ratio (2.0 +/- 0.2)", fabs(pm - 2.0) < 0.2);
-        check("unequal gains -> verdict UNCERTAIN with gain advice", r == DOA_VERDICT_UNCERTAIN);
+        check("unequal gains: still JAMMER DETECTED YES (level note, angle valid)", r == DOA_VERDICT_SOURCE);
+        check("unequal gains: angle still correct (within 0.5 deg)", fabs(avg_deg(true) - 25.0) < 0.5);
         scene_gain1 = 1.0;
     }
     scene_theta_deg = 25.0;

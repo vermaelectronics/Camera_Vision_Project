@@ -802,6 +802,7 @@ static void info_doa(void)
     console_print("         doa_watch=20       the same, one line per 16 windows\n");
     console_print("         doa_cal?           calibration in use (offset removed)\n");
     console_print("         doa_offset?        MEASURE the phase offset (nothing applied)\n");
+    console_print("         doa_baseline=1     jammer OFF: record the background first\n");
     console_print("         doa_expect=25      known bearing: show measured - expected\n");
     console_print("         doa?  doa_monitor=20   read the angle\n");
     console_print("         doa_test=-30       inject a known angle (test generator)\n");

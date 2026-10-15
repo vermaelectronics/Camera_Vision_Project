@@ -88,6 +88,7 @@
 #define DOA_VERDICT_NOISE      2    /* noise only: no jammer (satellites are below noise) */
 #define DOA_VERDICT_UNCERTAIN  3    /* partly coherent / unequal gains / 2 sources */
 #define DOA_VERDICT_SOURCE     4    /* one strong coherent source = jammer / test signal */
+#define DOA_VERDICT_BACKGROUND 5    /* coherent, but no louder than the jammer-OFF baseline */
 
 /* ---- one estimator's view ------------------------------------------------- */
 typedef struct {
@@ -133,6 +134,7 @@ int32_t gnss_doa_print_phase(uint32_t nwin);         /* "doa_phase?" -> verdict 
 int32_t gnss_doa_watch(uint32_t n);                  /* "doa_watch=N"          */
 void    gnss_doa_set_expect(double theta_deg);       /* "doa_expect=<deg>"     */
 int32_t gnss_doa_print_offset(void);                 /* "doa_offset?" measure only */
+void    gnss_doa_set_baseline(int take);             /* "doa_baseline=1/0"     */
 int32_t gnss_doa_boot_check(void);                   /* probe + quick selftest */
 
 /* fixed-point helpers (no libm) */

@@ -45,7 +45,7 @@ It is based on:
 | Built-in two-element test source | `Source/HDL/doa_test_gen.v` | Known-angle hardware test without RF. |
 | RX2 phase calibration, decimation, hardware averaging, peak meter | `gnss_doa_esprit.v` | |
 | Registers 0x100–0x194 | `gnss_passthrough` aperture, **0x43C0_0100** | Block design **unchanged** (same ports, same address). |
-| Firmware driver + self-test + 20 console commands | `gnss_doa.c/.h`, `command.c/.h`, `main.c`, `gnss_info.c/.h` | Boot self-test, `doa?`, `doa_cal=1`, … |
+| Firmware driver + self-test + 21 console commands | `gnss_doa.c/.h`, `command.c/.h`, `main.c`, `gnss_info.c/.h` | Boot self-test, `doa?`, `doa_cal=1`, … |
 | System testbench (61 checks) | `Source/Sim/ESPRIT/tb_gnss_doa.v` | Runs from the **Vivado Tcl console**. |
 | Firmware ↔ RTL co-simulation | `Source/Sim/ESPRIT/fw_cosim/` | Runs the real `gnss_doa.c` against the real RTL. |
 | Vivado post-implementation report | `Vivado/Scripts/report_doa.tcl` | Utilisation, timing, CDC coverage. |
@@ -704,9 +704,10 @@ bitstream rebuild is needed (rebuild only the Vitis application / BOOT.BIN).
 
 | Verdict | Condition | Meaning |
 |---|---|---|
-| `JAMMER / STRONG COHERENT SOURCE at θ` | coherence ≥ 0.90 (and M-ESPRIT off-circle ≤ 25 %) | one strong signal; θ is its DOA |
+| `JAMMER / STRONG COHERENT SOURCE at θ` | coherence ≥ 0.90 (and, with a baseline, +3 dB or 10° phase change vs it) | one strong signal; θ is its DOA. If M-ESPRIT \|ψ\| is far from 1 a `note` reports the RX2/RX1 level mismatch in dB (the angle is still valid) |
 | `NO JAMMER` | coherence < 0.50 | noise only; satellites are ~20 dB below the noise and are not visible to ESPRIT on raw samples |
-| `UNCERTAIN` | otherwise | weak source, two sources / multipath, or (stable phase, \|ψ\| ≠ 1) unequal RX gains |
+| `NO - only the background` | coherent, but same level and phase as the `doa_baseline` | the board's own common signal, no jammer |
+| `UNCERTAIN` | 0.50 ≤ coherence < 0.90 | weak source near the noise, two sources / multipath, or a moving source |
 | `NO SIGNAL` | no_signal flag | all-zero input |
 
 `doa_phase?` collects 32 windows. Example (co-simulation, jammer at 25° after
@@ -730,6 +731,17 @@ Noise only (no jammer):
 DOA:   coherence      :  0.058   (1.000 = same signal on RX1 and RX2, ~0 = independent noise)
 DOA:   VERDICT        : NO JAMMER - RX1 and RX2 see independent noise only.
 ```
+
+**Baseline — `doa_baseline=1` (take it with the jammer OFF).** RX1 and RX2
+share one LO and one clock, so with nothing connected they can still carry a
+common, coherent component (LO leakage / DC, a clock spur, RX1↔RX2
+coupling). Coherence alone then reads ≈1 with no jammer. `doa_baseline=1`
+records that background (mean peak level per channel and raw phase). After
+that, **JAMMER DETECTED: YES** needs coherence ≥ 0.90 **and** either a level
+rise ≥ 3 dB or a raw-phase change ≥ 10° versus the baseline; otherwise it
+reports `NO - only the background of the baseline`. Re-take the baseline after
+changing RX gain, LO or cabling (lost at power-off; `doa_baseline=0` clears it).
+Without a baseline, YES is printed with a reminder to take one.
 
 **JAMMER DETECTED line.** `doa?`, `doa_phase?` and `doa_watch=` state it
 explicitly: `JAMMER DETECTED: YES - strong coherent source at θ`, `NO - noise
@@ -926,6 +938,7 @@ Type `doa_help?` on the board for this list. All DOA commands are receive-only.
 | `doa_offset?` | MEASURE the RX2−RX1 phase offset only (nothing applied): raw − expected, as DOA error, vs the loaded correction |
 | `doa_phase?` | phase RX2−RX1 raw and calibrated, coherence, \|ψ\|, dBFS levels, DOA, JAMMER / NO JAMMER verdict (9.3b) |
 | `doa_watch=<N>` | the same as one line per 16 windows (with err = DOA − expected and JAMMER:YES/NO), N lines |
+| `doa_baseline=1` / `0` | record the jammer-OFF background (needed for a reliable jammer yes/no) / clear |
 | `doa_expect=<deg>` | the bearing you know the source has; reports show measured − expected (default 0°) |
 | `doa_spacing_mm=<mm>` | antenna spacing, sets k = λ/(2πd) at the current RX LO |
 | `doa_window=<n>` | 2ⁿ snapshots per window, n = 7..14 |

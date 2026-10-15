@@ -39,6 +39,8 @@ DOA:   snapshots 33806  peak |x0| 10544  |x1| 11344 (of 32767)
 DOA:   phase RX2-RX1 (last window): raw  6.014 deg  calibrated  6.017 deg
 DOA:   calibration offset removed: none (not calibrated, doa_cal=1)
 DOA:   JAMMER DETECTED: YES - strong coherent source at -1.821 deg (coherence  1.000)
+DOA:                    (no baseline yet: a coherent INTERNAL signal also looks like this;
+DOA:                     take one with the jammer OFF: doa_baseline=1)
 DOA:   expected       : DOA  0.000 deg  phase  0.000 deg   (default 0 = splitter/broadside; set doa_expect=<deg>)
 DOA:   difference     : DOA -1.821 deg  phase  5.825 deg   (measured - expected)  -> OFF by more than 1 deg
 FW_COSIM: uncalibrated I-UESPRIT -1.821 deg, expected with offset -1.828 deg
@@ -58,6 +60,8 @@ DOA:     none - no correction applied (DOA_CAL = identity)
 DOA: [3] geometry: K_Q30 341782638 -> d/lambda =  0.500  (0.500 = lambda/2, 95 mm at L1)
 DOA: [4] DOA reported now      : -11.853 deg (uncorrected)
 DOA:   JAMMER DETECTED: YES - strong coherent source at -11.853 deg (coherence  1.000)
+DOA:                    (no baseline yet: a coherent INTERNAL signal also looks like this;
+DOA:                     take one with the jammer OFF: doa_baseline=1)
 DOA:   To APPLY a correction use doa_cal=1 (optional); doa_cal=0 removes it.
 DOA: ==============================================================================
 FW_COSIM: measured offset 37.010 deg, true 37.000 deg
@@ -112,6 +116,8 @@ DOA:     measured - loaded     :  0.075 deg   (change of the offset since that c
 DOA: [3] geometry: K_Q30 341782638 -> d/lambda =  0.500  (0.500 = lambda/2, 95 mm at L1)
 DOA: [4] DOA reported now      : -0.025 deg (with the loaded correction)
 DOA:   JAMMER DETECTED: YES - strong coherent source at -0.025 deg (coherence  1.000)
+DOA:                    (no baseline yet: a coherent INTERNAL signal also looks like this;
+DOA:                     take one with the jammer OFF: doa_baseline=1)
 DOA:   To APPLY a correction use doa_cal=1 (optional); doa_cal=0 removes it.
 DOA: ==============================================================================
 FW_COSIM: doa_offset? after calibration still measures the raw offset (within 1 deg) PASS
@@ -125,6 +131,8 @@ DOA:   snapshots 1294492  peak |x0| 10848  |x1| 12479 (of 32767)
 DOA:   phase RX2-RX1 (last window): raw -39.118 deg  calibrated -76.106 deg
 DOA:   calibration offset removed  36.988 deg phase = -11.858 deg DOA error if not removed (broadside)
 DOA:   JAMMER DETECTED: YES - strong coherent source at  25.003 deg (coherence  1.000)
+DOA:                    (no baseline yet: a coherent INTERNAL signal also looks like this;
+DOA:                     take one with the jammer OFF: doa_baseline=1)
 DOA:   expected       : DOA  25.000 deg  phase -76.069 deg   (your known bearing, doa_expect)
 DOA:   difference     : DOA  0.003 deg  phase -0.006 deg   (measured - expected)  -> within 1 deg
 FW_COSIM: --- doa_phase?  (strong source at 25 deg = jammer) ---
@@ -141,6 +149,8 @@ DOA:   DOA            : mean  24.986 deg  std  0.061 deg  (average of 16 windows
 DOA:   expected       : DOA  25.000 deg  phase -76.069 deg   (your known bearing, doa_expect)
 DOA:   difference     : DOA -0.014 deg  phase  0.063 deg   (measured - expected)  -> within 1 deg
 DOA:   JAMMER DETECTED: YES - strong coherent source at  24.986 deg (coherence  1.000)
+DOA:                    (no baseline yet: a coherent INTERNAL signal also looks like this;
+DOA:                     take one with the jammer OFF: doa_baseline=1)
 DOA:   VERDICT        : >>> JAMMER / STRONG COHERENT SOURCE at  24.986 deg <<<
 DOA:                    One signal well above the noise reaches both elements with a
                         stable phase. GNSS satellites are ~20 dB BELOW the noise and
@@ -212,6 +222,102 @@ DOA: calibration REFUSED - coherence below 0.900: RX1 and RX2 do not carry
      floor, which cannot be used). Feed one strong signal through a splitter
      and repeat. Previous calibration kept.
 FW_COSIM: doa_cal=1 on noise is REFUSED and keeps the old calibration    PASS
+FW_COSIM: --- nothing connected, but a common internal tone on RX1+RX2 ---
+DOA: ==== PHASE / CALIBRATION / JAMMER CHECK  (I-UESPRIT, 32 windows of 1024 snapshots) ====
+DOA:   calibration    : ACTIVE  offset removed  36.986 deg  (doa_cal=1, 64 windows, coherence  1.000)
+DOA:                    = -11.858 deg DOA error if not removed (broadside)
+DOA:   calibration chk: right after doa_cal=1 the common signal read phase  0.022 deg,
+                        DOA -0.012 deg (difference from the expected 0.000 deg)
+DOA:   phase RX2-RX1  : raw         0.967 deg   as received (includes the board/cable offset)
+DOA:                    calibrated -36.021 deg   after CAL; this phase gives the DOA
+DOA:   coherence      :  0.998   (1.000 = same signal on RX1 and RX2, ~0 = independent noise)
+DOA:   level          : RX1 peak  8384 (-11.8 dBFS)   RX2 peak  9230 (-11.0 dBFS)
+DOA:   DOA            : mean  12.125 deg  std  1.218 deg  (average of 16 windows)
+DOA:   expected       : DOA  25.000 deg  phase -76.069 deg   (your known bearing, doa_expect)
+DOA:   difference     : DOA -12.875 deg  phase  40.049 deg   (measured - expected)  -> OFF by more than 1 deg
+DOA:   JAMMER DETECTED: YES - strong coherent source at  12.125 deg (coherence  0.998)
+DOA:                    (no baseline yet: a coherent INTERNAL signal also looks like this;
+DOA:                     take one with the jammer OFF: doa_baseline=1)
+DOA:   VERDICT        : >>> JAMMER / STRONG COHERENT SOURCE at  12.125 deg <<<
+DOA:                    One signal well above the noise reaches both elements with a
+                        stable phase. GNSS satellites are ~20 dB BELOW the noise and
+                        never look like this, so it is an interferer (or your bench
+                        signal generator).
+FW_COSIM: coherent background without baseline -> YES with 'no baseline' warning PASS
+FW_COSIM: --- doa_baseline=1 (jammer OFF) ---
+DOA: taking the baseline - the jammer must be OFF. Collecting 64 windows ...
+DOA: baseline (jammer OFF): RX1 mean peak 7849 (-12.4 dBFS)  RX2 mean peak 7755 (-12.5 dBFS)
+DOA:   background coherence  0.998  raw phase  0.854 deg
+DOA:   ! the background is COHERENT: RX1 and RX2 share a signal with nothing
+DOA:     connected (LO leakage / DC, clock spur or RX1<->RX2 coupling).
+DOA:   JAMMER DETECTED: YES now needs coherence >= 0.900 AND (level +3.0 dB over this
+DOA:   OR raw phase moved >= 10 deg from this).
+DOA:   Re-take it after changing RX gain, LO or cabling. Lost at power-off.
+DOA: ==== PHASE / CALIBRATION / JAMMER CHECK  (I-UESPRIT, 32 windows of 1024 snapshots) ====
+DOA:   calibration    : ACTIVE  offset removed  36.986 deg  (doa_cal=1, 64 windows, coherence  1.000)
+DOA:                    = -11.858 deg DOA error if not removed (broadside)
+DOA:   calibration chk: right after doa_cal=1 the common signal read phase  0.022 deg,
+                        DOA -0.012 deg (difference from the expected 0.000 deg)
+DOA:   phase RX2-RX1  : raw        -0.502 deg   as received (includes the board/cable offset)
+DOA:                    calibrated -37.490 deg   after CAL; this phase gives the DOA
+DOA:   coherence      :  0.998   (1.000 = same signal on RX1 and RX2, ~0 = independent noise)
+DOA:   level          : RX1 peak  9792 (-10.4 dBFS)   RX2 peak  9158 (-11.0 dBFS)
+DOA:   DOA            : mean  11.614 deg  std  1.453 deg  (average of 16 windows)
+DOA:   expected       : DOA  25.000 deg  phase -76.069 deg   (your known bearing, doa_expect)
+DOA:   difference     : n/a - no coherent source, the measured angle is noise
+DOA:   JAMMER DETECTED: NO  - only the background of the baseline (level  0.0 dB, phase moved  1.4 deg;
+DOA:                    needs +3.0 dB or 10 deg; coherence  0.998 is the board's own common signal)
+DOA:   VERDICT        : NO JAMMER - the coherent signal is the board's own background
+                        (same level and phase as the doa_baseline taken with the jammer OFF).
+FW_COSIM: after doa_baseline=1 the same background -> JAMMER NO (background) PASS
+FW_COSIM: --- jammer ON (on top of the background) ---
+DOA: ==== PHASE / CALIBRATION / JAMMER CHECK  (I-UESPRIT, 32 windows of 1024 snapshots) ====
+DOA:   calibration    : ACTIVE  offset removed  36.986 deg  (doa_cal=1, 64 windows, coherence  1.000)
+DOA:                    = -11.858 deg DOA error if not removed (broadside)
+DOA:   calibration chk: right after doa_cal=1 the common signal read phase  0.022 deg,
+                        DOA -0.012 deg (difference from the expected 0.000 deg)
+DOA:   phase RX2-RX1  : raw        -39.024 deg   as received (includes the board/cable offset)
+DOA:                    calibrated -76.012 deg   after CAL; this phase gives the DOA
+DOA:   coherence      :  1.000   (1.000 = same signal on RX1 and RX2, ~0 = independent noise)
+DOA:   level          : RX1 peak 13840 (-7.4 dBFS)   RX2 peak 15026 (-6.7 dBFS)
+DOA:   DOA            : mean  24.925 deg  std  0.148 deg  (average of 16 windows)
+DOA:   expected       : DOA  25.000 deg  phase -76.069 deg   (your known bearing, doa_expect)
+DOA:   difference     : DOA -0.075 deg  phase  0.057 deg   (measured - expected)  -> within 1 deg
+DOA:   JAMMER DETECTED: YES - strong coherent source at  24.925 deg (coherence  1.000,
+DOA:                    level  5.4 dB and phase moved  39.9 deg vs the jammer-OFF baseline)
+DOA:   VERDICT        : >>> JAMMER / STRONG COHERENT SOURCE at  24.925 deg <<<
+DOA:                    One signal well above the noise reaches both elements with a
+                        stable phase. GNSS satellites are ~20 dB BELOW the noise and
+                        never look like this, so it is an interferer (or your bench
+                        signal generator).
+FW_COSIM: jammer ON over the baseline -> JAMMER YES                      PASS
+FW_COSIM: --- doa_watch=2 with baseline ---
+DOA: watching 2 x 16 windows  (raw / calibrated phase RX2-RX1, coherence, level,
+     DOA, err = DOA - expected  25.000 deg, jammer detected)
+DOA:   calibration    : ACTIVE  offset removed  36.986 deg  (doa_cal=1, 64 windows, coherence  1.000)
+DOA:                    = -11.858 deg DOA error if not removed (broadside)
+DOA:   calibration chk: right after doa_cal=1 the common signal read phase  0.022 deg,
+                        DOA -0.012 deg (difference from the expected 0.000 deg)
+DOA: #1    raw -38.9  cal -75.9 deg  coh  1.00  RX1 -7.5 RX2 -6.5 dBFS  DOA  24.902 err-0.098  bl 5.5dB/ 39.8deg  JAMMER:YES
+DOA: #2    raw -39.1  cal -76.1 deg  coh  1.00  RX1 -7.7 RX2 -6.4 dBFS  DOA  24.943 err-0.057  bl 5.5dB/ 40.0deg  JAMMER:YES
+DOA: ==== PHASE / CALIBRATION / JAMMER CHECK  (I-UESPRIT, 32 windows of 1024 snapshots) ====
+DOA:   calibration    : ACTIVE  offset removed  36.986 deg  (doa_cal=1, 64 windows, coherence  1.000)
+DOA:                    = -11.858 deg DOA error if not removed (broadside)
+DOA:   calibration chk: right after doa_cal=1 the common signal read phase  0.022 deg,
+                        DOA -0.012 deg (difference from the expected 0.000 deg)
+DOA:   phase RX2-RX1  : raw        -0.681 deg   as received (includes the board/cable offset)
+DOA:                    calibrated -37.670 deg   after CAL; this phase gives the DOA
+DOA:   coherence      :  0.999   (1.000 = same signal on RX1 and RX2, ~0 = independent noise)
+DOA:   level          : RX1 peak  8816 (-11.4 dBFS)   RX2 peak  8864 (-11.3 dBFS)
+DOA:   DOA            : mean  12.409 deg  std  1.414 deg  (average of 16 windows)
+DOA:   expected       : DOA  25.000 deg  phase -76.069 deg   (your known bearing, doa_expect)
+DOA:   difference     : n/a - no coherent source, the measured angle is noise
+DOA:   JAMMER DETECTED: NO  - only the background of the baseline (level  0.1 dB, phase moved  1.5 deg;
+DOA:                    needs +3.0 dB or 10 deg; coherence  0.999 is the board's own common signal)
+DOA:   VERDICT        : NO JAMMER - the coherent signal is the board's own background
+                        (same level and phase as the doa_baseline taken with the jammer OFF).
+FW_COSIM: jammer OFF again -> JAMMER NO (background)                     PASS
+DOA: baseline cleared - jammer detection uses coherence only
 FW_COSIM: --- doa_test=-22.5 ---
 DOA: test generator set to -22.500 deg (DPHASE 0x30fbffff, current K)
 DOA:   I-UESPRIT mean -22.503  error -0.003 deg
@@ -229,8 +335,10 @@ DOA:   I-UESPRIT window #0        theta  0.000 deg   avg #0      mean  0.000 deg
 DOA:   snapshots 9  peak |x0| 0  |x1| 0 (of 32767)
 DOA:   phase RX2-RX1 (last window): raw  36.988 deg  calibrated  0.000 deg
 DOA:   calibration offset removed  36.988 deg phase = -11.858 deg DOA error if not removed (broadside)
-DOA:   JAMMER DETECTED: YES - strong coherent source at  25.016 deg (coherence  1.000)
+DOA:   JAMMER DETECTED: YES - strong coherent source at  24.984 deg (coherence  1.000)
+DOA:                    (no baseline yet: a coherent INTERNAL signal also looks like this;
+DOA:                     take one with the jammer OFF: doa_baseline=1)
 DOA:   expected       : DOA  25.000 deg  phase -76.069 deg   (your known bearing, doa_expect)
-DOA:   difference     : DOA  0.016 deg  phase -0.002 deg   (measured - expected)  -> within 1 deg
-FW_COSIM: simulated time 206.499 ms
+DOA:   difference     : DOA -0.016 deg  phase -0.025 deg   (measured - expected)  -> within 1 deg
+FW_COSIM: simulated time 254.522 ms
 FW_COSIM_RESULT: PASS

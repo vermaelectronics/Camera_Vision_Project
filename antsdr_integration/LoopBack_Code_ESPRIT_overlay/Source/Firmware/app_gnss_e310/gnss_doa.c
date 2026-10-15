@@ -440,7 +440,8 @@ static void print_flags_legend(uint32_t fi, uint32_t fm)
     if ((fi | fm) & 1U) { printf("DOA:   ! no_signal: cumulant matrix was all zero (no input?)\n"); }
     if ((fi | fm) & 2U) { printf("DOA:   ! ambiguous: |k*phi| > 1, angle clipped to +/-90 deg (check K / spacing)\n"); }
     if ((fi | fm) & 4U) { printf("DOA:   ! overrun: a window was dropped (window too short for the sample rate)\n"); }
-    if (fm & 8U)        { printf("DOA:   ! off_circle: |psi| far from 1 -> no coherent source (Remark A)\n"); }
+    if (fm & 8U)        { printf("DOA:   ! off_circle: |psi| far from 1 -> no coherent source, OR RX1/RX2 levels differ\n"
+                                 "DOA:     (|psi| = RX2/RX1 level ratio for one source). The JAMMER DETECTED line decides.\n"); }
 }
 
 static void quick_jammer(void);
@@ -743,6 +744,7 @@ int32_t gnss_doa_selftest(int verbose)
 typedef struct {
     int      is_m;
     uint32_t n, offc, pk0, pk1, flags;
+    uint32_t pkm0, pkm1;              /* mean of the per-window peaks          */
     int32_t  cal_q28;                 /* mean phase after CAL (gives the DOA)   */
     int32_t  raw_q28;                 /* mean phase as received                 */
     int32_t  alpha_q28;               /* CAL rotation                           */
@@ -755,9 +757,10 @@ static int32_t collect_phase(uint32_t nwin, doa_phase_t *o)
     uint32_t caps = rd(DOA_REG_CAPS);
     uint32_t seq_reg, phi_reg, tol, last, t, q, pk;
     int64_t  sc = 0, ss = 0, psum = 0;
+    uint64_t ps0 = 0, ps1 = 0;
 
     o->is_m = (caps & 2U) ? 1 : 0;
-    o->n = 0; o->offc = 0; o->pk0 = 0; o->pk1 = 0; o->flags = 0;
+    o->n = 0; o->offc = 0; o->pk0 = 0; o->pk1 = 0; o->flags = 0; o->pkm0 = 0; o->pkm1 = 0;
     o->cal_q28 = 0; o->raw_q28 = 0; o->coh_q15 = 0; o->psi_q24 = 0;
     o->alpha_q28 = cal_alpha_q28(rd(DOA_REG_CAL));
     if (!(rd(DOA_REG_CTRL) & DOA_CTRL_ENABLE)) { return DOA_ERR_NO_INPUT; }
@@ -778,6 +781,8 @@ static int32_t collect_phase(uint32_t nwin, doa_phase_t *o)
                 if ((uint32_t)iabs32(p - (1 << 24)) > tol) { o->offc++; }
             }
             pk = rd(DOA_REG_PEAK);
+            ps0 += pk & 0xFFFFU;
+            ps1 += pk >> 16;
             if ((pk & 0xFFFFU) > o->pk0) { o->pk0 = pk & 0xFFFFU; }
             if ((pk >> 16)     > o->pk1) { o->pk1 = pk >> 16; }
             o->n++;
@@ -790,7 +795,49 @@ static int32_t collect_phase(uint32_t nwin, doa_phase_t *o)
     circ_mean(sc, ss, o->n, &o->cal_q28, &o->coh_q15);
     o->raw_q28 = wrap_q28((int64_t)o->cal_q28 - o->alpha_q28);
     o->psi_q24 = (int32_t)(psum / (int64_t)o->n);
+    o->pkm0    = (uint32_t)(ps0 / o->n);
+    o->pkm1    = (uint32_t)(ps1 / o->n);
     return DOA_OK;
+}
+
+/* --------------------------------------------------------------------------
+ * baseline (doa_baseline=1, taken with the jammer OFF)
+ *
+ * RX1 and RX2 share one LO and one clock, so with NOTHING connected they can
+ * still carry a common, coherent component (LO leakage / DC, clock spurs,
+ * RX1<->RX2 coupling). Coherence alone then reads ~1 without any jammer.
+ * The baseline records that background (level and raw phase). A jammer is
+ * then a coherent signal that is at least DOA_JAM_RISE_X10 louder than it OR
+ * arrives with a raw phase at least DOA_JAM_DPHASE_Q16 away from it (a new
+ * source changes the inter-element phase; the internal background does not).
+ * -------------------------------------------------------------------------- */
+#define DOA_JAM_RISE_X10    30        /* +3.0 dB over the baseline              */
+#define DOA_JAM_DPHASE_Q16  (10 * 65536)  /* or the phase moved by >= 10 deg    */
+static struct {
+    int      valid;
+    uint32_t pkm0, pkm1;              /* mean peaks with the jammer OFF         */
+    int32_t  coh_q15;
+    int32_t  raw_q28;
+    uint32_t n;
+} base_info;
+
+/* level rise over the baseline in tenths of a dB (the larger channel) */
+static int32_t base_rise_x10(const doa_phase_t *p)
+{
+    int32_t r0 = dbfs_x10(p->pkm0) - dbfs_x10(base_info.pkm0);
+    int32_t r1 = dbfs_x10(p->pkm1) - dbfs_x10(base_info.pkm1);
+    return (r0 > r1) ? r0 : r1;
+}
+
+/* raw-phase change vs the baseline, deg Q16 (absolute) */
+static int32_t base_dphase_q16(const doa_phase_t *p)
+{
+    return iabs32(q28_to_degq16(wrap_q28((int64_t)p->raw_q28 - base_info.raw_q28)));
+}
+
+static int base_is_new(const doa_phase_t *p)
+{
+    return base_rise_x10(p) >= DOA_JAM_RISE_X10 || base_dphase_q16(p) >= DOA_JAM_DPHASE_Q16;
 }
 
 static int32_t phase_verdict(const doa_phase_t *p)
@@ -798,7 +845,13 @@ static int32_t phase_verdict(const doa_phase_t *p)
     if (p->n == 0U)                     { return DOA_VERDICT_NO_DATA; }
     if (p->flags & 1U)                  { return DOA_VERDICT_NO_SIGNAL; }
     if (p->coh_q15 < DOA_COH_NOISE_Q15) { return DOA_VERDICT_NOISE; }
-    if (p->coh_q15 >= DOA_COH_SOURCE_Q15 && (!p->is_m || 4U * p->offc <= p->n)) {
+    /* coherence alone decides: |psi| (M-ESPRIT) is the RX2/RX1 LEVEL ratio
+     * for one source, so it flags a gain mismatch, not the absence of a
+     * source -- see print_level_note() */
+    if (p->coh_q15 >= DOA_COH_SOURCE_Q15) {
+        if (base_info.valid && !base_is_new(p)) {
+            return DOA_VERDICT_BACKGROUND;
+        }
         return DOA_VERDICT_SOURCE;
     }
     return DOA_VERDICT_UNCERTAIN;
@@ -811,6 +864,7 @@ static const char *verdict_word(int32_t v)
     case DOA_VERDICT_NOISE:     return "JAMMER:NO";
     case DOA_VERDICT_UNCERTAIN: return "JAMMER:??";
     case DOA_VERDICT_NO_SIGNAL: return "NO-SIGNAL";
+    case DOA_VERDICT_BACKGROUND:return "JAMMER:NO(bg)";
     default:                    return "NO-DATA";
     }
 }
@@ -849,24 +903,46 @@ void gnss_doa_set_expect(double deg)
     printf(" deg (current K). doa_phase? / doa_watch= / doa? now show measured - expected.\n");
 }
 
-static void print_jammer_line(int32_t v, int32_t deg_q16, int32_t coh_q15)
+static void print_jammer_line(int32_t v, int32_t deg_q16, const doa_phase_t *p)
 {
+    int32_t coh = p ? p->coh_q15 : 0;
     switch (v) {
     case DOA_VERDICT_SOURCE:
         printf("DOA:   JAMMER DETECTED: YES - strong coherent source at ");
         put_deg(deg_q16);
         printf(" deg (coherence ");
-        put_fixed(coh_q15, 15, 3);
+        put_fixed(coh, 15, 3);
+        if (base_info.valid) {
+            printf(",\nDOA:                    level ");
+            put_x10(base_rise_x10(p));
+            printf(" dB and phase moved ");
+            put_x10(degq16_x10(base_dphase_q16(p)));
+            printf(" deg vs the jammer-OFF baseline");
+        }
         printf(")\n");
+        if (!base_info.valid) {
+            printf("DOA:                    (no baseline yet: a coherent INTERNAL signal also looks like this;\n"
+                   "DOA:                     take one with the jammer OFF: doa_baseline=1)\n");
+        }
+        break;
+    case DOA_VERDICT_BACKGROUND:
+        printf("DOA:   JAMMER DETECTED: NO  - only the background of the baseline (level ");
+        put_x10(base_rise_x10(p));
+        printf(" dB, phase moved ");
+        put_x10(degq16_x10(base_dphase_q16(p)));
+        printf(" deg;\n"
+               "DOA:                    needs +3.0 dB or 10 deg; coherence ");
+        put_fixed(coh, 15, 3);
+        printf(" is the board's own common signal)\n");
         break;
     case DOA_VERDICT_NOISE:
         printf("DOA:   JAMMER DETECTED: NO  - noise only (coherence ");
-        put_fixed(coh_q15, 15, 3);
+        put_fixed(coh, 15, 3);
         printf("); satellites are below the noise\n");
         break;
     case DOA_VERDICT_UNCERTAIN:
         printf("DOA:   JAMMER DETECTED: UNCERTAIN - partly coherent (coherence ");
-        put_fixed(coh_q15, 15, 3);
+        put_fixed(coh, 15, 3);
         printf("), see doa_phase?\n");
         break;
     case DOA_VERDICT_NO_SIGNAL:
@@ -876,6 +952,60 @@ static void print_jammer_line(int32_t v, int32_t deg_q16, int32_t coh_q15)
         printf("DOA:   JAMMER DETECTED: no data (doa=1? RX running?)\n");
         break;
     }
+}
+
+/* doa_baseline=1 : record the jammer-OFF background; =0 : forget it */
+void gnss_doa_set_baseline(int take)
+{
+    doa_phase_t p;
+    if (!take) {
+        base_info.valid = 0;
+        printf("DOA: baseline cleared - jammer detection uses coherence only\n");
+        return;
+    }
+    printf("DOA: taking the baseline - the jammer must be OFF. Collecting 64 windows ...\n");
+    if (collect_phase(64, &p) != DOA_OK) {
+        printf("DOA: baseline FAILED - no estimator results (doa=1? RX running?)\n");
+        return;
+    }
+    base_info.valid   = 1;
+    base_info.pkm0    = p.pkm0;
+    base_info.pkm1    = p.pkm1;
+    base_info.coh_q15 = p.coh_q15;
+    base_info.raw_q28 = p.raw_q28;
+    base_info.n       = p.n;
+    printf("DOA: baseline (jammer OFF): RX1 mean peak %lu (", (unsigned long)p.pkm0);
+    put_x10(dbfs_x10(p.pkm0));
+    printf(" dBFS)  RX2 mean peak %lu (", (unsigned long)p.pkm1);
+    put_x10(dbfs_x10(p.pkm1));
+    printf(" dBFS)\n");
+    printf("DOA:   background coherence ");
+    put_fixed(p.coh_q15, 15, 3);
+    printf("  raw phase ");
+    put_deg(q28_to_degq16(p.raw_q28));
+    printf(" deg\n");
+    if (p.coh_q15 >= DOA_COH_SOURCE_Q15) {
+        printf("DOA:   ! the background is COHERENT: RX1 and RX2 share a signal with nothing\n"
+               "DOA:     connected (LO leakage / DC, clock spur or RX1<->RX2 coupling).\n");
+    }
+    printf("DOA:   JAMMER DETECTED: YES now needs coherence >= 0.900 AND (level +3.0 dB over this\n"
+           "DOA:   OR raw phase moved >= 10 deg from this).\n"
+           "DOA:   Re-take it after changing RX gain, LO or cabling. Lost at power-off.\n");
+}
+
+/* M-ESPRIT: a coherent source with |psi| far from 1 means the two RX channels
+ * see it at different LEVELS (|psi| = |x1|/|x0|). The angle uses arg(psi)
+ * and stays valid; matching the gains removes the off_circle flag. */
+static void print_level_note(const doa_phase_t *p)
+{
+    if (!p->is_m || phase_verdict(p) != DOA_VERDICT_SOURCE || 4U * p->offc <= p->n) { return; }
+    printf("DOA:   note           : |psi| ");
+    put_q24(p->psi_q24);
+    printf(" (off-circle %lu/%lu) -> RX2 is ", (unsigned long)p->offc, (unsigned long)p->n);
+    put_x10(dbfs_x10((uint32_t)((((int64_t)p->psi_q24) * 32767) >> 24)));
+    printf(" dB vs RX1.\n"
+           "DOA:                    Level mismatch only - the jammer and its angle are valid.\n"
+           "DOA:                    To clear it: rx1_gc_mode=0 rx2_gc_mode=0 and equal rx1/rx2_rf_gain.\n");
 }
 
 static void print_expect(int32_t meas_deg_q16, int32_t meas_phase_q28, int32_t v)
@@ -1129,7 +1259,8 @@ int32_t gnss_doa_print_offset(void)
     printf("DOA: [4] DOA reported now      : ");
     put_deg(deg);
     printf(" deg (%s)\n", (cal == 0x00007FFFU) ? "uncorrected" : "with the loaded correction");
-    print_jammer_line(v, deg, p.coh_q15);
+    print_jammer_line(v, deg, &p);
+    print_level_note(&p);
     printf("DOA:   To APPLY a correction use doa_cal=1 (optional); doa_cal=0 removes it.\n");
     printf("DOA: ==============================================================================\n");
     return off_q16;
@@ -1140,7 +1271,7 @@ int32_t gnss_doa_print_phase(uint32_t nwin)
 {
     doa_phase_t p;
     doa_state_t st;
-    int32_t     v, r, ratio_x10;
+    int32_t     v, r;
     uint32_t    navg;
 
     if (nwin < 4U)   { nwin = 4U; }
@@ -1186,7 +1317,8 @@ int32_t gnss_doa_print_phase(uint32_t nwin)
     put_mdeg(p.is_m ? st.m.std_mdeg : st.i.std_mdeg);
     printf(" deg  (average of %lu windows)\n", (unsigned long)navg);
     print_expect(p.is_m ? st.m.avg_deg_q16 : st.i.avg_deg_q16, p.cal_q28, v);
-    print_jammer_line(v, p.is_m ? st.m.avg_deg_q16 : st.i.avg_deg_q16, p.coh_q15);
+    print_jammer_line(v, p.is_m ? st.m.avg_deg_q16 : st.i.avg_deg_q16, &p);
+    print_level_note(&p);
 
     switch (v) {
     case DOA_VERDICT_SOURCE:
@@ -1207,23 +1339,15 @@ int32_t gnss_doa_print_phase(uint32_t nwin)
                "                        strong interferers). The DOA angle above is meaningless.\n");
         break;
     case DOA_VERDICT_UNCERTAIN:
-        if (p.is_m && p.coh_q15 >= DOA_COH_SOURCE_Q15) {
-            /* stable phase, |psi| off the unit circle: for one source
-             * |psi| = |x1| / |x0|, so this is usually an RX gain mismatch */
-            ratio_x10 = dbfs_x10((uint32_t)((((int64_t)p.psi_q24) * 32767) >> 24));
-            printf("DOA:   VERDICT        : UNCERTAIN - stable phase (a source is present) but |psi| is\n"
-                   "                        off 1: RX2 is ");
-            put_x10(ratio_x10);
-            printf(" dB vs RX1. Usually unequal RX gains (else two\n"
-                   "                        sources / multipath). Set equal manual gains\n"
-                   "                        (rx1_gc_mode=0 rx2_gc_mode=0, same rx1/rx2_rf_gain), re-check.\n");
-        } else {
-            printf("DOA:   VERDICT        : UNCERTAIN - partly coherent: weak source near the noise,\n"
-                   "                        two sources / multipath, or a moving source.\n");
-        }
+        printf("DOA:   VERDICT        : UNCERTAIN - partly coherent: weak source near the noise,\n"
+               "                        two sources / multipath, or a moving source.\n");
         break;
     case DOA_VERDICT_NO_SIGNAL:
         printf("DOA:   VERDICT        : NO SIGNAL - the estimator input is all zero.\n");
+        break;
+    case DOA_VERDICT_BACKGROUND:
+        printf("DOA:   VERDICT        : NO JAMMER - the coherent signal is the board's own background\n"
+               "                        (same level and phase as the doa_baseline taken with the jammer OFF).\n");
         break;
     default:
         printf("DOA:   VERDICT        : no data\n");
@@ -1276,7 +1400,12 @@ int32_t gnss_doa_watch(uint32_t n)
         } else {
             printf("    ---");
         }
-        printf("  %s\n", verdict_word(v));
+        if (base_info.valid) {
+            printf("  bl"); put_x10(base_rise_x10(&p)); printf("dB/");
+            put_x10(degq16_x10(base_dphase_q16(&p))); printf("deg");
+        }
+        printf("  %s%s\n", verdict_word(v),
+               (p.is_m && v == DOA_VERDICT_SOURCE && 4U * p.offc > p.n) ? " (levels differ)" : "");
     }
     return DOA_OK;
 }
@@ -1288,12 +1417,13 @@ static void quick_jammer(void)
     doa_state_t st;
     int32_t     deg;
     if (collect_phase(16, &p) != DOA_OK) {
-        print_jammer_line(DOA_VERDICT_NO_DATA, 0, 0);
+        print_jammer_line(DOA_VERDICT_NO_DATA, 0, NULL);
         return;
     }
     gnss_doa_get_state(&st);
     deg = p.is_m ? st.m.avg_deg_q16 : st.i.avg_deg_q16;
-    print_jammer_line(phase_verdict(&p), deg, p.coh_q15);
+    print_jammer_line(phase_verdict(&p), deg, &p);
+    print_level_note(&p);
     print_expect(deg, p.cal_q28, phase_verdict(&p));
 }
 
