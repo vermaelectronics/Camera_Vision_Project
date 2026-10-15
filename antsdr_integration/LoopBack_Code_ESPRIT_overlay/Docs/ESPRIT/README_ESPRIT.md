@@ -755,10 +755,20 @@ re-measures with the new calibration and reports the remaining difference
 ```
 DOA: measured RX2-RX1 offset  37.021 deg over 64 windows
 DOA:   = difference from the expected 0.000 deg (same signal, equal cables)
+DOA:   = -11.869 deg DOA error if not removed (broadside)
 DOA:   -> DOA_CAL = 0xb2ee6632 (cos 26162, sin -19730) removes it
 DOA: calibration check (same signal, expected 0.000 deg):
 DOA:   phase  measured -0.075 deg   difference -0.075 deg
 DOA:   DOA    measured  0.006 deg   difference  0.006 deg   -> GOOD (within 0.5 deg)
+```
+
+**How much offset was removed.** The phase offset is converted into the
+DOA error it would cause at broadside if it were not removed,
+θ = asin(−k·offset) (37° of phase = −11.9° of DOA for d = λ/2). It is
+printed by `doa_cal=1`, `doa_cal?`, `doa_phase?`, `doa_watch=` and `doa?`:
+
+```
+DOA:   calibration offset removed  37.023 deg phase = -11.870 deg DOA error if not removed (broadside)
 ```
 
 `doa_watch=N` prints one line per 16 windows (err = DOA − expected):

@@ -230,6 +230,29 @@ static void circ_mean(int64_t sc, int64_t ss, uint32_t n, int32_t *mean_q28, int
     *mean_q28 = gnss_doa_atan2_q28((int32_t)ss, (int32_t)sc);
 }
 
+/* DOA shift (deg Q16) that a phase offset alone causes at broadside for the
+ * current K:  theta = asin(-k * offset).  This is how far the angle would be
+ * off if the board/cable offset were NOT removed by the calibration. */
+static int32_t doa_shift_for_phase(int32_t off_q28)
+{
+    int64_t  u = ((int64_t)(int32_t)rd(DOA_REG_K) * -(int64_t)off_q28) >> 30;   /* Q28 */
+    uint64_t c2;
+    int32_t  c, a;
+    if (u >  (1LL << 28)) { u =  (1LL << 28); }
+    if (u < -(1LL << 28)) { u = -(1LL << 28); }
+    c2 = (1ULL << 56) - (uint64_t)(u * u);
+    c  = (int32_t)isqrt64(c2);                                                 /* Q28 */
+    a  = gnss_doa_atan2_q28((int32_t)u, c);
+    return q28_to_degq16(a);
+}
+
+static void put_shift(int32_t off_q28)
+{
+    printf("= ");
+    put_deg(doa_shift_for_phase(off_q28));
+    printf(" deg DOA error if not removed (broadside)");
+}
+
 /* --------------------------------------------------------------------------
  * state
  * -------------------------------------------------------------------------- */
@@ -445,9 +468,16 @@ void gnss_doa_print_result(void)
         put_deg(q28_to_degq16(wrap_q28((int64_t)pcal - alpha)));
         printf(" deg  calibrated ");
         put_deg(q28_to_degq16(pcal));
-        printf(" deg  (CAL removes ");
-        put_deg(q28_to_degq16(-alpha));
-        printf(" deg)\n");
+        printf(" deg\n");
+        if (rd(DOA_REG_CAL) == 0x00007FFFU) {
+            printf("DOA:   calibration offset removed: none (not calibrated, doa_cal=1)\n");
+        } else {
+            printf("DOA:   calibration offset removed ");
+            put_deg(q28_to_degq16(-alpha));
+            printf(" deg phase ");
+            put_shift(-alpha);
+            printf("\n");
+        }
     }
     if (s.ctrl & DOA_CTRL_ENABLE) { quick_jammer(); }
     print_flags_legend(s.i.flags, s.m.flags);
@@ -928,6 +958,9 @@ int32_t gnss_doa_calibrate(void)
     put_deg(q16);
     printf(" deg over %lu windows\n", (unsigned long)p.n);
     printf("DOA:   = difference from the expected 0.000 deg (same signal, equal cables)\n");
+    printf("DOA:   ");
+    put_shift(p.cal_q28);
+    printf("\n");
     printf("DOA:   -> DOA_CAL = 0x%08lx (cos %ld, sin %ld) removes it\n",
            (unsigned long)rd(DOA_REG_CAL), (long)c, (long)s);
     if (wait_avg(2) == DOA_OK && collect_phase(32, &p) == DOA_OK) {
@@ -976,6 +1009,9 @@ static void print_cal_line(void)
         printf(" deg  (doa_cal=1, %lu windows, coherence ", (unsigned long)cal_info.n);
         put_fixed(cal_info.coh_q15, 15, 3);
         printf(")\n");
+        printf("DOA:                    ");
+        put_shift(-alpha);
+        printf("\n");
         if (cal_info.check_valid) {
             printf("DOA:   calibration chk: right after doa_cal=1 the common signal read phase ");
             put_deg(cal_info.check_phase_q16);
@@ -987,6 +1023,9 @@ static void print_cal_line(void)
         printf("DOA:   calibration    : ACTIVE  offset removed ");
         put_deg(q28_to_degq16(-alpha));
         printf(" deg  (DOA_CAL = 0x%08lx, written directly)\n", (unsigned long)cal);
+        printf("DOA:                    ");
+        put_shift(-alpha);
+        printf("\n");
     }
 }
 

@@ -36,7 +36,8 @@ FW_COSIM: --- doa?  (live, true 10 deg, NOT calibrated) ---
 DOA: ---- ESPRIT direction of arrival (source: LIVE RX1/RX2, cumulant) ----
 DOA:   I-UESPRIT window #33       theta -1.881 deg   avg #2      mean -1.843 deg  std  0.051 deg  phi  0.1031 rad  psi  0.0516  flags 0x0
 DOA:   snapshots 33806  peak |x0| 10704  |x1| 11696 (of 32767)
-DOA:   phase RX2-RX1 (last window): raw  5.907 deg  calibrated  5.909 deg  (CAL removes -0.003 deg)
+DOA:   phase RX2-RX1 (last window): raw  5.907 deg  calibrated  5.909 deg
+DOA:   calibration offset removed: none (not calibrated, doa_cal=1)
 DOA:   JAMMER DETECTED: YES - strong coherent source at -1.820 deg (coherence  1.000)
 DOA:   expected       : DOA  0.000 deg  phase  0.000 deg   (default 0 = splitter/broadside; set doa_expect=<deg>)
 DOA:   difference     : DOA -1.820 deg  phase  5.824 deg   (measured - expected)  -> OFF by more than 1 deg
@@ -46,11 +47,12 @@ FW_COSIM: --- doa_cal=1 (splitter: both RX see the same signal) ---
 DOA: calibrating RX1/RX2 phase. RX1 and RX2 must see the SAME signal
      (splitter, equal cables). Collecting 64 windows ...
 DOA:   coherence  1.000  RX1 peak 11488 (-9.1 dBFS)  RX2 peak 14719 (-6.9 dBFS)
-DOA: measured RX2-RX1 offset  37.040 deg over 64 windows
+DOA: measured RX2-RX1 offset  37.039 deg over 64 windows
 DOA:   = difference from the expected 0.000 deg (same signal, equal cables)
-DOA:   -> DOA_CAL = 0xb2e5662c (cos 26156, sin -19739) removes it
+DOA:   = -11.875 deg DOA error if not removed (broadside)
+DOA:   -> DOA_CAL = 0xb2e6662c (cos 26156, sin -19738) removes it
 DOA: calibration check (same signal, expected 0.000 deg):
-DOA:   phase  measured -0.057 deg   difference -0.057 deg
+DOA:   phase  measured -0.055 deg   difference -0.055 deg
 DOA:   DOA    measured -0.010 deg   difference -0.010 deg   -> GOOD (within 0.5 deg)
 DOA: calibration is lost at power-off.
 FW_COSIM: calibration completes                                          PASS
@@ -61,40 +63,43 @@ FW_COSIM: live true  -15.0 deg -> I-UESPRIT  -14.986  M-ESPRIT  -14.986
 FW_COSIM: live -15 deg after calibration, built estimators within 0.5 deg PASS
 FW_COSIM: live true  +25.0 deg -> I-UESPRIT  +25.004  M-ESPRIT  +25.004
 FW_COSIM: live +25 deg after calibration, built estimators within 0.5 deg PASS
-FW_COSIM: live true  +50.0 deg -> I-UESPRIT  +49.977  M-ESPRIT  +49.977
+FW_COSIM: live true  +50.0 deg -> I-UESPRIT  +49.976  M-ESPRIT  +49.976
 FW_COSIM: live +50 deg after calibration, built estimators within 0.5 deg PASS
 FW_COSIM: --- doa_monitor=3 ---
 DOA: monitoring 3 averaged results (Ctrl-C does not abort; keep N small)
-DOA: #1    I-UESPRIT  50.055 (std  0.088)  pk 11856/14067  fl 0/0
-DOA: #2    I-UESPRIT  50.005 (std  0.083)  pk 11264/14207  fl 0/0
-DOA: #3    I-UESPRIT  50.052 (std  0.064)  pk 10800/14662  fl 0/0
+DOA: #1    I-UESPRIT  50.055 (std  0.092)  pk 11856/14067  fl 0/0
+DOA: #2    I-UESPRIT  50.005 (std  0.076)  pk 11264/14207  fl 0/0
+DOA: #3    I-UESPRIT  50.051 (std  0.070)  pk 10800/14662  fl 0/0
 FW_COSIM: --- doa_cal? ---
 DOA: ---- RX1/RX2 phase calibration ----
-DOA:   calibration    : ACTIVE  offset removed  37.040 deg  (doa_cal=1, 64 windows, coherence  1.000)
-DOA:   calibration chk: right after doa_cal=1 the common signal read phase -0.057 deg,
+DOA:   calibration    : ACTIVE  offset removed  37.039 deg  (doa_cal=1, 64 windows, coherence  1.000)
+DOA:                    = -11.875 deg DOA error if not removed (broadside)
+DOA:   calibration chk: right after doa_cal=1 the common signal read phase -0.055 deg,
                         DOA -0.010 deg (difference from the expected 0.000 deg)
 FW_COSIM: --- doa_expect=25 ---
 DOA: expected DOA set to  25.000 deg -> expected phase RX2-RX1 -76.069 deg (current K). doa_phase? / doa_watch= / doa? now show measured - expected.
 FW_COSIM: --- doa?  (jammer at 25 deg) ---
 DOA: ---- ESPRIT direction of arrival (source: LIVE RX1/RX2, cumulant) ----
-DOA:   I-UESPRIT window #864      theta  24.972 deg   avg #54     mean  25.036 deg  std  0.070 deg  phi -1.3263 rad  psi -0.7812  flags 0x0
-DOA:   snapshots 885727  peak |x0| 10656  |x1| 12359 (of 32767)
-DOA:   phase RX2-RX1 (last window): raw -38.950 deg  calibrated -75.991 deg  (CAL removes  37.040 deg)
-DOA:   JAMMER DETECTED: YES - strong coherent source at  25.011 deg (coherence  1.000)
+DOA:   I-UESPRIT window #864      theta  24.968 deg   avg #54     mean  25.036 deg  std  0.072 deg  phi -1.3261 rad  psi -0.7810  flags 0x0
+DOA:   snapshots 885728  peak |x0| 10656  |x1| 12359 (of 32767)
+DOA:   phase RX2-RX1 (last window): raw -38.941 deg  calibrated -75.981 deg
+DOA:   calibration offset removed  37.040 deg phase = -11.875 deg DOA error if not removed (broadside)
+DOA:   JAMMER DETECTED: YES - strong coherent source at  25.010 deg (coherence  1.000)
 DOA:   expected       : DOA  25.000 deg  phase -76.069 deg   (your known bearing, doa_expect)
-DOA:   difference     : DOA  0.011 deg  phase -0.003 deg   (measured - expected)  -> within 1 deg
+DOA:   difference     : DOA  0.010 deg  phase -0.023 deg   (measured - expected)  -> within 1 deg
 FW_COSIM: --- doa_phase?  (strong source at 25 deg = jammer) ---
 DOA: ==== PHASE / CALIBRATION / JAMMER CHECK  (I-UESPRIT, 32 windows of 1024 snapshots) ====
-DOA:   calibration    : ACTIVE  offset removed  37.040 deg  (doa_cal=1, 64 windows, coherence  1.000)
-DOA:   calibration chk: right after doa_cal=1 the common signal read phase -0.057 deg,
+DOA:   calibration    : ACTIVE  offset removed  37.039 deg  (doa_cal=1, 64 windows, coherence  1.000)
+DOA:                    = -11.875 deg DOA error if not removed (broadside)
+DOA:   calibration chk: right after doa_cal=1 the common signal read phase -0.055 deg,
                         DOA -0.010 deg (difference from the expected 0.000 deg)
-DOA:   phase RX2-RX1  : raw        -39.067 deg   as received (includes the board/cable offset)
-DOA:                    calibrated -76.107 deg   after CAL; this phase gives the DOA
+DOA:   phase RX2-RX1  : raw        -39.065 deg   as received (includes the board/cable offset)
+DOA:                    calibrated -76.105 deg   after CAL; this phase gives the DOA
 DOA:   coherence      :  1.000   (1.000 = same signal on RX1 and RX2, ~0 = independent noise)
 DOA:   level          : RX1 peak 11520 (-9.0 dBFS)   RX2 peak 12891 (-8.1 dBFS)
-DOA:   DOA            : mean  25.016 deg  std  0.061 deg  (average of 16 windows)
+DOA:   DOA            : mean  25.016 deg  std  0.058 deg  (average of 16 windows)
 DOA:   expected       : DOA  25.000 deg  phase -76.069 deg   (your known bearing, doa_expect)
-DOA:   difference     : DOA  0.016 deg  phase -0.038 deg   (measured - expected)  -> within 1 deg
+DOA:   difference     : DOA  0.016 deg  phase -0.036 deg   (measured - expected)  -> within 1 deg
 DOA:   JAMMER DETECTED: YES - strong coherent source at  25.016 deg (coherence  1.000)
 DOA:   VERDICT        : >>> JAMMER / STRONG COHERENT SOURCE at  25.016 deg <<<
 DOA:                    One signal well above the noise reaches both elements with a
@@ -102,29 +107,31 @@ DOA:                    One signal well above the noise reaches both elements wi
                         never look like this, so it is an interferer (or your bench
                         signal generator).
 FW_COSIM: doa_phase?: strong coherent source -> verdict JAMMER           PASS
-FW_COSIM: calibrated phase -76.120 deg, expected -76.071 deg (raw expected -39.071)
+FW_COSIM: calibrated phase -76.113 deg, expected -76.071 deg (raw expected -39.071)
 FW_COSIM: calibrated phase register matches -180*sin(theta) (within 1 deg) PASS
 FW_COSIM: --- doa_watch=2 ---
 DOA: watching 2 x 16 windows  (raw / calibrated phase RX2-RX1, coherence, level,
      DOA, err = DOA - expected  25.000 deg, jammer detected)
-DOA:   calibration    : ACTIVE  offset removed  37.040 deg  (doa_cal=1, 64 windows, coherence  1.000)
-DOA:   calibration chk: right after doa_cal=1 the common signal read phase -0.057 deg,
+DOA:   calibration    : ACTIVE  offset removed  37.039 deg  (doa_cal=1, 64 windows, coherence  1.000)
+DOA:                    = -11.875 deg DOA error if not removed (broadside)
+DOA:   calibration chk: right after doa_cal=1 the common signal read phase -0.055 deg,
                         DOA -0.010 deg (difference from the expected 0.000 deg)
-DOA: #1    raw -39.0  cal -76.1 deg  coh  1.00  RX1 -9.0 RX2 -8.0 dBFS  DOA  25.021 err 0.021  JAMMER:YES
-DOA: #2    raw -39.1  cal -76.2 deg  coh  1.00  RX1 -9.2 RX2 -7.5 dBFS  DOA  25.005 err 0.005  JAMMER:YES
+DOA: #1    raw -39.0  cal -76.1 deg  coh  1.00  RX1 -9.0 RX2 -8.0 dBFS  DOA  25.020 err 0.020  JAMMER:YES
+DOA: #2    raw -39.1  cal -76.2 deg  coh  1.00  RX1 -9.2 RX2 -7.5 dBFS  DOA  25.004 err 0.004  JAMMER:YES
 FW_COSIM: --- noise only on RX1/RX2 (no jammer; satellites below noise) ---
 DOA: ==== PHASE / CALIBRATION / JAMMER CHECK  (I-UESPRIT, 32 windows of 1024 snapshots) ====
-DOA:   calibration    : ACTIVE  offset removed  37.040 deg  (doa_cal=1, 64 windows, coherence  1.000)
-DOA:   calibration chk: right after doa_cal=1 the common signal read phase -0.057 deg,
+DOA:   calibration    : ACTIVE  offset removed  37.039 deg  (doa_cal=1, 64 windows, coherence  1.000)
+DOA:                    = -11.875 deg DOA error if not removed (broadside)
+DOA:   calibration chk: right after doa_cal=1 the common signal read phase -0.055 deg,
                         DOA -0.010 deg (difference from the expected 0.000 deg)
-DOA:   phase RX2-RX1  : raw         45.953 deg   as received (includes the board/cable offset)
-DOA:                    calibrated  8.912 deg   after CAL; this phase gives the DOA
-DOA:   coherence      :  0.235   (1.000 = same signal on RX1 and RX2, ~0 = independent noise)
+DOA:   phase RX2-RX1  : raw         43.172 deg   as received (includes the board/cable offset)
+DOA:                    calibrated  6.131 deg   after CAL; this phase gives the DOA
+DOA:   coherence      :  0.254   (1.000 = same signal on RX1 and RX2, ~0 = independent noise)
 DOA:   level          : RX1 peak  7472 (-12.8 dBFS)   RX2 peak  7501 (-12.8 dBFS)
-DOA:   DOA            : mean  4.891 deg  std  27.376 deg  (average of 16 windows)
+DOA:   DOA            : mean  5.477 deg  std  27.197 deg  (average of 16 windows)
 DOA:   expected       : DOA  25.000 deg  phase -76.069 deg   (your known bearing, doa_expect)
 DOA:   difference     : n/a - no coherent source, the measured angle is noise
-DOA:   JAMMER DETECTED: NO  - noise only (coherence  0.235); satellites are below the noise
+DOA:   JAMMER DETECTED: NO  - noise only (coherence  0.254); satellites are below the noise
 DOA:   VERDICT        : NO JAMMER - RX1 and RX2 see independent noise only.
                         Satellites may be present but are ~20 dB below the noise
                         floor; ESPRIT on raw samples cannot locate them (it locates
@@ -132,15 +139,16 @@ DOA:   VERDICT        : NO JAMMER - RX1 and RX2 see independent noise only.
 FW_COSIM: doa_phase?: independent noise -> verdict NO JAMMER             PASS
 FW_COSIM: --- doa?  (noise only) ---
 DOA: ---- ESPRIT direction of arrival (source: LIVE RX1/RX2, cumulant) ----
-DOA:   I-UESPRIT window #1552     theta  21.230 deg   avg #97     mean  4.891 deg  std  27.376 deg  phi -1.1376 rad  psi -0.6393  flags 0x0
-DOA:   snapshots 1589627  peak |x0| 5472  |x1| 7199 (of 32767)
-DOA:   phase RX2-RX1 (last window): raw -28.140 deg  calibrated -65.181 deg  (CAL removes  37.040 deg)
-DOA:   JAMMER DETECTED: NO  - noise only (coherence  0.274); satellites are below the noise
+DOA:   I-UESPRIT window #1552     theta  21.045 deg   avg #97     mean  5.477 deg  std  27.197 deg  phi -1.1282 rad  psi -0.6326  flags 0x0
+DOA:   snapshots 1589633  peak |x0| 5472  |x1| 7199 (of 32767)
+DOA:   phase RX2-RX1 (last window): raw -27.598 deg  calibrated -64.638 deg
+DOA:   calibration offset removed  37.040 deg phase = -11.875 deg DOA error if not removed (broadside)
+DOA:   JAMMER DETECTED: NO  - noise only (coherence  0.282); satellites are below the noise
 DOA:   expected       : DOA  25.000 deg  phase -76.069 deg   (your known bearing, doa_expect)
 DOA:   difference     : n/a - no coherent source, the measured angle is noise
 DOA: calibrating RX1/RX2 phase. RX1 and RX2 must see the SAME signal
      (splitter, equal cables). Collecting 64 windows ...
-DOA:   coherence  0.326  RX1 peak 7712 (-12.5 dBFS)  RX2 peak 7487 (-12.8 dBFS)
+DOA:   coherence  0.341  RX1 peak 7712 (-12.5 dBFS)  RX2 peak 7487 (-12.8 dBFS)
 DOA: calibration REFUSED - coherence below 0.900: RX1 and RX2 do not carry
      the same signal (noise only? sky antennas see satellites BELOW the noise
      floor, which cannot be used). Feed one strong signal through a splitter
@@ -156,15 +164,16 @@ FW_COSIM: test generator at -22.5 deg: I-UESPRIT within 0.05 deg         PASS
 DOA: ---- configuration ----
 DOA:   enable 1  source live RX  subspace cumulant  p = 4  window 1024  average 16
 DOA:   MU_Q30 1024  K_Q30 341782638 (1/pi = 341782638 for d = lambda/2)  UCTOL_Q24 0x00400000
-DOA:   DECIM 0  CAL cos 26156 sin -19739 (rotation -37.040 deg)
+DOA:   DECIM 0  CAL cos 26156 sin -19738 (rotation -37.040 deg)
 DOA:   TG_FTW 0x0147ae14  TG_DPHASE 0x30fbffff  TG_CFG 0x00400064
 DOA: ---- ESPRIT direction of arrival (source: LIVE RX1/RX2, cumulant) ----
 DOA:   I-UESPRIT window #0        theta  0.000 deg   avg #0      mean  0.000 deg  std  0.000 deg  phi  0.0000 rad  psi  0.0000  flags 0x0
 DOA:   snapshots 9  peak |x0| 0  |x1| 0 (of 32767)
-DOA:   phase RX2-RX1 (last window): raw  37.040 deg  calibrated  0.000 deg  (CAL removes  37.040 deg)
-DOA:   JAMMER DETECTED: YES - strong coherent source at  25.034 deg (coherence  1.000)
+DOA:   phase RX2-RX1 (last window): raw  37.040 deg  calibrated  0.000 deg
+DOA:   calibration offset removed  37.040 deg phase = -11.875 deg DOA error if not removed (broadside)
+DOA:   JAMMER DETECTED: YES - strong coherent source at  25.032 deg (coherence  1.000)
 DOA:   expected       : DOA  25.000 deg  phase -76.069 deg   (your known bearing, doa_expect)
-DOA:   difference     : DOA  0.034 deg  phase -0.092 deg   (measured - expected)  -> within 1 deg
+DOA:   difference     : DOA  0.032 deg  phase -0.093 deg   (measured - expected)  -> within 1 deg
 FW_COSIM: HLS kernel (iuesprit_hls) processed 2860 windows
 FW_COSIM: estimator results came from the HLS kernel (DOA_CAPS bit 2 set) PASS
 FW_COSIM: simulated time 166.681 ms
