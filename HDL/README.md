@@ -1,148 +1,158 @@
-# 2-Antenna CRPA Anti-Jamming Core: LCMV Power-Inversion (LCMV-PI)
+# 2-Antenna CRPA Anti-Jamming Core: Robust LCMV (PIER C 2008)
 
 FPGA (Verilog) anti-jamming core for an ANTSDR E310 (AD9361, 2 RX channels) GNSS receiver.
-It replaces the earlier angle-steered LCMV beamformer with the **LCMV power-inversion** algorithm from:
+The weights follow the robust LCMV formulation of:
 
-> F. Wang, H. Liu, C. Zhang, "Anti-Jamming Front-End Design of Satellite Navigation Receiver,"
-> *ACES Journal*, vol. 34, no. 11, pp. 1739-1749, Nov. 2019. (Section II-B, eq. 5-9)
+> R. Li, X. Zhao, X. W. Shi, "Derivative Constrained Robust LCMV Beamforming Algorithm,"
+> *Progress In Electromagnetics Research C*, vol. 4, pp. 43-52, 2008. (Eq. 6-9)
+
+The GPS look direction and the jammer direction are supplied by the PS (AXI registers 0x40 / 0x44).
+**This core contains no DOA estimation.** The jammer angle must come from PS software, an external DOA
+system, or a known jammer position.
 
 ---
 
 ## 1. Algorithm
 
-LCMV criterion (paper eq. 5):
+Paper eq. (9):
 
 ```
-min_w  w^H R w     subject to   w^H C = f
-w_opt = R^-1 C (C^H R^-1 C)^-1 f                          (eq. 7)
+min  w^H R w
+s.t. S^H w        = 1        look constraint      (GPS direction)
+     w^H B^p A_J  = 0        derivative constraint (null widening)
+     w^H A_J      = eps      enforcement constraint (null deepening)
+
+w_opt = R^-1 C (C^H R^-1 C)^-1 f                    (eq. 7 with all constraints in C, f)
 ```
 
-Power inversion (paper eq. 8-9): `C = s0 = [1 0 ... 0]^T`, `f = 1`
+Steering vector for 2 elements at d = λ/2: `a(θ) = [1, exp(j·π·sin θ)]^T`.
+
+### What fits on 2 antennas
+
+A 2-element array has **2 degrees of freedom**, and eq. (9) needs 3 constraint rows (rank check in
+`model/lcmv_dc_model.py`).
+
+* **Derivative row is omitted.** With B = diag(0,1), `w^H B a_J = conj(w2)·e^{jψ} = 0` forces
+  **w2 = 0**. That switches the second antenna off and leaves no null. The paper's null widening
+  needs M ≥ 4 for one jammer (the paper uses 8 and 16 elements).
+* **Look and enforcement rows are implemented:** `C = [a_s a_J]`, `f = [1 ε]^T`.
+
+C is then 2×2 and invertible, so the paper's solution simplifies exactly:
 
 ```
-w_opt = R^-1 s0 / (s0^H R^-1 s0)                          (eq. 9)
+w = R^-1 C (C^H R^-1 C)^-1 f = R^-1 C · C^-1 R C^-H f = C^-H f
 ```
 
-For 2 antennas (R is 2x2 Hermitian) this reduces exactly to:
+Solving `a_s^H w = 1`, `a_J^H w = ε` (s = a_s(2), j = a_J(2)):
 
 ```
-w1 = 1
-w2 = -conj(R12) / R22'          R22' = R22 + (R11 + R22) >> DL_SHIFT + 1   (diagonal loading)
-
-y  = w^H x = x1 - (R12 / R22') * x2
+w2 = (1 - ε) · (s - j) / |s - j|^2
+w1 = 1 - conj(s) · w2
 ```
 
-* No steering vector and no GPS/jammer angle are needed. The null is placed on the
-  **measured** jammer direction.
-* Null depth follows the jammer-to-noise ratio. The stronger the jammer, the deeper the null,
-  as in the paper's Fig. 5.
-* The weights are recomputed every covariance block (1024 samples), so the null follows a moving jammer.
+This is the exact LCMV optimum for this constraint set. R cancels because the constraints use every
+degree of freedom, so the core needs no covariance estimate and no matrix inverse. `model/lcmv_dc_model.py`
+checks numerically that this equals `R^-1 C (C^H R^-1 C)^-1 f` for random R and ε = 0, 0.001, 0.006.
 
-### Why the old design was replaced
+### ε (`EPS_Q16`, Q16.16)
+* `0` (default): ideal null at `jam_angle`.
+* `> 0`: residual gain ε toward the jammer (paper uses 0.001-0.006). With 2 antennas this makes the
+  null **shallower only**. It does not widen it (paper Fig. 1 behavior needs the derivative rows).
 
-The old core used `C = [a(gps) a(jam)]`, `f = [1 0]`. With 2 antennas and 2 constraints, C is square and
-`w = C^-H f`, so **R had no effect on the weights**. The null sat at the angle written by the PS. A 1° angle error
-gives only about -34 dB at the true jammer (see `sim/lcmv_pi_null_pattern.png`, red curve).
+### Jammer near the GPS direction
+`|s - j|^2 → 0` makes the weights grow without bound. `|s - j|^2` is clamped to `DEN_MIN_Q16`
+(default 0.01, about 2° separation at broadside). Inside that region the look constraint is no longer met exactly.
 
 ---
 
-## 2. File list
+## 2. Files
 
-| File | Status | Description |
-|---|---|---|
-| `lcmv_crpa_core.v` | **rewritten** | Top of the LCMV-PI core: covariance, then PI weights, then beamformer. Same ports as before. |
-| `lcmv_pi_weight_2ch.v` | **new** | Solves `w2 = -conj(R12)/R22'` using two parallel 64-bit serial dividers (68 clocks), diagonal loading, Q16.16 saturation. |
-| `covariance_2antenna.v` | unchanged | Pipelined 2x2 covariance estimate (1024 samples, 64-bit accumulators). |
-| `lcmv_beamformer_2ch.v` | unchanged | `y = conj(w1) x1 + conj(w2) x2`, 4-stage pipeline. |
-| `gnss_passthrough.v` | comments only | AXI-Lite + datapath top. No functional change. |
-| `sim/tb_lcmv_crpa_core.v` | **new** | Self-checking testbench (static and moving jammer). |
-| `sim/lcmv_pi_null_pattern.png` | **new** | Beam pattern of the simulated weights compared with the old LCMV. |
-| `model/lcmv_pi_model.py` | **new** | Python floating-point reference model and plot script. |
+| File | Description |
+|---|---|
+| `lcmv_crpa_core.v` | Core: angles → steering vectors → LCMV weights → beamformer. Same ports as the original core. |
+| `lcmv_dc_weight_2ch.v` | LCMV weight solver (eq. 9 look + enforcement), Q16.16, 72 clocks. |
+| `sdiv_q16_serial.v` | Serial signed divider `(num<<16)/den`, saturated Q16.16, 66 clocks. |
+| `steering_vector_2x2.v` | Your original steering LUT: `cos/sin(π·sin θ)`, integer degrees, Q15. |
+| `lcmv_beamformer_2ch.v` | Your original beamformer `y = conj(w1)x1 + conj(w2)x2` (unchanged). |
+| `gnss_passthrough.v` | Top level (AXI-Lite + datapath). Only header comments changed. |
+| `covariance_2antenna.v` | Your original covariance block. **Not used** by this core (R cancels), kept for future N-element work. |
+| `sim/tb_lcmv_crpa_core.v` | Self-checking testbench. |
+| `sim/sim_results.txt` | Testbench output. |
+| `sim/lcmv_null_pattern.png` | Beam patterns of the simulated weights. |
+| `model/lcmv_dc_model.py` | Python reference: paper formula vs closed form, HDL cross-check, derivative-row rank check. |
 
-Removed (no longer needed): `steering_vector_2x2.v`, `d_inverse_2x2.v`, `lcmv_r_inverse_c_2x2.v`,
-`lcmv_b_e_inverse_2x2.v`, `lcmv_weight_vector_2x2.v`. The originals are kept in `original_HDL/` in the zip package
-and in git history. The original design also instantiated `c_h_b_matrix_2x2`, which was **missing** from the upload.
+Removed from the original design: `d_inverse_2x2.v`, `lcmv_r_inverse_c_2x2.v`, `lcmv_b_e_inverse_2x2.v`,
+`lcmv_weight_vector_2x2.v`. They computed the same `w = C^-H f` through two 2×2 inverses. The original
+`c_h_b_matrix_2x2` module was missing from the upload, so that design could not compile. The originals are in
+`original_HDL/` (zip) and in git history.
 
 ---
 
-## 3. Interface (unchanged)
+## 3. Interface
 
 ```
 lcmv_crpa_core #(
     IQ_WIDTH    = 16,
-    ACC_WIDTH   = 64,
-    COV_WIDTH   = 32,     // kept for compatibility, unused
-    COV_SAMPLES = 1024,   // covariance block length (power of 2)
-    COV_SHIFT   = 10,     // log2(COV_SAMPLES)
-    DL_SHIFT    = 16      // diagonal loading = trace(R) >> DL_SHIFT  (new, optional)
+    ACC_WIDTH, COV_WIDTH, COV_SAMPLES, COV_SHIFT    // unused, kept for compatibility
+    EPS_Q16     = 0,     // paper ε in Q16.16 (65 ≈ 0.001)
+    DEN_MIN_Q16 = 655    // |s-j|^2 floor (0.01)
 )
 ```
 
 | Port | Meaning |
 |---|---|
-| `enable` | 1 = continuous LCMV-PI. 0 = disabled (covariance and solver held in reset, `weights_valid = 0`). |
-| `rx_valid, rx1_i/q, rx2_i/q` | Antenna samples (antenna 1 = reference element, weight fixed to 1). |
-| `gps_angle, jam_angle` | **Ignored** (power inversion needs no angles). AXI registers 0x40/0x44 remain for SW compatibility. |
-| `w1_*, w2_*` | Current weights, Q16.16. `w1 = 1.0 = 65536`. |
-| `y_re, y_im, beam_valid` | Beamformer output (integer ADC scale). |
+| `enable` | 1 = continuous weight update and beamforming. 0 = disabled, `weights_valid = 0`. |
+| `gps_angle` | Look direction, integer degrees, -90…90 (AXI 0x40). |
+| `jam_angle` | Null direction, integer degrees, -90…90 (AXI 0x44). |
+| `rx_valid, rx1_*, rx2_*` | Antenna samples. |
+| `w1_*, w2_*` | Current weights, Q16.16 (AXI 0x50-0x5C). |
+| `y_re, y_im, beam_valid` | Beamformer output, integer ADC scale. |
 | `busy, weights_valid` | Status. |
 
-### Timing
-* Weight update period: `COV_SAMPLES` valid samples + about 70 clocks. The next covariance block starts as soon as the previous one finishes.
-* The old weights stay active while the new ones are calculated (atomic update).
-
-### Fixes compared with the original core
-* The covariance was connected through 32-bit wires and truncated from 64 bits, so a strong jammer could overflow.
-  It now uses full `ACC_WIDTH`.
-* The covariance block and the solver are reset while `enable = 0`, so every enable starts from fresh data.
+Weights are recomputed continuously (about 80 clocks per update), so a new `jam_angle` written by the PS takes
+effect within about 1 µs at 100 MHz. Old weights stay active until the new set is ready.
 
 ---
 
 ## 4. Simulation results (Icarus Verilog 12)
 
-Setup: 2-element ULA, d = λ/2, noise-like jammer, JNR ≈ 46 dB, 12-bit ADC (no clipping).
+2-element ULA, d = λ/2, noise-like jammer, JNR ≈ 46 dB, 12-bit ADC, GPS look direction 10°.
 
-| Block | Jammer | Null found at | Null depth | Output / input power |
+| Case | Null at | Gain to GPS | Null depth | Output/input power |
 |---|---|---|---|---|
-| 0-3 | 40° fixed | 40.00° | -74 … -86 dB | -42 … -43 dB |
-| 4-7 | moved to 46° | 46.00° | -72 … -88 dB | -43 dB |
+| jammer 40°, `jam_angle = 40` | 40.00° | 0.00 dB | **-94.8 dB** | -44.8 dB |
+| jammer 46°, `jam_angle = 46` | 46.00° | 0.00 dB | **-103.6 dB** | -46.2 dB |
+| jammer 46°, `jam_angle = 45` (1° error) | 45.00° | 0.00 dB | -34.3 dB | -31.6 dB |
 
-At -43 dB output/input, the jammer is cancelled down to the receiver noise floor. **Result: PASS.**
+**PASS.** At -45 dB output/input the jammer is cancelled down to the receiver noise floor. HDL weights match the
+floating-point paper formula to 2·10⁻⁵ (Q16.16 resolution).
 
-### Run the testbench
+The third case is the main practical limit of this method: **the null is exactly where `jam_angle` points.**
+A 1° error leaves about -34 dB at the real jammer. Null depth on hardware therefore depends on how accurate
+the angle source is, and on RX channel calibration (amplitude and phase mismatch shift the null in the same way).
+
+### Run
 
 ```bash
 cd HDL/sim
-iverilog -g2012 -o tb.vvp ../covariance_2antenna.v ../lcmv_pi_weight_2ch.v \
-         ../lcmv_beamformer_2ch.v ../lcmv_crpa_core.v tb_lcmv_crpa_core.v
+iverilog -g2012 -o tb.vvp ../steering_vector_2x2.v ../sdiv_q16_serial.v \
+         ../lcmv_dc_weight_2ch.v ../lcmv_beamformer_2ch.v ../lcmv_crpa_core.v tb_lcmv_crpa_core.v
 vvp -n tb.vvp
+
+cd ../model && python3 lcmv_dc_model.py      # needs numpy
 ```
 
-Top-level compile check: `iverilog -g2012 -s gnss_passthrough HDL/*.v`
-
-In Vivado, add the four RTL files plus `gnss_passthrough.v` as before. No IP cores are needed.
-
----
-
-## 5. Limitations and next steps
-
-1. **Null width.** 2 antennas give 1 degree of freedom, so there is 1 null, and its width is fixed by geometry
-   (about 3° at -30 dB). Null widening (covariance-matrix taper, virtual jammers, derivative constraints) needs
-   **≥ 3 antennas**. With 2 antennas it only makes the null shallower. For **wide and deep** nulls use a
-   4-element (drone CRPA) or 7-element (paper) array. The PI solver then becomes an N×N solve of `R w = s0`.
-2. **Max jammers = N-1 = 1** for 2 antennas.
-3. **ADC saturation.** A clipped jammer cannot be nulled (the test showed only -40 dB when clipping). Keep the AD9361
-   AGC/manual gain so the jammer stays below full scale (paper §II-C recommends multi-stage AGC).
-4. **Channel mismatch.** The paper applies channel equalization with a calibration channel (Table 1, >20 dB CR
-   improvement). Amplitude and phase mismatch between RX1 and RX2 limits the real null depth. Calibrate the E310 RX channels.
-5. **GPS gain.** PI does not steer a beam to the satellites. GPS signals see the array pattern outside the null.
+For Vivado, add `gnss_passthrough.v`, `lcmv_crpa_core.v`, `lcmv_dc_weight_2ch.v`, `sdiv_q16_serial.v`,
+`steering_vector_2x2.v` and `lcmv_beamformer_2ch.v`. No IP cores are needed.
 
 ---
 
-## 6. Related LCMV papers (for future N-element work)
+## 5. Limitations
 
-* Gershman, Nickel, Böhme, "Adaptive beamforming algorithms with robustness against jammer motion," IEEE TSP 45(7), 1997.
-  Derivative-constraint LCMV null broadening.
-* "A Robust GNSS Interference Suppression Method Based on Null Broadening of Dual-polarized Antenna Arrays." LCMV + projection null broadening/deepening.
-* Gong et al., "A Robust Method to Suppress Jamming for GNSS Array Antenna Based on Reconstruction of Sample Covariance Matrix," IJAP 2017.
-* Zhang et al., "Impact Analysis of Orthogonal Circular-Polarized Interference on GNSS Spatial Anti-Jamming Array," Remote Sensing 16, 2024. PI and LCMV.
+1. **No null widening with 2 antennas.** The paper's derivative constraints need M ≥ 4 for one jammer.
+2. **One jammer** (M - 1 = 1).
+3. **Angle accuracy.** Integer-degree angles from the PS. The null depth at the real jammer is limited by the
+   angle error (about -34 dB for 1°, about -40 dB for 0.5°).
+4. **Channel calibration.** RX1/RX2 phase and amplitude mismatch moves the null away from `jam_angle`. Calibrate
+   the AD9361 RX paths (the ACES 2019 paper reports >20 dB improvement from channel equalization).
+5. **ADC clipping.** A clipped jammer cannot be nulled. Keep the jammer below full scale (AGC/manual gain).

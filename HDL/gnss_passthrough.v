@@ -3,7 +3,7 @@
 // ============================================================================
 // gnss_passthrough.v
 //
-// ANTSDR E310 GNSS passthrough + 2-antenna LCMV-PI (power inversion)
+// ANTSDR E310 GNSS passthrough + 2-antenna robust LCMV (PIER C 2008)
 //
 // NORMAL MODE:
 //      lcmv_enable = 0
@@ -49,8 +49,8 @@
 //   0x30 RX_COUNT_CH1
 //   0x34 TX_COUNT_CH1
 //   0x38 RX_SNAPSHOT_CH1
-//   0x40 GPS ANGLE   - unused by LCMV-PI (kept for software compatibility)
-//   0x44 JAM ANGLE   - unused by LCMV-PI (kept for software compatibility)
+//   0x40 GPS ANGLE   - LCMV look direction (integer deg)
+//   0x44 JAM ANGLE   - LCMV null direction (integer deg, from PS / external DOA)
 //   0x48 LCMV CONTROL - legacy/reserved, ignored
 //   0x50 W1 REAL
 //   0x54 W1 IMAG
