@@ -110,7 +110,7 @@ Readbacks lag by one status capture (256 `l_clk`).
 ## 4. Using it (UART console)
 
 ```
-gnss_lcmv_angles=10 40       GPS look 10 deg, jammer null 40 deg
+gnss_lcmv_angles=80 50       GPS look 80 deg, jammer null 50 deg (0..180, 90 = broadside)
 gnss_rx_gain=40              RX1 and RX2 at the same manual gain (keep the jammer below clipping)
 gnss_lcmv=1                  LCMV on TX1 (if the AGC is on, locks RX1+RX2 to one manual gain)
 gnss_tx=1                    open the TX path as before (attenuation interlock unchanged)
@@ -207,16 +207,18 @@ The paper's LCMV is `w = R⁻¹C (CᴴR⁻¹C)⁻¹f` with `R = E[x xᴴ]`. v3.1
 | y = w1ᴴx1 + w2ᴴ(c·x2) on every sample | PL | `crpa_beamformer_2ch.v` |
 
 Constraint sets:
-* **AUTO (mode 1, default at boot):** C = [a_s], f = [1]. R places the null on the jammer by itself,
-  **no jammer angle is needed**, and it follows a moving jammer.
-* **ANGLE (mode 2):** C = [a_s, a_J], f = [1, ε], which is paper eq. (9) with look + enforcement constraints.
+* **`gnss_lcmv=1` (default): with the jammer angle.** C = [a_s, a_J], f = [1, ε], which is paper eq. (9)
+  with look + enforcement constraints, solved on the measured R. **The jammer angle is required**: the LCMV is armed
+  at boot and starts when `gnss_lcmv_angles=<gps> <jammer>` is given.
+* `gnss_lcmv=2` (optional): covariance only, C = [a_s], f = [1]. R places the null without an angle.
 * With 2 antennas the paper's derivative constraint forces w2 = 0, so it is still omitted (needs ≥ 4 elements).
 * When look and jammer are both specified, R cancels and the result equals the PL angle solver (verified: same weights).
 
 ### What runs automatically (from boot, `gnss_lcmv_auto.c`)
 1. **RX link check:** at boot and every 2 s it checks that RX samples reach the PL. If not, it re-runs the AD9361 RX
    interface tuning (up to 3 times at boot, 5 times later).
-2. **LCMV AUTO:** GPS look angle 0° (broadside), weights from the covariance about every 1 ms.
+2. **LCMV:** armed with GPS look 90° (broadside). It starts as soon as the jammer angle is given, then the weights
+   are re-solved from the covariance about every 1 ms.
 3. **Matched RX gain:** RX1 = RX2 always (keeps the RX2 calibration valid). Both are stepped together every 100 ms:
    −3 dB when the rms is above 700 LSB or the LCMV output clipped, +1 dB when it is below 180 LSB.
 
@@ -224,8 +226,8 @@ Constraint sets:
 | Command | Meaning |
 |---|---|
 | `gnss_tx=1` / `gnss_tx=0` | transmit on TX1 / abort |
-| `gnss_lcmv=1` / `2` / `0` | AUTO (default) / known jammer angle / off |
-| `gnss_lcmv_angles=G [J]` | GPS look angle [, jammer angle for mode 2] |
+| `gnss_lcmv_angles=G J` | GPS look and jammer angle, **0..180°** (required, starts the LCMV) |
+| `gnss_lcmv=1` / `0` | LCMV on (default) / off |
 | `gnss_lcmv?` | mode, covariance R, eigenvalue JNR (jammer detected?), null direction, weights, gain |
 
 Advanced (listed by `help?` only): `gnss_lcmv_eps=`, `gnss_lcmv_cal=`, `gnss_rx_gain=`, `gnss_rx_agc=`, `gnss_adc?`, `gnss_adc_tune=1`.
@@ -235,3 +237,24 @@ Advanced (listed by `help?` only): `gnss_lcmv_eps=`, `gnss_lcmv_cal=`, `gnss_rx_
   ANGLE matches the PL solver; ε = 0.01 gives −40 dB; no-jammer weights give full array gain.
 * `Sim/run_sim.sh` T7/T8: the PS loop is modelled over AXI (read R, solve, write weights). Jammer 40°: −45.3 dB, tone 0.01 dB.
   Jammer moved to −25° with no setting changed: −46.8 dB, tone 0.01 dB.
+
+### Angle convention (v3.1 console): 0..180°, no negative angles
+Angles are measured from the antenna axis (the line through RX1 and RX2):
+
+```
+            90° (broadside, straight ahead)
+               |
+   180° -------+------- 0°
+  (RX1 side)  RX1  RX2  (RX2 side)
+```
+* 0° = along the axis on the RX2 side (the wave reaches RX2 first), 90° = broadside, 180° = along the axis on the RX1 side.
+* Internally the steering vector uses the broadside angle θ = 90° − angle: a = [1, e^{jπ·cos(angle)}].
+* Cable test: a longer cable to RX2 delays RX2, which looks like a jammer on the RX1 side.
+  Coax at L1 (velocity factor 0.66) has λ ≈ 12.6 cm:
+
+| Extra cable on RX2 | RX2 phase lag | Jammer angle to set |
+|---|---|---|
+| 0 | 0° | 90 |
+| 2.1 cm | 60° | 110 |
+| 3.15 cm | 90° | 120 |
+| 6.3 cm | 180° | 180 |

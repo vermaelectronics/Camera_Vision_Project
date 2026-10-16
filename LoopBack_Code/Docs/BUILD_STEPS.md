@@ -146,7 +146,7 @@ Set the boot switch to SD and open the console at 115200 8N1:
 ```
 gnss: firmware started (gnss_passthrough v3.0 with LCMV)   <- first line after boot
 gnss_status?               -> version 3.0
-gnss_lcmv_angles=10 40     GPS look 10 deg, jammer null 40 deg
+gnss_lcmv_angles=80 50     GPS look 80 deg, jammer null 50 deg (0..180, 90 = broadside)
 gnss_lcmv=1                LCMV on TX1 (locks RX1+RX2 to one manual gain)
 gnss_tx=1                  open the TX path (attenuation interlock unchanged)
 gnss_lcmv?                 driving TX1: YES, weights valid, updates rising

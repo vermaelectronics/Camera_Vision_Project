@@ -11,10 +11,9 @@
  *                       solves the paper's  w = R^-1 C (C^H R^-1 C)^-1 f
  *                       (lcmv_math.c) about every 1 ms, then loads the
  *                       weights into the PL beamformer.
- *                         AUTO  (default) look constraint only: the null
- *                               follows the jammer, no jammer angle needed.
- *                         ANGLE look + enforcement constraint toward a
- *                               known jammer angle (paper eq. 9).
+ *                         ANGLE (default) look + enforcement constraint
+ *                               toward the given jammer angle (paper eq. 9).
+ *                         AUTO  look constraint only (optional).
  *  3. Matched RX gain   RX1 and RX2 always at the SAME manual gain (keeps
  *                       the RX2 calibration valid), stepped together every
  *                       100 ms to keep the input below ADC clipping.
@@ -27,14 +26,15 @@
 #include <stdint.h>
 
 #define GNSS_LCMV_OFF    0   /* TX1 = RX1                                  */
-#define GNSS_LCMV_AUTO   1   /* covariance LCMV, look constraint (default) */
-#define GNSS_LCMV_ANGLE  2   /* covariance LCMV, look + jammer angle       */
+#define GNSS_LCMV_AUTO   1   /* covariance LCMV, look constraint only      */
+#define GNSS_LCMV_ANGLE  2   /* covariance LCMV, look + jammer (default)   */
 #define GNSS_LCMV_PL     3   /* PL angle solver only (no covariance)       */
 
 struct ad9361_rf_phy;
 
-/* Boot: RX link check, defaults (AUTO, GPS look 0 deg, auto gain), and the
- * console idle hook that runs everything afterwards. */
+/* Boot: RX link check, defaults (jammer-angle LCMV armed, GPS look 90 deg =
+ * broadside, auto gain), and the console idle hook that runs everything
+ * afterwards. */
 void gnss_lcmv_init(struct ad9361_rf_phy *phy);
 
 /* Console idle hook (registered by gnss_lcmv_init). */
@@ -42,8 +42,10 @@ void gnss_lcmv_poll(void);
 
 void gnss_lcmv_set_mode(int mode);
 int  gnss_lcmv_get_mode(void);
-void gnss_lcmv_set_gps_angle(int deg);
-void gnss_lcmv_set_jam_angle(int deg);
+/* GPS look and jammer null angles, 0..180 deg measured from the array axis
+ * (0 = RX2 side along the axis, 90 = broadside, 180 = RX1 side). The jammer
+ * angle is required: the LCMV starts once it has been given. */
+void gnss_lcmv_set_angles(int gps_deg, int jam_deg);
 void gnss_lcmv_set_eps(double eps);
 void gnss_lcmv_set_cal(double re, double im);
 

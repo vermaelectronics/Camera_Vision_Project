@@ -133,11 +133,12 @@ command cmd_list[] = {
 	{"gnss_tx?", "Gets the GNSS L1 retransmit state.", "", get_gnss_tx},
 	{"gnss_tx=", "1 = retransmit RX1 on TX1, 0 = silence TX1.", "gnss_tx=0", set_gnss_tx},
 	{"gnss_status?", "Prints AD9361 and gnss_passthrough runtime state.", "", get_gnss_status},
-	/* LCMV CRPA, 2 antennas. Runs automatically from boot (AUTO: covariance
-	 * LCMV, null follows the jammer, matched RX gain, RX link watchdog). */
+	/* LCMV CRPA, 2 antennas. Armed from boot (paper eq. 9 on the measured
+	 * covariance, matched RX gain, RX link watchdog); it starts as soon as
+	 * the jammer angle is given. */
 	{"gnss_lcmv?", "LCMV state: mode, covariance, jammer detection, null, weights, gain.", "", get_gnss_lcmv},
-	{"gnss_lcmv=", "0 = off, 1 = AUTO (default, no jammer angle needed), 2 = ANGLE (known jammer).", "gnss_lcmv=1", set_gnss_lcmv},
-	{"gnss_lcmv_angles=", "GPS look angle [deg]; optional 2nd value = jammer angle for mode 2.", "gnss_lcmv_angles=0 40", set_gnss_lcmv_angles},
+	{"gnss_lcmv_angles=", "GPS look and jammer angle, 0..180 deg (90 = broadside). Starts the LCMV.", "gnss_lcmv_angles=90 130", set_gnss_lcmv_angles},
+	{"gnss_lcmv=", "1 = LCMV with the jammer angle (default), 0 = off, 2 = covariance only.", "gnss_lcmv=1", set_gnss_lcmv},
 	/* advanced (not in the menu) */
 	{"gnss_lcmv_eps=", "Advanced: gain left toward the jammer in mode 2, 0 .. 0.5 (default 0).", "gnss_lcmv_eps=0", set_gnss_lcmv_eps},
 	{"gnss_lcmv_cal=", "Advanced: RX2 calibration re im (Tools/lcmv_rx2_cal.py), default 1 0.", "gnss_lcmv_cal=1 0", set_gnss_lcmv_cal},
@@ -1403,63 +1404,65 @@ void get_gnss_lcmv(double* param, char param_no)
 }
 
 /**************************************************************************//***
- * @brief LCMV CRPA mode. 0 off, 1 AUTO (covariance LCMV with the look
- * constraint: the null follows the jammer, no angle needed), 2 ANGLE (paper
- * eq. 9: look + enforcement constraint toward a known jammer angle),
- * 3 PL angle solver (no covariance). Only selects what feeds TX1; gnss_tx=1
- * still opens the transmitter.
+ * @brief LCMV CRPA mode, as typed on the console:
+ *   1 = LCMV with the jammer angle (default): paper eq. 9, look + enforcement
+ *       constraint, solved on the measured covariance
+ *   0 = off (TX1 = RX1)
+ *   2 = covariance only (look constraint, no jammer angle)
+ *   3 = PL angle solver (no covariance)
+ * Only selects what feeds TX1; gnss_tx=1 still opens the transmitter.
 *******************************************************************************/
 void set_gnss_lcmv(double* param, char param_no)
 {
+	static const int map[4] = { GNSS_LCMV_OFF, GNSS_LCMV_ANGLE,
+				    GNSS_LCMV_AUTO, GNSS_LCMV_PL };
 	int m;
 	int n;
 
 	if(param_no < 1 || param[0] < 0.0 || param[0] > 3.0) {
-		console_print("gnss_lcmv= needs 0 (off), 1 (AUTO) or 2 (ANGLE)\n");
+		console_print("gnss_lcmv= needs 1 (with jammer angle), 0 (off) or 2 (covariance only)\n");
 		return;
 	}
 	if(gnss_pt_read(GNSS_PT_REG_VERSION) < 0x00030000U) {
 		console_print("gnss_lcmv: this bitstream has no LCMV core (needs v3.0+)\n");
 		return;
 	}
-	m = (int)param[0];
+	m = map[(int)param[0]];
 	gnss_lcmv_set_mode(m);
 	/* wait (<= ~1 ms) for the enable to cross into the sample domain */
 	for(n = 0; n < 10000; n++)
-		if(((gnss_pt_read(GNSS_PT_REG_STATUS) & GNSS_PT_ST_LCMV_EN_SYNCED) != 0) == (m != 0))
+		if(((gnss_pt_read(GNSS_PT_REG_STATUS) & GNSS_PT_ST_LCMV_EN_SYNCED) != 0) ==
+		   ((gnss_pt_read(GNSS_PT_REG_CONTROL) & GNSS_PT_CTRL_LCMV_EN) != 0))
 			break;
 	gnss_lcmv_print();
 }
 
 /**************************************************************************//***
- * @brief GPS look angle, and optionally the jammer angle (mode 2), degrees
- * from broadside. theta > 0 means the wave reaches the RX2 antenna first.
+ * @brief GPS look angle and jammer angle, both required, 0..180 deg measured
+ * from the antenna axis: 0 = along the axis on the RX2 side, 90 = broadside
+ * (straight ahead), 180 = along the axis on the RX1 side.
 *******************************************************************************/
 void set_gnss_lcmv_angles(double* param, char param_no)
 {
-	int gps, jam = 0, d;
+	int gps, jam, d;
 
-	if(param_no < 1) {
-		console_print("gnss_lcmv_angles= needs the GPS angle, optionally the jammer angle, "
-			      "e.g. gnss_lcmv_angles=0 or gnss_lcmv_angles=0 40\n");
+	if(param_no < 2) {
+		console_print("gnss_lcmv_angles= needs the GPS angle AND the jammer angle, "
+			      "0..180 deg (90 = broadside), e.g. gnss_lcmv_angles=90 130\n");
 		return;
 	}
-	gps = (int)(param[0] < 0 ? param[0] - 0.5 : param[0] + 0.5);
-	if(param_no >= 2)
-		jam = (int)(param[1] < 0 ? param[1] - 0.5 : param[1] + 0.5);
-	if(gps < -90 || gps > 90 || jam < -90 || jam > 90) {
-		console_print("gnss_lcmv_angles: angles must be -90..90 deg\n");
+	gps = (int)(param[0] + 0.5);
+	jam = (int)(param[1] + 0.5);
+	if(param[0] < 0.0 || param[1] < 0.0 || gps > 180 || jam > 180) {
+		console_print("gnss_lcmv_angles: angles must be 0..180 deg (90 = broadside)\n");
 		return;
 	}
-	if(param_no >= 2) {
-		d = gps - jam;
-		if(d < 0) d = -d;
-		if(d < 3)
-			console_print("gnss_lcmv_angles: WARNING GPS and jammer only %d deg apart; "
-				      "the GPS gain cannot be held (needs >= 3 deg)\n", (long)d);
-		gnss_lcmv_set_jam_angle(jam);
-	}
-	gnss_lcmv_set_gps_angle(gps);
+	d = gps - jam;
+	if(d < 0) d = -d;
+	if(d < 3)
+		console_print("gnss_lcmv_angles: WARNING GPS and jammer only %d deg apart; "
+			      "the GPS gain cannot be held (needs >= 3 deg)\n", (long)d);
+	gnss_lcmv_set_angles(gps, jam);
 	gnss_lcmv_print();
 }
 
