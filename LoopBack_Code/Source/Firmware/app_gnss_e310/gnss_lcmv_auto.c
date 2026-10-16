@@ -31,13 +31,13 @@
 static struct ad9361_rf_phy *phy;
 static int      mode        = GNSS_LCMV_OFF;
 static int      cov_hw      = 0;     /* bitstream has the covariance (v3.1+)   */
-/* Angles as the operator gives them: 0..180 deg from the array axis
- * (0 = along the axis on the RX2 side, 90 = broadside, 180 = RX1 side).
- * The steering maths uses the broadside angle theta = 90 - angle. */
-static int      gps_ang     = 90;
-static int      jam_ang     = 90;
-static int      jam_set     = 0;
-#define TO_BROADSIDE(a)   (90 - (a))
+/* Angles as in the reference design (LCMV_Manu, steering_vector_2x2.v):
+ * signed integer degrees from broadside, -90..+90, steering vector
+ * a(theta) = [1, exp(j*pi*sin(theta))]; defaults GPS 30, jammer 60. */
+static int      gps_ang     = 30;
+static int      jam_ang     = 60;
+static int      jam_set     = 1;
+#define TO_BROADSIDE(a)   (a)
 static double   eps         = 0.0;
 static lcmv_c_t cal         = { 1.0, 0.0 };
 static int      gain_auto   = 1;
@@ -257,7 +257,7 @@ void gnss_lcmv_set_mode(int m)
     mode = m;
     if (waiting_for_jammer())
         printf("gnss_lcmv: waiting for the jammer angle: "
-               "gnss_lcmv_angles=<gps> <jammer>  (0..180 deg, 90 = broadside)\n\r");
+               "gnss_lcmv_angles=<gps> <jammer>  (-90..+90 deg from broadside)\n\r");
     apply_mode();
 }
 
@@ -353,21 +353,25 @@ void gnss_lcmv_init(struct ad9361_rf_phy *p)
     gnss_rx_link_check(3, 1);
     link_rx_last = gnss_pt_read(GNSS_PT_REG_RX_COUNT_CH0);
 
-    /* 2. defaults: no calibration, GPS look at broadside (90 deg) */
+    /* 2. defaults (reference design): no calibration, GPS 30 deg, jammer 60 deg */
     gnss_lcmv_set_cal(1.0, 0.0);
     gnss_lcmv_set_eps(0.0);
-    gps_ang = 90;
+    gps_ang = 30;
+    jam_ang = 60;
+    jam_set = 1;
     gnss_pt_lcmv_set_angles(TO_BROADSIDE(gps_ang), TO_BROADSIDE(jam_ang));
 
     /* 3. matched automatic RX gain */
     gnss_lcmv_gain_auto(1);
 
-    /* 4. LCMV with the jammer angle (paper eq. 9 on the measured covariance).
-     *    It starts as soon as gnss_lcmv_angles= gives the jammer angle. */
+    /* 4. LCMV with the jammer angle (paper eq. 9 on the measured covariance),
+     *    running from boot with the default angles GPS 30, jammer 60. */
     t_link = t_weight = t_gain = now_us();
     console_set_idle_hook(gnss_lcmv_poll);
     printf("gnss_lcmv: RX gain AUTO matched (%ld dB)\n\r", (long)gain_db);
     gnss_lcmv_set_mode(cov_hw ? GNSS_LCMV_ANGLE : GNSS_LCMV_PL);
+    printf("gnss_lcmv: LCMV on, GPS %d deg, jammer %d deg "
+           "(gnss_lcmv_angles=<gps> <jammer> to change)\n\r", gps_ang, jam_ang);
 }
 
 /* ---- reports ------------------------------------------------------------------- */
@@ -407,7 +411,7 @@ void gnss_lcmv_print(void)
            waiting_for_jammer() ? "no (set the jammer angle: gnss_lcmv_angles=<gps> <jammer>)" :
            (mode != GNSS_LCMV_OFF && !(st & GNSS_PT_ST_PASS_EN_SYNCED))
                ? "no (TX path off: gnss_tx=1)" : "no");
-    printf("  angles         : 0..180 deg from the array axis, 90 = broadside\n\r");
+    printf("  angles         : degrees from broadside, -90..+90\n\r");
     printf("  GPS look angle : %d deg\n\r", gps_ang);
     if (jam_set) printf("  jammer angle   : %d deg\n\r", jam_ang);
     else         printf("  jammer angle   : NOT SET\n\r");
@@ -427,7 +431,7 @@ void gnss_lcmv_print(void)
         printf("  eigenvalues    : JNR %s dB -> %s\n\r", fmt(a, res_last.jnr_db, 1),
                res_last.jnr_db > JAMMER_JNR_DB ? "JAMMER DETECTED" : "no jammer");
         if (res_last.null_valid)
-            printf("  array null at  : %s deg\n\r", fmt(a, 90.0 - res_last.null_deg, 1));
+            printf("  array null at  : %s deg\n\r", fmt(a, res_last.null_deg, 1));
         printf("  w1             : %s %sj\n\r", fmt(a, res_last.w1.re, 5), fmt(b, res_last.w1.im, 5));
         printf("  w2             : %s %sj\n\r", fmt(c2, res_last.w2.re, 5), fmt(d, res_last.w2.im, 5));
         printf("  solves         : %lu (%lu skipped: no valid R)\n\r",

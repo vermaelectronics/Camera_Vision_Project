@@ -32,8 +32,8 @@
 
 struct ad9361_rf_phy;
 
-/* Boot: RX link check, defaults (jammer-angle LCMV armed, GPS look 90 deg =
- * broadside, auto gain), and the console idle hook that runs everything
+/* Boot: RX link check, defaults (jammer-angle LCMV on, GPS 30 deg, jammer
+ * 60 deg, auto gain), and the console idle hook that runs everything
  * afterwards. */
 void gnss_lcmv_init(struct ad9361_rf_phy *phy);
 
@@ -42,9 +42,9 @@ void gnss_lcmv_poll(void);
 
 void gnss_lcmv_set_mode(int mode);
 int  gnss_lcmv_get_mode(void);
-/* GPS look and jammer null angles, 0..180 deg measured from the array axis
- * (0 = RX2 side along the axis, 90 = broadside, 180 = RX1 side). The jammer
- * angle is required: the LCMV starts once it has been given. */
+/* GPS look and jammer null angles, signed integer degrees from broadside,
+ * -90..+90 (reference design convention, a = [1, exp(j*pi*sin(theta))]).
+ * Defaults GPS 30, jammer 60. */
 void gnss_lcmv_set_angles(int gps_deg, int jam_deg);
 void gnss_lcmv_set_eps(double eps);
 void gnss_lcmv_set_cal(double re, double im);

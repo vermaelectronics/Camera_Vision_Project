@@ -133,11 +133,10 @@ command cmd_list[] = {
 	{"gnss_tx?", "Gets the GNSS L1 retransmit state.", "", get_gnss_tx},
 	{"gnss_tx=", "1 = retransmit RX1 on TX1, 0 = silence TX1.", "gnss_tx=0", set_gnss_tx},
 	{"gnss_status?", "Prints AD9361 and gnss_passthrough runtime state.", "", get_gnss_status},
-	/* LCMV CRPA, 2 antennas. Armed from boot (paper eq. 9 on the measured
-	 * covariance, matched RX gain, RX link watchdog); it starts as soon as
-	 * the jammer angle is given. */
+	/* LCMV CRPA, 2 antennas. On from boot (paper eq. 9 on the measured
+	 * covariance, GPS 30 / jammer 60 deg, matched RX gain, RX link watchdog). */
 	{"gnss_lcmv?", "LCMV state: mode, covariance, jammer detection, null, weights, gain.", "", get_gnss_lcmv},
-	{"gnss_lcmv_angles=", "GPS look and jammer angle, 0..180 deg (90 = broadside). Starts the LCMV.", "gnss_lcmv_angles=90 130", set_gnss_lcmv_angles},
+	{"gnss_lcmv_angles=", "GPS look and jammer angle, -90..+90 deg from broadside (default 30 60).", "gnss_lcmv_angles=30 60", set_gnss_lcmv_angles},
 	{"gnss_lcmv=", "1 = LCMV with the jammer angle (default), 0 = off, 2 = covariance only.", "gnss_lcmv=1", set_gnss_lcmv},
 	/* advanced (not in the menu) */
 	{"gnss_lcmv_eps=", "Advanced: gain left toward the jammer in mode 2, 0 .. 0.5 (default 0).", "gnss_lcmv_eps=0", set_gnss_lcmv_eps},
@@ -1438,9 +1437,10 @@ void set_gnss_lcmv(double* param, char param_no)
 }
 
 /**************************************************************************//***
- * @brief GPS look angle and jammer angle, both required, 0..180 deg measured
- * from the antenna axis: 0 = along the axis on the RX2 side, 90 = broadside
- * (straight ahead), 180 = along the axis on the RX1 side.
+ * @brief GPS look angle and jammer angle, both required. Signed integer
+ * degrees from broadside, -90..+90, as in the reference design
+ * (steering_vector_2x2.v: a = [1, exp(j*pi*sin(theta))]); theta > 0 means the
+ * wave reaches the RX2 antenna first.
 *******************************************************************************/
 void set_gnss_lcmv_angles(double* param, char param_no)
 {
@@ -1448,13 +1448,13 @@ void set_gnss_lcmv_angles(double* param, char param_no)
 
 	if(param_no < 2) {
 		console_print("gnss_lcmv_angles= needs the GPS angle AND the jammer angle, "
-			      "0..180 deg (90 = broadside), e.g. gnss_lcmv_angles=90 130\n");
+			      "-90..+90 deg from broadside, e.g. gnss_lcmv_angles=30 60\n");
 		return;
 	}
-	gps = (int)(param[0] + 0.5);
-	jam = (int)(param[1] + 0.5);
-	if(param[0] < 0.0 || param[1] < 0.0 || gps > 180 || jam > 180) {
-		console_print("gnss_lcmv_angles: angles must be 0..180 deg (90 = broadside)\n");
+	gps = (int)(param[0] < 0 ? param[0] - 0.5 : param[0] + 0.5);
+	jam = (int)(param[1] < 0 ? param[1] - 0.5 : param[1] + 0.5);
+	if(gps < -90 || gps > 90 || jam < -90 || jam > 90) {
+		console_print("gnss_lcmv_angles: angles must be -90..+90 deg from broadside\n");
 		return;
 	}
 	d = gps - jam;

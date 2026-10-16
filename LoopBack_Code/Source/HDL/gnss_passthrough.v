@@ -109,10 +109,10 @@
 //    0x34    TX_COUNT_CH1    RO      dac_valid_i1 pulses served
 //    0x38    RX_SNAPSHOT_CH1 RO      {adc_data_q1, adc_data_i1} last accepted
 //    0x3C    RESERVED        RO      reads 0
-//    0x40    LCMV_GPS_ANGLE  RW      [15:0] signed integer deg -90..90, LCMV
-//                                    look direction (gain 1)      (COEF[0])
-//    0x44    LCMV_JAM_ANGLE  RW      [15:0] signed integer deg -90..90, LCMV
-//                                    null direction               (COEF[1])
+//    0x40    LCMV_GPS_ANGLE  RW      [15:0] signed integer deg -90..90 from
+//                                    broadside, look direction. Reset 30.
+//    0x44    LCMV_JAM_ANGLE  RW      [15:0] signed integer deg -90..90 from
+//                                    broadside, null direction. Reset 60.
 //    0x48    CRPA_COEF[2]    RW      stored, unused (reserved)
 //    0x4C    LCMV_EPS        RW      [15:0] Q0.16 LCMV gain toward the jammer,
 //                                    0 = ideal null               (COEF[3])
@@ -298,8 +298,8 @@ module gnss_passthrough #(
   reg  [31:0] crpa_coef [0:15];
   // LCMV settings, also kept in plain registers (synchronised below).
   localparam [31:0] LCMV_CAL_ONE = 32'h0000_4000;     // 1.0 + j0, Q2.14
-  reg  [15:0] reg_lcmv_gps = 16'd0;                   // 0x40
-  reg  [15:0] reg_lcmv_jam = 16'd0;                   // 0x44
+  reg  [15:0] reg_lcmv_gps = 16'd30;                  // 0x40, reset 30 deg
+  reg  [15:0] reg_lcmv_jam = 16'd60;                  // 0x44, reset 60 deg
   reg  [15:0] reg_lcmv_eps = 16'd0;                   // 0x4C
   reg  [31:0] reg_lcmv_cal = LCMV_CAL_ONE;            // 0x50
   // PS weights: staging registers, committed together by the 0x8C write.
@@ -315,8 +315,8 @@ module gnss_passthrough #(
     if (s_axi_aresetn == 1'b0) begin
       reg_scratch <= 32'd0;
       reg_control <= 32'd0;
-      reg_lcmv_gps  <= 16'd0;
-      reg_lcmv_jam  <= 16'd0;
+      reg_lcmv_gps  <= 16'd30;
+      reg_lcmv_jam  <= 16'd60;
       reg_lcmv_eps  <= 16'd0;
       reg_lcmv_cal  <= LCMV_CAL_ONE;
       reg_sw_w1r <= 32'h0001_0000; reg_sw_w1i <= 32'd0;
@@ -436,10 +436,10 @@ module gnss_passthrough #(
   // but a write can land while the synchroniser samples, so the value is
   // only taken once it has been identical for two clocks: a torn mix of old
   // and new bits never reaches the solver.
-  (* ASYNC_REG = "TRUE" *) reg [79:0] lcmv_ctrl_meta = {LCMV_CAL_ONE, 48'd0};
-  (* ASYNC_REG = "TRUE" *) reg [79:0] lcmv_ctrl_sync = {LCMV_CAL_ONE, 48'd0};
-  reg [79:0] lcmv_cfg_prev = {LCMV_CAL_ONE, 48'd0};
-  reg [79:0] lcmv_cfg      = {LCMV_CAL_ONE, 48'd0};
+  (* ASYNC_REG = "TRUE" *) reg [79:0] lcmv_ctrl_meta = {LCMV_CAL_ONE, 16'd0, 16'd60, 16'd30};
+  (* ASYNC_REG = "TRUE" *) reg [79:0] lcmv_ctrl_sync = {LCMV_CAL_ONE, 16'd0, 16'd60, 16'd30};
+  reg [79:0] lcmv_cfg_prev = {LCMV_CAL_ONE, 16'd0, 16'd60, 16'd30};
+  reg [79:0] lcmv_cfg      = {LCMV_CAL_ONE, 16'd0, 16'd60, 16'd30};
 
   always @(posedge clk) begin
     lcmv_ctrl_meta <= {reg_lcmv_cal, reg_lcmv_eps, reg_lcmv_jam, reg_lcmv_gps};

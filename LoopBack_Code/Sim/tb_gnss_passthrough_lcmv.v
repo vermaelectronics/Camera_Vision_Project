@@ -316,6 +316,8 @@ module tb_gnss_passthrough_lcmv;
     check(r == 32'h00030001, "VERSION 3.1");
     axi_read(16'h50, r);  $display("T1 RX2_CAL reset = 0x%08h", r);
     check(r == 32'h00004000, "RX2_CAL reset value (1.0, Q2.14)");
+    axi_read(16'h40, r);  check(r == 32'd30, "GPS angle reset 30 deg (reference design)");
+    axi_read(16'h44, r);  check(r == 32'd60, "jammer angle reset 60 deg (reference design)");
 
     // ---------------- T2 ----------------
     axi_write(16'h40, 32'd10);                 // GPS angle

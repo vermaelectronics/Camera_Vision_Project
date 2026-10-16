@@ -765,8 +765,8 @@ static void info_quickstart(void)
     console_print("   gnss_ddr_tx=1 / =0          DDR round trip / stop\n");
     console_print("   tx1_attenuation=N           mdB. BIGGER = QUIETER.\n");
     console_print("   gnss_tx? / gnss_status?     state, read back from hardware\n");
-    console_print("   gnss_lcmv_angles=G J        GPS look and jammer angle, 0..180 deg\n");
-    console_print("                               from the antenna axis, 90 = broadside\n");
+    console_print("   gnss_lcmv_angles=G J        GPS look and jammer angle, -90..+90 deg\n");
+    console_print("                               from broadside (default 30 60)\n");
     console_print("   gnss_lcmv=1                 LCMV with the jammer angle (default)\n");
     console_print("   gnss_lcmv=0                 off, TX1 = RX1\n");
     console_print("   gnss_lcmv=2                 covariance only (no jammer angle)\n");
@@ -814,8 +814,8 @@ void gnss_info_menu(void)
     console_print("    9   Quick start         bringing this up on a new bench\n");
     console_print("\n");
     console_print("  CONTROL   (RX gain and RX link run AUTOMATICALLY)\n");
-    console_print("    gnss_lcmv_angles=G J       GPS and JAMMER angle, 0..180 deg\n");
-    console_print("                               (90 = broadside). Starts the LCMV.\n");
+    console_print("    gnss_lcmv_angles=G J       GPS and JAMMER angle, -90..+90 deg\n");
+    console_print("                               from broadside (default 30 60)\n");
     console_print("    gnss_tx=1 / gnss_tx=0      transmit on TX1 / ABORT\n");
     console_print("    tx1_attenuation=N          mdB, BIGGER = QUIETER (89750 quietest)\n");
     console_print("    gnss_lcmv=1 / gnss_lcmv=0  LCMV on (default) / off\n");
