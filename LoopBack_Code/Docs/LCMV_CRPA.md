@@ -1,4 +1,4 @@
-# LCMV CRPA integration — gnss_passthrough v3.0
+# LCMV CRPA integration — gnss_passthrough v3.1 (covariance LCMV, automatic)
 
 This change adds a 2-element robust LCMV anti-jamming beamformer to the
 ANTSDR E310 V1 GNSS loopback pipeline. The v2.1 source was used only as the
@@ -191,3 +191,47 @@ about 3k FFs. Vivado timing has **not** been run here, so check `timing_impl.rpt
 3. **Look and null directions need about 3° or more separation**, or the GPS gain drops (guarded).
 4. **ADC clipping cannot be nulled.** Watch `LCMV_SAT_COUNT` and keep the jammer below full scale.
 5. The shipped `SD_Image/BOOT.BIN` predates v3.0 and must be rebuilt.
+
+---
+
+## v3.1: covariance LCMV (the paper's full formula) and automatic operation
+
+### Where the covariance maths is
+The paper's LCMV is `w = R⁻¹C (CᴴR⁻¹C)⁻¹f` with `R = E[x xᴴ]`. v3.1 computes it exactly that way:
+
+| Step | Where | File |
+|---|---|---|
+| R11 = E\|x1\|², R22 = E\|x2\|², R12 = E[x1·x2*] over 4096-pair blocks | PL, every sample | `Source/HDL/crpa/crpa_cov_2ch.v` |
+| Diagonal loading R + λmin·I (robust LCMV), eigenvalues → jammer detection (JNR) | ARM | `lcmv_math.c` |
+| w = R⁻¹C (CᴴR⁻¹C)⁻¹f, about every 1 ms | ARM | `lcmv_math.c`, `gnss_lcmv_auto.c` |
+| y = w1ᴴx1 + w2ᴴ(c·x2) on every sample | PL | `crpa_beamformer_2ch.v` |
+
+Constraint sets:
+* **AUTO (mode 1, default at boot):** C = [a_s], f = [1]. R places the null on the jammer by itself,
+  **no jammer angle is needed**, and it follows a moving jammer.
+* **ANGLE (mode 2):** C = [a_s, a_J], f = [1, ε], which is paper eq. (9) with look + enforcement constraints.
+* With 2 antennas the paper's derivative constraint forces w2 = 0, so it is still omitted (needs ≥ 4 elements).
+* When look and jammer are both specified, R cancels and the result equals the PL angle solver (verified: same weights).
+
+### What runs automatically (from boot, `gnss_lcmv_auto.c`)
+1. **RX link check:** at boot and every 2 s it checks that RX samples reach the PL. If not, it re-runs the AD9361 RX
+   interface tuning (up to 3 times at boot, 5 times later).
+2. **LCMV AUTO:** GPS look angle 0° (broadside), weights from the covariance about every 1 ms.
+3. **Matched RX gain:** RX1 = RX2 always (keeps the RX2 calibration valid). Both are stepped together every 100 ms:
+   −3 dB when the rms is above 700 LSB or the LCMV output clipped, +1 dB when it is below 180 LSB.
+
+### Console (control panel)
+| Command | Meaning |
+|---|---|
+| `gnss_tx=1` / `gnss_tx=0` | transmit on TX1 / abort |
+| `gnss_lcmv=1` / `2` / `0` | AUTO (default) / known jammer angle / off |
+| `gnss_lcmv_angles=G [J]` | GPS look angle [, jammer angle for mode 2] |
+| `gnss_lcmv?` | mode, covariance R, eigenvalue JNR (jammer detected?), null direction, weights, gain |
+
+Advanced (listed by `help?` only): `gnss_lcmv_eps=`, `gnss_lcmv_cal=`, `gnss_rx_gain=`, `gnss_rx_agc=`, `gnss_adc?`, `gnss_adc_tune=1`.
+
+### Verification
+* `Sim/firmware/test_lcmv_math.c` (host): AUTO finds the null at 40.00° without the angle; it follows the jammer to −25° (−92.7 dB);
+  ANGLE matches the PL solver; ε = 0.01 gives −40 dB; no-jammer weights give full array gain.
+* `Sim/run_sim.sh` T7/T8: the PS loop is modelled over AXI (read R, solve, write weights). Jammer 40°: −45.3 dB, tone 0.01 dB.
+  Jammer moved to −25° with no setting changed: −46.8 dB, tone 0.01 dB.

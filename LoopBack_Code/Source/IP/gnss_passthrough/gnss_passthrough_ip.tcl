@@ -32,7 +32,7 @@ set rtl_file   [file join $src_dir "HDL" "${ip_name}.v"]
 set xdc_file   [file join $src_dir "IP" $ip_name "${ip_name}_constr.xdc"]
 
 # LCMV CRPA sub-modules (Source/HDL/crpa), instantiated by gnss_passthrough.v.
-set crpa_names {crpa_lcmv_2ch.v crpa_lcmv_weight_2ch.v crpa_sdiv_serial.v
+set crpa_names {crpa_lcmv_2ch.v crpa_lcmv_weight_2ch.v crpa_sdiv_serial.v crpa_cov_2ch.v
                 crpa_beamformer_2ch.v steering_vector_2x2.v}
 set crpa_files {}
 foreach n $crpa_names { lappend crpa_files [file join $src_dir "HDL" "crpa" $n] }

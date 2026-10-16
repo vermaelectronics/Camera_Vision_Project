@@ -58,6 +58,7 @@
 #include "axi_dmac.h"
 /* GNSS-CRPA MOD-10 */
 #include "gnss_info.h"
+#include "gnss_lcmv_auto.h"
 
 /******************************************************************************/
 /************************ Constants Definitions *******************************/
@@ -132,21 +133,19 @@ command cmd_list[] = {
 	{"gnss_tx?", "Gets the GNSS L1 retransmit state.", "", get_gnss_tx},
 	{"gnss_tx=", "1 = retransmit RX1 on TX1, 0 = silence TX1.", "gnss_tx=0", set_gnss_tx},
 	{"gnss_status?", "Prints AD9361 and gnss_passthrough runtime state.", "", get_gnss_status},
-	/* RX1 and RX2 at one manual gain: the LCMV null and the RX2 calibration
-	 * hold only while both channels have the same gain. */
-	{"gnss_rx_gain?", "Gets RX1/RX2 gain control mode and gain.", "", get_gnss_rx_gain},
-	{"gnss_rx_gain=", "Sets RX1 AND RX2 to the same MANUAL gain [dB].", "gnss_rx_gain=40", set_gnss_rx_gain},
-	{"gnss_rx_agc=", "1 = AD9361 slow AGC on both channels, 0 = manual (locks both at RX1's gain).", "gnss_rx_agc=0", set_gnss_rx_agc},
-	/* LCMV CRPA, 2 antennas (bitstream v3.0+). Angles come from software:
-	 * the FPGA does no DOA estimation. */
-	/* RX digital interface diagnostics: why RX samples do (not) reach the PL. */
-	{"gnss_adc?", "RX interface status: ADC core, IODELAYs, AD9361 port, RX counters.", "", get_gnss_adc},
-	{"gnss_adc_tune=", "1 = re-run the AD9361 RX interface tuning (prints the delay table).", "gnss_adc_tune=1", set_gnss_adc_tune},
-	{"gnss_lcmv?", "Gets the LCMV CRPA state, angles and weights.", "", get_gnss_lcmv},
-	{"gnss_lcmv=", "1 = TX1 carries LCMV(RX1, RX2): gain 1 at GPS angle, null at jammer.", "gnss_lcmv=1", set_gnss_lcmv},
-	{"gnss_lcmv_angles=", "Sets GPS (look) and jammer (null) angle [deg], -90..90.", "gnss_lcmv_angles=10 40", set_gnss_lcmv_angles},
-	{"gnss_lcmv_eps=", "Sets the gain left toward the jammer, 0 (ideal null) .. 0.5.", "gnss_lcmv_eps=0", set_gnss_lcmv_eps},
-	{"gnss_lcmv_cal=", "Sets the RX2 calibration re im (Tools/lcmv_rx2_cal.py), 1 0 = none.", "gnss_lcmv_cal=1 0", set_gnss_lcmv_cal},
+	/* LCMV CRPA, 2 antennas. Runs automatically from boot (AUTO: covariance
+	 * LCMV, null follows the jammer, matched RX gain, RX link watchdog). */
+	{"gnss_lcmv?", "LCMV state: mode, covariance, jammer detection, null, weights, gain.", "", get_gnss_lcmv},
+	{"gnss_lcmv=", "0 = off, 1 = AUTO (default, no jammer angle needed), 2 = ANGLE (known jammer).", "gnss_lcmv=1", set_gnss_lcmv},
+	{"gnss_lcmv_angles=", "GPS look angle [deg]; optional 2nd value = jammer angle for mode 2.", "gnss_lcmv_angles=0 40", set_gnss_lcmv_angles},
+	/* advanced (not in the menu) */
+	{"gnss_lcmv_eps=", "Advanced: gain left toward the jammer in mode 2, 0 .. 0.5 (default 0).", "gnss_lcmv_eps=0", set_gnss_lcmv_eps},
+	{"gnss_lcmv_cal=", "Advanced: RX2 calibration re im (Tools/lcmv_rx2_cal.py), default 1 0.", "gnss_lcmv_cal=1 0", set_gnss_lcmv_cal},
+	{"gnss_rx_gain?", "Advanced: RX1/RX2 gain (AUTO matched by default).", "", get_gnss_rx_gain},
+	{"gnss_rx_gain=", "Advanced: fixed manual gain [dB] on RX1 AND RX2 (turns AUTO off).", "gnss_rx_gain=40", set_gnss_rx_gain},
+	{"gnss_rx_agc=", "Advanced: 1 = AUTO matched gain (default), 0 = hold the current gain.", "gnss_rx_agc=1", set_gnss_rx_agc},
+	{"gnss_adc?", "Advanced: RX interface status (ADC core, IODELAYs, AD9361 port).", "", get_gnss_adc},
+	{"gnss_adc_tune=", "Advanced: 1 = re-run the AD9361 RX interface tuning now.", "gnss_adc_tune=1", set_gnss_adc_tune},
 	/* GNSS-CRPA MOD-7: the DDR round trip. Exercises axi_ad9361_dac_dma,
 	 * util_upack2 and the util_rfifo DATA path, none of which had ever moved a
 	 * real sample. See gnss_txdma.h. */
@@ -293,79 +292,35 @@ void get_gnss_status(double* param, char param_no)
 }
 
 /**************************************************************************//***
- * @brief RX gain for the LCMV. Both channels must have the same gain, or the
- * RX2 calibration (and with it the null) is wrong; the AD9361 AGC sets each
- * channel on its own, so the LCMV is run with a manual gain.
+ * @brief RX gain. RX1 and RX2 are always at the SAME manual gain (the LCMV and
+ * its RX2 calibration need it); by default gnss_lcmv_auto.c steps both
+ * together to stay below ADC clipping.
 *******************************************************************************/
-static void gnss_rx_gain_print(void)
-{
-	uint8_t m1 = 0, m2 = 0;
-	int32_t g1 = 0, g2 = 0;
-
-	if(!ad9361_phy) {
-		console_print("gnss_rx_gain: ad9361_phy is NULL\n");
-		return;
-	}
-	ad9361_get_rx_gain_control_mode(ad9361_phy, 0, &m1);
-	ad9361_get_rx_gain_control_mode(ad9361_phy, 1, &m2);
-	ad9361_get_rx_rf_gain(ad9361_phy, 0, &g1);
-	ad9361_get_rx_rf_gain(ad9361_phy, 1, &g2);
-	console_print("GNSS_RX_GAIN: RX1 %s %d dB, RX2 %s %d dB  %s\n",
-		      (char*)(m1 == RF_GAIN_MGC ? "manual" : "AGC"), (long)g1,
-		      (char*)(m2 == RF_GAIN_MGC ? "manual" : "AGC"), (long)g2,
-		      (char*)((m1 == RF_GAIN_MGC && m2 == RF_GAIN_MGC && g1 == g2)
-			      ? "(matched: OK for LCMV)"
-			      : "(NOT matched: use gnss_rx_gain=<dB> for LCMV)"));
-}
-
-/* Both channels manual at one gain. Returns 0 on success. */
-static int gnss_rx_gain_lock(int32_t db)
-{
-	if(!ad9361_phy) return -1;
-	ad9361_set_rx_gain_control_mode(ad9361_phy, 0, RF_GAIN_MGC);
-	ad9361_set_rx_gain_control_mode(ad9361_phy, 1, RF_GAIN_MGC);
-	if(ad9361_set_rx_rf_gain(ad9361_phy, 0, db) != 0) return -1;
-	if(ad9361_set_rx_rf_gain(ad9361_phy, 1, db) != 0) return -1;
-	return 0;
-}
-
 void get_gnss_rx_gain(double* param, char param_no)
 {
 	(void)param; (void)param_no;
-	gnss_rx_gain_print();
+	gnss_rx_gain_report();
 }
 
 void set_gnss_rx_gain(double* param, char param_no)
 {
-	if(param_no < 1 || param[0] < 0.0 || param[0] > 73.0) {
-		console_print("gnss_rx_gain= needs a gain in dB, 0 to 73, e.g. gnss_rx_gain=40\n");
+	if(param_no < 1 || param[0] < 0.0 || param[0] > 71.0) {
+		console_print("gnss_rx_gain= needs a gain in dB, 0 to 71, e.g. gnss_rx_gain=40\n");
 		return;
 	}
-	if(gnss_rx_gain_lock((int32_t)param[0]) != 0)
+	if(gnss_lcmv_gain_manual((int32_t)param[0]) != 0)
 		console_print("gnss_rx_gain: the AD9361 rejected %d dB\n", (long)param[0]);
-	gnss_rx_gain_print();
+	gnss_rx_gain_report();
 }
 
 void set_gnss_rx_agc(double* param, char param_no)
 {
-	int32_t g = 0;
-
 	if(param_no < 1 || param[0] < 0.0 || param[0] > 1.0) {
-		console_print("gnss_rx_agc= needs 0 (manual, matched) or 1 (AD9361 AGC)\n");
+		console_print("gnss_rx_agc= needs 1 (AUTO matched, default) or 0 (hold)\n");
 		return;
 	}
-	if(!ad9361_phy) {
-		console_print("gnss_rx_agc: ad9361_phy is NULL\n");
-		return;
-	}
-	if((int)param[0] == 1) {
-		ad9361_set_rx_gain_control_mode(ad9361_phy, 0, RF_GAIN_SLOWATTACK_AGC);
-		ad9361_set_rx_gain_control_mode(ad9361_phy, 1, RF_GAIN_SLOWATTACK_AGC);
-	} else {
-		ad9361_get_rx_rf_gain(ad9361_phy, 0, &g);
-		gnss_rx_gain_lock(g);
-	}
-	gnss_rx_gain_print();
+	gnss_lcmv_gain_auto((int)param[0]);
+	gnss_rx_gain_report();
 }
 
 /* GNSS-CRPA MOD-7: the DDR round trip.
@@ -1439,109 +1394,85 @@ void set_dds_tx2_tone2_scale(double* param, char param_no)	// dds_tx2_tone2_scal
 }
 
 /**************************************************************************//***
- * @brief LCMV CRPA. Report state, angles, weights and clipping.
+ * @brief LCMV CRPA (gnss_lcmv_auto.c). Report.
 *******************************************************************************/
 void get_gnss_lcmv(double* param, char param_no)
 {
 	(void)param; (void)param_no;
-	if(gnss_pt_read(GNSS_PT_REG_VERSION) < 0x00030000U) {
-		console_print("GNSS_LCMV: this bitstream has no LCMV core (needs v3.0)\n");
-		return;
-	}
-	gnss_pt_lcmv_print_state();
+	gnss_lcmv_print();
 }
 
 /**************************************************************************//***
- * @brief LCMV CRPA. Put the 2-element LCMV beamformer in (1) or out (0) of the
- * TX1 path. This only selects what feeds TX1; gnss_tx=1 still opens the
- * transmitter. The null is only as good as the RX1/RX2 match, so if the
- * channels are on the AD9361 AGC (each its own gain) they are locked to one
- * manual gain first.
+ * @brief LCMV CRPA mode. 0 off, 1 AUTO (covariance LCMV with the look
+ * constraint: the null follows the jammer, no angle needed), 2 ANGLE (paper
+ * eq. 9: look + enforcement constraint toward a known jammer angle),
+ * 3 PL angle solver (no covariance). Only selects what feeds TX1; gnss_tx=1
+ * still opens the transmitter.
 *******************************************************************************/
 void set_gnss_lcmv(double* param, char param_no)
 {
-	int on;
+	int m;
 	int n;
 
-	if(param_no < 1) {
-		console_print("gnss_lcmv= needs 0 or 1\n");
+	if(param_no < 1 || param[0] < 0.0 || param[0] > 3.0) {
+		console_print("gnss_lcmv= needs 0 (off), 1 (AUTO) or 2 (ANGLE)\n");
 		return;
 	}
 	if(gnss_pt_read(GNSS_PT_REG_VERSION) < 0x00030000U) {
-		console_print("gnss_lcmv: this bitstream has no LCMV core (needs v3.0)\n");
+		console_print("gnss_lcmv: this bitstream has no LCMV core (needs v3.0+)\n");
 		return;
 	}
-	on = ((int)param[0] != 0);
-	if(on) {
-		uint8_t m1 = RF_GAIN_MGC, m2 = RF_GAIN_MGC;
-		int32_t g1 = 0, g2 = 0;
-		if(ad9361_phy) {
-			ad9361_get_rx_gain_control_mode(ad9361_phy, 0, &m1);
-			ad9361_get_rx_gain_control_mode(ad9361_phy, 1, &m2);
-			ad9361_get_rx_rf_gain(ad9361_phy, 0, &g1);
-			ad9361_get_rx_rf_gain(ad9361_phy, 1, &g2);
-			if(m1 != RF_GAIN_MGC || m2 != RF_GAIN_MGC || g1 != g2) {
-				gnss_rx_gain_lock(g1);
-				console_print("gnss_lcmv: RX1+RX2 locked to manual %d dB "
-					      "(equal gains keep the RX2 calibration valid; "
-					      "gnss_rx_gain=<dB> to change)\n", (long)g1);
-			}
-		}
-	}
-	gnss_pt_lcmv_enable(on);
-	/* Wait (at most ~1 ms) for the enable to cross into the sample domain
-	 * and back, so the report shows the new state. */
+	m = (int)param[0];
+	gnss_lcmv_set_mode(m);
+	/* wait (<= ~1 ms) for the enable to cross into the sample domain */
 	for(n = 0; n < 10000; n++)
-		if(((gnss_pt_read(GNSS_PT_REG_STATUS) & GNSS_PT_ST_LCMV_EN_SYNCED) != 0) == on)
+		if(((gnss_pt_read(GNSS_PT_REG_STATUS) & GNSS_PT_ST_LCMV_EN_SYNCED) != 0) == (m != 0))
 			break;
-	gnss_pt_lcmv_print_state();
+	gnss_lcmv_print();
 }
 
 /**************************************************************************//***
- * @brief LCMV CRPA. GPS look angle and jammer null angle, degrees from
- * broadside. theta > 0 means the wave reaches the RX2 antenna first.
+ * @brief GPS look angle, and optionally the jammer angle (mode 2), degrees
+ * from broadside. theta > 0 means the wave reaches the RX2 antenna first.
 *******************************************************************************/
 void set_gnss_lcmv_angles(double* param, char param_no)
 {
-	int gps, jam, d;
+	int gps, jam = 0, d;
 
-	if(param_no < 2) {
-		console_print("gnss_lcmv_angles= needs two angles: GPS jammer, e.g. gnss_lcmv_angles=10 40\n");
+	if(param_no < 1) {
+		console_print("gnss_lcmv_angles= needs the GPS angle, optionally the jammer angle, "
+			      "e.g. gnss_lcmv_angles=0 or gnss_lcmv_angles=0 40\n");
 		return;
 	}
 	gps = (int)(param[0] < 0 ? param[0] - 0.5 : param[0] + 0.5);
-	jam = (int)(param[1] < 0 ? param[1] - 0.5 : param[1] + 0.5);
+	if(param_no >= 2)
+		jam = (int)(param[1] < 0 ? param[1] - 0.5 : param[1] + 0.5);
 	if(gps < -90 || gps > 90 || jam < -90 || jam > 90) {
 		console_print("gnss_lcmv_angles: angles must be -90..90 deg\n");
 		return;
 	}
-	d = gps - jam;
-	if(d < 0) d = -d;
-	if(d < 3)
-		console_print("gnss_lcmv_angles: WARNING GPS and jammer only %d deg apart; "
-			      "the GPS gain cannot be held (needs >= 3 deg)\n", (long)d);
-	gnss_pt_lcmv_set_angles(gps, jam);
-	gnss_pt_lcmv_print_state();
+	if(param_no >= 2) {
+		d = gps - jam;
+		if(d < 0) d = -d;
+		if(d < 3)
+			console_print("gnss_lcmv_angles: WARNING GPS and jammer only %d deg apart; "
+				      "the GPS gain cannot be held (needs >= 3 deg)\n", (long)d);
+		gnss_lcmv_set_jam_angle(jam);
+	}
+	gnss_lcmv_set_gps_angle(gps);
+	gnss_lcmv_print();
 }
 
-/**************************************************************************//***
- * @brief LCMV CRPA. Enforcement value eps of PIER C 2008 eq. (9): w^H a_J = eps.
- * 0 is the deepest null; the paper uses small values such as 0.001.
-*******************************************************************************/
 void set_gnss_lcmv_eps(double* param, char param_no)
 {
 	if(param_no < 1 || param[0] < 0.0 || param[0] > 0.5) {
 		console_print("gnss_lcmv_eps= needs a value from 0 to 0.5, e.g. gnss_lcmv_eps=0.001\n");
 		return;
 	}
-	gnss_pt_lcmv_set_eps((float)param[0]);
-	gnss_pt_lcmv_print_state();
+	gnss_lcmv_set_eps(param[0]);
+	gnss_lcmv_print();
 }
 
-/**************************************************************************//***
- * @brief LCMV CRPA. RX2 gain/phase correction c = re + j*im (Q2.14 in the
- * hardware), as printed by Tools/lcmv_rx2_cal.py. 1 0 removes it.
-*******************************************************************************/
 void set_gnss_lcmv_cal(double* param, char param_no)
 {
 	if(param_no < 2 || param[0] <= -2.0 || param[0] >= 2.0 ||
@@ -1549,8 +1480,8 @@ void set_gnss_lcmv_cal(double* param, char param_no)
 		console_print("gnss_lcmv_cal= needs re im, each between -2 and 2, e.g. gnss_lcmv_cal=1 0\n");
 		return;
 	}
-	gnss_pt_lcmv_set_rx2_cal((float)param[0], (float)param[1]);
-	gnss_pt_lcmv_print_state();
+	gnss_lcmv_set_cal(param[0], param[1]);
+	gnss_lcmv_print();
 }
 
 /**************************************************************************//***

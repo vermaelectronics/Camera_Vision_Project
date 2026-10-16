@@ -165,6 +165,9 @@ if {[file exists $ld]} {
 app config -name $app_name -add define-compiler-symbols XILINX_PLATFORM
 app config -name $app_name -add define-compiler-symbols ANTSDR_E310
 app config -name $app_name -add include-path $fw_src
+# libm: the PS LCMV solver (lcmv_math.c, gnss_lcmv_auto.c) uses sqrt/log10/
+# atan2/asin/lrint. The standalone template links only -lxil -lgcc -lc.
+app config -name $app_name -add libraries m
 
 puts "SW_STAGE: building"
 if {[catch {app build -name $app_name} err]} {

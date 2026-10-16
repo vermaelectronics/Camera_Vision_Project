@@ -54,6 +54,13 @@
 //                                                        angle, null on the
 //                                                        jammer angle)
 //                                                    0 = ch0 TX carries RX1
+//                                    [5]  lcmv_sw    weight source:
+//                                                    1 = PS solves the paper's
+//                                                        w = R^-1 C (C^H R^-1 C)^-1 f
+//                                                        from the measured
+//                                                        covariance (0x90..0xA0)
+//                                                        and writes 0x80..0x8C
+//                                                    0 = PL angle solver
 //                                    [8]  cnt_clear  1 = hold counters cleared
 //    0x10    STATUS          RO      [0]  adc_enable_i0   [1]  adc_enable_q0
 //                                    [2]  dac_enable_i0   [3]  dac_enable_q0
@@ -66,6 +73,7 @@
 //                                         ch0 (lcmv_en & weights valid)
 //                                    [22] lcmv_sat_sticky: an LCMV output
 //                                         sample was clipped to 12 bits
+//                                    [23] lcmv_sw (as seen in the clk domain)
 //
 //            READ [2]/[3] CAREFULLY. dac_enable_* is NOT an enable this block
 //            drives, and it is NOT derived from the valid strobes. It is a
@@ -117,10 +125,20 @@
 //    0x60    LCMV_W2_IM      RO
 //    0x64    LCMV_STATUS     RO      [0] lcmv_en [1] weights_valid
 //                                    [2] solver busy [3] sat_sticky
+//                                    [4] lcmv_sw (sample domain)
 //    0x68    LCMV_UPDATES    RO      LCMV weight sets computed
 //    0x6C    LCMV_SAT_COUNT  RO      LCMV output samples clipped
 //    0x70..  CRPA_COEF[12..15] RW    reserved; stored and returned, no logic
 //                                    consumes them.
+//    0x80    LCMV_SW_W1_RE   RW      PS weights, Q16.16 (bits [24:0] used,
+//    0x84    LCMV_SW_W1_IM   RW      i.e. |w| < 128), final beamformer weights
+//    0x88    LCMV_SW_W2_RE   RW      with the RX2 calibration included.
+//    0x8C    LCMV_SW_W2_IM   RW      Writing 0x8C COMMITS all four atomically.
+//    0x90    COV_R11         RO      covariance block average, Q.4 LSB^2
+//    0x94    COV_R22         RO        (raw ADC samples, 4096-pair blocks,
+//    0x98    COV_R12_RE      RO         R12 = E[x1 conj(x2)], signed)
+//    0x9C    COV_R12_IM      RO
+//    0xA0    COV_BLOCKS      RO      covariance blocks completed
 //
 //    LCMV (v3.0): R. Li, X. Zhao, X. W. Shi, "Derivative Constrained Robust
 //    LCMV Beamforming Algorithm", PIER C vol. 4, 2008, eq. (9), look +
@@ -206,7 +224,10 @@ module gnss_passthrough #(
   // reports which of the two behaviours its bitstream actually has.
   // v3.0 -- LCMV CRPA build: 2-element LCMV beamformer (CONTROL[4],
   //         registers 0x40/0x44, 0x4C-0x6C) on TX ch0. No PL-NPI / PI core.
-  localparam [31:0] CORE_VERSION = 32'h00030000;   // v3.0
+  // v3.1 -- adds the 2x2 covariance estimator (0x90..0xA0) and PS-computed
+  //         weights (CONTROL[5], 0x80..0x8C): the full paper formula
+  //         w = R^-1 C (C^H R^-1 C)^-1 f is solved on the ARM.
+  localparam [31:0] CORE_VERSION = 32'h00030001;   // v3.1
   localparam        AW           = FIFO_ADDR_WIDTH;
 
   // ==========================================================================
@@ -281,6 +302,11 @@ module gnss_passthrough #(
   reg  [15:0] reg_lcmv_jam = 16'd0;                   // 0x44
   reg  [15:0] reg_lcmv_eps = 16'd0;                   // 0x4C
   reg  [31:0] reg_lcmv_cal = LCMV_CAL_ONE;            // 0x50
+  // PS weights: staging registers, committed together by the 0x8C write.
+  reg  [31:0] reg_sw_w1r = 32'h0001_0000, reg_sw_w1i = 32'd0;   // 0x80, 0x84
+  reg  [31:0] reg_sw_w2r = 32'd0,         reg_sw_w2i = 32'd0;   // 0x88, 0x8C
+  reg  [99:0] reg_sw_commit = {75'd0, 25'sd65536};             // {w2i,w2r,w1i,w1r}
+  reg         reg_sw_seq    = 1'b0;
 
   integer ci;
   initial for (ci = 0; ci < 16; ci = ci + 1) crpa_coef[ci] = 32'd0;
@@ -293,6 +319,10 @@ module gnss_passthrough #(
       reg_lcmv_jam  <= 16'd0;
       reg_lcmv_eps  <= 16'd0;
       reg_lcmv_cal  <= LCMV_CAL_ONE;
+      reg_sw_w1r <= 32'h0001_0000; reg_sw_w1i <= 32'd0;
+      reg_sw_w2r <= 32'd0;         reg_sw_w2i <= 32'd0;
+      reg_sw_commit <= {75'd0, 25'sd65536};
+      reg_sw_seq    <= 1'b0;
     end else if (reg_wr) begin
       case (reg_waddr)
         12'h002: reg_scratch <= s_axi_wdata;   // 0x08
@@ -301,6 +331,15 @@ module gnss_passthrough #(
         12'h011: reg_lcmv_jam  <= s_axi_wdata[15:0];  // 0x44
         12'h013: reg_lcmv_eps  <= s_axi_wdata[15:0];  // 0x4C
         12'h014: reg_lcmv_cal  <= s_axi_wdata;        // 0x50
+        12'h020: reg_sw_w1r    <= s_axi_wdata;        // 0x80
+        12'h021: reg_sw_w1i    <= s_axi_wdata;        // 0x84
+        12'h022: reg_sw_w2r    <= s_axi_wdata;        // 0x88
+        12'h023: begin                                // 0x8C: commit
+          reg_sw_w2i    <= s_axi_wdata;
+          reg_sw_commit <= {s_axi_wdata[24:0], reg_sw_w2r[24:0],
+                            reg_sw_w1i[24:0],  reg_sw_w1r[24:0]};
+          reg_sw_seq    <= ~reg_sw_seq;
+        end
         default: ;
       endcase
       if (reg_waddr >= 12'h010 && reg_waddr <= 12'h01F)   // 0x40..0x7C
@@ -312,6 +351,7 @@ module gnss_passthrough #(
   wire [31:0] v_status, v_rx_cnt0, v_tx_cnt0, v_ovf_cnt, v_unf_cnt;
   wire [31:0] v_rx_snap0, v_tx_snap0, v_level, v_rx_cnt1, v_tx_cnt1, v_rx_snap1;
   wire [31:0] v_lw1r, v_lw1i, v_lw2r, v_lw2i, v_lst, v_lupd, v_lsat;
+  wire [31:0] v_c11, v_c22, v_c12r, v_c12i, v_cblk;
 
   // Read data is captured on the SAME edge that accepts the address, using the
   // live s_axi_araddr rather than the registered copy.
@@ -353,6 +393,15 @@ module gnss_passthrough #(
       12'h019: axi_rdata <= v_lst;                                    // 0x64
       12'h01A: axi_rdata <= v_lupd;                                   // 0x68
       12'h01B: axi_rdata <= v_lsat;                                   // 0x6C
+      12'h020: axi_rdata <= reg_sw_w1r;                               // 0x80
+      12'h021: axi_rdata <= reg_sw_w1i;                               // 0x84
+      12'h022: axi_rdata <= reg_sw_w2r;                               // 0x88
+      12'h023: axi_rdata <= reg_sw_w2i;                               // 0x8C
+      12'h024: axi_rdata <= v_c11;                                    // 0x90
+      12'h025: axi_rdata <= v_c22;                                    // 0x94
+      12'h026: axi_rdata <= v_c12r;                                   // 0x98
+      12'h027: axi_rdata <= v_c12i;                                   // 0x9C
+      12'h028: axi_rdata <= v_cblk;                                   // 0xA0
       12'h01C, 12'h01D, 12'h01E, 12'h01F:
                axi_rdata <= crpa_coef[s_axi_araddr[5:2]];
       default: axi_rdata <= 32'd0;
@@ -379,6 +428,7 @@ module gnss_passthrough #(
   wire swap_iq   = ctrl_sync[2];
   wire ch1_copy  = ctrl_sync[3];
   wire lcmv_en   = ctrl_sync[4];
+  wire lcmv_sw   = ctrl_sync[5];
   wire cnt_clear = ctrl_sync[8];
 
   // LCMV settings, same "*ctrl_meta" synchroniser pattern (and therefore the
@@ -404,6 +454,22 @@ module gnss_passthrough #(
   wire        [15:0] lcmv_eps   = lcmv_cfg[47:32];
   wire signed [15:0] lcmv_cal_r = lcmv_cfg[63:48];
   wire signed [15:0] lcmv_cal_i = lcmv_cfg[79:64];
+
+  // PS weights: same synchroniser + stability filter. The commit word and its
+  // sequence bit change together on the AXI side; a set is only used once all
+  // 101 bits have been stable for two clocks, so it is never torn.
+  (* ASYNC_REG = "TRUE" *) reg [100:0] lcmv_sw_ctrl_meta = {1'b0, 75'd0, 25'sd65536};
+  (* ASYNC_REG = "TRUE" *) reg [100:0] lcmv_sw_ctrl_sync = {1'b0, 75'd0, 25'sd65536};
+  reg [100:0] lcmv_sw_prev = {1'b0, 75'd0, 25'sd65536};
+  reg [100:0] lcmv_sw_cfg  = {1'b0, 75'd0, 25'sd65536};
+
+  always @(posedge clk) begin
+    lcmv_sw_ctrl_meta <= {reg_sw_seq, reg_sw_commit};
+    lcmv_sw_ctrl_sync <= lcmv_sw_ctrl_meta;
+    lcmv_sw_prev      <= lcmv_sw_ctrl_sync;
+    if (lcmv_sw_ctrl_sync == lcmv_sw_prev)
+      lcmv_sw_cfg <= lcmv_sw_ctrl_sync;
+  end
 
   // ==========================================================================
   //  Elastic buffer (one per channel)
@@ -488,6 +554,12 @@ module gnss_passthrough #(
     .eps           (lcmv_eps),
     .cal_re        (lcmv_cal_r),
     .cal_im        (lcmv_cal_i),
+    .sw_mode       (lcmv_sw),
+    .sw_seq        (lcmv_sw_cfg[100]),
+    .sw_w1_re      (lcmv_sw_cfg[24:0]),
+    .sw_w1_im      (lcmv_sw_cfg[49:25]),
+    .sw_w2_re      (lcmv_sw_cfg[74:50]),
+    .sw_w2_im      (lcmv_sw_cfg[99:75]),
     .in_valid      (adc_valid_i0 & adc_valid_i1 & adc_enable_i0 & adc_enable_i1),
     .x1_re         (adc_data_i0[11:0]),
     .x1_im         (adc_data_q0[11:0]),
@@ -504,6 +576,26 @@ module gnss_passthrough #(
     .w1_im         (lcmv_w1_im),
     .w2_re         (lcmv_w2_re),
     .w2_im         (lcmv_w2_im)
+  );
+
+  // ---- 2x2 covariance R = E[x x^H] of the raw array snapshots -------------
+  //  Runs continuously (also with the LCMV off), so the PS always has the
+  //  current R: for the LCMV weights and for jammer detection.
+  wire [31:0] cov_r11, cov_r22, cov_r12r, cov_r12i, cov_blocks;
+
+  crpa_cov_2ch #(.LOG2N(12)) u_cov (
+    .clk      (clk),
+    .rst      (rst),
+    .in_valid (adc_valid_i0 & adc_valid_i1 & adc_enable_i0 & adc_enable_i1),
+    .x1_re    (adc_data_i0[11:0]),
+    .x1_im    (adc_data_q0[11:0]),
+    .x2_re    (adc_data_i1[11:0]),
+    .x2_im    (adc_data_q1[11:0]),
+    .r11      (cov_r11),
+    .r22      (cov_r22),
+    .r12_re   (cov_r12r),
+    .r12_im   (cov_r12i),
+    .blocks   (cov_blocks)
   );
 
   reg [LCMV_LATENCY-1:0] lcmv_use_d = {LCMV_LATENCY{1'b0}};
@@ -656,7 +748,7 @@ module gnss_passthrough #(
   end
 
   wire [31:0] status_w;
-  assign status_w = { 9'd0, lcmv_sat_sticky, 2'd0, lcmv_active, 1'b0,
+  assign status_w = { 8'd0, lcmv_sw, lcmv_sat_sticky, 2'd0, lcmv_active, 1'b0,
                       lcmv_en, pass_en,
                       6'd0, unf_sticky, ovf_sticky,
                       full1, empty1, full0, empty0,
@@ -681,6 +773,7 @@ module gnss_passthrough #(
   reg  [31:0] cap_status, cap_rx0, cap_tx0, cap_ovf, cap_unf;
   reg  [31:0] cap_rxs0, cap_txs0, cap_lvl, cap_rx1, cap_tx1, cap_rxs1;
   reg  [31:0] cap_lw1r, cap_lw1i, cap_lw2r, cap_lw2i, cap_lst, cap_lupd, cap_lsat;
+  reg  [31:0] cap_c11, cap_c22, cap_c12r, cap_c12i, cap_cblk;
 
   always @(posedge clk) begin
     cap_div <= cap_div + 1'b1;
@@ -700,9 +793,14 @@ module gnss_passthrough #(
       cap_lw1i   <= {{7{lcmv_w1_im[24]}}, lcmv_w1_im};
       cap_lw2r   <= {{7{lcmv_w2_re[24]}}, lcmv_w2_re};
       cap_lw2i   <= {{7{lcmv_w2_im[24]}}, lcmv_w2_im};
-      cap_lst    <= {28'd0, lcmv_sat_sticky, lcmv_busy, lcmv_wvalid, lcmv_en};
+      cap_lst    <= {27'd0, lcmv_sw, lcmv_sat_sticky, lcmv_busy, lcmv_wvalid, lcmv_en};
       cap_lupd   <= lcmv_updates;
       cap_lsat   <= lcmv_sat_cnt;
+      cap_c11    <= cov_r11;      // the five covariance words change on the
+      cap_c22    <= cov_r22;      // same clock, so this capture is coherent
+      cap_c12r   <= cov_r12r;
+      cap_c12i   <= cov_r12i;
+      cap_cblk   <= cov_blocks;
       cap_toggle <= ~cap_toggle;
     end
   end
@@ -716,6 +814,7 @@ module gnss_passthrough #(
   reg [31:0] h_lvl = 32'd0, h_rx1 = 32'd0, h_tx1 = 32'd0, h_rxs1 = 32'd0;
   reg [31:0] h_lw1r = 32'd0, h_lw1i = 32'd0, h_lw2r = 32'd0, h_lw2i = 32'd0;
   reg [31:0] h_lst = 32'd0, h_lupd = 32'd0, h_lsat = 32'd0;
+  reg [31:0] h_c11 = 32'd0, h_c22 = 32'd0, h_c12r = 32'd0, h_c12i = 32'd0, h_cblk = 32'd0;
 
   always @(posedge s_axi_aclk) begin
     tog_meta <= cap_toggle;
@@ -740,6 +839,11 @@ module gnss_passthrough #(
       h_lst    <= cap_lst;
       h_lupd   <= cap_lupd;
       h_lsat   <= cap_lsat;
+      h_c11    <= cap_c11;
+      h_c22    <= cap_c22;
+      h_c12r   <= cap_c12r;
+      h_c12i   <= cap_c12i;
+      h_cblk   <= cap_cblk;
     end
   end
 
@@ -761,5 +865,10 @@ module gnss_passthrough #(
   assign v_lst      = h_lst;
   assign v_lupd     = h_lupd;
   assign v_lsat     = h_lsat;
+  assign v_c11      = h_c11;
+  assign v_c22      = h_c22;
+  assign v_c12r     = h_c12r;
+  assign v_c12i     = h_c12i;
+  assign v_cblk     = h_cblk;
 
 endmodule

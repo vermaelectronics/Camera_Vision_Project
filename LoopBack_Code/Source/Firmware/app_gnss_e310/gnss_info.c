@@ -176,12 +176,13 @@ static void info_hardware(struct ad9361_rf_phy *phy)
     console_print("   base address    : 0x43C00000, 4 kB aperture\n");
     console_print("   ID register     : 0x%08x  (expect 0x47435031, ASCII 'GCP1')\n",
                   (long)gnss_pt_read(GNSS_PT_REG_ID));
-    console_print("   VERSION         : 0x%08x  (expect 0x00030000 = v3.0)\n",
+    console_print("   VERSION         : 0x%08x  (expect 0x00030001 = v3.1)\n",
                   (long)gnss_pt_read(GNSS_PT_REG_VERSION));
     console_print("     v1.0 is the original identity passthrough and transmits\n");
     console_print("     24 dB LOW. v1.1 adds the RX->TX sample alignment stage.\n");
     console_print("     v3.0 is the LCMV CRPA build: 2-element LCMV beamformer on\n");
-    console_print("     TX1 (CONTROL[4], gnss_lcmv=).\n");
+    console_print("     TX1 (CONTROL[4], gnss_lcmv=). v3.1 adds the covariance\n");
+    console_print("     estimator: the ARM solves w = R^-1 C (C^H R^-1 C)^-1 f.\n");
     rule();
 
     console_print(" RF FRONT END                                            [cfg]\n");
@@ -536,7 +537,7 @@ static void info_registers(void)
     console_print("   0x08  SCRATCH         RW  read/write test\n");
     console_print("   0x0C  CONTROL         RW  [0] pass_en  [1] mute\n");
     console_print("                             [2] swap_iq  [3] ch1_copy\n");
-    console_print("                             [4] lcmv_en\n");
+    console_print("                             [4] lcmv_en  [5] lcmv_sw (PS weights)\n");
     console_print("                             [8] cnt_clear\n");
     console_print("   0x10  STATUS          RO  [0] adc_enable_i0  [1] adc_enable_q0\n");
     console_print("                             [2] dac_enable_i0  [3] dac_enable_q0\n");
@@ -548,6 +549,7 @@ static void info_registers(void)
     console_print("                            [17] lcmv_en in the sample domain\n");
     console_print("                            [19] LCMV drives TX1 now\n");
     console_print("                            [22] LCMV output clipped (sticky)\n");
+    console_print("                            [23] lcmv_sw in the sample domain\n");
     console_print("   0x14  RX_COUNT_CH0    RO\n");
     console_print("   0x18  TX_COUNT_CH0    RO\n");
     console_print("   0x1C  OVERFLOW_COUNT  RO\n");
@@ -569,6 +571,10 @@ static void info_registers(void)
     console_print("   0x68  LCMV_UPDATES    RO  weight sets computed\n");
     console_print("   0x6C  LCMV_SAT_COUNT  RO  output samples clipped\n");
     console_print("   0x70  CRPA_COEF12..15 RW  0x70-0x7C, stored but unused.\n");
+    console_print("   0x80  LCMV_SW_W1/W2   RW  0x80-0x8C PS weights Q16.16, 0x8C commits\n");
+    console_print("   0x90  COV_R11/R22     RO  0x90/0x94 covariance, Q.4 LSB^2\n");
+    console_print("   0x98  COV_R12 RE/IM   RO  0x98/0x9C E[x1 conj(x2)]\n");
+    console_print("   0xA0  COV_BLOCKS      RO  4096-pair blocks completed\n");
     rule();
     console_print(" STATUS BITS [2] AND [3] ARE THE IMPORTANT ONES.\n");
     console_print("   They are axi_ad9361's read-back of (dac_data_sel == 4'h2),\n");
@@ -759,14 +765,14 @@ static void info_quickstart(void)
     console_print("   gnss_ddr_tx=1 / =0          DDR round trip / stop\n");
     console_print("   tx1_attenuation=N           mdB. BIGGER = QUIETER.\n");
     console_print("   gnss_tx? / gnss_status?     state, read back from hardware\n");
-    console_print("   gnss_rx_gain?               RX1/RX2 gain and mode (matched?)\n");
-    console_print("   gnss_rx_gain=<dB>           same manual gain on RX1+RX2\n");
-    console_print("   gnss_rx_agc=0 / =1          manual matched / AD9361 AGC\n");
-    console_print("   gnss_lcmv_angles=G J        LCMV GPS look / jammer null [deg]\n");
-    console_print("   gnss_lcmv=1 / gnss_lcmv=0   LCMV CRPA on TX1 / off\n");
-    console_print("   gnss_lcmv_eps=E             LCMV gain left at jammer, 0 = null\n");
-    console_print("   gnss_lcmv_cal=RE IM         RX2 calibration (lcmv_rx2_cal.py)\n");
-    console_print("   gnss_lcmv?                  LCMV state, weights, clipping\n");
+    console_print("   gnss_lcmv=1                 AUTO: covariance LCMV, null follows\n");
+    console_print("                               the jammer (default at boot)\n");
+    console_print("   gnss_lcmv=2                 ANGLE: look + null at a known jammer\n");
+    console_print("   gnss_lcmv=0                 off, TX1 = RX1\n");
+    console_print("   gnss_lcmv_angles=G [J]      GPS look [, jammer] angle [deg]\n");
+    console_print("   gnss_lcmv?                  mode, covariance, jammer, null, weights\n");
+    console_print("   advanced (help?): gnss_lcmv_eps= gnss_lcmv_cal= gnss_rx_gain=\n");
+    console_print("                     gnss_rx_agc= gnss_adc? gnss_adc_tune=1\n");
     console_print("   ?                           this menu\n");
     console_print("   help?                       every command (long)\n");
 }
@@ -807,16 +813,12 @@ void gnss_info_menu(void)
     console_print("    8   Cautions            what will bite you\n");
     console_print("    9   Quick start         bringing this up on a new bench\n");
     console_print("\n");
-    console_print("  CONTROL\n");
-    console_print("    gnss_tx=1 / gnss_tx=0       live retransmit / ABORT\n");
-    console_print("    gnss_ddr_tx=1 / =0         DDR round trip / stop\n");
-    console_print("    tx1_attenuation=N          mdB. BIGGER = QUIETER.\n");
-    console_print("                               89750 quietest, 70000 known good\n");
-    console_print("    gnss_lcmv_angles=10 40     LCMV: GPS look 10 deg, jammer null 40 deg\n");
-    console_print("    gnss_lcmv=1 / gnss_lcmv=0  LCMV CRPA on TX1 / off\n");
-    console_print("    gnss_rx_gain=40            same manual gain on RX1+RX2 (LCMV)\n");
-    console_print("    gnss_tx? gnss_status? gnss_lcmv?    read back\n");
-    console_print("    gnss_adc? / gnss_adc_tune=1  RX interface check / re-tune\n");
+    console_print("  CONTROL   (LCMV, RX gain and RX link run AUTOMATICALLY)\n");
+    console_print("    gnss_tx=1 / gnss_tx=0      transmit on TX1 / ABORT\n");
+    console_print("    tx1_attenuation=N          mdB, BIGGER = QUIETER (89750 quietest)\n");
+    console_print("    gnss_lcmv=1 / 2 / 0        AUTO (default) / known jammer angle / off\n");
+    console_print("    gnss_lcmv_angles=G [J]     GPS look angle [, jammer angle for mode 2]\n");
+    console_print("    gnss_lcmv?  gnss_status?   read back\n");
     console_print("\n");
     console_print("    ?        this menu            help?    every command (long)\n");
     console_print("===============================================================\n");

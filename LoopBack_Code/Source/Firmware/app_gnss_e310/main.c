@@ -71,6 +71,7 @@
 #include "gnss_passthrough.h"
 #include "gnss_capture.h"
 #include "gnss_info.h"   /* GNSS-CRPA MOD-10 */
+#include "gnss_lcmv_auto.h"
 
 #ifdef IIO_SUPPORT
 
@@ -591,7 +592,7 @@ int main(void)
 	Xil_DCacheEnable();
 	/* First line on the console: proves the FSBL handed over and the UART
 	 * works, before anything (AD9361 SPI, DMA) can hang. */
-	printf("\n\rgnss: firmware started (gnss_passthrough v2.2 with LCMV)\n\r");
+	printf("\n\rgnss: firmware started (gnss_passthrough v3.1, covariance LCMV)\n\r");
 	default_init_param.spi_param.extra = &xil_spi_param;
 	default_init_param.spi_param.platform_ops = &xil_spi_ops;
 #endif
@@ -1179,6 +1180,10 @@ int main(void)
 #ifdef CONSOLE_COMMANDS
 	/* GNSS-CRPA MOD-9/MOD-10: show the information menu at start-up, not the
 	 * full ~60-line vendor command dump. `help?` still prints everything. */
+	/* LCMV CRPA: everything automatic from here (RX link check and re-tune,
+	 * covariance LCMV in AUTO mode, matched RX gain). gnss_lcmv_auto.c */
+	gnss_lcmv_init(ad9361_phy);
+
 	gnss_info_menu();
 
 	while(1)

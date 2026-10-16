@@ -84,6 +84,16 @@
 #define GNSS_PT_REG_LCMV_UPDATES    0x68U   /* RO  weight sets computed         */
 #define GNSS_PT_REG_LCMV_SAT_COUNT  0x6CU   /* RO  output samples clipped       */
 #define GNSS_PT_LCMV_CAL_ONE        0x4000  /* 1.0 in Q2.14                     */
+/* v3.1: PS-computed weights (paper formula from the covariance) */
+#define GNSS_PT_REG_SW_W1_RE        0x80U   /* RW  Q16.16, |w| < 128            */
+#define GNSS_PT_REG_SW_W1_IM        0x84U
+#define GNSS_PT_REG_SW_W2_RE        0x88U   /* includes the RX2 calibration     */
+#define GNSS_PT_REG_SW_W2_IM        0x8CU   /* writing this COMMITS all four    */
+#define GNSS_PT_REG_COV_R11         0x90U   /* RO  covariance, Q.4 LSB^2        */
+#define GNSS_PT_REG_COV_R22         0x94U
+#define GNSS_PT_REG_COV_R12_RE      0x98U   /* RO  E[x1 conj(x2)], signed       */
+#define GNSS_PT_REG_COV_R12_IM      0x9CU
+#define GNSS_PT_REG_COV_BLOCKS      0xA0U   /* RO  4096-pair blocks completed   */
 
 /* ---- expected identity --------------------------------------------------- */
 #define GNSS_PT_EXPECTED_ID         0x47435031U
@@ -92,8 +102,10 @@
  *       the AD9361 DAC consumes [15:4]). A board reporting 1.0 is running a
  *       bitstream whose TX output is 24 dB low with 4 bits discarded. */
 /* 3.0 = LCMV CRPA build: 2-element LCMV beamformer on TX1 (CONTROL[4],
- *       registers 0x40/0x44, 0x4C..0x6C). No PL-NPI / PI core. */
-#define GNSS_PT_EXPECTED_VERSION    0x00030000U
+ *       registers 0x40/0x44, 0x4C..0x6C). No PL-NPI / PI core.
+ * 3.1 = adds the covariance estimator (0x90..0xA0) and PS-computed weights
+ *       (CONTROL[5], 0x80..0x8C). */
+#define GNSS_PT_EXPECTED_VERSION    0x00030001U
 
 /* ---- CONTROL bits -------------------------------------------------------- */
 #define GNSS_PT_CTRL_PASS_EN        (1U << 0)  /* 1 = RX->TX passthrough      */
@@ -101,6 +113,7 @@
 #define GNSS_PT_CTRL_SWAP_IQ        (1U << 2)
 #define GNSS_PT_CTRL_CH1_COPY       (1U << 3)  /* ch1 TX fed from ch0         */
 #define GNSS_PT_CTRL_LCMV_EN        (1U << 4)  /* ch0 TX = LCMV(RX1, RX2)     */
+#define GNSS_PT_CTRL_LCMV_SW        (1U << 5)  /* weights from the PS (cov.)  */
 #define GNSS_PT_CTRL_CNT_CLEAR      (1U << 8)  /* held, not self-clearing     */
 
 /* ---- STATUS bits --------------------------------------------------------- */
@@ -118,6 +131,7 @@
 #define GNSS_PT_ST_LCMV_EN_SYNCED   (1U << 17)
 #define GNSS_PT_ST_LCMV_ACTIVE      (1U << 19) /* LCMV drives ch0 TX now      */
 #define GNSS_PT_ST_LCMV_SAT         (1U << 22) /* LCMV output clipped, sticky */
+#define GNSS_PT_ST_LCMV_SW          (1U << 23) /* PS weights in use           */
 
 /* ---- return codes -------------------------------------------------------- */
 #define GNSS_PT_OK                   0

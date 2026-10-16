@@ -1,5 +1,5 @@
 T1 ID      = 0x47435031
-T1 VERSION = 0x00030000
+T1 VERSION = 0x00030001
 T1 RX2_CAL reset = 0x00004000
 T2 STATUS = 0x000b000f  (pass_en=1 lcmv_en=1 lcmv_active=1)
 T2 weights  w1 = 0.50000 +0.55098j   w2 = 0.71333 -0.21156j
@@ -14,7 +14,13 @@ LCMV_STATUS = 0x0000000f
 LCMV_SAT_COUNT = 3
 T6 STATUS = 0x0041000f  (lcmv_en=0 lcmv_active=0)
 T6 LCMV off again: TX0/RX1 power   0.00 dB, nibble errors 0
+T7 covariance blocks 8..8 (coherent read: 1)
+     R11 322062 R22 322585 R12 -139297-290259j LSB^2, JNR 32.4 dB, w1 0.50045+0.55022j w2 0.71253-0.21115j
+T7 covariance LCMV (no jammer angle): residual  -45.3 dB re RX1, tone gain  0.01 dB, nibble errors 0
+     R11 327697 R22 328024 R12 79358+317568j LSB^2, JNR 30.9 dB, w1 0.50019-0.36754j w2 0.23655+0.57353j
+T8 jammer moved to -25 deg, re-solved from R: residual  -46.8 dB, tone gain  0.01 dB
+LCMV_UPDATES (PS weight sets) = 1209
 OVERFLOW_COUNT = 0
 UNDERFLOW_COUNT = 0
 PASS
-tb_gnss_passthrough_lcmv.v:326: $finish called at 885905000 (1ps)
+tb_gnss_passthrough_lcmv.v:430: $finish called at 1656045000 (1ps)

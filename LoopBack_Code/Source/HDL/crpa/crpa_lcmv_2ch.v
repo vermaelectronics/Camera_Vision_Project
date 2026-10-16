@@ -17,6 +17,13 @@
 //    x1 = RX1 (adc ch0) is the reference element; for theta > 0 the wave
 //    reaches RX2 first (RX2 leads RX1 by pi*sin(theta)).
 //
+//  WEIGHT SOURCE
+//    sw_mode = 0 : angle solver in the PL (look + enforcement, w = C^-H f).
+//    sw_mode = 1 : weights computed by the PS from the measured covariance
+//                  (full paper formula w = R^-1 C (C^H R^-1 C)^-1 f, see
+//                  crpa_cov_2ch.v) and loaded through sw_w*; a new set is
+//                  taken atomically whenever sw_seq toggles.
+//
 //  OPERATION
 //    enable = 0 : weights_valid = 0, solver idle.
 //    enable = 1 : weights recomputed continuously from the latest angles
@@ -38,6 +45,13 @@ module crpa_lcmv_2ch (
   input         [15:0]     eps,          // Q0.16
   input  signed [15:0]     cal_re,       // RX2 calibration, Q2.14 (1.0 = 16384)
   input  signed [15:0]     cal_im,
+
+  input                    sw_mode,      // 1 = weights from the PS
+  input                    sw_seq,       // toggles on every new PS weight set
+  input  signed [24:0]     sw_w1_re,     // Q8.16, final beamformer weights
+  input  signed [24:0]     sw_w1_im,     //        (RX2 calibration included)
+  input  signed [24:0]     sw_w2_re,
+  input  signed [24:0]     sw_w2_im,
 
   input                    in_valid,
   input  signed [11:0]     x1_re,
@@ -66,6 +80,8 @@ module crpa_lcmv_2ch (
   localparam S_WGT   = 2'd2;
 
   reg [1:0] state;
+  reg       sw_seq_d;
+  reg       sw_have;                    // a PS weight set has been committed
   reg       steer_start;
   reg       wgt_start;
 
@@ -97,7 +113,7 @@ module crpa_lcmv_2ch (
 
   crpa_lcmv_weight_2ch u_weight (
     .clk   (clk),
-    .rst   (rst | ~enable),
+    .rst   (rst | ~enable | sw_mode),
     .start (wgt_start),
     .s_re  (gps_a2_i),
     .s_im  (gps_a2_q),
@@ -145,14 +161,30 @@ module crpa_lcmv_2ch (
       cal_im_work   <= 16'sd0;
       w1_re <= 25'sd65536; w1_im <= 25'sd0;
       w2_re <= 25'sd0;     w2_im <= 25'sd0;
+      sw_seq_d      <= 1'b0;
+      sw_have       <= 1'b0;
     end else begin
       steer_start <= 1'b0;
       wgt_start   <= 1'b0;
+      sw_seq_d    <= sw_seq;
+      if (sw_seq != sw_seq_d) sw_have <= 1'b1;
 
       if (!enable) begin
         state         <= S_IDLE;
         busy          <= 1'b0;
         weights_valid <= 1'b0;
+      end else if (sw_mode) begin
+        // PS-computed (covariance) weights: atomic load on every new set,
+        // and of the last committed set right after enable (the PS commits
+        // before it sets the enable).
+        state <= S_IDLE;
+        busy  <= 1'b0;
+        if (sw_seq != sw_seq_d || (sw_have && !weights_valid)) begin
+          w1_re <= sw_w1_re;  w1_im <= sw_w1_im;
+          w2_re <= sw_w2_re;  w2_im <= sw_w2_im;
+          weights_valid <= 1'b1;
+          update_count  <= update_count + 1'b1;
+        end
       end else begin
         case (state)
           // capture one consistent set of inputs per calculation
