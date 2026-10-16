@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 # ============================================================================
-#  setup_antsdr_lcmv.sh  --  create ~/AntSDR_LCMV from the downloaded zip
+#  setup_antsdr_lcmv.sh  --  create ~/Desktop/AntSDR_LCMV from the downloaded zip
 #
 #      bash ~/Downloads/setup_antsdr_lcmv.sh          # set up only
 #      BUILD=1 bash ~/Downloads/setup_antsdr_lcmv.sh  # set up, then build BOOT.BIN
 #
 #  Result:
-#      ~/AntSDR_LCMV/LoopBack_Code/            v2.0 sources (from the zip)
-#      ~/AntSDR_LCMV/LoopBack_Code/Vendor/     copied from your old tree (if found)
+#      ~/Desktop/AntSDR_LCMV/LoopBack_Code/            v2.0 sources (from the zip)
+#      ~/Desktop/AntSDR_LCMV/LoopBack_Code/Vendor/     copied from your old tree (if found)
 #                                              + ADI hdl_2023_r2 (fetched by build_all.sh)
-#      ~/AntSDR_LCMV/LoopBack_Code/Build/Boot/BOOT.BIN   (with BUILD=1)
+#      ~/Desktop/AntSDR_LCMV/LoopBack_Code/Build/Boot/BOOT.BIN   (with BUILD=1)
 #
 #  Overridable:
-#      DEST=~/AntSDR_LCMV
+#      DEST=~/Desktop/AntSDR_LCMV
 #      ZIP=~/Downloads/LoopBack_Code_LCMV_v2.zip    (default: newest match)
 #      OLD_VENDOR=~/Desktop/AntSDR2/LoopBack_Code/Vendor
 #      TOOL_VER=2023.2 (default) | 2026.1
@@ -21,7 +21,7 @@
 # ============================================================================
 set -euo pipefail
 
-DEST="${DEST:-$HOME/AntSDR_LCMV}"
+DEST="${DEST:-$HOME/Desktop/AntSDR_LCMV}"
 OLD_VENDOR="${OLD_VENDOR:-$HOME/Desktop/AntSDR2/LoopBack_Code/Vendor}"
 TOOL_VER="${TOOL_VER:-2023.2}"
 if [ "$TOOL_VER" = 2026.1 ]; then

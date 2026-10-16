@@ -1,6 +1,6 @@
 # Build LoopBack_Code (LCMV v2.0) up to BOOT.BIN — Vivado/Vitis 2023.2
 
-Host: Ubuntu 22.04 with **Vivado + Vitis 2023.2**. The zip is in `~/Downloads`, and the work folder is `~/AntSDR_LCMV`.
+Host: Ubuntu 22.04 with **Vivado + Vitis 2023.2**. The zip is in `~/Downloads`, and the work folder is `~/Desktop/AntSDR_LCMV`.
 (2026.1 is still supported: put `TOOL_VER=2026.1` in front of any command.)
 
 ## What 2023.2 changes compared with 2026.1
@@ -25,14 +25,14 @@ cd ~/Downloads
 unzip -o -j "$(ls -t LoopBack_Code_LCMV_v2*.zip | head -1)" \
       LoopBack_Code/Automation/setup_antsdr_lcmv.sh -d ~/Downloads
 bash ~/Downloads/setup_antsdr_lcmv.sh
-#   -> ~/AntSDR_LCMV/LoopBack_Code            (sources)
+#   -> ~/Desktop/AntSDR_LCMV/LoopBack_Code            (sources)
 #   -> copies ~/Desktop/AntSDR2/LoopBack_Code/Vendor if it exists (optional for 2023.2)
 
 # 0.2 find the Vitis 2023.2 settings file
 ls /tools/Xilinx/Vitis/2023.2/settings64.sh ~/Xilinx/Vitis/2023.2/settings64.sh 2>/dev/null
 export XILINX_SETTINGS=/tools/Xilinx/Vitis/2023.2/settings64.sh      # path printed above
 
-cd ~/AntSDR_LCMV/LoopBack_Code
+cd ~/Desktop/AntSDR_LCMV/LoopBack_Code
 ```
 
 ## Option A — one command
@@ -50,7 +50,7 @@ library stage on later runs.
 
 ### Step 1  Environment (every new terminal)
 ```bash
-cd ~/AntSDR_LCMV/LoopBack_Code
+cd ~/Desktop/AntSDR_LCMV/LoopBack_Code
 export XILINX_SETTINGS=/tools/Xilinx/Vitis/2023.2/settings64.sh
 source Automation/env.sh                  # prints vivado / xsct / bootgen paths
 mkdir -p Build/Logs Build/Bit Build/XSA Build/ELF Build/Boot
