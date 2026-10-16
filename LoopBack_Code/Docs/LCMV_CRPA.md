@@ -131,8 +131,16 @@ turns a −45 dB null into +2.7 dB.
 
 ## 5. Build
 
-The flow is the same as before. The IP must be repackaged because the stale
-`Build/ip_repo/gnss_passthrough` does not contain the LCMV.
+One command builds everything, from sources to `Build/Boot/BOOT.BIN`, on Linux with Vivado/Vitis 2026.1:
+
+```bash
+export XILINX_SETTINGS=/tools/Xilinx/2026.1/Vitis/settings64.sh   # your install path
+./Automation/build_all.sh              # bench build
+DEPLOY=1 ./Automation/build_all.sh     # SD deployment build (auto-TX at boot)
+```
+
+Logs are written to `Build/Logs/`. The manual steps the script performs are listed below.
+The IP must be repackaged because the stale `Build/ip_repo/gnss_passthrough` does not contain the LCMV.
 
 1. Package the IP: `vivado -mode batch -source Source/IP/gnss_passthrough/gnss_passthrough_ip.tcl -tclargs <abs>/Source <abs>/Build/ip_repo`.
    Expect `IP_PACKAGE_SELFCHECK: OK - LCMV CRPA sources packaged with the IP`.
