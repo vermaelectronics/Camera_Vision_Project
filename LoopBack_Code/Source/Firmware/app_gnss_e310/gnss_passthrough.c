@@ -96,27 +96,6 @@ void gnss_pt_clear_counters(void)
     gnss_pt_write(GNSS_PT_REG_CONTROL, c & ~GNSS_PT_CTRL_CNT_CLEAR);
 }
 
-void gnss_pt_set_npi(int enable)
-{
-    uint32_t c = gnss_pt_read(GNSS_PT_REG_CONTROL);
-    if (enable) { c |= GNSS_PT_CTRL_NPI_EN; }
-    else        { c &= ~GNSS_PT_CTRL_NPI_EN; }
-    gnss_pt_write(GNSS_PT_REG_CONTROL, c);
-}
-
-void gnss_pt_set_npi_gamma(uint32_t gamma)
-{
-    gnss_pt_write(GNSS_PT_REG_NPI_GAMMA, gamma);
-}
-
-void gnss_pt_set_npi_freeze(int freeze)
-{
-    uint32_t c = gnss_pt_read(GNSS_PT_REG_CONTROL);
-    if (freeze) { c |= GNSS_PT_CTRL_NPI_FREEZE; }
-    else        { c &= ~GNSS_PT_CTRL_NPI_FREEZE; }
-    gnss_pt_write(GNSS_PT_REG_CONTROL, c);
-}
-
 /* ---- LCMV CRPA ----------------------------------------------------------- */
 
 void gnss_pt_lcmv_enable(int enable)
@@ -211,7 +190,6 @@ void gnss_pt_lcmv_print_state(void)
     printf("\n--- LCMV CRPA (2 antennas, look + null) ---\n");
     printf("  enabled        : %s\n", s.enabled ? "yes" : "no");
     printf("  driving TX1    : %s\n", s.active ? "YES" :
-           (s.enabled && (sts & GNSS_PT_ST_NPI_EN_SYNCED)) ? "no (PL-NPI has priority, gnss_npi=0)" :
            (s.enabled && !(sts & GNSS_PT_ST_PASS_EN_SYNCED)) ? "no (passthrough off, gnss_tx=1)" : "no");
     printf("  gps / jam angle: %d / %d deg\n", s.gps_deg, s.jam_deg);
     lcmv_fmt(a, (int32_t)(gnss_pt_read(GNSS_PT_REG_LCMV_EPS) & 0xFFFFU), 16);
@@ -275,11 +253,6 @@ void gnss_pt_print_state(void)
     printf("  control        : 0x%08lx\n", (unsigned long)s.control);
     printf("  status         : 0x%08lx\n", (unsigned long)s.status);
     printf("  passthrough    : %s\n", s.passthrough_enabled ? "ON" : "off");
-    printf("  pl-npi         : %s%s, gamma=%lu, gain band=%lu\n",
-           (s.status & GNSS_PT_ST_NPI_EN_SYNCED) ? "ON" : "off",
-           (s.control & GNSS_PT_CTRL_NPI_FREEZE) ? " (weights frozen)" : "",
-           (unsigned long)gnss_pt_read(GNSS_PT_REG_NPI_GAMMA),
-           (unsigned long)((s.status >> GNSS_PT_ST_NPI_BAND_SHIFT) & GNSS_PT_ST_NPI_BAND_MASK));
     printf("  lcmv           : %s%s\n",
            (s.status & GNSS_PT_ST_LCMV_EN_SYNCED) ? "enabled" : "off",
            (s.status & GNSS_PT_ST_LCMV_ACTIVE) ? " (ACTIVE on TX1, see gnss_lcmv?)" : "");

@@ -6,14 +6,14 @@
 #      BUILD=1 bash ~/Downloads/setup_antsdr_lcmv.sh  # set up, then build BOOT.BIN
 #
 #  Result:
-#      ~/Desktop/AntSDR_LCMV/LoopBack_Code/            v2.0 sources (from the zip)
+#      ~/Desktop/AntSDR_LCMV/LoopBack_Code/            v3.0 sources (from the zip)
 #      ~/Desktop/AntSDR_LCMV/LoopBack_Code/Vendor/     copied from your old tree (if found)
 #                                              + ADI hdl_2023_r2 (fetched by build_all.sh)
 #      ~/Desktop/AntSDR_LCMV/LoopBack_Code/Build/Boot/BOOT.BIN   (with BUILD=1)
 #
 #  Overridable:
 #      DEST=~/Desktop/AntSDR_LCMV
-#      ZIP=~/Downloads/LoopBack_Code_LCMV_v2.zip    (default: newest match)
+#      ZIP=~/Downloads/LoopBack_Code_LCMV_v3.zip    (default: newest match)
 #      OLD_VENDOR=~/Desktop/AntSDR2/LoopBack_Code/Vendor
 #      TOOL_VER=2023.2 (default) | 2026.1
 #      XILINX_SETTINGS=/tools/Xilinx/Vitis/2023.2/settings64.sh
@@ -30,9 +30,9 @@ else
   XILINX_SETTINGS="${XILINX_SETTINGS:-/tools/Xilinx/Vitis/2023.2/settings64.sh}"
 fi
 
-# Newest download, so "LoopBack_Code_LCMV_v2 (1).zip" is found too.
+# Newest download, so "LoopBack_Code_LCMV_v3 (1).zip" is found too.
 if [ -z "${ZIP:-}" ]; then
-  ZIP="$(ls -t "$HOME"/Downloads/LoopBack_Code_LCMV_v2*.zip 2>/dev/null | head -1 || true)"
+  ZIP="$(ls -t "$HOME"/Downloads/LoopBack_Code_LCMV_v3*.zip 2>/dev/null | head -1 || true)"
 fi
 [ -n "$ZIP" ] && [ -f "$ZIP" ] || { echo "Zip not found in ~/Downloads (set ZIP=...)"; exit 2; }
 HAVE_OLD_VENDOR=0
@@ -54,7 +54,11 @@ echo "destination: $DEST"
 # 1. sources
 mkdir -p "$DEST"
 if [ -d "$DEST/LoopBack_Code" ]; then
-  echo "Existing $DEST/LoopBack_Code - updating sources, keeping Vendor/"
+  echo "Existing $DEST/LoopBack_Code - replacing Source/, keeping Vendor/"
+  # Source/ comes entirely from the zip. Clearing it first removes files an
+  # older package had and this one does not (e.g. the PL-NPI HLS core and
+  # gnss_npi_agc.c, which would otherwise still be compiled).
+  rm -rf "$DEST/LoopBack_Code/Source"
 fi
 unzip -q -o "$ZIP" -d "$DEST"
 ROOT="$DEST/LoopBack_Code"

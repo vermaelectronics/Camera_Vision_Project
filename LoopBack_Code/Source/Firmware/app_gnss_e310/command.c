@@ -50,7 +50,6 @@
 /* GNSS-CRPA MOD-6 */
 #include "gnss_l1.h"
 #include "gnss_passthrough.h"
-#include "gnss_npi_agc.h"
 /* GNSS-CRPA MOD-7 */
 #include "gnss_txdma.h"
 #include "axi_dmac.h"
@@ -130,17 +129,12 @@ command cmd_list[] = {
 	{"gnss_tx?", "Gets the GNSS L1 retransmit state.", "", get_gnss_tx},
 	{"gnss_tx=", "1 = retransmit RX1 on TX1, 0 = silence TX1.", "gnss_tx=0", set_gnss_tx},
 	{"gnss_status?", "Prints AD9361 and gnss_passthrough runtime state.", "", get_gnss_status},
-	/* PL-NPI power inversion in pl_npi_0 (bitstream v1.4+). */
-	{"gnss_npi?", "Gets the PL-NPI power-inversion state.", "", get_gnss_npi},
-	{"gnss_npi=", "1 = TX1 carries PL-NPI(RX1, RX2), 0 = TX1 carries RX1.", "gnss_npi=1", set_gnss_npi},
-	{"gnss_npi_gamma=", "Sets a FIXED PL-NPI gamma (>= 1); turns automatic gamma off.", "gnss_npi_gamma=100000000", set_gnss_npi_gamma},
-	{"gnss_npi_auto=", "1 = automatic gamma from the noise floor (default), 0 = fixed.", "gnss_npi_auto=1", set_gnss_npi_auto},
-	{"gnss_npi_k=", "0 = automatic k (default: 32 clean, 1 with jammer), 1..64 = fixed k.", "gnss_npi_k=0", set_gnss_npi_k},
-	{"gnss_rx_gain?", "Gets RX1/RX2 gain, mode, TX level hold and gamma.", "", get_gnss_rx_gain},
-	{"gnss_rx_gain=", "Sets RX1 AND RX2 to the same gain [dB] (also the auto reference).", "gnss_rx_gain=40", set_gnss_rx_gain},
-	{"gnss_rx_agc=", "0 = manual locked, 1 = AD9361 AGC per channel, 2 = matched auto (PL-NPI).", "gnss_rx_agc=2", set_gnss_rx_agc},
-	{"gnss_npi_freeze=", "1 = freeze the PL-NPI weights, 0 = adapt.", "gnss_npi_freeze=0", set_gnss_npi_freeze},
-	/* LCMV CRPA, 2 antennas (bitstream v2.2+). Angles come from software:
+	/* RX1 and RX2 at one manual gain: the LCMV null and the RX2 calibration
+	 * hold only while both channels have the same gain. */
+	{"gnss_rx_gain?", "Gets RX1/RX2 gain control mode and gain.", "", get_gnss_rx_gain},
+	{"gnss_rx_gain=", "Sets RX1 AND RX2 to the same MANUAL gain [dB].", "gnss_rx_gain=40", set_gnss_rx_gain},
+	{"gnss_rx_agc=", "1 = AD9361 slow AGC on both channels, 0 = manual (locks both at RX1's gain).", "gnss_rx_agc=0", set_gnss_rx_agc},
+	/* LCMV CRPA, 2 antennas (bitstream v3.0+). Angles come from software:
 	 * the FPGA does no DOA estimation. */
 	{"gnss_lcmv?", "Gets the LCMV CRPA state, angles and weights.", "", get_gnss_lcmv},
 	{"gnss_lcmv=", "1 = TX1 carries LCMV(RX1, RX2): gain 1 at GPS angle, null at jammer.", "gnss_lcmv=1", set_gnss_lcmv},
@@ -293,160 +287,79 @@ void get_gnss_status(double* param, char param_no)
 }
 
 /**************************************************************************//***
- * @brief PL-NPI. Report whether the power-inversion core is in the TX1 path.
+ * @brief RX gain for the LCMV. Both channels must have the same gain, or the
+ * RX2 calibration (and with it the null) is wrong; the AD9361 AGC sets each
+ * channel on its own, so the LCMV is run with a manual gain.
 *******************************************************************************/
-void get_gnss_npi(double* param, char param_no)
+static void gnss_rx_gain_print(void)
 {
-	uint32_t status = gnss_pt_read(GNSS_PT_REG_STATUS);
-	uint32_t ver    = gnss_pt_read(GNSS_PT_REG_VERSION);
+	uint8_t m1 = 0, m2 = 0;
+	int32_t g1 = 0, g2 = 0;
 
-	(void)param; (void)param_no;
-	if(ver < 0x00020000U) {
-		console_print("GNSS_NPI: bitstream v%d.%d has no PL-NPI core\n",
-			      (long)(ver >> 16), (long)(ver & 0xFFFFU));
+	if(!ad9361_phy) {
+		console_print("gnss_rx_gain: ad9361_phy is NULL\n");
 		return;
 	}
-	console_print("GNSS_NPI: %s (read from hardware)%s, gamma = %d%d, gain band = %d%s\n",
-		      (char*)((status & GNSS_PT_ST_NPI_EN_SYNCED) ? "ON" : "off"),
-		      (char*)((gnss_pt_read(GNSS_PT_REG_CONTROL) & GNSS_PT_CTRL_NPI_FREEZE)
-		          ? ", weights FROZEN" : ""),
-		      /* gamma can exceed 2^31; console_print has only signed %d */
-		      (long)(gnss_pt_read(GNSS_PT_REG_NPI_GAMMA) / 10U),
-		      (long)(gnss_pt_read(GNSS_PT_REG_NPI_GAMMA) % 10U),
-		      (long)((status >> GNSS_PT_ST_NPI_BAND_SHIFT) & GNSS_PT_ST_NPI_BAND_MASK),
-		      (char*)((status & GNSS_PT_ST_NPI_DROP) ? ", SAMPLES DROPPED (STATUS[10])" : ""));
+	ad9361_get_rx_gain_control_mode(ad9361_phy, 0, &m1);
+	ad9361_get_rx_gain_control_mode(ad9361_phy, 1, &m2);
+	ad9361_get_rx_rf_gain(ad9361_phy, 0, &g1);
+	ad9361_get_rx_rf_gain(ad9361_phy, 1, &g2);
+	console_print("GNSS_RX_GAIN: RX1 %s %d dB, RX2 %s %d dB  %s\n",
+		      (char*)(m1 == RF_GAIN_MGC ? "manual" : "AGC"), (long)g1,
+		      (char*)(m2 == RF_GAIN_MGC ? "manual" : "AGC"), (long)g2,
+		      (char*)((m1 == RF_GAIN_MGC && m2 == RF_GAIN_MGC && g1 == g2)
+			      ? "(matched: OK for LCMV)"
+			      : "(NOT matched: use gnss_rx_gain=<dB> for LCMV)"));
 }
 
-/**************************************************************************//***
- * @brief PL-NPI. Put the power-inversion core in (1) or out (0) of the TX1
- * path. This only selects what feeds TX1. It does not open the
- * transmitter; that is still gnss_tx=1, with its attenuation interlock. Both
- * AD9361 receive channels must be connected: RX2 is the auxiliary element.
-*******************************************************************************/
-void set_gnss_npi(double* param, char param_no)
+/* Both channels manual at one gain. Returns 0 on success. */
+static int gnss_rx_gain_lock(int32_t db)
 {
-	if(param_no < 1) {
-		console_print("gnss_npi= needs 0 or 1\n");
-		return;
-	}
-	if(gnss_pt_read(GNSS_PT_REG_VERSION) < 0x00020000U) {
-		console_print("gnss_npi: this bitstream has no PL-NPI core\n");
-		return;
-	}
-	/* PL-NPI needs the same gain on both channels at all times and a gamma
-	 * that matches the noise floor. gnss_npi=1 therefore switches from the
-	 * AD9361 per-channel AGC to the matched automatic loop (gnss_npi_agc.c),
-	 * which also sets gamma from the measured noise and holds the
-	 * retransmitted level. A manual gain set by the operator (gnss_rx_agc=0
-	 * / gnss_rx_gain=) is kept. gnss_npi=0 first gives the operator's TX
-	 * attenuation back. */
-	if((int)param[0] != 0) {
-		if(gnss_rxg_mode() == GNSS_RXG_AD9361) {
-			gnss_rxg_set_mode(GNSS_RXG_MATCHED);
-			console_print("gnss_npi: RX gain MATCHED AUTO on RX1+RX2, gamma %s "
-				      "(gnss_rx_gain? to see it)\n",
-				      (char*)(gnss_npi_gamma_is_auto() ? "AUTO" : "fixed"));
-		}
-	} else {
-		gnss_rxg_stop_tx_hold();
-	}
-	if(((int)param[0] != 0) &&
-	   (gnss_pt_read(GNSS_PT_REG_CONTROL) & GNSS_PT_CTRL_LCMV_EN)) {
-		gnss_pt_lcmv_enable(0);
-		console_print("gnss_npi: LCMV turned off (one canceller on TX1 at a time)\n");
-	}
-	gnss_pt_set_npi((int)param[0] != 0);
-	/* The enable crosses into the sample-clock domain and its read-back
-	 * crosses back into the AXI domain; reading STATUS straight after the
-	 * write can still show the old state (the first gnss_npi=1 printed
-	 * "off" although the core had been switched on). Wait until the hardware
-	 * confirms, at most ~1 ms. */
-	{
-		uint32_t want = ((int)param[0] != 0) ? GNSS_PT_ST_NPI_EN_SYNCED : 0U;
-		int n;
-		for(n = 0; n < 10000; n++)
-			if((gnss_pt_read(GNSS_PT_REG_STATUS) & GNSS_PT_ST_NPI_EN_SYNCED) == want)
-				break;
-	}
-	get_gnss_npi(param, param_no);
+	if(!ad9361_phy) return -1;
+	ad9361_set_rx_gain_control_mode(ad9361_phy, 0, RF_GAIN_MGC);
+	ad9361_set_rx_gain_control_mode(ad9361_phy, 1, RF_GAIN_MGC);
+	if(ad9361_set_rx_rf_gain(ad9361_phy, 0, db) != 0) return -1;
+	if(ad9361_set_rx_rf_gain(ad9361_phy, 1, db) != 0) return -1;
+	return 0;
 }
 
-/**************************************************************************//***
- * @brief RX gain control and automatic gamma for PL-NPI (gnss_npi_agc.c).
-*******************************************************************************/
 void get_gnss_rx_gain(double* param, char param_no)
 {
 	(void)param; (void)param_no;
-	gnss_rxg_print();
+	gnss_rx_gain_print();
 }
 
 void set_gnss_rx_gain(double* param, char param_no)
 {
-	if(param_no < 1 || param[0] < 1.0 || param[0] > 76.0) {
-		console_print("gnss_rx_gain= needs a gain in dB, 1 to 76, e.g. gnss_rx_gain=40\n");
+	if(param_no < 1 || param[0] < 0.0 || param[0] > 73.0) {
+		console_print("gnss_rx_gain= needs a gain in dB, 0 to 73, e.g. gnss_rx_gain=40\n");
 		return;
 	}
-	gnss_rxg_set_gain((int32_t)param[0]);
-	gnss_rxg_print();
+	if(gnss_rx_gain_lock((int32_t)param[0]) != 0)
+		console_print("gnss_rx_gain: the AD9361 rejected %d dB\n", (long)param[0]);
+	gnss_rx_gain_print();
 }
 
 void set_gnss_rx_agc(double* param, char param_no)
 {
-	if(param_no < 1 || param[0] < 0.0 || param[0] > 2.0) {
-		console_print("gnss_rx_agc= needs 0 (manual), 1 (AD9361 AGC) or 2 (matched auto)\n");
-		return;
-	}
-	gnss_rxg_set_mode((int)param[0]);
-	gnss_rxg_print();
-}
+	int32_t g = 0;
 
-void set_gnss_npi_auto(double* param, char param_no)
-{
-	if(param_no < 1) {
-		console_print("gnss_npi_auto= needs 0 or 1\n");
+	if(param_no < 1 || param[0] < 0.0 || param[0] > 1.0) {
+		console_print("gnss_rx_agc= needs 0 (manual, matched) or 1 (AD9361 AGC)\n");
 		return;
 	}
-	gnss_npi_gamma_auto((int)param[0] != 0);
-	gnss_rxg_print();
-}
-
-void set_gnss_npi_k(double* param, char param_no)
-{
-	if(param_no < 1 || param[0] < 0.0 || param[0] > 64.0) {
-		console_print("gnss_npi_k= needs 0 (automatic, default) or 1 to 64 (fixed)\n");
+	if(!ad9361_phy) {
+		console_print("gnss_rx_agc: ad9361_phy is NULL\n");
 		return;
 	}
-	gnss_npi_gamma_k((uint32_t)param[0]);
-	gnss_rxg_print();
-}
-
-/**************************************************************************//***
- * @brief PL-NPI. Set the regulariser gamma. Read every sample by the core.
-*******************************************************************************/
-void set_gnss_npi_gamma(double* param, char param_no)
-{
-	if(param_no < 1 || param[0] < 1.0 || param[0] > 4294967295.0) {
-		console_print("gnss_npi_gamma= needs a value from 1 to 4294967295, e.g. gnss_npi_gamma=1\n");
-		return;
+	if((int)param[0] == 1) {
+		ad9361_set_rx_gain_control_mode(ad9361_phy, 0, RF_GAIN_SLOWATTACK_AGC);
+		ad9361_set_rx_gain_control_mode(ad9361_phy, 1, RF_GAIN_SLOWATTACK_AGC);
+	} else {
+		ad9361_get_rx_rf_gain(ad9361_phy, 0, &g);
+		gnss_rx_gain_lock(g);
 	}
-	gnss_npi_gamma_auto(0);            /* a typed value is meant to stay */
-	gnss_pt_set_npi_gamma((uint32_t)param[0]);
-	console_print("gnss_npi_gamma: fixed value, automatic gamma OFF "
-		      "(gnss_npi_auto=1 to turn it back on)\n");
-	get_gnss_npi(param, param_no);
-}
-
-/**************************************************************************//***
- * @brief PL-NPI. Freeze (1) or release (0) the adaptive weights.
-*******************************************************************************/
-void set_gnss_npi_freeze(double* param, char param_no)
-{
-	if(param_no < 1) {
-		console_print("gnss_npi_freeze= needs 0 or 1\n");
-		return;
-	}
-	gnss_pt_set_npi_freeze((int)param[0] != 0);
-	get_gnss_npi(param, param_no);
+	gnss_rx_gain_print();
 }
 
 /* GNSS-CRPA MOD-7: the DDR round trip.
@@ -1525,8 +1438,8 @@ void set_dds_tx2_tone2_scale(double* param, char param_no)	// dds_tx2_tone2_scal
 void get_gnss_lcmv(double* param, char param_no)
 {
 	(void)param; (void)param_no;
-	if(gnss_pt_read(GNSS_PT_REG_VERSION) < 0x00020002U) {
-		console_print("GNSS_LCMV: this bitstream has no LCMV core (needs v2.2)\n");
+	if(gnss_pt_read(GNSS_PT_REG_VERSION) < 0x00030000U) {
+		console_print("GNSS_LCMV: this bitstream has no LCMV core (needs v3.0)\n");
 		return;
 	}
 	gnss_pt_lcmv_print_state();
@@ -1534,10 +1447,10 @@ void get_gnss_lcmv(double* param, char param_no)
 
 /**************************************************************************//***
  * @brief LCMV CRPA. Put the 2-element LCMV beamformer in (1) or out (0) of the
- * TX1 path. Like gnss_npi=, this only selects what feeds TX1; gnss_tx=1 still
- * opens the transmitter. PL-NPI is switched off first, because the hardware
- * gives PL-NPI priority. The null is only as good as the RX1/RX2 match, so
- * the AD9361 per-channel AGC is replaced by the matched gain loop.
+ * TX1 path. This only selects what feeds TX1; gnss_tx=1 still opens the
+ * transmitter. The null is only as good as the RX1/RX2 match, so if the
+ * channels are on the AD9361 AGC (each its own gain) they are locked to one
+ * manual gain first.
 *******************************************************************************/
 void set_gnss_lcmv(double* param, char param_no)
 {
@@ -1548,21 +1461,25 @@ void set_gnss_lcmv(double* param, char param_no)
 		console_print("gnss_lcmv= needs 0 or 1\n");
 		return;
 	}
-	if(gnss_pt_read(GNSS_PT_REG_VERSION) < 0x00020002U) {
-		console_print("gnss_lcmv: this bitstream has no LCMV core (needs v2.2)\n");
+	if(gnss_pt_read(GNSS_PT_REG_VERSION) < 0x00030000U) {
+		console_print("gnss_lcmv: this bitstream has no LCMV core (needs v3.0)\n");
 		return;
 	}
 	on = ((int)param[0] != 0);
 	if(on) {
-		if(gnss_pt_read(GNSS_PT_REG_CONTROL) & GNSS_PT_CTRL_NPI_EN) {
-			gnss_rxg_stop_tx_hold();
-			gnss_pt_set_npi(0);
-			console_print("gnss_lcmv: PL-NPI turned off (one canceller on TX1 at a time)\n");
-		}
-		if(gnss_rxg_mode() == GNSS_RXG_AD9361) {
-			gnss_rxg_set_mode(GNSS_RXG_MATCHED);
-			console_print("gnss_lcmv: RX gain MATCHED AUTO on RX1+RX2 "
-				      "(equal gains keep the RX2 calibration valid)\n");
+		uint8_t m1 = RF_GAIN_MGC, m2 = RF_GAIN_MGC;
+		int32_t g1 = 0, g2 = 0;
+		if(ad9361_phy) {
+			ad9361_get_rx_gain_control_mode(ad9361_phy, 0, &m1);
+			ad9361_get_rx_gain_control_mode(ad9361_phy, 1, &m2);
+			ad9361_get_rx_rf_gain(ad9361_phy, 0, &g1);
+			ad9361_get_rx_rf_gain(ad9361_phy, 1, &g2);
+			if(m1 != RF_GAIN_MGC || m2 != RF_GAIN_MGC || g1 != g2) {
+				gnss_rx_gain_lock(g1);
+				console_print("gnss_lcmv: RX1+RX2 locked to manual %d dB "
+					      "(equal gains keep the RX2 calibration valid; "
+					      "gnss_rx_gain=<dB> to change)\n", (long)g1);
+			}
 		}
 	}
 	gnss_pt_lcmv_enable(on);

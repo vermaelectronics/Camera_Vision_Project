@@ -70,10 +70,8 @@
 #define GNSS_PT_REG_TX_COUNT_CH1    0x34U   /* RO                             */
 #define GNSS_PT_REG_RX_SNAPSHOT_CH1 0x38U   /* RO                             */
 #define GNSS_PT_REG_CRPA_COEF(n)    (0x40U + ((n) * 4U))  /* RW, n = 0..15    */
-/* CRPA_COEF[2] is the PL-NPI regulariser gamma (unsigned; 0 acts as 1). */
-#define GNSS_PT_REG_NPI_GAMMA       GNSS_PT_REG_CRPA_COEF(2)
-/* v2.2 LCMV CRPA (2-element, PIER C 2008 look + enforcement constraints).
- * The LCMV registers sit in the CRPA_COEF window, around NPI_GAMMA (0x48). */
+/* v3.0 LCMV CRPA (2-element, PIER C 2008 look + enforcement constraints).
+ * The LCMV registers sit in the CRPA_COEF window; 0x48 is reserved. */
 #define GNSS_PT_REG_LCMV_GPS_ANGLE  0x40U   /* RW  [15:0] signed deg, look      */
 #define GNSS_PT_REG_LCMV_JAM_ANGLE  0x44U   /* RW  [15:0] signed deg, null      */
 #define GNSS_PT_REG_LCMV_EPS        0x4CU   /* RW  [15:0] Q0.16, 0 = ideal null */
@@ -93,13 +91,9 @@
  * 1.1 = adds the RX->TX sample alignment stage (RX is right-aligned 12-in-16,
  *       the AD9361 DAC consumes [15:4]). A board reporting 1.0 is running a
  *       bitstream whose TX output is 24 dB low with 4 bits discarded. */
-/* 2.0 = PL-NPI-only build: the PL-NPI power-inversion core is a separate
- *       block-design IP (pl_npi_0, CONTROL[5], gamma in 0x48). This design
- *       has no PI-NLMS core. */
-/* 2.1 = PL-NPI HLS core with the matched RX gain loop.
- * 2.2 = adds the 2-element LCMV CRPA (CONTROL[4], registers 0x40..0x6C
- *       around NPI_GAMMA). PL-NPI has priority when both are enabled. */
-#define GNSS_PT_EXPECTED_VERSION    0x00020002U
+/* 3.0 = LCMV CRPA build: 2-element LCMV beamformer on TX1 (CONTROL[4],
+ *       registers 0x40/0x44, 0x4C..0x6C). No PL-NPI / PI core. */
+#define GNSS_PT_EXPECTED_VERSION    0x00030000U
 
 /* ---- CONTROL bits -------------------------------------------------------- */
 #define GNSS_PT_CTRL_PASS_EN        (1U << 0)  /* 1 = RX->TX passthrough      */
@@ -107,8 +101,6 @@
 #define GNSS_PT_CTRL_SWAP_IQ        (1U << 2)
 #define GNSS_PT_CTRL_CH1_COPY       (1U << 3)  /* ch1 TX fed from ch0         */
 #define GNSS_PT_CTRL_LCMV_EN        (1U << 4)  /* ch0 TX = LCMV(RX1, RX2)     */
-#define GNSS_PT_CTRL_NPI_EN         (1U << 5)  /* ch0 TX = PL-NPI(RX1, RX2)   */
-#define GNSS_PT_CTRL_NPI_FREEZE     (1U << 6)  /* PL-NPI weights frozen       */
 #define GNSS_PT_CTRL_CNT_CLEAR      (1U << 8)  /* held, not self-clearing     */
 
 /* ---- STATUS bits --------------------------------------------------------- */
@@ -122,14 +114,10 @@
 #define GNSS_PT_ST_FIFO1_FULL       (1U << 7)
 #define GNSS_PT_ST_OVERFLOW         (1U << 8)
 #define GNSS_PT_ST_UNDERFLOW        (1U << 9)
-#define GNSS_PT_ST_NPI_DROP         (1U << 10) /* v2.1+: pair lost at pl_npi_0 */
 #define GNSS_PT_ST_PASS_EN_SYNCED   (1U << 16)
 #define GNSS_PT_ST_LCMV_EN_SYNCED   (1U << 17)
-#define GNSS_PT_ST_NPI_EN_SYNCED    (1U << 18)
 #define GNSS_PT_ST_LCMV_ACTIVE      (1U << 19) /* LCMV drives ch0 TX now      */
 #define GNSS_PT_ST_LCMV_SAT         (1U << 22) /* LCMV output clipped, sticky */
-#define GNSS_PT_ST_NPI_BAND_SHIFT   20         /* [21:20] PL-NPI gain band    */
-#define GNSS_PT_ST_NPI_BAND_MASK    0x3U
 
 /* ---- return codes -------------------------------------------------------- */
 #define GNSS_PT_OK                   0
@@ -154,19 +142,7 @@ void     gnss_pt_set_passthrough(int enable);
 void     gnss_pt_set_mute(int mute);
 void     gnss_pt_clear_counters(void);
 
-/* PL-NPI power inversion (bitstream v2.0+). Enabled, channel 0 TX carries the
- * PL-NPI array output of RX1 and RX2 instead of RX1 alone; passthrough must
- * also be on. Disabling
- * holds the core in reset, so re-enabling restarts from the quiescent
- * weights [1, 0]. */
-void     gnss_pt_set_npi(int enable);
-/* Regulariser gamma of mu_NPI = 1/(2*x^T x + gamma). 1 is the value the
- * PL-NPI testbench was measured with; 0 is used as 1 by the hardware. */
-void     gnss_pt_set_npi_gamma(uint32_t gamma);
-/* 1 = freeze the PL-NPI weights at their current value, 0 = adapt. */
-void     gnss_pt_set_npi_freeze(int freeze);
-
-/* LCMV CRPA (bitstream v2.2+). Enabled (and PL-NPI off), channel 0 TX
+/* LCMV CRPA (bitstream v3.0+). Enabled, channel 0 TX
  * carries y = w1^H x1 + w2^H (c x2): gain 1 toward the GPS angle, a null
  * toward the jammer angle; channel 1 TX carries RX2 as before. The jammer
  * angle comes from software: the FPGA does no DOA estimation.

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================================
-#  build_all.sh  --  LoopBack_Code (gnss_passthrough v2.0 + LCMV CRPA)
+#  build_all.sh  --  LoopBack_Code (gnss_passthrough v3.0 + LCMV CRPA)
 #                    sources  ->  bitstream / XSA  ->  FSBL + app ELF  ->  BOOT.BIN
 #
 #  Linux (Ubuntu 22.04). Default tool version: Vivado + Vitis 2023.2.
@@ -148,25 +148,13 @@ else
   say "2/8 ADI libraries skipped (SKIP_ADI_LIBS=1)"
 fi
 
-# ---- 3  custom IP: gnss_passthrough v2.2 (PL-NPI streams + LCMV crpa/) ------------------------------
-say "3/8 package gnss_passthrough v2.2 (PL-NPI ports + LCMV CRPA)"
+# ---- 3  custom IP: gnss_passthrough v3.0 + LCMV crpa/ ---------------------------
+say "3/8 package gnss_passthrough v3.0 (LCMV CRPA)"
 run 3_gnss_ip bash -c "cd '$LOGS' && vivado -mode batch -nojournal -nolog \
   -source '$ROOT/Source/IP/gnss_passthrough/gnss_passthrough_ip.tcl' \
   -tclargs '$ROOT/Source' '$IP_REPO'"
 need 3_gnss_ip "IP_PACKAGE_SELFCHECK: OK - LCMV CRPA sources packaged"
 need 3_gnss_ip "IP_PACKAGE_OK"
-
-# ---- 3b PL-NPI HLS core (pl_npi_0 in the block design) -------------------------
-# Vitis HLS C-sim + synthesis + export to $IP_REPO/pl_npi. SKIP_HLS=1 reuses an
-# existing $IP_REPO/pl_npi (it only changes when Source/HLS/pl_npi changes).
-if [ "${SKIP_HLS:-0}" = 1 ] && [ -f "$IP_REPO/pl_npi/component.xml" ]; then
-  say "3b/8 PL-NPI HLS skipped (SKIP_HLS=1, $IP_REPO/pl_npi exists)"
-else
-  command -v vitis_hls >/dev/null || { echo "vitis_hls not found: source the Vitis $TOOL_VER settings64.sh"; exit 2; }
-  say "3b/8 build PL-NPI HLS core (vitis_hls, ~5-10 min)"
-  run 3b_pl_npi_hls bash -c "cd '$ROOT/Source/HLS/pl_npi' && GNSS_CRPA_IP_REPO='$IP_REPO' vitis_hls -f build_hls.tcl"
-  need 3b_pl_npi_hls "PL_NPI_HLS: PASS"
-fi
 
 # ---- 4  Vivado project ----------------------------------------------------------
 say "4/8 create Vivado project"

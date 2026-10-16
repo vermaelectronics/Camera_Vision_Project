@@ -52,33 +52,18 @@
 //                                                        2-element LCMV output
 //                                                        (gain 1 to the GPS
 //                                                        angle, null on the
-//                                                        jammer angle). Only
-//                                                        while npi_en = 0:
-//                                                        PL-NPI has priority.
-//                                    [5]  npi_en     1 = ch0 TX carries the
-//                                                        PL-NPI power-inversion
-//                                                        output (RX1 and RX2
-//                                                        combined)
-//                                                    0 = PL-NPI held in reset
-//                                    [6]  npi_freeze 1 = PL-NPI weights frozen
-//                                                        (adapt_en = 0)
+//                                                        jammer angle)
+//                                                    0 = ch0 TX carries RX1
 //                                    [8]  cnt_clear  1 = hold counters cleared
 //    0x10    STATUS          RO      [0]  adc_enable_i0   [1]  adc_enable_q0
 //                                    [2]  dac_enable_i0   [3]  dac_enable_q0
 //                                    [4]  fifo0_empty     [5]  fifo0_full
 //                                    [6]  fifo1_empty     [7]  fifo1_full
 //                                    [8]  overflow_sticky [9]  underflow_sticky
-//                                    [10] npi_drop_sticky: an RX sample pair
-//                                         arrived while the previous one was
-//                                         still waiting for pl_npi_0 (never
-//                                         expected; cleared with cnt_clear)
 //                                    [16] pass_en (as seen in the clk domain)
 //                                    [17] lcmv_en (as seen in the clk domain)
-//                                    [18] npi_en  (as seen in the clk domain)
 //                                    [19] lcmv_active: LCMV output is on TX
-//                                         ch0 (lcmv_en & !npi_en & weights)
-//                                    [21:20] PL-NPI gain band of the latest
-//                                         sample (0..3 = x1.00/1.05/1.10/1.20)
+//                                         ch0 (lcmv_en & weights valid)
 //                                    [22] lcmv_sat_sticky: an LCMV output
 //                                         sample was clipped to 12 bits
 //
@@ -120,9 +105,7 @@
 //                                    look direction (gain 1)      (COEF[0])
 //    0x44    LCMV_JAM_ANGLE  RW      [15:0] signed integer deg -90..90, LCMV
 //                                    null direction               (COEF[1])
-//    0x48    CRPA_COEF[2]    RW      PL-NPI regulariser gamma (unsigned, 32
-//                                    bits; 0 is used as 1). mu_NPI =
-//                                    1/(2*x^T x + gamma).
+//    0x48    CRPA_COEF[2]    RW      stored, unused (reserved)
 //    0x4C    LCMV_EPS        RW      [15:0] Q0.16 LCMV gain toward the jammer,
 //                                    0 = ideal null               (COEF[3])
 //    0x50    LCMV_RX2_CAL    RW      {im[31:16], re[15:0]} Q2.14, multiplies
@@ -139,7 +122,7 @@
 //    0x70..  CRPA_COEF[12..15] RW    reserved; stored and returned, no logic
 //                                    consumes them.
 //
-//    LCMV (v2.2): R. Li, X. Zhao, X. W. Shi, "Derivative Constrained Robust
+//    LCMV (v3.0): R. Li, X. Zhao, X. W. Shi, "Derivative Constrained Robust
 //    LCMV Beamforming Algorithm", PIER C vol. 4, 2008, eq. (9), look +
 //    enforcement constraints for 2 elements (Source/HDL/crpa/). Angles come
 //    from software; no DOA estimation in the FPGA.
@@ -194,25 +177,6 @@ module gnss_passthrough #(
   output     [15:0]   dac_data_i1,
   output     [15:0]   dac_data_q1,
 
-  // ---- PL-NPI core: separate block-design IP (pl_npi_0) -------------------
-  //  All in the clk domain. Source/BlockDesign/system_bd.tcl connects:
-  //    m_axis_npi    -> pl_npi_0/s_axis_x  {rx2_q, rx2_i, rx1_q, rx1_i}
-  //    pl_npi_0/m_axis_y -> s_axis_npi     {y_q, y_i}
-  //    npi_gamma     -> pl_npi_0/gamma     (register 0x48)
-  //    npi_adapt_en  -> pl_npi_0/adapt_en  (~CONTROL[6])
-  //    npi_rst_n     -> pl_npi_0/aresetn   (CONTROL[0] & CONTROL[5])
-  //    pl_npi_0/gain_band -> npi_band      (STATUS[21:20])
-  output     [63:0]   m_axis_npi_tdata,
-  output              m_axis_npi_tvalid,
-  input               m_axis_npi_tready,
-  input      [31:0]   s_axis_npi_tdata,
-  input               s_axis_npi_tvalid,
-  output              s_axis_npi_tready,
-  output     [31:0]   npi_gamma,
-  output              npi_adapt_en,
-  output              npi_rst_n,
-  input      [1:0]    npi_band,
-
   // ---- AXI4-Lite slave (sys_cpu_clk domain) -------------------------------
   input               s_axi_aclk,
   input               s_axi_aresetn,
@@ -240,16 +204,9 @@ module gnss_passthrough #(
   localparam [31:0] CORE_ID      = 32'h47435031;   // "GCP1"
   // v1.1 -- adds the RX->TX sample alignment stage. Bumped so a running board
   // reports which of the two behaviours its bitstream actually has.
-  // v2.0 -- PL-NPI-only build: the PL-NPI power-inversion core is a separate
-  //         block-design IP (pl_npi_0), selected by CONTROL[5], with its
-  //         regulariser in register 0x48. No PI-NLMS core in this design.
-  // v2.1 -- pl_npi_0 is the pipelined Vitis HLS core (II=2). The input to it
-  //         goes through a one-entry holding register, STATUS[10] flags a
-  //         sample pair it could not take.
-  // v2.2 -- adds the 2-element LCMV CRPA (CONTROL[4], registers 0x40/0x44,
-  //         0x4C-0x6C) as a second selectable mode. PL-NPI is unchanged and
-  //         has priority when both are enabled.
-  localparam [31:0] CORE_VERSION = 32'h00020002;   // v2.2
+  // v3.0 -- LCMV CRPA build: 2-element LCMV beamformer (CONTROL[4],
+  //         registers 0x40/0x44, 0x4C-0x6C) on TX ch0. No PL-NPI / PI core.
+  localparam [31:0] CORE_VERSION = 32'h00030000;   // v3.0
   localparam        AW           = FIFO_ADDR_WIDTH;
 
   // ==========================================================================
@@ -318,9 +275,6 @@ module gnss_passthrough #(
   reg  [31:0] reg_scratch = 32'd0;
   reg  [31:0] reg_control = 32'd0;
   reg  [31:0] crpa_coef [0:15];
-  // CRPA_COEF[2] is also kept in a plain register: it feeds the PL-NPI
-  // gamma in the clk domain, through the synchroniser below.
-  reg  [31:0] reg_npi_gamma = 32'd1;
   // LCMV settings, also kept in plain registers (synchronised below).
   localparam [31:0] LCMV_CAL_ONE = 32'h0000_4000;     // 1.0 + j0, Q2.14
   reg  [15:0] reg_lcmv_gps = 16'd0;                   // 0x40
@@ -335,7 +289,6 @@ module gnss_passthrough #(
     if (s_axi_aresetn == 1'b0) begin
       reg_scratch <= 32'd0;
       reg_control <= 32'd0;
-      reg_npi_gamma <= 32'd1;
       reg_lcmv_gps  <= 16'd0;
       reg_lcmv_jam  <= 16'd0;
       reg_lcmv_eps  <= 16'd0;
@@ -346,7 +299,6 @@ module gnss_passthrough #(
         12'h003: reg_control <= s_axi_wdata;   // 0x0C
         12'h010: reg_lcmv_gps  <= s_axi_wdata[15:0];  // 0x40
         12'h011: reg_lcmv_jam  <= s_axi_wdata[15:0];  // 0x44
-        12'h012: reg_npi_gamma <= s_axi_wdata;       // 0x48
         12'h013: reg_lcmv_eps  <= s_axi_wdata[15:0];  // 0x4C
         12'h014: reg_lcmv_cal  <= s_axi_wdata;        // 0x50
         default: ;
@@ -427,20 +379,7 @@ module gnss_passthrough #(
   wire swap_iq   = ctrl_sync[2];
   wire ch1_copy  = ctrl_sync[3];
   wire lcmv_en   = ctrl_sync[4];
-  wire npi_en    = ctrl_sync[5];
-  wire npi_freeze = ctrl_sync[6];
   wire cnt_clear = ctrl_sync[8];
-
-  // PL-NPI gamma. Quasi-static like the CONTROL bits, so bit-wise
-  // synchronisation is enough. The name keeps the "ctrl_meta" pattern so the
-  // existing false-path constraint covers it.
-  (* ASYNC_REG = "TRUE" *) reg [31:0] gamma_ctrl_meta = 32'd1;
-  (* ASYNC_REG = "TRUE" *) reg [31:0] gamma_ctrl_sync = 32'd1;
-
-  always @(posedge clk) begin
-    gamma_ctrl_meta <= reg_npi_gamma;
-    gamma_ctrl_sync <= gamma_ctrl_meta;
-  end
 
   // LCMV settings, same "*ctrl_meta" synchroniser pattern (and therefore the
   // same existing false-path constraint). The four words are quasi-static,
@@ -501,14 +440,11 @@ module gnss_passthrough #(
     end
   end
 
-  // With npi_en the ch0 buffer is fed by the PL-NPI output strobe, with the
-  // LCMV active by the LCMV output strobe, otherwise by the raw RX strobe.
-  // All run at the RX sample rate.
-  wire npi_out_valid;
+  // With the LCMV active the ch0 buffer is fed by the LCMV output strobe,
+  // otherwise by the raw RX strobe. Both run at the RX sample rate.
   wire lcmv_out_valid;
   wire lcmv_use;                 // LCMV output selected for ch0 (see below)
-  wire wr_en0 = pass_en & (npi_en   ? npi_out_valid  :
-                           lcmv_use ? lcmv_out_valid :
+  wire wr_en0 = pass_en & (lcmv_use ? lcmv_out_valid :
                                       (adc_valid_i0 & adc_enable_i0));
   wire rd_en0 = pass_en & dac_valid_i0 & primed0;
   wire wr_en1 = pass_en & adc_valid_i1 & adc_enable_i1;
@@ -517,69 +453,14 @@ module gnss_passthrough #(
   // ==========================================================================
   //  PROCESSING CORE
   //
-  //  npi_en = 0 : identity. proc_i/proc_q are the raw RX samples.
-  //  npi_en = 1 : channel 0 carries the PL-NPI output (RX1 and RX2
-  //               combined). Channel 1 is left as raw RX2.
-  //
-  //  RESET. The core is held in reset whenever pass_en or npi_en is 0, so
-  //  re-enabling restarts adaptation from the quiescent weights [1, 0].
+  //  lcmv_en = 0 : identity. proc_i/proc_q are the raw RX samples.
+  //  lcmv_en = 1 : channel 0 carries the 2-element LCMV output (RX1 and RX2
+  //                combined: gain 1 toward the GPS angle, null toward the
+  //                jammer angle). Channel 1 is left as raw RX2.
   // ==========================================================================
   // --------------------------------------------------------------------------
-  //  PL-NPI (pl_npi_0), a separate block-design IP. The PL-NPI core
-  //  works at the RAW ADC scale (its thresholds and gain calibration assume
-  //  it), so RX samples go in as received -- 12-bit right-aligned,
-  //  sign-extended to 16 -- and its 16-bit output is saturated back to the
-  //  12-bit range the elastic buffer and output alignment stage expect.
-  // --------------------------------------------------------------------------
-  wire npi_run = pass_en & npi_en;
-
-  reg npi_rst_n_r = 1'b0;
-  always @(posedge clk) npi_rst_n_r <= ~rst & npi_run;
-  assign npi_rst_n = npi_rst_n_r;
-
-  // The HLS core accepts one sample pair every 2 clocks (II=2) and its
-  // TREADY may be low in the clock a pair arrives. The pair is therefore held
-  // in a one-entry register until accepted. Pairs arrive at most every 2nd
-  // clock, so one entry is enough; a pair that finds the register still
-  // occupied is dropped and flagged (STATUS[10]).
-  wire npi_in_valid = npi_rst_n_r & adc_valid_i0 & adc_valid_i1 &
-                      adc_enable_i0 & adc_enable_i1;
-  reg  [63:0] npi_x_data  = 64'd0;
-  reg         npi_x_valid = 1'b0;
-  wire        npi_x_free  = ~npi_x_valid | m_axis_npi_tready;
-  wire        npi_drop    = npi_in_valid & ~npi_x_free;
-  always @(posedge clk) begin
-    if (!npi_rst_n_r) begin
-      npi_x_valid <= 1'b0;
-    end else if (npi_in_valid && npi_x_free) begin
-      npi_x_data  <= {adc_data_q1, adc_data_i1, adc_data_q0, adc_data_i0};
-      npi_x_valid <= 1'b1;
-    end else if (m_axis_npi_tready) begin
-      npi_x_valid <= 1'b0;
-    end
-  end
-  assign m_axis_npi_tdata  = npi_x_data;
-  assign m_axis_npi_tvalid = npi_x_valid;
-  assign s_axis_npi_tready = 1'b1;        // the elastic buffer always accepts
-  assign npi_out_valid     = s_axis_npi_tvalid;
-  assign npi_gamma         = gamma_ctrl_sync;
-  assign npi_adapt_en      = ~npi_freeze;
-
-  function [15:0] sat12(input [15:0] v);
-    begin
-      if      ($signed(v) >  $signed(16'sd2047)) sat12 = 16'h07FF;
-      else if ($signed(v) < -$signed(16'sd2048)) sat12 = 16'hF800;
-      else                                        sat12 = v;
-    end
-  endfunction
-
-  wire [15:0] npi_i = sat12(s_axis_npi_tdata[15:0]);
-  wire [15:0] npi_q = sat12(s_axis_npi_tdata[31:16]);
-
-  // --------------------------------------------------------------------------
-  //  LCMV (v2.2), Source/HDL/crpa/. Runs only while pass_en & lcmv_en &
-  //  !npi_en (PL-NPI keeps priority), and is held in reset otherwise so it
-  //  restarts cleanly. Its weights come from the GPS / jammer angles, so
+  //  LCMV, Source/HDL/crpa/. Runs only while pass_en & lcmv_en, and is
+  //  held in reset otherwise so it restarts cleanly. Its weights come from the GPS / jammer angles, so
   //  nothing adapts: a new weight set is computed about every 70 clocks and
   //  swapped in atomically.
   //
@@ -590,8 +471,7 @@ module gnss_passthrough #(
   // --------------------------------------------------------------------------
   localparam LCMV_LATENCY = 5;
 
-  wire lcmv_mode = lcmv_en & ~npi_en;
-  wire lcmv_run  = pass_en & lcmv_mode;
+  wire lcmv_run  = pass_en & lcmv_en;
 
   wire signed [11:0] lcmv_y_re, lcmv_y_im;
   wire               lcmv_out_sat;
@@ -637,8 +517,8 @@ module gnss_passthrough #(
   wire [15:0] lcmv_i = {{4{lcmv_y_re[11]}}, lcmv_y_re};
   wire [15:0] lcmv_q = {{4{lcmv_y_im[11]}}, lcmv_y_im};
 
-  wire [15:0] proc_i0 = npi_en ? npi_i : lcmv_use ? lcmv_i : adc_data_i0;
-  wire [15:0] proc_q0 = npi_en ? npi_q : lcmv_use ? lcmv_q : adc_data_q0;
+  wire [15:0] proc_i0 = lcmv_use ? lcmv_i : adc_data_i0;
+  wire [15:0] proc_q0 = lcmv_use ? lcmv_q : adc_data_q0;
   wire [15:0] proc_i1 = adc_data_i1;
   wire [15:0] proc_q1 = adc_data_q1;
   // ======================= END PROCESSING CORE ==============================
@@ -733,7 +613,6 @@ module gnss_passthrough #(
   reg [31:0] ovf_cnt = 32'd0, unf_cnt = 32'd0;
   reg [31:0] rx_snap0 = 32'd0, tx_snap0 = 32'd0, rx_snap1 = 32'd0;
   reg        ovf_sticky = 1'b0, unf_sticky = 1'b0;
-  reg        npi_drop_sticky = 1'b0;
   reg [31:0] lcmv_sat_cnt = 32'd0;
   reg        lcmv_sat_sticky = 1'b0;
 
@@ -743,7 +622,6 @@ module gnss_passthrough #(
       rx_cnt1 <= 32'd0; tx_cnt1 <= 32'd0;
       ovf_cnt <= 32'd0; unf_cnt <= 32'd0;
       ovf_sticky <= 1'b0; unf_sticky <= 1'b0;
-      npi_drop_sticky <= 1'b0;
       lcmv_sat_cnt <= 32'd0; lcmv_sat_sticky <= 1'b0;
       rx_snap0 <= 32'd0; tx_snap0 <= 32'd0; rx_snap1 <= 32'd0;
     end else begin
@@ -770,8 +648,6 @@ module gnss_passthrough #(
         unf_cnt    <= unf_cnt + 1'b1;
         unf_sticky <= 1'b1;
       end
-      if (npi_drop)
-        npi_drop_sticky <= 1'b1;
       if (lcmv_use && lcmv_out_valid && lcmv_out_sat) begin
         lcmv_sat_cnt    <= lcmv_sat_cnt + 1'b1;
         lcmv_sat_sticky <= 1'b1;
@@ -780,9 +656,9 @@ module gnss_passthrough #(
   end
 
   wire [31:0] status_w;
-  assign status_w = { 9'd0, lcmv_sat_sticky, npi_band, lcmv_active, npi_en,
+  assign status_w = { 9'd0, lcmv_sat_sticky, 2'd0, lcmv_active, 1'b0,
                       lcmv_en, pass_en,
-                      5'd0, npi_drop_sticky, unf_sticky, ovf_sticky,
+                      6'd0, unf_sticky, ovf_sticky,
                       full1, empty1, full0, empty0,
                       dac_enable_q0, dac_enable_i0,
                       adc_enable_q0, adc_enable_i0 };

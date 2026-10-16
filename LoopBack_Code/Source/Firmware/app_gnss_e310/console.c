@@ -50,8 +50,8 @@
 #define CONSOLE_HAS_IDLE_POLL 1
 #endif
 
-/* Called repeatedly while the console waits for a character (gnss_npi_agc.c
- * runs its matched gain / automatic gamma loop from here). */
+/* Called repeatedly while the console waits for a character (optional
+ * background work; none is registered in this build). */
 static void (*console_idle_hook)(void) = 0;
 
 void console_set_idle_hook(void (*hook)(void))

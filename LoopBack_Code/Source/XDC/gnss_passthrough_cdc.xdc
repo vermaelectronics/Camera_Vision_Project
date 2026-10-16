@@ -65,8 +65,8 @@ set_false_path \
 
 # --- 3. Control crossing into the sample domain -----------------------------
 # Quasi-static software settings through two-flop synchronisers: the CONTROL
-# bits (ctrl_meta) and the core parameters (mu_ctrl_meta in the PI-NLMS
-# design, gamma_/load_ctrl_meta in the PL-NPI / SMI-PI designs).
+# bits (ctrl_meta) and the LCMV settings (lcmv_ctrl_meta: angles, eps, RX2
+# calibration).
 #
 # The pattern was "inst/ctrl_meta_reg*" until 2026-10-08, which matched only
 # the CONTROL synchroniser: the parameter synchronisers were timed as ordinary

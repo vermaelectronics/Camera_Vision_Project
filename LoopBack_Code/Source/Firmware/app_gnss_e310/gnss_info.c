@@ -176,14 +176,12 @@ static void info_hardware(struct ad9361_rf_phy *phy)
     console_print("   base address    : 0x43C00000, 4 kB aperture\n");
     console_print("   ID register     : 0x%08x  (expect 0x47435031, ASCII 'GCP1')\n",
                   (long)gnss_pt_read(GNSS_PT_REG_ID));
-    console_print("   VERSION         : 0x%08x  (expect 0x00020002 = v2.2)\n",
+    console_print("   VERSION         : 0x%08x  (expect 0x00030000 = v3.0)\n",
                   (long)gnss_pt_read(GNSS_PT_REG_VERSION));
     console_print("     v1.0 is the original identity passthrough and transmits\n");
     console_print("     24 dB LOW. v1.1 adds the RX->TX sample alignment stage.\n");
-    console_print("     v2.0 is the PL-NPI-only build: the PL-NPI power-inversion\n");
-    console_print("     core (pl_npi_0) on TX1, no PI-NLMS. v2.1 makes pl_npi_0\n");
-    console_print("     the pipelined Vitis HLS core (II=2) that meets 8 ns timing.\n");
-    console_print("     v2.2 adds the 2-element LCMV CRPA (CONTROL[4], gnss_lcmv=).\n");
+    console_print("     v3.0 is the LCMV CRPA build: 2-element LCMV beamformer on\n");
+    console_print("     TX1 (CONTROL[4], gnss_lcmv=).\n");
     rule();
 
     console_print(" RF FRONT END                                            [cfg]\n");
@@ -262,18 +260,11 @@ static void info_config(struct ad9361_rf_phy *phy)
     console_print("     [2] swap_iq  : %d\n", (long)((ctrl >> 2) & 1U));
     console_print("     [3] ch1_copy : %d\n", (long)((ctrl >> 3) & 1U));
     console_print("     [4] lcmv_en  : %d   %s\n", (long)((ctrl >> 4) & 1U),
-                  (char *)(((ctrl >> 4) & 1U) ? "TX1 = LCMV(RX1, RX2) (if PL-NPI off)"
+                  (char *)(((ctrl >> 4) & 1U) ? "TX1 = LCMV(RX1, RX2)"
                                               : "LCMV off"));
     console_print("   LCMV angles    : GPS %d deg, jammer %d deg (gnss_lcmv_angles=)\n",
                   (long)(int16_t)(gnss_pt_read(GNSS_PT_REG_LCMV_GPS_ANGLE) & 0xFFFFU),
                   (long)(int16_t)(gnss_pt_read(GNSS_PT_REG_LCMV_JAM_ANGLE) & 0xFFFFU));
-    console_print("     [5] npi_en   : %d   %s\n", (long)((ctrl >> 5) & 1U),
-                  (char *)(((ctrl >> 5) & 1U) ? "TX1 = PL-NPI(RX1, RX2)"
-                                              : "TX1 = RX1 (PL-NPI off)"));
-    console_print("     [6] npi_freeze: %d\n", (long)((ctrl >> 6) & 1U));
-    console_print("   PL-NPI gamma   : %d%d   (gnss_npi_gamma=, register 0x48)\n",
-                  (long)(gnss_pt_read(GNSS_PT_REG_NPI_GAMMA) / 10U),
-                  (long)(gnss_pt_read(GNSS_PT_REG_NPI_GAMMA) % 10U));
     console_print("   DDR replay     : %s\n",
                   (char *)(gnss_txdma_is_running() ? "RUNNING" : "stopped"));
 }
@@ -400,15 +391,15 @@ static void info_pl(void)
     console_print("   axi_ad9361 -> AD9361 -> [TX1 SMA]\n");
     rule();
 
-    console_print("\n PL-NPI POWER INVERSION (v2.1)                          [cfg]\n");
+    console_print("\n LCMV CRPA (v3.0)                                       [cfg]\n");
     rule();
-    console_print("   pl_npi_0 is a Vitis HLS IP next to gnss_passthrough, on the same\n");
-    console_print("   l_clk. It takes RX1 and RX2 at the raw ADC scale over one\n");
-    console_print("   AXI-Stream (s_axis_x) and returns the array output (m_axis_y).\n");
-    console_print("   CONTROL[5] puts it on TX1 instead of RX1, register 0x48\n");
-    console_print("   sets gamma, CONTROL[6] freezes the weights. It has no AXI-Lite\n");
-    console_print("   port: all control goes through gnss_passthrough. TX2 always\n");
-    console_print("   carries plain RX2.\n");
+    console_print("   Inside gnss_passthrough (Source/HDL/crpa), on l_clk. Two\n");
+    console_print("   elements, d = lambda/2. From the GPS and jammer angles it\n");
+    console_print("   solves w = C^-H [1 eps]^T (PIER C 2008, look + enforcement\n");
+    console_print("   constraints) and forms y = w1^H x1 + w2^H (c x2) on TX1:\n");
+    console_print("   gain 1 toward GPS, null toward the jammer. CONTROL[4] selects\n");
+    console_print("   it. The angles come from software: no DOA in the FPGA. TX2\n");
+    console_print("   always carries plain RX2.\n");
     rule();
 
     console_print("\n THE ONE MODIFICATION THAT MATTERS\n");
@@ -470,9 +461,9 @@ static void info_about(void)
     console_print("\n WHY IT EXISTS\n");
     rule();
     console_print("   This is the skeleton of a CRPA anti-jam front end. With\n");
-    console_print("   gnss_npi=0 gnss_passthrough is transparent -- Iout = Iin.\n");
-    console_print("   With gnss_npi=1 the PL-NPI core (pl_npi_0) replaces the\n");
-    console_print("   identity on TX1 with adaptive power inversion across the two\n");
+    console_print("   gnss_lcmv=0 gnss_passthrough is transparent -- Iout = Iin.\n");
+    console_print("   With gnss_lcmv=1 the LCMV beamformer replaces the identity\n");
+    console_print("   on TX1 with a null toward the jammer angle across the two\n");
     console_print("   antenna elements RX1 and RX2.\n");
     console_print("   Proving the loop end to end FIRST means that when the\n");
     console_print("   algorithm goes in, any change it causes is measurable\n");
@@ -517,7 +508,7 @@ static void info_about(void)
     console_print("     shares 1575.42 MHz and the 18 MHz retransmit bandwidth\n");
     console_print("     carries GPS, Galileo and SBAS together.\n");
     console_print("   * Position ACCURACY was never checked against a reference.\n");
-    console_print("   * PL-NPI power inversion has NOT yet been verified on hardware\n");
+    console_print("   * The LCMV null has NOT yet been verified on hardware\n");
     console_print("     against a jammer. Treat it as under test.\n");
     rule();
 
@@ -545,8 +536,7 @@ static void info_registers(void)
     console_print("   0x08  SCRATCH         RW  read/write test\n");
     console_print("   0x0C  CONTROL         RW  [0] pass_en  [1] mute\n");
     console_print("                             [2] swap_iq  [3] ch1_copy\n");
-    console_print("                             [4] lcmv_en  [5] npi_en\n");
-    console_print("                             [6] npi_freeze\n");
+    console_print("                             [4] lcmv_en\n");
     console_print("                             [8] cnt_clear\n");
     console_print("   0x10  STATUS          RO  [0] adc_enable_i0  [1] adc_enable_q0\n");
     console_print("                             [2] dac_enable_i0  [3] dac_enable_q0\n");
@@ -554,12 +544,9 @@ static void info_registers(void)
     console_print("                             [6] fifo1_empty    [7] fifo1_full\n");
     console_print("                             [8] overflow_sticky\n");
     console_print("                             [9] underflow_sticky\n");
-    console_print("                            [10] npi_drop_sticky (must stay 0)\n");
     console_print("                            [16] pass_en in the sample domain\n");
     console_print("                            [17] lcmv_en in the sample domain\n");
-    console_print("                            [18] npi_en in the sample domain\n");
     console_print("                            [19] LCMV drives TX1 now\n");
-    console_print("                         [21:20] PL-NPI gain band (0..3)\n");
     console_print("                            [22] LCMV output clipped (sticky)\n");
     console_print("   0x14  RX_COUNT_CH0    RO\n");
     console_print("   0x18  TX_COUNT_CH0    RO\n");
@@ -573,7 +560,7 @@ static void info_registers(void)
     console_print("   0x38  RX_SNAPSHOT_CH1 RO\n");
     console_print("   0x40  LCMV_GPS_ANGLE  RW  [15:0] signed deg, look (gain 1)\n");
     console_print("   0x44  LCMV_JAM_ANGLE  RW  [15:0] signed deg, null\n");
-    console_print("   0x48  CRPA_COEF2      RW  PL-NPI regulariser gamma (0 acts as 1)\n");
+    console_print("   0x48  CRPA_COEF2      RW  stored but unused\n");
     console_print("   0x4C  LCMV_EPS        RW  [15:0] Q0.16, 0 = ideal null\n");
     console_print("   0x50  LCMV_RX2_CAL    RW  {im, re} Q2.14, reset 0x00004000\n");
     console_print("   0x54  LCMV_W1_RE/IM   RO  0x54/0x58, Q16.16\n");
@@ -684,11 +671,11 @@ static void info_issues(void)
     console_print("   nothing and the board looks broken when it is not.\n");
     rule();
 
-    console_print("\n 5. PL-NPI NEEDS RX2 CONNECTED.\n");
+    console_print("\n 5. THE LCMV NEEDS RX2 CONNECTED AND CALIBRATED.\n");
     rule();
     console_print("   Both RX channels are wired in the PL, so a TWO-ELEMENT CRPA\n");
     console_print("   is in place -- but with nothing on RX2 it sees only its own\n");
-    console_print("   noise and gnss_npi=1 cannot null anything. A second antenna\n");
+    console_print("   noise and gnss_lcmv=1 cannot null anything. A second antenna\n");
     console_print("   or a splitter is required before any array work.\n");
     console_print("   One AD9361 gives only TWO coherent channels. More elements\n");
     console_print("   than that needs more hardware.\n");
@@ -772,16 +759,11 @@ static void info_quickstart(void)
     console_print("   gnss_ddr_tx=1 / =0          DDR round trip / stop\n");
     console_print("   tx1_attenuation=N           mdB. BIGGER = QUIETER.\n");
     console_print("   gnss_tx? / gnss_status?     state, read back from hardware\n");
-    console_print("   gnss_npi=1 / gnss_npi=0     PL-NPI power inversion on TX1 / off\n");
-    console_print("   gnss_npi_gamma=N            fixed PL-NPI gamma (turns AUTO off)\n");
-    console_print("   gnss_npi_auto=1 / =0        automatic gamma on (default) / off\n");
-    console_print("   gnss_npi_k=0 / =N           k automatic (default) / fixed N\n");
-    console_print("   gnss_rx_gain?               RX1/RX2 gain, mode, level hold, gamma\n");
-    console_print("   gnss_rx_gain=<dB>           same gain on RX1+RX2 (auto reference)\n");
-    console_print("   gnss_rx_agc=2 / =0 / =1     matched auto / manual / AD9361 AGC\n");
-    console_print("   gnss_npi?                   PL-NPI on/off, gamma, gain band\n");
+    console_print("   gnss_rx_gain?               RX1/RX2 gain and mode (matched?)\n");
+    console_print("   gnss_rx_gain=<dB>           same manual gain on RX1+RX2\n");
+    console_print("   gnss_rx_agc=0 / =1          manual matched / AD9361 AGC\n");
     console_print("   gnss_lcmv_angles=G J        LCMV GPS look / jammer null [deg]\n");
-    console_print("   gnss_lcmv=1 / gnss_lcmv=0   LCMV CRPA on TX1 / off (PL-NPI off)\n");
+    console_print("   gnss_lcmv=1 / gnss_lcmv=0   LCMV CRPA on TX1 / off\n");
     console_print("   gnss_lcmv_eps=E             LCMV gain left at jammer, 0 = null\n");
     console_print("   gnss_lcmv_cal=RE IM         RX2 calibration (lcmv_rx2_cal.py)\n");
     console_print("   gnss_lcmv?                  LCMV state, weights, clipping\n");
@@ -830,12 +812,10 @@ void gnss_info_menu(void)
     console_print("    gnss_ddr_tx=1 / =0         DDR round trip / stop\n");
     console_print("    tx1_attenuation=N          mdB. BIGGER = QUIETER.\n");
     console_print("                               89750 quietest, 70000 known good\n");
-    console_print("    gnss_npi=1 / gnss_npi=0    PL-NPI power inversion on TX1 / off\n");
-    console_print("    gnss_npi_auto=1            automatic gamma (default with gnss_npi=1)\n");
     console_print("    gnss_lcmv_angles=10 40     LCMV: GPS look 10 deg, jammer null 40 deg\n");
     console_print("    gnss_lcmv=1 / gnss_lcmv=0  LCMV CRPA on TX1 / off\n");
-    console_print("    gnss_rx_gain?              gain, level hold, gamma, jammer flag\n");
-    console_print("    gnss_tx? gnss_status? gnss_npi? gnss_lcmv?  read back\n");
+    console_print("    gnss_rx_gain=40            same manual gain on RX1+RX2 (LCMV)\n");
+    console_print("    gnss_tx? gnss_status? gnss_lcmv?    read back\n");
     console_print("\n");
     console_print("    ?        this menu            help?    every command (long)\n");
     console_print("===============================================================\n");

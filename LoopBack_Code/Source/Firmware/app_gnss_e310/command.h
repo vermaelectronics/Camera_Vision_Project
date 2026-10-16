@@ -237,23 +237,14 @@ void set_gnss_tx(double* param, char param_no);
 /* Prints AD9361 and gnss_passthrough runtime state. */
 void get_gnss_status(double* param, char param_no);
 
-/* PL-NPI power inversion in the PL (bitstream v2.0+).
- * gnss_npi=1 puts the PL-NPI output of RX1+RX2 on TX1 (with gnss_tx=1),
- * gnss_npi=0 returns TX1 to plain RX1. gnss_npi_gamma= sets the
- * regulariser, gnss_npi_freeze= freezes the weights. */
-void get_gnss_npi(double* param, char param_no);
-void set_gnss_npi(double* param, char param_no);
-void set_gnss_npi_gamma(double* param, char param_no);
-void set_gnss_npi_freeze(double* param, char param_no);
+/* RX1/RX2 gain: one manual gain on both channels (needed by the LCMV). */
 void get_gnss_rx_gain(double* param, char param_no);
 void set_gnss_rx_gain(double* param, char param_no);
 void set_gnss_rx_agc(double* param, char param_no);
-void set_gnss_npi_auto(double* param, char param_no);
-void set_gnss_npi_k(double* param, char param_no);
 
 /* LCMV CRPA (bitstream v2.2+): 2-element beamformer with gain 1 toward the
  * GPS angle and a null toward the jammer angle, on TX1 with gnss_tx=1.
- * gnss_lcmv=1 and gnss_npi=1 switch each other off. */
+ * gnss_lcmv=1 locks RX1+RX2 to one manual gain. */
 void get_gnss_lcmv(double* param, char param_no);
 void set_gnss_lcmv(double* param, char param_no);
 void set_gnss_lcmv_angles(double* param, char param_no);
