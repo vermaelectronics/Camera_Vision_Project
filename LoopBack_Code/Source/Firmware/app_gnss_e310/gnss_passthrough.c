@@ -61,9 +61,7 @@ int32_t gnss_pt_probe(void)
         printf("gnss_pt: WARNING version mismatch. Firmware expects %lu.%lu,\n"
                "         the bitstream reports %lu.%lu. If the board reports\n"
                "         1.0, its TX output is missing the sample alignment\n"
-               "         stage and is 24 dB low. If it reports 1.x, it has no\n"
-               "         LCMV CRPA and the lcmv commands have no effect.\n"
-               "         Reprogram the FPGA.\n",
+               "         stage and is 24 dB low. Reprogram the FPGA.\n",
                (unsigned long)(GNSS_PT_EXPECTED_VERSION >> 16),
                (unsigned long)(GNSS_PT_EXPECTED_VERSION & 0xFFFFU),
                (unsigned long)(ver >> 16), (unsigned long)(ver & 0xFFFFU));
@@ -96,6 +94,27 @@ void gnss_pt_clear_counters(void)
     gnss_pt_write(GNSS_PT_REG_CONTROL, c |  GNSS_PT_CTRL_CNT_CLEAR);
     no_os_mdelay(1);
     gnss_pt_write(GNSS_PT_REG_CONTROL, c & ~GNSS_PT_CTRL_CNT_CLEAR);
+}
+
+void gnss_pt_set_npi(int enable)
+{
+    uint32_t c = gnss_pt_read(GNSS_PT_REG_CONTROL);
+    if (enable) { c |= GNSS_PT_CTRL_NPI_EN; }
+    else        { c &= ~GNSS_PT_CTRL_NPI_EN; }
+    gnss_pt_write(GNSS_PT_REG_CONTROL, c);
+}
+
+void gnss_pt_set_npi_gamma(uint32_t gamma)
+{
+    gnss_pt_write(GNSS_PT_REG_NPI_GAMMA, gamma);
+}
+
+void gnss_pt_set_npi_freeze(int freeze)
+{
+    uint32_t c = gnss_pt_read(GNSS_PT_REG_CONTROL);
+    if (freeze) { c |= GNSS_PT_CTRL_NPI_FREEZE; }
+    else        { c &= ~GNSS_PT_CTRL_NPI_FREEZE; }
+    gnss_pt_write(GNSS_PT_REG_CONTROL, c);
 }
 
 void gnss_pt_get_state(gnss_pt_state_t *st)
@@ -141,9 +160,11 @@ void gnss_pt_print_state(void)
     printf("  control        : 0x%08lx\n", (unsigned long)s.control);
     printf("  status         : 0x%08lx\n", (unsigned long)s.status);
     printf("  passthrough    : %s\n", s.passthrough_enabled ? "ON" : "off");
-    printf("  lcmv crpa      : %s\n",
-           (s.status & GNSS_PT_ST_LCMV_ACTIVE)    ? "ACTIVE (TX ch0 = LCMV, ch1 = RX1)" :
-           (s.status & GNSS_PT_ST_LCMV_EN_SYNCED) ? "enabled, no weights yet" : "off");
+    printf("  pl-npi         : %s%s, gamma=%lu, gain band=%lu\n",
+           (s.status & GNSS_PT_ST_NPI_EN_SYNCED) ? "ON" : "off",
+           (s.control & GNSS_PT_CTRL_NPI_FREEZE) ? " (weights frozen)" : "",
+           (unsigned long)gnss_pt_read(GNSS_PT_REG_NPI_GAMMA),
+           (unsigned long)((s.status >> GNSS_PT_ST_NPI_BAND_SHIFT) & GNSS_PT_ST_NPI_BAND_MASK));
     printf("  adc enable i/q : %d / %d\n",
            (s.status & GNSS_PT_ST_ADC_EN_I0) ? 1 : 0,
            (s.status & GNSS_PT_ST_ADC_EN_Q0) ? 1 : 0);
@@ -246,116 +267,4 @@ int32_t gnss_pt_check_dataflow(uint32_t delay_ms)
     }
 
     return GNSS_PT_OK;
-}
-
-/* ==========================================================================
- *  LCMV CRPA  (gnss_passthrough v2.0)
- * ======================================================================= */
-
-void gnss_pt_lcmv_enable(int enable)
-{
-    uint32_t c = gnss_pt_read(GNSS_PT_REG_CONTROL);
-    if (enable) { c |= GNSS_PT_CTRL_LCMV_EN; }
-    else        { c &= ~GNSS_PT_CTRL_LCMV_EN; }
-    gnss_pt_write(GNSS_PT_REG_CONTROL, c);
-    printf("gnss_pt: LCMV CRPA %s\n", enable ? "ENABLED (TX ch0 = beamformed, ch1 = RX1)"
-                                             : "disabled (identity passthrough)");
-    if (enable && !(c & GNSS_PT_CTRL_PASS_EN)) {
-        printf("gnss_pt: note - passthrough is off, so the LCMV output does not\n"
-               "         reach the DAC until it is enabled (gnss_tx=1).\n");
-    }
-}
-
-int32_t gnss_pt_lcmv_set_angles(int gps_deg, int jam_deg)
-{
-    if (gps_deg < -90 || gps_deg > 90 || jam_deg < -90 || jam_deg > 90) {
-        printf("gnss_pt: LCMV angles must be -90..90 deg (got gps %d, jam %d)\n",
-               gps_deg, jam_deg);
-        return GNSS_PT_ERR_RANGE;
-    }
-    gnss_pt_write(GNSS_PT_REG_LCMV_GPS_ANGLE, (uint32_t)(int32_t)gps_deg & 0xFFFFU);
-    gnss_pt_write(GNSS_PT_REG_LCMV_JAM_ANGLE, (uint32_t)(int32_t)jam_deg & 0xFFFFU);
-    /* With two antennas the look and null directions must be separated: the
-     * weights grow as 1/|a_s(2) - a_J(2)| and the solver clamps them below
-     * about 2 deg of separation at broadside, where the look gain drops. */
-    if ((gps_deg - jam_deg) < 3 && (jam_deg - gps_deg) < 3) {
-        printf("gnss_pt: WARNING GPS and jammer angles are within 3 deg; the\n"
-               "         2-element LCMV cannot keep unity GPS gain there.\n");
-    }
-    return GNSS_PT_OK;
-}
-
-void gnss_pt_lcmv_set_eps(uint32_t eps_q16)
-{
-    gnss_pt_write(GNSS_PT_REG_LCMV_EPS, eps_q16 & 0xFFFFU);
-}
-
-void gnss_pt_lcmv_set_rx2_cal(int16_t re_q14, int16_t im_q14)
-{
-    gnss_pt_write(GNSS_PT_REG_LCMV_RX2_CAL,
-                  ((uint32_t)(uint16_t)im_q14 << 16) | (uint32_t)(uint16_t)re_q14);
-}
-
-void gnss_pt_lcmv_get_state(gnss_pt_lcmv_state_t *st)
-{
-    if (!st) { return; }
-
-    uint32_t lst = gnss_pt_read(GNSS_PT_REG_LCMV_STATUS);
-    uint32_t sts = gnss_pt_read(GNSS_PT_REG_STATUS);
-    uint32_t cal = gnss_pt_read(GNSS_PT_REG_LCMV_RX2_CAL);
-
-    st->enabled    = (lst & GNSS_PT_LCMV_ST_EN)  ? 1 : 0;
-    st->active     = (sts & GNSS_PT_ST_LCMV_ACTIVE) ? 1 : 0;
-    st->busy       = (lst & GNSS_PT_LCMV_ST_BUSY) ? 1 : 0;
-    st->sat_sticky = (lst & GNSS_PT_LCMV_ST_SAT) ? 1 : 0;
-    st->gps_deg    = (int16_t)(gnss_pt_read(GNSS_PT_REG_LCMV_GPS_ANGLE) & 0xFFFFU);
-    st->jam_deg    = (int16_t)(gnss_pt_read(GNSS_PT_REG_LCMV_JAM_ANGLE) & 0xFFFFU);
-    st->eps_q16    = gnss_pt_read(GNSS_PT_REG_LCMV_EPS) & 0xFFFFU;
-    st->cal_re_q14 = (int16_t)( cal        & 0xFFFFU);
-    st->cal_im_q14 = (int16_t)((cal >> 16) & 0xFFFFU);
-    st->w1_re      = (int32_t)gnss_pt_read(GNSS_PT_REG_LCMV_W1_RE);
-    st->w1_im      = (int32_t)gnss_pt_read(GNSS_PT_REG_LCMV_W1_IM);
-    st->w2_re      = (int32_t)gnss_pt_read(GNSS_PT_REG_LCMV_W2_RE);
-    st->w2_im      = (int32_t)gnss_pt_read(GNSS_PT_REG_LCMV_W2_IM);
-    st->updates    = gnss_pt_read(GNSS_PT_REG_LCMV_UPDATES);
-    st->sat_count  = gnss_pt_read(GNSS_PT_REG_LCMV_SAT_COUNT);
-}
-
-/* Q16.16 -> "-1.2345" without floating-point printf. */
-static void q16_str(int32_t v, char *buf, int len)
-{
-    uint32_t a    = (v < 0) ? (uint32_t)(-(int64_t)v) : (uint32_t)v;
-    uint32_t ip   = a >> 16;
-    uint32_t frac = (uint32_t)(((uint64_t)(a & 0xFFFFU) * 10000U + 32768U) >> 16);
-    if (frac >= 10000U) { ip++; frac -= 10000U; }
-    snprintf(buf, len, "%s%lu.%04lu", (v < 0) ? "-" : "+",
-             (unsigned long)ip, (unsigned long)frac);
-}
-
-void gnss_pt_lcmv_print_state(void)
-{
-    gnss_pt_lcmv_state_t s;
-    char a[16], b[16], c[16], d[16];
-
-    gnss_pt_lcmv_get_state(&s);
-    q16_str(s.w1_re, a, sizeof(a));
-    q16_str(s.w1_im, b, sizeof(b));
-    q16_str(s.w2_re, c, sizeof(c));
-    q16_str(s.w2_im, d, sizeof(d));
-
-    printf("\n--- LCMV CRPA (PIER C 2008, 2 elements) ---\n");
-    printf("  state          : %s%s\n",
-           s.active ? "ACTIVE" : (s.enabled ? "enabled, no weights yet" : "off"),
-           s.busy ? "  (solver running)" : "");
-    printf("  GPS look angle : %ld deg   (gain 1)\n", (long)s.gps_deg);
-    printf("  jammer angle   : %ld deg   (null)\n", (long)s.jam_deg);
-    printf("  eps            : %lu / 65536\n", (unsigned long)s.eps_q16);
-    printf("  RX2 cal        : re %d  im %d   (Q2.14, 16384 = 1.0)\n",
-           (int)s.cal_re_q14, (int)s.cal_im_q14);
-    printf("  w1             : %s %sj\n", a, b);
-    printf("  w2             : %s %sj\n", c, d);
-    printf("  weight updates : %lu\n", (unsigned long)s.updates);
-    printf("  clipped output : %lu samples%s\n", (unsigned long)s.sat_count,
-           s.sat_sticky ? "   (CLIPPING SEEN - reduce RX gain)" : "");
-    printf("-------------------------------------------\n");
 }

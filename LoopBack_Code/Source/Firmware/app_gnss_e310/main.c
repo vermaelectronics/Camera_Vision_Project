@@ -69,6 +69,7 @@
 /* GNSS-CRPA MOD-3: project additions. See Docs/Architecture/MODIFICATIONS.md. */
 #include "gnss_l1.h"
 #include "gnss_passthrough.h"
+#include "gnss_npi_agc.h"
 #include "gnss_capture.h"
 #include "gnss_info.h"   /* GNSS-CRPA MOD-10 */
 
@@ -589,15 +590,6 @@ int main(void)
 #ifdef XILINX_PLATFORM
 	Xil_ICacheEnable();
 	Xil_DCacheEnable();
-#endif
-	/* GNSS-CRPA MOD-11: first sign of life, BEFORE anything that can hang.
-	 * The next console output normally comes from ad9361_init, about a second
-	 * later. If this line appears and nothing follows, the firmware is running
-	 * and stuck in AD9361/SPI/GPIO bring-up; if even this line is missing, the
-	 * problem is the boot (FSBL/SD) or the console port, not the firmware. */
-	printf("\n\rgnss: firmware started (gnss_passthrough v2.0 + LCMV), "
-	       "initialising AD9361 ...\n\r");
-#ifdef XILINX_PLATFORM
 	default_init_param.spi_param.extra = &xil_spi_param;
 	default_init_param.spi_param.platform_ops = &xil_spi_ops;
 #endif
@@ -1186,6 +1178,10 @@ int main(void)
 	/* GNSS-CRPA MOD-9/MOD-10: show the information menu at start-up, not the
 	 * full ~60-line vendor command dump. `help?` still prints everything. */
 	gnss_info_menu();
+
+	/* PL-NPI matched RX gain / automatic gamma loop runs while the console
+	 * is idle. */
+	console_set_idle_hook(gnss_rxg_poll);
 
 	while(1)
 	{

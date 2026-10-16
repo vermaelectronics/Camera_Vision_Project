@@ -176,11 +176,13 @@ static void info_hardware(struct ad9361_rf_phy *phy)
     console_print("   base address    : 0x43C00000, 4 kB aperture\n");
     console_print("   ID register     : 0x%08x  (expect 0x47435031, ASCII 'GCP1')\n",
                   (long)gnss_pt_read(GNSS_PT_REG_ID));
-    console_print("   VERSION         : 0x%08x  (expect 0x00020000 = v2.0)\n",
+    console_print("   VERSION         : 0x%08x  (expect 0x00020001 = v2.1)\n",
                   (long)gnss_pt_read(GNSS_PT_REG_VERSION));
     console_print("     v1.0 is the original identity passthrough and transmits\n");
     console_print("     24 dB LOW. v1.1 adds the RX->TX sample alignment stage.\n");
-    console_print("     v2.0 adds the 2-element LCMV CRPA (lcmv=1).\n");
+    console_print("     v2.0 is the PL-NPI-only build: the PL-NPI power-inversion\n");
+    console_print("     core (pl_npi_0) on TX1, no PI-NLMS. v2.1 makes pl_npi_0\n");
+    console_print("     the pipelined Vitis HLS core (II=2) that meets 8 ns timing.\n");
     rule();
 
     console_print(" RF FRONT END                                            [cfg]\n");
@@ -258,6 +260,13 @@ static void info_config(struct ad9361_rf_phy *phy)
                   (char *)(((ctrl >> 1) & 1U) ? "output forced to zero" : "output live"));
     console_print("     [2] swap_iq  : %d\n", (long)((ctrl >> 2) & 1U));
     console_print("     [3] ch1_copy : %d\n", (long)((ctrl >> 3) & 1U));
+    console_print("     [5] npi_en   : %d   %s\n", (long)((ctrl >> 5) & 1U),
+                  (char *)(((ctrl >> 5) & 1U) ? "TX1 = PL-NPI(RX1, RX2)"
+                                              : "TX1 = RX1 (PL-NPI off)"));
+    console_print("     [6] npi_freeze: %d\n", (long)((ctrl >> 6) & 1U));
+    console_print("   PL-NPI gamma   : %d%d   (gnss_npi_gamma=, register 0x48)\n",
+                  (long)(gnss_pt_read(GNSS_PT_REG_NPI_GAMMA) / 10U),
+                  (long)(gnss_pt_read(GNSS_PT_REG_NPI_GAMMA) % 10U));
     console_print("   DDR replay     : %s\n",
                   (char *)(gnss_txdma_is_running() ? "RUNNING" : "stopped"));
 }
@@ -384,6 +393,17 @@ static void info_pl(void)
     console_print("   axi_ad9361 -> AD9361 -> [TX1 SMA]\n");
     rule();
 
+    console_print("\n PL-NPI POWER INVERSION (v2.1)                          [cfg]\n");
+    rule();
+    console_print("   pl_npi_0 is a Vitis HLS IP next to gnss_passthrough, on the same\n");
+    console_print("   l_clk. It takes RX1 and RX2 at the raw ADC scale over one\n");
+    console_print("   AXI-Stream (s_axis_x) and returns the array output (m_axis_y).\n");
+    console_print("   CONTROL[5] puts it on TX1 instead of RX1, register 0x48\n");
+    console_print("   sets gamma, CONTROL[6] freezes the weights. It has no AXI-Lite\n");
+    console_print("   port: all control goes through gnss_passthrough. TX2 always\n");
+    console_print("   carries plain RX2.\n");
+    rule();
+
     console_print("\n THE ONE MODIFICATION THAT MATTERS\n");
     rule();
     console_print("   Upstream wired the DAC FIFO's data pins straight into\n");
@@ -442,11 +462,11 @@ static void info_about(void)
 
     console_print("\n WHY IT EXISTS\n");
     rule();
-    console_print("   This is the skeleton of a CRPA anti-jam front end. Today\n");
-    console_print("   gnss_passthrough is transparent -- Iout = Iin. It is the\n");
-    console_print("   insertion point where a Controlled Reception Pattern Antenna\n");
-    console_print("   algorithm will replace the identity with adaptive null\n");
-    console_print("   steering across two antenna elements.\n");
+    console_print("   This is the skeleton of a CRPA anti-jam front end. With\n");
+    console_print("   gnss_npi=0 gnss_passthrough is transparent -- Iout = Iin.\n");
+    console_print("   With gnss_npi=1 the PL-NPI core (pl_npi_0) replaces the\n");
+    console_print("   identity on TX1 with adaptive power inversion across the two\n");
+    console_print("   antenna elements RX1 and RX2.\n");
     console_print("   Proving the loop end to end FIRST means that when the\n");
     console_print("   algorithm goes in, any change it causes is measurable\n");
     console_print("   immediately at a real receiver.\n");
@@ -490,7 +510,8 @@ static void info_about(void)
     console_print("     shares 1575.42 MHz and the 18 MHz retransmit bandwidth\n");
     console_print("     carries GPS, Galileo and SBAS together.\n");
     console_print("   * Position ACCURACY was never checked against a reference.\n");
-    console_print("   * No CRPA algorithm exists yet. The block is still identity.\n");
+    console_print("   * PL-NPI power inversion has NOT yet been verified on hardware\n");
+    console_print("     against a jammer. Treat it as under test.\n");
     rule();
 
     console_print("\n SAFETY -- READ THIS\n");
@@ -513,20 +534,22 @@ static void info_registers(void)
     head("6  gnss_passthrough REGISTER MAP  (base 0x43C00000, 4 kB)");
 
     console_print("   0x00  ID              RO  0x47435031, ASCII 'GCP1'\n");
-    console_print("   0x04  VERSION         RO  0x00020000 = v2.0\n");
+    console_print("   0x04  VERSION         RO  0x00020001 = v2.1\n");
     console_print("   0x08  SCRATCH         RW  read/write test\n");
     console_print("   0x0C  CONTROL         RW  [0] pass_en  [1] mute\n");
     console_print("                             [2] swap_iq  [3] ch1_copy\n");
-    console_print("                             [4] lcmv_en  [8] cnt_clear\n");
+    console_print("                             [5] npi_en   [6] npi_freeze\n");
+    console_print("                             [8] cnt_clear\n");
     console_print("   0x10  STATUS          RO  [0] adc_enable_i0  [1] adc_enable_q0\n");
     console_print("                             [2] dac_enable_i0  [3] dac_enable_q0\n");
     console_print("                             [4] fifo0_empty    [5] fifo0_full\n");
     console_print("                             [6] fifo1_empty    [7] fifo1_full\n");
     console_print("                             [8] overflow_sticky\n");
     console_print("                             [9] underflow_sticky\n");
+    console_print("                            [10] npi_drop_sticky (must stay 0)\n");
     console_print("                            [16] pass_en in the sample domain\n");
-    console_print("                            [17] lcmv_en  [18] lcmv_active\n");
-    console_print("                            [19] lcmv output clipped (sticky)\n");
+    console_print("                            [18] npi_en in the sample domain\n");
+    console_print("                         [21:20] PL-NPI gain band (0..3)\n");
     console_print("   0x14  RX_COUNT_CH0    RO\n");
     console_print("   0x18  TX_COUNT_CH0    RO\n");
     console_print("   0x1C  OVERFLOW_COUNT  RO\n");
@@ -537,14 +560,9 @@ static void info_registers(void)
     console_print("   0x30  RX_COUNT_CH1    RO\n");
     console_print("   0x34  TX_COUNT_CH1    RO\n");
     console_print("   0x38  RX_SNAPSHOT_CH1 RO\n");
-    console_print("   0x40  LCMV_GPS_ANGLE  RW  [15:0] signed deg (look, gain 1)\n");
-    console_print("   0x44  LCMV_JAM_ANGLE  RW  [15:0] signed deg (null)\n");
-    console_print("   0x48  LCMV_EPS        RW  [15:0] Q0.16 gain toward jammer\n");
-    console_print("   0x4C  LCMV_RX2_CAL    RW  {im,re} Q2.14, reset 0x00004000\n");
-    console_print("   0x50  LCMV_W1_RE..    RO  0x50-0x5C weights w1, w2, Q16.16\n");
-    console_print("   0x60  LCMV_STATUS     RO  [0] en [1] valid [2] busy [3] sat\n");
-    console_print("   0x64  LCMV_UPDATES    RO  weight sets computed\n");
-    console_print("   0x68  LCMV_SAT_COUNT  RO  output samples clipped\n");
+    console_print("   0x40  CRPA_COEF0..1   RW  stored but unused\n");
+    console_print("   0x48  CRPA_COEF2      RW  PL-NPI regulariser gamma (0 acts as 1)\n");
+    console_print("   0x4C  CRPA_COEF3..15  RW  0x4C-0x7C, stored but unused.\n");
     rule();
     console_print(" STATUS BITS [2] AND [3] ARE THE IMPORTANT ONES.\n");
     console_print("   They are axi_ad9361's read-back of (dac_data_sel == 4'h2),\n");
@@ -591,7 +609,7 @@ static void info_health(struct ad9361_rf_phy *phy)
     console_print("   overflow       : 0 / 0    a non-zero sticky flag means the\n");
     console_print("   underflow      : 0 / 0    elastic buffer lost samples\n");
     console_print("   last tx sample : low nibble ZERO -- proves the RX->TX\n");
-    console_print("                    alignment stage is present (v1.1+). If the\n");
+    console_print("                    alignment stage is present (v1.1). If the\n");
     console_print("                    low nibble is non-zero you are running v1.0\n");
     console_print("                    and transmitting 24 dB low.\n");
 }
@@ -647,12 +665,12 @@ static void info_issues(void)
     console_print("   nothing and the board looks broken when it is not.\n");
     rule();
 
-    console_print("\n 5. RX2 HAS NOTHING CONNECTED.\n");
+    console_print("\n 5. PL-NPI NEEDS RX2 CONNECTED.\n");
     rule();
     console_print("   Both RX channels are wired in the PL, so a TWO-ELEMENT CRPA\n");
-    console_print("   needs no block-design change -- but RX2 currently sees only\n");
-    console_print("   its own noise. A second antenna or a splitter is required\n");
-    console_print("   before any array work.\n");
+    console_print("   is in place -- but with nothing on RX2 it sees only its own\n");
+    console_print("   noise and gnss_npi=1 cannot null anything. A second antenna\n");
+    console_print("   or a splitter is required before any array work.\n");
     console_print("   One AD9361 gives only TWO coherent channels. More elements\n");
     console_print("   than that needs more hardware.\n");
     rule();
@@ -735,6 +753,14 @@ static void info_quickstart(void)
     console_print("   gnss_ddr_tx=1 / =0          DDR round trip / stop\n");
     console_print("   tx1_attenuation=N           mdB. BIGGER = QUIETER.\n");
     console_print("   gnss_tx? / gnss_status?     state, read back from hardware\n");
+    console_print("   gnss_npi=1 / gnss_npi=0     PL-NPI power inversion on TX1 / off\n");
+    console_print("   gnss_npi_gamma=N            fixed PL-NPI gamma (turns AUTO off)\n");
+    console_print("   gnss_npi_auto=1 / =0        automatic gamma on (default) / off\n");
+    console_print("   gnss_npi_k=0 / =N           k automatic (default) / fixed N\n");
+    console_print("   gnss_rx_gain?               RX1/RX2 gain, mode, level hold, gamma\n");
+    console_print("   gnss_rx_gain=<dB>           same gain on RX1+RX2 (auto reference)\n");
+    console_print("   gnss_rx_agc=2 / =0 / =1     matched auto / manual / AD9361 AGC\n");
+    console_print("   gnss_npi?                   PL-NPI on/off, gamma, gain band\n");
     console_print("   ?                           this menu\n");
     console_print("   help?                       every command (long)\n");
 }
@@ -780,13 +806,10 @@ void gnss_info_menu(void)
     console_print("    gnss_ddr_tx=1 / =0         DDR round trip / stop\n");
     console_print("    tx1_attenuation=N          mdB. BIGGER = QUIETER.\n");
     console_print("                               89750 quietest, 70000 known good\n");
-    console_print("    gnss_tx? gnss_ddr_tx? gnss_status?   read back from hardware\n");
-    console_print("\n");
-    console_print("  LCMV CRPA  (2 antennas: TX1 = beamformed, TX2 = RX1)\n");
-    console_print("    lcmv_angles=G J            GPS look / jammer null [deg]\n");
-    console_print("    lcmv=1 / lcmv=0            LCMV on / identity\n");
-    console_print("    lcmv_eps=E  lcmv_cal=R I   null depth / RX2 calibration\n");
-    console_print("    lcmv?                      angles, weights, clipping\n");
+    console_print("    gnss_npi=1 / gnss_npi=0    PL-NPI power inversion on TX1 / off\n");
+    console_print("    gnss_npi_auto=1            automatic gamma (default with gnss_npi=1)\n");
+    console_print("    gnss_rx_gain?              gain, level hold, gamma, jammer flag\n");
+    console_print("    gnss_tx? gnss_ddr_tx? gnss_status? gnss_npi?   read back\n");
     console_print("\n");
     console_print("    ?        this menu            help?    every command (long)\n");
     console_print("===============================================================\n");

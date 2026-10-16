@@ -48,15 +48,19 @@
  *  again the real definition wins and this file becomes a no-op.
  *
  *  ---------------------------------------------------------------------------
- *  VITIS 2023.2 (classic, non-SDT BSP)
- *    The classic BSP still defines the legacy names (XPAR_PS7_*_DEVICE_ID,
- *    _XPARAMETERS_PS_H_, XPAR_DDR_MEM_BASEADDR, ...), so every guarded mapping
- *    below is skipped and this file is a no-op apart from the DDR fallback.
- *
  *  VERIFIED AGAINST
  *    Vitis 2026.1, platform e310_gnss_platform, domain standalone_ps7_cortexa9_0
  *    Every replacement symbol below was confirmed present in the generated
  *    xparameters.h before being used here. None is guessed (requirement 32).
+ *
+ *  VITIS 2023.2
+ *    The default 2023.2 software flow (Vitis/Scripts/build_software.tcl, XSCT)
+ *    generates a CLASSIC BSP. That BSP still defines the legacy names
+ *    (XPAR_PS7_*_DEVICE_ID, XPAR_PS7_SPI_0_SPI_CLK_FREQ_HZ,
+ *    _XPARAMETERS_PS_H_, ...), so every guarded mapping below is skipped and
+ *    the vendor no-OS code sees exactly what it was written for. The 2023.2
+ *    Python flow (build_software.py) is SDT-based like 2026.1 and uses the
+ *    mappings as before. Section 4 also accepts the classic DDR symbol.
  *****************************************************************************/
 #ifndef XPARAM_COMPAT_H_
 #define XPARAM_COMPAT_H_
@@ -114,6 +118,20 @@
 #define XPAR_PS7_SPI_1_SPI_CLK_FREQ_HZ  XPAR_XSPIPS_1_SPI_CLK_FREQ_HZ
 #endif
 
+/* The Vitis 2023.2 Unified IDE (SDT) BSP defines neither spelling. The block
+ * design leaves PCW_SPI_PERIPHERAL_FREQMHZ at the PS7 default, 166.666666 MHz,
+ * which the classic BSP reports as 166666672 Hz. Use that value and say so.
+ * If this is ever wrong the SPI to the AD9361 runs at a different speed:
+ * the AD9361 init in the boot log ("ad9361_init : AD936x Rev 2 successfully
+ * initialized") is the check. */
+#ifndef XPAR_PS7_SPI_0_SPI_CLK_FREQ_HZ
+#warning "No SPI0 clock in xparameters.h; assuming the PS7 default 166666672 Hz"
+#define XPAR_PS7_SPI_0_SPI_CLK_FREQ_HZ  166666672U
+#endif
+#ifndef XPAR_PS7_SPI_1_SPI_CLK_FREQ_HZ
+#define XPAR_PS7_SPI_1_SPI_CLK_FREQ_HZ  166666672U
+#endif
+
 /* ---------------------------------------------------------------------------
  * 3b. Peripheral instance counts.
  *
@@ -163,7 +181,8 @@
 #if !defined(XPAR_DDR_MEM_BASEADDR)
 #  if defined(XPAR_PS7_DDR_0_BASEADDRESS)
 #    define XPAR_DDR_MEM_BASEADDR       XPAR_PS7_DDR_0_BASEADDRESS
-#  elif defined(XPAR_PS7_DDR_0_S_AXI_BASEADDR)    /* Vitis 2023.2 classic BSP */
+#  elif defined(XPAR_PS7_DDR_0_S_AXI_BASEADDR)
+     /* Classic (non-SDT) BSP, e.g. Vitis 2023.2 XSCT flow. */
 #    define XPAR_DDR_MEM_BASEADDR       XPAR_PS7_DDR_0_S_AXI_BASEADDR
 #  elif defined(XPAR_PSU_DDR_0_S_AXI_BASEADDR)
 #    define XPAR_DDR_MEM_BASEADDR       XPAR_PSU_DDR_0_S_AXI_BASEADDR

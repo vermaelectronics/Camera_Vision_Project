@@ -13,16 +13,17 @@
   ],
 
   "toolchain": {
-    "_comment": "Set install_root to the directory that CONTAINS Vivado\\bin\\vivado.bat. Leave null to auto-detect via PATH, environment variables, Start Menu shortcuts and the usual install roots.",
+    "_comment": "Target toolchain is Vivado/Vitis 2023.2. On Linux, source /tools/Xilinx/Vivado/2023.2/settings64.sh and /tools/Xilinx/Vitis/2023.2/settings64.sh before running Automation/Linux/build_all.sh; that script uses whatever is on PATH. Leave install_root null to auto-detect.",
     "install_root": null,
-    "_example": "C:/AMDDesignTools/2026.1",
-    "_detected_on_the_setup_machine": "C:/AMDDesignTools/2026.1 (Vivado 2026.1, Vitis 2026.1)"
+    "_example": "/tools/Xilinx/Vivado/2023.2",
+    "_example_windows": "C:/Xilinx/Vivado/2023.2",
+    "target_version": "2023.2"
   },
 
   "build": {
     "_comment": "Parallel jobs for synthesis and implementation. Match your CPU, not the machine this template came from.",
     "jobs": 4,
-    "_comment_version_override": "The upstream ADI scripts demand Vivado 2021.1 and abort otherwise. Build_All.ps1 sets REQUIRED_VIVADO_VERSION to the detected version so the check passes. Set force_required_version to pin a different string if you deliberately want the original behaviour.",
+    "_comment_version_override": "Vendor/ADI_hdl_2023_r2 expects Vivado 2023.2, so no override is needed. build_all.sh exports REQUIRED_VIVADO_VERSION=2023.2 anyway. Set force_required_version only if you deliberately run a different version.",
     "force_required_version": null
   },
 

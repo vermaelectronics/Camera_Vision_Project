@@ -48,7 +48,7 @@ if {![info exists ::env(GNSS_CRPA_IP_REPO)]} {
   error "ERROR: environment variable GNSS_CRPA_IP_REPO is not set.\
          It must point at the directory holding the packaged custom IP\
          (normally <code_r1>/Build/ip_repo).  Run the build through\
-         Automation/PowerShell/Build_All.ps1, or set it manually before\
+         Automation/Linux/build_all.sh, or set it manually before\
          sourcing this script."
 }
 set gnss_ip_repo [file normalize $::env(GNSS_CRPA_IP_REPO)]
@@ -73,8 +73,18 @@ if {[llength $gnss_ipdef] == 0} {
   error "ERROR: gnss_passthrough was not found in the IP catalog after registering\
          $gnss_ip_repo. Re-package it with\
          Source/IP/gnss_passthrough/gnss_passthrough_ip.tcl, or run\
-         Build_All.ps1 -FromStage 3."
+         Automation/Linux/build_all.sh --from ip."
 }
+# The PL-NPI core is a separate Vitis HLS IP in the same repository
+# (Source/HLS/pl_npi/build_hls.tcl, build_all.sh stage "npi").
+set npi_ipdef [get_ipdefs -all -quiet -filter \
+  {VLNV =~ *:pl_npi:* && design_tool_contexts =~ *IPI* && UPGRADE_VERSIONS == ""}]
+if {[llength $npi_ipdef] == 0} {
+  error "ERROR: pl_npi was not found in the IP catalog at $gnss_ip_repo.\
+         Build it with Source/HLS/pl_npi/build_hls.tcl (vitis_hls), or run\
+         Automation/Linux/build_all.sh --from npi."
+}
+puts "GNSS-CRPA: PL-NPI IP resolved in catalog: $npi_ipdef"
 puts "GNSS-CRPA: custom IP repository registered: $gnss_ip_repo"
 puts "GNSS-CRPA: custom IP resolved in catalog: $gnss_ipdef"
 # GNSS-CRPA MOD-0 END
@@ -492,6 +502,19 @@ ad_connect gnss_passthrough/dac_data_i0 axi_ad9361/dac_data_i0
 ad_connect gnss_passthrough/dac_data_q0 axi_ad9361/dac_data_q0
 ad_connect gnss_passthrough/dac_data_i1 axi_ad9361/dac_data_i1
 ad_connect gnss_passthrough/dac_data_q1 axi_ad9361/dac_data_q1
+
+# PL-NPI power-inversion core (pipelined Vitis HLS IP, II=2), next to gnss_passthrough.
+#   gnss_passthrough selects it for TX1 with CONTROL[5], supplies gamma (register 0x48) and adapt_en (~CONTROL[6]), and
+#   holds it in reset while disabled. Same clock, so no clock crossing.
+ad_ip_instance pl_npi pl_npi_0
+
+ad_connect axi_ad9361/l_clk             pl_npi_0/ap_clk
+ad_connect gnss_passthrough/npi_rst_n   pl_npi_0/ap_rst_n
+ad_connect gnss_passthrough/m_axis_npi  pl_npi_0/s_axis_x
+ad_connect pl_npi_0/m_axis_y            gnss_passthrough/s_axis_npi
+ad_connect gnss_passthrough/npi_gamma    pl_npi_0/gamma
+ad_connect gnss_passthrough/npi_adapt_en pl_npi_0/adapt_en
+ad_connect pl_npi_0/gain_band           gnss_passthrough/npi_band
 
 # GNSS-CRPA MOD-2 END
 # ---------------------------------------------------------------------------

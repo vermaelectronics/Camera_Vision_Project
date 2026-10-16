@@ -45,10 +45,9 @@
 #define GNSS_PT_BASEADDR   XPAR_GNSS_PASSTHROUGH_0_BASEADDR
 #elif defined(XPAR_GNSS_PASSTHROUGH_BASEADDR)
 #define GNSS_PT_BASEADDR   XPAR_GNSS_PASSTHROUGH_BASEADDR
-#elif defined(XPAR_GNSS_PASSTHROUGH_S_AXI_BASEADDR)       /* Vitis 2023.2 classic */
+#elif defined(XPAR_GNSS_PASSTHROUGH_S_AXI_BASEADDR)
+/* Classic (non-SDT) BSP naming, e.g. Vitis 2023.2 XSCT flow. */
 #define GNSS_PT_BASEADDR   XPAR_GNSS_PASSTHROUGH_S_AXI_BASEADDR
-#elif defined(XPAR_GNSS_PASSTHROUGH_0_S_AXI_BASEADDR)
-#define GNSS_PT_BASEADDR   XPAR_GNSS_PASSTHROUGH_0_S_AXI_BASEADDR
 #else
 #warning "gnss_passthrough base address not found in xparameters.h; using the project-assigned 0x43C00000. Verify this against the generated XSA before trusting any register read."
 #define GNSS_PT_BASEADDR   0x43C00000U
@@ -70,47 +69,28 @@
 #define GNSS_PT_REG_RX_COUNT_CH1    0x30U   /* RO                             */
 #define GNSS_PT_REG_TX_COUNT_CH1    0x34U   /* RO                             */
 #define GNSS_PT_REG_RX_SNAPSHOT_CH1 0x38U   /* RO                             */
-
-/* ---- LCMV CRPA (v2.0) ----------------------------------------------------
- * 2-element robust LCMV, PIER C vol. 4 (2008) eq. (9): gain 1 toward the GPS
- * angle, gain EPS toward the jammer angle. Angles come from software; the
- * FPGA does no DOA estimation. Writes to 0x40-0x4C reach the sample domain
- * within ~1 us; the readbacks 0x50-0x68 lag by one status capture (~4 us). */
-#define GNSS_PT_REG_LCMV_GPS_ANGLE  0x40U   /* RW  [15:0] signed deg -90..90  */
-#define GNSS_PT_REG_LCMV_JAM_ANGLE  0x44U   /* RW  [15:0] signed deg -90..90  */
-#define GNSS_PT_REG_LCMV_EPS        0x48U   /* RW  [15:0] Q0.16, 0 = null     */
-#define GNSS_PT_REG_LCMV_RX2_CAL    0x4CU   /* RW  {im,re} Q2.14, 1.0 = 0x4000*/
-#define GNSS_PT_REG_LCMV_W1_RE      0x50U   /* RO  Q16.16                     */
-#define GNSS_PT_REG_LCMV_W1_IM      0x54U   /* RO                             */
-#define GNSS_PT_REG_LCMV_W2_RE      0x58U   /* RO  (includes RX2 calibration) */
-#define GNSS_PT_REG_LCMV_W2_IM      0x5CU   /* RO                             */
-#define GNSS_PT_REG_LCMV_STATUS     0x60U   /* RO  see GNSS_PT_LCMV_ST_*      */
-#define GNSS_PT_REG_LCMV_UPDATES    0x64U   /* RO  weight sets computed       */
-#define GNSS_PT_REG_LCMV_SAT_COUNT  0x68U   /* RO  output samples clipped     */
-
-#define GNSS_PT_LCMV_ST_EN          (1U << 0)
-#define GNSS_PT_LCMV_ST_WVALID      (1U << 1)
-#define GNSS_PT_LCMV_ST_BUSY        (1U << 2)
-#define GNSS_PT_LCMV_ST_SAT         (1U << 3)
-
-#define GNSS_PT_LCMV_RX2_CAL_ONE    0x00004000U   /* 1.0 + j0 (reset value)   */
+#define GNSS_PT_REG_CRPA_COEF(n)    (0x40U + ((n) * 4U))  /* RW, n = 0..15    */
+/* CRPA_COEF[2] is the PL-NPI regulariser gamma (unsigned; 0 acts as 1). */
+#define GNSS_PT_REG_NPI_GAMMA       GNSS_PT_REG_CRPA_COEF(2)
 
 /* ---- expected identity --------------------------------------------------- */
 #define GNSS_PT_EXPECTED_ID         0x47435031U
 /* 1.0 = Phase-1 identity passthrough.
  * 1.1 = adds the RX->TX sample alignment stage (RX is right-aligned 12-in-16,
  *       the AD9361 DAC consumes [15:4]). A board reporting 1.0 is running a
- *       bitstream whose TX output is 24 dB low with 4 bits discarded.
- * 2.0 = adds the 2-element LCMV CRPA (CONTROL[4], registers 0x40-0x68).
- *       A board reporting 1.x has no LCMV; the lcmv commands do nothing. */
-#define GNSS_PT_EXPECTED_VERSION    0x00020000U
+ *       bitstream whose TX output is 24 dB low with 4 bits discarded. */
+/* 2.0 = PL-NPI-only build: the PL-NPI power-inversion core is a separate
+ *       block-design IP (pl_npi_0, CONTROL[5], gamma in 0x48). This design
+ *       has no PI-NLMS core. */
+#define GNSS_PT_EXPECTED_VERSION    0x00020001U
 
 /* ---- CONTROL bits -------------------------------------------------------- */
 #define GNSS_PT_CTRL_PASS_EN        (1U << 0)  /* 1 = RX->TX passthrough      */
 #define GNSS_PT_CTRL_MUTE           (1U << 1)  /* 1 = drive zeros to the DAC  */
 #define GNSS_PT_CTRL_SWAP_IQ        (1U << 2)
 #define GNSS_PT_CTRL_CH1_COPY       (1U << 3)  /* ch1 TX fed from ch0         */
-#define GNSS_PT_CTRL_LCMV_EN        (1U << 4)  /* TX ch0 = LCMV, ch1 = RX1    */
+#define GNSS_PT_CTRL_NPI_EN         (1U << 5)  /* ch0 TX = PL-NPI(RX1, RX2)   */
+#define GNSS_PT_CTRL_NPI_FREEZE     (1U << 6)  /* PL-NPI weights frozen       */
 #define GNSS_PT_CTRL_CNT_CLEAR      (1U << 8)  /* held, not self-clearing     */
 
 /* ---- STATUS bits --------------------------------------------------------- */
@@ -124,10 +104,11 @@
 #define GNSS_PT_ST_FIFO1_FULL       (1U << 7)
 #define GNSS_PT_ST_OVERFLOW         (1U << 8)
 #define GNSS_PT_ST_UNDERFLOW        (1U << 9)
+#define GNSS_PT_ST_NPI_DROP         (1U << 10) /* v2.1+: pair lost at pl_npi_0 */
 #define GNSS_PT_ST_PASS_EN_SYNCED   (1U << 16)
-#define GNSS_PT_ST_LCMV_EN_SYNCED   (1U << 17)
-#define GNSS_PT_ST_LCMV_ACTIVE      (1U << 18)  /* enabled AND weights valid  */
-#define GNSS_PT_ST_LCMV_SAT         (1U << 19)  /* LCMV output was clipped    */
+#define GNSS_PT_ST_NPI_EN_SYNCED    (1U << 18)
+#define GNSS_PT_ST_NPI_BAND_SHIFT   20         /* [21:20] PL-NPI gain band    */
+#define GNSS_PT_ST_NPI_BAND_MASK    0x3U
 
 /* ---- return codes -------------------------------------------------------- */
 #define GNSS_PT_OK                   0
@@ -136,7 +117,6 @@
 #define GNSS_PT_ERR_NO_TX           -3   /* no TX requests arriving           */
 #define GNSS_PT_ERR_SCRATCH         -4   /* register read/write failed        */
 #define GNSS_PT_ERR_ALIGNMENT       -5   /* TX samples are not left-aligned   */
-#define GNSS_PT_ERR_RANGE           -6   /* argument out of range             */
 
 /* ---- API ----------------------------------------------------------------- */
 
@@ -152,6 +132,18 @@ int32_t  gnss_pt_probe(void);
 void     gnss_pt_set_passthrough(int enable);
 void     gnss_pt_set_mute(int mute);
 void     gnss_pt_clear_counters(void);
+
+/* PL-NPI power inversion (bitstream v2.0+). Enabled, channel 0 TX carries the
+ * PL-NPI array output of RX1 and RX2 instead of RX1 alone; passthrough must
+ * also be on. Disabling
+ * holds the core in reset, so re-enabling restarts from the quiescent
+ * weights [1, 0]. */
+void     gnss_pt_set_npi(int enable);
+/* Regulariser gamma of mu_NPI = 1/(2*x^T x + gamma). 1 is the value the
+ * PL-NPI testbench was measured with; 0 is used as 1 by the hardware. */
+void     gnss_pt_set_npi_gamma(uint32_t gamma);
+/* 1 = freeze the PL-NPI weights at their current value, 0 = adapt. */
+void     gnss_pt_set_npi_freeze(int freeze);
 
 /* Snapshot of everything worth observing at runtime (requirement 58). */
 typedef struct {
@@ -182,34 +174,5 @@ void     gnss_pt_print_state(void);
  * Returns GNSS_PT_OK only if both RX and TX counters advanced, and -- when
  * passthrough is on and unmuted -- the TX snapshot is left-aligned. */
 int32_t  gnss_pt_check_dataflow(uint32_t delay_ms);
-
-/* ---- LCMV CRPA ------------------------------------------------------------
- * Typical use:
- *     gnss_pt_lcmv_set_angles(gps_deg, jam_deg);
- *     gnss_pt_lcmv_enable(1);            // needs passthrough on to reach TX
- *
- * Angle convention: degrees from broadside, d = lambda/2 (95.2 mm at L1).
- * theta > 0 means the wave reaches the RX2 antenna first. */
-void     gnss_pt_lcmv_enable(int enable);
-int32_t  gnss_pt_lcmv_set_angles(int gps_deg, int jam_deg);
-void     gnss_pt_lcmv_set_eps(uint32_t eps_q16);
-void     gnss_pt_lcmv_set_rx2_cal(int16_t re_q14, int16_t im_q14);   /* Q2.14 */
-
-typedef struct {
-    int      enabled;            /* CONTROL[4] as seen in the sample domain   */
-    int      active;             /* enabled and a weight set is valid         */
-    int      busy;
-    int      sat_sticky;
-    int32_t  gps_deg;
-    int32_t  jam_deg;
-    uint32_t eps_q16;
-    int16_t  cal_re_q14, cal_im_q14;   /* Q2.14, 16384 = 1.0 */
-    int32_t  w1_re, w1_im, w2_re, w2_im;   /* Q16.16 */
-    uint32_t updates;
-    uint32_t sat_count;
-} gnss_pt_lcmv_state_t;
-
-void     gnss_pt_lcmv_get_state(gnss_pt_lcmv_state_t *st);
-void     gnss_pt_lcmv_print_state(void);
 
 #endif /* GNSS_PASSTHROUGH_H_ */

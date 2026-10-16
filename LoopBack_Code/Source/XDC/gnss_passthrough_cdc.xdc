@@ -64,21 +64,12 @@ set_false_path \
   -to [get_cells -quiet -hier -filter {NAME =~ *gnss_passthrough/inst/tog_meta_reg*}]
 
 # --- 3. Control crossing into the sample domain -----------------------------
-# Quasi-static software settings through two-flop synchronisers.
+# Quasi-static software settings through two-flop synchronisers: the CONTROL
+# bits (ctrl_meta) and the core parameters (mu_ctrl_meta in the PI-NLMS
+# design, gamma_/load_ctrl_meta in the PL-NPI / SMI-PI designs).
+#
+# The pattern was "inst/ctrl_meta_reg*" until 2026-10-08, which matched only
+# the CONTROL synchroniser: the parameter synchronisers were timed as ordinary
+# s_axi_aclk -> rx_clk paths and could show up as failing inter-clock paths.
 set_false_path \
-  -to [get_cells -quiet -hier -filter {NAME =~ *gnss_passthrough/inst/ctrl_meta_reg*}]
-
-# --- 4. LCMV configuration: s_axi_aclk -> clk (v2.0) ------------------------
-# crpa_coef[0..3] (angles, EPS, RX2 calibration) is written on the AXI clock and
-# copied into cfgc_* in the sample domain only on the edge of a synchronised
-# toggle (cfg_toggle -> cfg_tog_meta -> cfg_tog_sync). The source word is held
-# from the write until the next write, so, as for the status capture, a bounded
-# datapath delay is required rather than a synchronous relationship.
-set_max_delay -datapath_only \
-  -from [get_cells -quiet -hier -filter {NAME =~ *gnss_passthrough/inst/crpa_coef_reg*}] \
-  -to   [get_cells -quiet -hier -filter {NAME =~ *gnss_passthrough/inst/cfgc_*_reg*}] \
-  8.000
-
-# --- 5. LCMV configuration toggle into the sample domain --------------------
-set_false_path \
-  -to [get_cells -quiet -hier -filter {NAME =~ *gnss_passthrough/inst/cfg_tog_meta_reg*}]
+  -to [get_cells -quiet -hier -filter {NAME =~ *gnss_passthrough/inst/*ctrl_meta_reg*}]

@@ -1,0 +1,282 @@
+
+****** Vitis HLS - High-Level Synthesis from C, C++ and OpenCL v2023.2 (64-bit)
+  **** SW Build 4023990 on Oct 11 2023
+  **** IP Build 4028589 on Sat Oct 14 00:45:43 MDT 2023
+  **** SharedData Build 4025554 on Tue Oct 10 17:18:54 MDT 2023
+    ** Copyright 1986-2022 Xilinx, Inc. All Rights Reserved.
+    ** Copyright 2022-2023 Advanced Micro Devices, Inc. All Rights Reserved.
+
+source /tools/Xilinx/Vitis_HLS/2023.2/scripts/vitis_hls/hls.tcl -notrace
+INFO: [HLS 200-10] Running '/tools/Xilinx/Vitis_HLS/2023.2/bin/unwrapped/lnx64.o/vitis_hls'
+INFO: [HLS 200-10] For user 'sandeep' on host 'sandeep-ThinkStation-P2-Tower-Gen-2' (Linux_x86_64 version 6.8.0-138-generic) on Fri Oct 09 17:17:04 IST 2026
+INFO: [HLS 200-10] On os Ubuntu 22.04.5 LTS
+INFO: [HLS 200-10] In directory '/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi'
+INFO: [HLS 200-2053] The vitis_hls executable is being deprecated. Consider using vitis-run --mode hls --tcl
+Sourcing Tcl script 'build_hls.tcl'
+PL_NPI_HLS: HLS clock target 8 ns (uncertainty 1.0 ns), II=2
+INFO: [HLS 200-1510] Running: open_project -reset pl_npi_hls 
+INFO: [HLS 200-10] Creating and opening project '/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls'.
+INFO: [HLS 200-1510] Running: set_top pl_npi 
+INFO: [HLS 200-1510] Running: add_files /home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp -cflags -I/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi 
+INFO: [HLS 200-10] Adding design file '/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp' to the project
+INFO: [HLS 200-1510] Running: add_files -tb /home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/testbench.cpp -cflags -I/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi -Wno-unknown-pragmas 
+INFO: [HLS 200-10] Adding test bench file '/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/testbench.cpp' to the project
+INFO: [HLS 200-1510] Running: open_solution -reset sol -flow_target vivado 
+INFO: [HLS 200-10] Creating and opening solution '/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls/sol'.
+INFO: [HLS 200-10] Cleaning up the solution database.
+INFO: [HLS 200-1505] Using flow_target 'vivado'
+Resolution: For help on HLS 200-1505 see docs.xilinx.com/access/sources/dita/topic?Doc_Version=2023.2%20English&url=ug1448-hls-guidance&resourceid=200-1505.html
+INFO: [HLS 200-1510] Running: set_part xc7z020clg400-2 
+INFO: [HLS 200-1611] Setting target device to 'xc7z020-clg400-2'
+INFO: [HLS 200-1510] Running: create_clock -period 8 -name default 
+INFO: [SYN 201-201] Setting up clock 'default' with a period of 8ns.
+INFO: [HLS 200-1510] Running: set_clock_uncertainty 1.0 
+INFO: [SYN 201-201] Setting up clock 'default' with an uncertainty of 1ns.
+PL_NPI_HLS: csim scenario 1
+INFO: [HLS 200-1510] Running: csim_design -argv 1 
+INFO: [SIM 211-2] *************** CSIM start ***************
+INFO: [SIM 211-4] CSIM will launch GCC as the compiler.
+INFO: [HLS 200-2036] Building debug C Simulation binaries
+   Compiling ../../../../../testbench.cpp in debug mode
+   Compiling ../../../../pl_npi_hls.cpp in debug mode
+   Generating csim.exe
+jammer 600 LSB, gamma 1: in 360000  first 100 79240.6  last 100 3.03  null -50.7 dB  converged at sample 300  bands 4
+PL_NPI_CSIM: PASS
+INFO [HLS SIM]: The maximum depth reached by any hls::stream() instance in the design is 1
+INFO: [SIM 211-1] CSim done with 0 errors.
+INFO: [SIM 211-3] *************** CSIM finish ***************
+INFO: [HLS 200-111] Finished Command csim_design CPU user time: 2.06 seconds. CPU system time: 0.26 seconds. Elapsed time: 2.36 seconds; current allocated memory: 0.156 MB.
+PL_NPI_HLS: csim scenario 2
+INFO: [HLS 200-1510] Running: csim_design -argv 2 
+INFO: [SIM 211-2] *************** CSIM start ***************
+INFO: [SIM 211-4] CSIM will launch GCC as the compiler.
+INFO: [HLS 200-2036] Building debug C Simulation binaries
+make: 'csim.exe' is up to date.
+no jammer, noise +-20 LSB, gamma 1e8, 200000 samples: output vs RX1 power -0.2 dB
+PL_NPI_CSIM: PASS
+INFO [HLS SIM]: The maximum depth reached by any hls::stream() instance in the design is 1
+INFO: [SIM 211-1] CSim done with 0 errors.
+INFO: [SIM 211-3] *************** CSIM finish ***************
+INFO: [HLS 200-111] Finished Command csim_design CPU user time: 3.83 seconds. CPU system time: 0.06 seconds. Elapsed time: 3.9 seconds; current allocated memory: 0.301 MB.
+PL_NPI_HLS: csim scenario 3
+INFO: [HLS 200-1510] Running: csim_design -argv 3 
+INFO: [SIM 211-2] *************** CSIM start ***************
+INFO: [SIM 211-4] CSIM will launch GCC as the compiler.
+INFO: [HLS 200-2036] Building debug C Simulation binaries
+make: 'csim.exe' is up to date.
+no jammer, noise +-20 LSB, gamma 1 (informational): output vs RX1 power -24.6 dB
+PL_NPI_CSIM: PASS
+INFO [HLS SIM]: The maximum depth reached by any hls::stream() instance in the design is 1
+INFO: [SIM 211-1] CSim done with 0 errors.
+INFO: [SIM 211-3] *************** CSIM finish ***************
+INFO: [HLS 200-111] Finished Command csim_design CPU user time: 0.17 seconds. CPU system time: 0.05 seconds. Elapsed time: 0.24 seconds; current allocated memory: 0.125 MB.
+INFO: [HLS 200-1510] Running: csynth_design 
+INFO: [HLS 200-111] Finished File checks and directory preparation: CPU user time: 0.02 seconds. CPU system time: 0.01 seconds. Elapsed time: 0.03 seconds; current allocated memory: 270.457 MB.
+INFO: [HLS 200-10] Analyzing design file '/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp' ... 
+INFO: [HLS 200-111] Finished Source Code Analysis and Preprocessing: CPU user time: 1.29 seconds. CPU system time: 0.25 seconds. Elapsed time: 1.56 seconds; current allocated memory: 273.898 MB.
+INFO: [HLS 200-777] Using interface defaults for 'Vivado' flow target.
+INFO: [HLS 200-1995] There were 11,920 instructions in the design after the 'Compile/Link' phase of compilation. See the Design Size Report for more details: /home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls/sol/syn/report/csynth_design_size.rpt
+INFO: [HLS 200-1995] There were 1,296 instructions in the design after the 'Unroll/Inline (step 1)' phase of compilation. See the Design Size Report for more details: /home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls/sol/syn/report/csynth_design_size.rpt
+INFO: [HLS 200-1995] There were 804 instructions in the design after the 'Unroll/Inline (step 2)' phase of compilation. See the Design Size Report for more details: /home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls/sol/syn/report/csynth_design_size.rpt
+INFO: [HLS 200-1995] There were 804 instructions in the design after the 'Unroll/Inline (step 3)' phase of compilation. See the Design Size Report for more details: /home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls/sol/syn/report/csynth_design_size.rpt
+INFO: [HLS 200-1995] There were 803 instructions in the design after the 'Unroll/Inline (step 4)' phase of compilation. See the Design Size Report for more details: /home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls/sol/syn/report/csynth_design_size.rpt
+INFO: [HLS 200-1995] There were 705 instructions in the design after the 'Array/Struct (step 1)' phase of compilation. See the Design Size Report for more details: /home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls/sol/syn/report/csynth_design_size.rpt
+INFO: [HLS 200-1995] There were 704 instructions in the design after the 'Array/Struct (step 2)' phase of compilation. See the Design Size Report for more details: /home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls/sol/syn/report/csynth_design_size.rpt
+INFO: [HLS 200-1995] There were 704 instructions in the design after the 'Array/Struct (step 3)' phase of compilation. See the Design Size Report for more details: /home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls/sol/syn/report/csynth_design_size.rpt
+INFO: [HLS 200-1995] There were 704 instructions in the design after the 'Array/Struct (step 4)' phase of compilation. See the Design Size Report for more details: /home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls/sol/syn/report/csynth_design_size.rpt
+INFO: [HLS 200-1995] There were 704 instructions in the design after the 'Array/Struct (step 5)' phase of compilation. See the Design Size Report for more details: /home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls/sol/syn/report/csynth_design_size.rpt
+INFO: [HLS 200-1995] There were 704 instructions in the design after the 'Performance (step 1)' phase of compilation. See the Design Size Report for more details: /home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls/sol/syn/report/csynth_design_size.rpt
+INFO: [HLS 200-1995] There were 704 instructions in the design after the 'Performance (step 2)' phase of compilation. See the Design Size Report for more details: /home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls/sol/syn/report/csynth_design_size.rpt
+INFO: [HLS 200-1995] There were 704 instructions in the design after the 'Performance (step 3)' phase of compilation. See the Design Size Report for more details: /home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls/sol/syn/report/csynth_design_size.rpt
+INFO: [HLS 200-1995] There were 704 instructions in the design after the 'Performance (step 4)' phase of compilation. See the Design Size Report for more details: /home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls/sol/syn/report/csynth_design_size.rpt
+INFO: [HLS 200-1995] There were 707 instructions in the design after the 'HW Transforms (step 1)' phase of compilation. See the Design Size Report for more details: /home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls/sol/syn/report/csynth_design_size.rpt
+INFO: [HLS 200-1995] There were 713 instructions in the design after the 'HW Transforms (step 2)' phase of compilation. See the Design Size Report for more details: /home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls/sol/syn/report/csynth_design_size.rpt
+INFO: [HLS 214-131] Inlining function 'sat25(ap_int<38>)' into 'pl_npi(hls::stream<ap_uint<64>, 0>&, hls::stream<ap_uint<32>, 0>&, ap_uint<32>, ap_uint<1>, ap_uint<2>*)' (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:370:13)
+INFO: [HLS 214-131] Inlining function 'sat25(ap_int<38>)' into 'pl_npi(hls::stream<ap_uint<64>, 0>&, hls::stream<ap_uint<32>, 0>&, ap_uint<32>, ap_uint<1>, ap_uint<2>*)' (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:369:13)
+INFO: [HLS 214-131] Inlining function 'sat16(ap_int<50>)' into 'pl_npi(hls::stream<ap_uint<64>, 0>&, hls::stream<ap_uint<32>, 0>&, ap_uint<32>, ap_uint<1>, ap_uint<2>*)' (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:343:32)
+INFO: [HLS 214-131] Inlining function 'sat16(ap_int<50>)' into 'pl_npi(hls::stream<ap_uint<64>, 0>&, hls::stream<ap_uint<32>, 0>&, ap_uint<32>, ap_uint<1>, ap_uint<2>*)' (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:342:31)
+INFO: [HLS 214-131] Inlining function 'sat48(ap_int<80>)' into 'pl_npi(hls::stream<ap_uint<64>, 0>&, hls::stream<ap_uint<32>, 0>&, ap_uint<32>, ap_uint<1>, ap_uint<2>*)' (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:304:21)
+INFO: [HLS 214-131] Inlining function 'sat48(ap_int<80>)' into 'pl_npi(hls::stream<ap_uint<64>, 0>&, hls::stream<ap_uint<32>, 0>&, ap_uint<32>, ap_uint<1>, ap_uint<2>*)' (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:303:21)
+INFO: [HLS 214-131] Inlining function 'sat32(ap_int<49>)' into 'pl_npi(hls::stream<ap_uint<64>, 0>&, hls::stream<ap_uint<32>, 0>&, ap_uint<32>, ap_uint<1>, ap_uint<2>*)' (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:291:32)
+INFO: [HLS 214-131] Inlining function 'sat32(ap_int<49>)' into 'pl_npi(hls::stream<ap_uint<64>, 0>&, hls::stream<ap_uint<32>, 0>&, ap_uint<32>, ap_uint<1>, ap_uint<2>*)' (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:290:32)
+INFO: [HLS 214-131] Inlining function 'ap_uint<7> msb_index<33>(ap_uint<33>)' into 'pl_npi(hls::stream<ap_uint<64>, 0>&, hls::stream<ap_uint<32>, 0>&, ap_uint<32>, ap_uint<1>, ap_uint<2>*)' (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:263:21)
+INFO: [HLS 214-291] Loop 'VITIS_LOOP_362_10' is marked as complete unroll implied by the pipeline pragma (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:362:24)
+INFO: [HLS 214-291] Loop 'VITIS_LOOP_347_8' is marked as complete unroll implied by the pipeline pragma (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:347:23)
+INFO: [HLS 214-291] Loop 'VITIS_LOOP_351_9' is marked as complete unroll implied by the pipeline pragma (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:351:27)
+INFO: [HLS 214-291] Loop 'VITIS_LOOP_333_7' is marked as complete unroll implied by the pipeline pragma (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:333:23)
+INFO: [HLS 214-291] Loop 'VITIS_LOOP_323_6' is marked as complete unroll implied by the pipeline pragma (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:323:20)
+INFO: [HLS 214-291] Loop 'VITIS_LOOP_313_5' is marked as complete unroll implied by the pipeline pragma (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:313:23)
+INFO: [HLS 214-291] Loop 'VITIS_LOOP_298_4' is marked as complete unroll implied by the pipeline pragma (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:298:20)
+INFO: [HLS 214-291] Loop 'VITIS_LOOP_286_3' is marked as complete unroll implied by the pipeline pragma (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:286:20)
+INFO: [HLS 214-291] Loop 'VITIS_LOOP_272_2' is marked as complete unroll implied by the pipeline pragma (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:272:20)
+INFO: [HLS 214-291] Loop 'VITIS_LOOP_154_1' is marked as complete unroll implied by the pipeline pragma (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:154:23)
+INFO: [HLS 214-291] Loop 'VITIS_LOOP_254_1' is marked as complete unroll implied by the pipeline pragma (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:254:23)
+INFO: [HLS 214-186] Unrolling loop 'VITIS_LOOP_362_10' (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:362:24) in function 'pl_npi' completely with a factor of 4 (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:166:0)
+INFO: [HLS 214-186] Unrolling loop 'VITIS_LOOP_347_8' (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:347:23) in function 'pl_npi' completely with a factor of 2 (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:166:0)
+INFO: [HLS 214-186] Unrolling loop 'VITIS_LOOP_351_9' (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:351:27) in function 'pl_npi' completely with a factor of 3 (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:166:0)
+INFO: [HLS 214-186] Unrolling loop 'VITIS_LOOP_333_7' (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:333:23) in function 'pl_npi' completely with a factor of 2 (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:166:0)
+INFO: [HLS 214-186] Unrolling loop 'VITIS_LOOP_323_6' (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:323:20) in function 'pl_npi' completely with a factor of 2 (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:166:0)
+INFO: [HLS 214-186] Unrolling loop 'VITIS_LOOP_313_5' (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:313:23) in function 'pl_npi' completely with a factor of 2 (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:166:0)
+INFO: [HLS 214-186] Unrolling loop 'VITIS_LOOP_298_4' (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:298:20) in function 'pl_npi' completely with a factor of 2 (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:166:0)
+INFO: [HLS 214-186] Unrolling loop 'VITIS_LOOP_286_3' (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:286:20) in function 'pl_npi' completely with a factor of 2 (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:166:0)
+INFO: [HLS 214-186] Unrolling loop 'VITIS_LOOP_272_2' (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:272:20) in function 'pl_npi' completely with a factor of 4 (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:166:0)
+INFO: [HLS 214-186] Unrolling loop 'VITIS_LOOP_154_1' (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:154:23) in function 'pl_npi' completely with a factor of 33 (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:166:0)
+INFO: [HLS 214-186] Unrolling loop 'VITIS_LOOP_254_1' (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:254:23) in function 'pl_npi' completely with a factor of 2 (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:166:0)
+INFO: [HLS 214-248] Applying array_partition to '_ZZ6pl_npiRN3hls6streamI7ap_uintILi64EELi0EEERNS0_IS1_ILi32EELi0EEES5_S1_ILi1EEPS1_ILi2EEE5wp_re': Complete partitioning on dimension 1. (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:176:0)
+INFO: [HLS 214-248] Applying array_partition to '_ZZ6pl_npiRN3hls6streamI7ap_uintILi64EELi0EEERNS0_IS1_ILi32EELi0EEES5_S1_ILi1EEPS1_ILi2EEE5wp_im': Complete partitioning on dimension 1. (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:176:0)
+INFO: [HLS 214-248] Applying array_partition to '_ZZ6pl_npiRN3hls6streamI7ap_uintILi64EELi0EEERNS0_IS1_ILi32EELi0EEES5_S1_ILi1EEPS1_ILi2EEE5xA_re': Complete partitioning on dimension 1. (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:185:0)
+INFO: [HLS 214-248] Applying array_partition to '_ZZ6pl_npiRN3hls6streamI7ap_uintILi64EELi0EEERNS0_IS1_ILi32EELi0EEES5_S1_ILi1EEPS1_ILi2EEE5xA_im': Complete partitioning on dimension 1. (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:185:0)
+INFO: [HLS 214-248] Applying array_partition to '_ZZ6pl_npiRN3hls6streamI7ap_uintILi64EELi0EEERNS0_IS1_ILi32EELi0EEES5_S1_ILi1EEPS1_ILi2EEE5cB_re': Complete partitioning on dimension 1. (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:191:0)
+INFO: [HLS 214-248] Applying array_partition to '_ZZ6pl_npiRN3hls6streamI7ap_uintILi64EELi0EEERNS0_IS1_ILi32EELi0EEES5_S1_ILi1EEPS1_ILi2EEE5cB_im': Complete partitioning on dimension 1. (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:191:0)
+INFO: [HLS 214-248] Applying array_partition to '_ZZ6pl_npiRN3hls6streamI7ap_uintILi64EELi0EEERNS0_IS1_ILi32EELi0EEES5_S1_ILi1EEPS1_ILi2EEE5pC_re': Complete partitioning on dimension 1. (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:199:0)
+INFO: [HLS 214-248] Applying array_partition to '_ZZ6pl_npiRN3hls6streamI7ap_uintILi64EELi0EEERNS0_IS1_ILi32EELi0EEES5_S1_ILi1EEPS1_ILi2EEE5pC_im': Complete partitioning on dimension 1. (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:199:0)
+INFO: [HLS 214-248] Applying array_partition to '_ZZ6pl_npiRN3hls6streamI7ap_uintILi64EELi0EEERNS0_IS1_ILi32EELi0EEES5_S1_ILi1EEPS1_ILi2EEE3mkA': Complete partitioning on dimension 1. (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:208:0)
+INFO: [HLS 214-248] Applying array_partition to '_ZZ6pl_npiRN3hls6streamI7ap_uintILi64EELi0EEERNS0_IS1_ILi32EELi0EEES5_S1_ILi1EEPS1_ILi2EEE3mkB': Complete partitioning on dimension 1. (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:208:0)
+INFO: [HLS 214-248] Applying array_partition to '_ZZ6pl_npiRN3hls6streamI7ap_uintILi64EELi0EEERNS0_IS1_ILi32EELi0EEES5_S1_ILi1EEPS1_ILi2EEE3ekA': Complete partitioning on dimension 1. (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:209:0)
+INFO: [HLS 214-248] Applying array_partition to '_ZZ6pl_npiRN3hls6streamI7ap_uintILi64EELi0EEERNS0_IS1_ILi32EELi0EEES5_S1_ILi1EEPS1_ILi2EEE3ekB': Complete partitioning on dimension 1. (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:209:0)
+INFO: [HLS 214-248] Applying array_partition to '_ZZ6pl_npiRN3hls6streamI7ap_uintILi64EELi0EEERNS0_IS1_ILi32EELi0EEES5_S1_ILi1EEPS1_ILi2EEE5tD_re': Complete partitioning on dimension 1. (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:219:0)
+INFO: [HLS 214-248] Applying array_partition to '_ZZ6pl_npiRN3hls6streamI7ap_uintILi64EELi0EEERNS0_IS1_ILi32EELi0EEES5_S1_ILi1EEPS1_ILi2EEE5tD_im': Complete partitioning on dimension 1. (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:219:0)
+INFO: [HLS 214-248] Applying array_partition to '_ZZ6pl_npiRN3hls6streamI7ap_uintILi64EELi0EEERNS0_IS1_ILi32EELi0EEES5_S1_ILi1EEPS1_ILi2EEE5tQ_re': Complete partitioning on dimension 1. Complete partitioning on dimension 2. (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:226:0)
+INFO: [HLS 214-248] Applying array_partition to '_ZZ6pl_npiRN3hls6streamI7ap_uintILi64EELi0EEERNS0_IS1_ILi32EELi0EEES5_S1_ILi1EEPS1_ILi2EEE5tQ_im': Complete partitioning on dimension 1. Complete partitioning on dimension 2. (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:226:0)
+INFO: [HLS 200-111] Finished Compiling Optimization and Transform: CPU user time: 1.53 seconds. CPU system time: 0.2 seconds. Elapsed time: 6.17 seconds; current allocated memory: 275.715 MB.
+INFO: [HLS 200-111] Finished Checking Pragmas: CPU user time: 0 seconds. CPU system time: 0 seconds. Elapsed time: 0 seconds; current allocated memory: 275.715 MB.
+INFO: [HLS 200-10] Starting code transformations ...
+INFO: [HLS 200-111] Finished Standard Transforms: CPU user time: 0.02 seconds. CPU system time: 0 seconds. Elapsed time: 0.01 seconds; current allocated memory: 277.492 MB.
+INFO: [HLS 200-10] Checking synthesizability ...
+INFO: [HLS 200-111] Finished Checking Synthesizability: CPU user time: 0.01 seconds. CPU system time: 0 seconds. Elapsed time: 0.02 seconds; current allocated memory: 278.660 MB.
+INFO: [XFORM 203-401] Performing if-conversion on hyperblock from (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:241:31) to (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:371:1) in function 'pl_npi'... converting 16 basic blocks.
+INFO: [XFORM 203-11] Balancing expressions in function 'pl_npi' (/home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Source/HLS/pl_npi/build/pl_npi_hls.cpp:117:1)...6 expression(s) balanced.
+INFO: [HLS 200-111] Finished Loop, function and other optimizations: CPU user time: 0.07 seconds. CPU system time: 0.01 seconds. Elapsed time: 0.07 seconds; current allocated memory: 305.238 MB.
+INFO: [HLS 200-111] Finished Architecture Synthesis: CPU user time: 0.06 seconds. CPU system time: 0 seconds. Elapsed time: 0.07 seconds; current allocated memory: 299.012 MB.
+INFO: [HLS 200-10] Starting hardware synthesis ...
+INFO: [HLS 200-10] Synthesizing 'pl_npi' ...
+INFO: [HLS 200-10] ----------------------------------------------------------------
+INFO: [HLS 200-42] -- Implementing module 'pl_npi' 
+INFO: [HLS 200-10] ----------------------------------------------------------------
+INFO: [SCHED 204-11] Starting scheduling ...
+INFO: [HLS 200-486] Changing DSP latency (root=sub_ln326_1) to 3 in order to utilize available DSP registers.
+INFO: [HLS 200-486] Changing DSP latency (root=add_ln325_1) to 3 in order to utilize available DSP registers.
+INFO: [HLS 200-486] Changing DSP latency (root=sub_ln326) to 3 in order to utilize available DSP registers.
+INFO: [HLS 200-486] Changing DSP latency (root=add_ln325) to 3 in order to utilize available DSP registers.
+INFO: [HLS 200-486] Changing DSP latency (root=add_ln256_1) to 3 in order to utilize available DSP registers.
+INFO: [HLS 200-486] Changing DSP latency (root=add_ln256) to 3 in order to utilize available DSP registers.
+INFO: [SCHED 204-61] Pipelining function 'pl_npi'.
+INFO: [HLS 200-1470] Pipelining result : Target II = 2, Final II = 2, Depth = 47, function 'pl_npi'
+INFO: [SCHED 204-11] Finished scheduling.
+INFO: [HLS 200-111] Finished Scheduling: CPU user time: 0.16 seconds. CPU system time: 0.02 seconds. Elapsed time: 0.17 seconds; current allocated memory: 304.812 MB.
+INFO: [BIND 205-100] Starting micro-architecture generation ...
+INFO: [BIND 205-101] Performing variable lifetime analysis.
+INFO: [BIND 205-101] Exploring resource sharing.
+INFO: [BIND 205-101] Binding ...
+INFO: [BIND 205-100] Finished micro-architecture generation.
+INFO: [HLS 200-111] Finished Binding: CPU user time: 0.03 seconds. CPU system time: 0.01 seconds. Elapsed time: 0.03 seconds; current allocated memory: 304.812 MB.
+INFO: [HLS 200-10] ----------------------------------------------------------------
+INFO: [HLS 200-10] -- Generating RTL for module 'pl_npi' 
+INFO: [HLS 200-10] ----------------------------------------------------------------
+WARNING: [RTGEN 206-101] Design contains AXI ports. Reset is fixed to synchronous and active low.
+INFO: [RTGEN 206-500] Setting interface mode on port 'pl_npi/s_axis_x' to 'axis' (register, both mode).
+INFO: [RTGEN 206-500] Setting interface mode on port 'pl_npi/m_axis_y' to 'axis' (register, both mode).
+INFO: [RTGEN 206-500] Setting interface mode on port 'pl_npi/gamma' to 'ap_none'.
+INFO: [RTGEN 206-500] Setting interface mode on port 'pl_npi/adapt_en' to 'ap_none'.
+INFO: [RTGEN 206-500] Setting interface mode on port 'pl_npi/gain_band' to 'ap_none'.
+WARNING: [RTGEN 206-101] Port 'gain_band' with mode 'ap_none' may require an associated data valid signal to correctly communicate with other blocks or a test bench; automatic C/RTL co-simulation may not be able to verify such a port.
+INFO: [RTGEN 206-500] Setting interface mode on function 'pl_npi' to 'ap_ctrl_none'.
+WARNING: [RTGEN 206-101] Register 'bandB' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'pl_npi_stream_stream_ap_uint_0_ap_uint_32_ap_uint_1_ap_uint_2_wp_re_1' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'p_ZZ6pl_npiRN3hls6streamI7ap_uintILi64EELi0EEERNS0_IS1_ILi32EELi0EEES5_S1_ILi1EEP_1' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'pl_npi_stream_stream_ap_uint_0_ap_uint_32_ap_uint_1_ap_uint_2_wp_im_1' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'p_ZZ6pl_npiRN3hls6streamI7ap_uintILi64EELi0EEERNS0_IS1_ILi32EELi0EEES5_S1_ILi1EEP_9' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'pl_npi_stream_stream_ap_uint_0_ap_uint_32_ap_uint_1_ap_uint_2_wp_re' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'p_ZZ6pl_npiRN3hls6streamI7ap_uintILi64EELi0EEERNS0_IS1_ILi32EELi0EEES5_S1_ILi1EEP' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'pl_npi_stream_stream_ap_uint_0_ap_uint_32_ap_uint_1_ap_uint_2_wp_im' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'p_ZZ6pl_npiRN3hls6streamI7ap_uintILi64EELi0EEERNS0_IS1_ILi32EELi0EEES5_S1_ILi1EEP_8' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'shC' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'pl_npi_stream_stream_ap_uint_0_ap_uint_32_ap_uint_1_ap_uint_2_pC_re_1' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'pl_npi_stream_stream_ap_uint_0_ap_uint_32_ap_uint_1_ap_uint_2_pC_im_1' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'pl_npi_stream_stream_ap_uint_0_ap_uint_32_ap_uint_1_ap_uint_2_pC_re' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'pl_npi_stream_stream_ap_uint_0_ap_uint_32_ap_uint_1_ap_uint_2_pC_im' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'pl_npi_stream_stream_ap_uint_0_ap_uint_32_ap_uint_1_ap_uint_2_mkB_3' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'pl_npi_stream_stream_ap_uint_0_ap_uint_32_ap_uint_1_ap_uint_2_mkB_2' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'pl_npi_stream_stream_ap_uint_0_ap_uint_32_ap_uint_1_ap_uint_2_mkB_1' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'pl_npi_stream_stream_ap_uint_0_ap_uint_32_ap_uint_1_ap_uint_2_mkB' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'pl_npi_stream_stream_ap_uint_0_ap_uint_32_ap_uint_1_ap_uint_2_ekB_3' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'pl_npi_stream_stream_ap_uint_0_ap_uint_32_ap_uint_1_ap_uint_2_ekB_2' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'pl_npi_stream_stream_ap_uint_0_ap_uint_32_ap_uint_1_ap_uint_2_ekB_1' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'pl_npi_stream_stream_ap_uint_0_ap_uint_32_ap_uint_1_ap_uint_2_ekB' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'pl_npi_stream_stream_ap_uint_0_ap_uint_32_ap_uint_1_ap_uint_2_cB_re_1' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'pl_npi_stream_stream_ap_uint_0_ap_uint_32_ap_uint_1_ap_uint_2_cB_im_1' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'pl_npi_stream_stream_ap_uint_0_ap_uint_32_ap_uint_1_ap_uint_2_cB_re' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'pl_npi_stream_stream_ap_uint_0_ap_uint_32_ap_uint_1_ap_uint_2_cB_im' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'sA_re' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'sA_im' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'pl_npi_stream_stream_ap_uint_0_ap_uint_32_ap_uint_1_ap_uint_2_xA_re_1' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'pl_npi_stream_stream_ap_uint_0_ap_uint_32_ap_uint_1_ap_uint_2_xA_im_1' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'pl_npi_stream_stream_ap_uint_0_ap_uint_32_ap_uint_1_ap_uint_2_xA_re' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'pl_npi_stream_stream_ap_uint_0_ap_uint_32_ap_uint_1_ap_uint_2_xA_im' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'p_ZZ6pl_npiRN3hls6streamI7ap_uintILi64EELi0EEERNS0_IS1_ILi32EELi0EEES5_S1_ILi1EEP_3' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'p_ZZ6pl_npiRN3hls6streamI7ap_uintILi64EELi0EEERNS0_IS1_ILi32EELi0EEES5_S1_ILi1EEP_5' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'p_ZZ6pl_npiRN3hls6streamI7ap_uintILi64EELi0EEERNS0_IS1_ILi32EELi0EEES5_S1_ILi1EEP_7' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'p_ZZ6pl_npiRN3hls6streamI7ap_uintILi64EELi0EEERNS0_IS1_ILi32EELi0EEES5_S1_ILi1EEP_2' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'p_ZZ6pl_npiRN3hls6streamI7ap_uintILi64EELi0EEERNS0_IS1_ILi32EELi0EEES5_S1_ILi1EEP_4' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'p_ZZ6pl_npiRN3hls6streamI7ap_uintILi64EELi0EEERNS0_IS1_ILi32EELi0EEES5_S1_ILi1EEP_6' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'p_ZZ6pl_npiRN3hls6streamI7ap_uintILi64EELi0EEERNS0_IS1_ILi32EELi0EEES5_S1_ILi1EEP_11' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'p_ZZ6pl_npiRN3hls6streamI7ap_uintILi64EELi0EEERNS0_IS1_ILi32EELi0EEES5_S1_ILi1EEP_13' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'p_ZZ6pl_npiRN3hls6streamI7ap_uintILi64EELi0EEERNS0_IS1_ILi32EELi0EEES5_S1_ILi1EEP_15' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'p_ZZ6pl_npiRN3hls6streamI7ap_uintILi64EELi0EEERNS0_IS1_ILi32EELi0EEES5_S1_ILi1EEP_10' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'p_ZZ6pl_npiRN3hls6streamI7ap_uintILi64EELi0EEERNS0_IS1_ILi32EELi0EEES5_S1_ILi1EEP_12' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'p_ZZ6pl_npiRN3hls6streamI7ap_uintILi64EELi0EEERNS0_IS1_ILi32EELi0EEES5_S1_ILi1EEP_14' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'pl_npi_stream_stream_ap_uint_0_ap_uint_32_ap_uint_1_ap_uint_2_tD_re_1' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'pl_npi_stream_stream_ap_uint_0_ap_uint_32_ap_uint_1_ap_uint_2_tD_re' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'pl_npi_stream_stream_ap_uint_0_ap_uint_32_ap_uint_1_ap_uint_2_tD_im_1' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'pl_npi_stream_stream_ap_uint_0_ap_uint_32_ap_uint_1_ap_uint_2_tD_im' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'pl_npi_stream_stream_ap_uint_0_ap_uint_32_ap_uint_1_ap_uint_2_mkA_3' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'pl_npi_stream_stream_ap_uint_0_ap_uint_32_ap_uint_1_ap_uint_2_mkA' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'pl_npi_stream_stream_ap_uint_0_ap_uint_32_ap_uint_1_ap_uint_2_mkA_2' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'pl_npi_stream_stream_ap_uint_0_ap_uint_32_ap_uint_1_ap_uint_2_mkA_1' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'pl_npi_stream_stream_ap_uint_0_ap_uint_32_ap_uint_1_ap_uint_2_ekA_3' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'pl_npi_stream_stream_ap_uint_0_ap_uint_32_ap_uint_1_ap_uint_2_ekA_2' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'pl_npi_stream_stream_ap_uint_0_ap_uint_32_ap_uint_1_ap_uint_2_ekA_1' is power-on initialization.
+WARNING: [RTGEN 206-101] Register 'pl_npi_stream_stream_ap_uint_0_ap_uint_32_ap_uint_1_ap_uint_2_ekA' is power-on initialization.
+INFO: [HLS 200-1030] Apply Unified Pipeline Control on module 'pl_npi' pipeline 'pl_npi' pipeline type 'function pipeline'
+INFO: [RTGEN 206-100] Generating core module 'mac_muladd_16s_16s_32s_33_4_1': 2 instance(s).
+INFO: [RTGEN 206-100] Generating core module 'mac_muladd_25s_16s_41s_42_4_1': 2 instance(s).
+INFO: [RTGEN 206-100] Generating core module 'mac_mulsub_25s_16s_41s_41_4_1': 2 instance(s).
+INFO: [RTGEN 206-100] Generating core module 'mul_16s_16s_32_1_1': 2 instance(s).
+INFO: [RTGEN 206-100] Generating core module 'mul_18ns_18ns_35_1_1': 3 instance(s).
+INFO: [RTGEN 206-100] Generating core module 'mul_25s_16s_41_1_1': 4 instance(s).
+INFO: [RTGEN 206-100] Generating core module 'mul_32s_16s_48_2_1': 6 instance(s).
+INFO: [RTGEN 206-100] Generating core module 'mul_41s_18ns_59_2_1': 2 instance(s).
+INFO: [RTGEN 206-100] Generating core module 'mul_42s_18ns_60_2_1': 2 instance(s).
+INFO: [RTGEN 206-100] Generating core module 'sparsemux_9_2_18_1_1': 1 instance(s).
+INFO: [RTGEN 206-100] Generating core module 'sparsemux_9_2_6_1_1': 1 instance(s).
+INFO: [RTGEN 206-100] Generating core module 'udiv_34ns_38ns_38_38_1': 1 instance(s).
+INFO: [RTGEN 206-100] Finished creating RTL model for 'pl_npi'.
+INFO: [HLS 200-111] Finished Creating RTL model: CPU user time: 0.08 seconds. CPU system time: 0 seconds. Elapsed time: 0.1 seconds; current allocated memory: 309.152 MB.
+INFO: [HLS 200-111] Finished Generating all RTL models: CPU user time: 0.19 seconds. CPU system time: 0.01 seconds. Elapsed time: 0.2 seconds; current allocated memory: 320.562 MB.
+INFO: [HLS 200-111] Finished Updating report files: CPU user time: 0.08 seconds. CPU system time: 0 seconds. Elapsed time: 0.09 seconds; current allocated memory: 324.484 MB.
+INFO: [VHDL 208-304] Generating VHDL RTL for pl_npi.
+INFO: [VLOG 209-307] Generating Verilog RTL for pl_npi.
+INFO: [HLS 200-789] **** Estimated Fmax: 144.65 MHz
+INFO: [HLS 200-111] Finished Command csynth_design CPU user time: 3.55 seconds. CPU system time: 0.52 seconds. Elapsed time: 8.53 seconds; current allocated memory: 54.672 MB.
+PL_NPI_HLS: estimated clock period 6.913 ns (target 8 ns), achieved II 2 (requested 2)
+INFO: [HLS 200-1510] Running: export_design -format ip_catalog -rtl verilog -vendor antsdr -library gnss -version 1.0 -ipname pl_npi -display_name PL-NPI power inversion -description Two-element PL-NPI anti-jam core (pipelined, Vitis HLS). s_axis_x = RX1 and RX2 IQ, m_axis_y = array output IQ. 
+INFO: [IMPL 213-8] Exporting RTL as a Vivado IP.
+
+****** Vivado v2023.2 (64-bit)
+  **** SW Build 4029153 on Fri Oct 13 20:13:54 MDT 2023
+  **** IP Build 4028589 on Sat Oct 14 00:45:43 MDT 2023
+  **** SharedData Build 4025554 on Tue Oct 10 17:18:54 MDT 2023
+    ** Copyright 1986-2022 Xilinx, Inc. All Rights Reserved.
+    ** Copyright 2022-2023 Advanced Micro Devices, Inc. All Rights Reserved.
+
+source run_ippack.tcl -notrace
+INFO: [IP_Flow 19-234] Refreshing IP repositories
+INFO: [IP_Flow 19-1704] No user IP repositories specified
+INFO: [IP_Flow 19-2313] Loaded Vivado IP repository '/tools/Xilinx/Vivado/2023.2/data/ip'.
+INFO: [Common 17-206] Exiting Vivado at Fri Oct  9 17:17:24 2026...
+INFO: [HLS 200-802] Generated output file pl_npi_hls/sol/impl/export.zip
+INFO: [HLS 200-111] Finished Command export_design CPU user time: 4.36 seconds. CPU system time: 0.31 seconds. Elapsed time: 7.34 seconds; current allocated memory: 5.270 MB.
+PL_NPI_HLS: IP antsdr:gnss:pl_npi:1.0 -> /home/sandeep/npi_v219/LoopBack_Code_PL_NPI/Build/ip_repo/pl_npi
+PL_NPI_HLS: PASS
+INFO: [HLS 200-112] Total CPU user time: 14.63 seconds. Total CPU system time: 1.32 seconds. Total elapsed time: 23.07 seconds; peak allocated memory: 330.395 MB.
+INFO: [Common 17-206] Exiting vitis_hls at Fri Oct  9 17:17:27 2026...
