@@ -3,15 +3,23 @@
 #  build_all.sh  --  LoopBack_Code (gnss_passthrough v2.0 + LCMV CRPA)
 #                    sources  ->  bitstream / XSA  ->  FSBL + app ELF  ->  BOOT.BIN
 #
-#  Linux (Ubuntu 22.04), Vivado + Vitis 2026.1. Run from anywhere:
+#  Linux (Ubuntu 22.04). Default tool version: Vivado + Vitis 2023.2.
 #
-#      export XILINX_SETTINGS=/tools/Xilinx/2026.1/Vitis/settings64.sh   # your install
 #      ./Automation/build_all.sh                 # bench build  (no auto-TX)
 #      DEPLOY=1 ./Automation/build_all.sh        # SD deployment (auto-TX at boot,
-#                                                #  same as SD_Image/README_SD_CARD.md)
+#                                                #  see SD_Image/README_SD_CARD.md)
 #      DRY_RUN=1 ./Automation/build_all.sh       # print the commands only
 #
-#  Optional:  JOBS=8   SKIP_ADI_LIBS=1 (reuse already packaged ADI libraries)
+#  TOOL_VER   2023.2 (default) or 2026.1
+#               2023.2 : ADI hdl_2023_r2 (cloned into Vendor/ if missing),
+#                        FSBL + firmware with XSCT (Vitis classic)
+#               2026.1 : ADI_hdl_2026_r1_update, FSBL + firmware with the
+#                        Vitis Python API (XSCT no longer exists in 2026.1)
+#  XILINX_SETTINGS   settings64.sh of that Vitis install
+#               2023.2 default: /tools/Xilinx/Vitis/2023.2/settings64.sh
+#               2026.1 default: /tools/Xilinx/2026.1/Vitis/settings64.sh
+#  ADI_VENDOR  override the ADI HDL tree (absolute path)
+#  JOBS=8   SKIP_ADI_LIBS=1 (reuse already packaged ADI libraries)
 #
 #  Stages (each stops the script on failure; logs in Build/Logs/):
 #    1  working copy of the ADI HDL tree      Build/VendorWork/hdl
@@ -26,12 +34,26 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TOOL_VER="${TOOL_VER:-2023.2}"
 JOBS="${JOBS:-8}"
 DEPLOY="${DEPLOY:-0}"
 DRY_RUN="${DRY_RUN:-0}"
 SKIP_ADI_LIBS="${SKIP_ADI_LIBS:-0}"
 
-VENDOR_SRC="$ROOT/Vendor/ADI_hdl_2026_r1_update"   # has projects/scripts/auto_timing_fix_xilinx.tcl
+case "$TOOL_VER" in
+  2023.2)
+    : "${XILINX_SETTINGS:=/tools/Xilinx/Vitis/2023.2/settings64.sh}"
+    : "${ADI_VENDOR:=$ROOT/Vendor/ADI_hdl_2023_r2}"
+    ADI_GIT_BRANCH="hdl_2023_r2"
+    SW_FLOW="xsct" ;;
+  2026.1)
+    : "${XILINX_SETTINGS:=/tools/Xilinx/2026.1/Vitis/settings64.sh}"
+    : "${ADI_VENDOR:=$ROOT/Vendor/ADI_hdl_2026_r1_update}"
+    ADI_GIT_BRANCH=""
+    SW_FLOW="python" ;;
+  *) echo "TOOL_VER must be 2023.2 or 2026.1 (got $TOOL_VER)"; exit 2 ;;
+esac
+
 WORK_HDL="$ROOT/Build/VendorWork/hdl"
 IP_REPO="$ROOT/Build/ip_repo"
 LOGS="$ROOT/Build/Logs"
@@ -64,35 +86,57 @@ need() {                       # need <log> <marker>: build scripts print a PASS
   grep -q "$2" "$LOGS/$1.log" || { echo "FAILED - '$2' not in $LOGS/$1.log"; tail -25 "$LOGS/$1.log"; exit 2; }
 }
 
+echo "Tool version : $TOOL_VER  (software flow: $SW_FLOW)"
+echo "Settings     : $XILINX_SETTINGS"
+echo "ADI HDL tree : $ADI_VENDOR"
+
 # ---- tools -------------------------------------------------------------------
-if [ -n "${XILINX_SETTINGS:-}" ]; then
-  if [ -f "$XILINX_SETTINGS" ]; then
-    # shellcheck disable=SC1090
-    source "$XILINX_SETTINGS"
-  elif [ "$DRY_RUN" != 1 ]; then
-    echo "XILINX_SETTINGS=$XILINX_SETTINGS does not exist."
-    echo "Find yours with:  ls /tools/Xilinx/*/Vitis/settings64.sh ~/Xilinx/*/Vitis/settings64.sh"
-    exit 2
+if [ -f "$XILINX_SETTINGS" ]; then
+  # shellcheck disable=SC1090
+  source "$XILINX_SETTINGS"
+elif [ "$DRY_RUN" != 1 ]; then
+  echo "XILINX_SETTINGS=$XILINX_SETTINGS does not exist."
+  echo "Find yours with:  ls /tools/Xilinx/Vitis/*/settings64.sh /tools/Xilinx/*/Vitis/settings64.sh"
+  exit 2
+fi
+if [ "$SW_FLOW" = xsct ]; then TOOLS="vivado xsct bootgen make rsync"; else TOOLS="vivado vitis bootgen make rsync"; fi
+if [ "$DRY_RUN" != 1 ]; then
+  for t in $TOOLS; do
+    command -v "$t" >/dev/null || { echo "'$t' not found. Check XILINX_SETTINGS (and: sudo apt install make rsync)"; exit 2; }
+  done
+  have="$(vivado -version 2>/dev/null | head -1 || true)"
+  case "$have" in
+    *"v$TOOL_VER"*) echo "Vivado       : $have" ;;
+    *) echo "WARNING: TOOL_VER=$TOOL_VER but '$have' is on PATH" ;;
+  esac
+fi
+
+# ---- ADI HDL tree for this tool version -----------------------------------------
+if [ ! -d "$ADI_VENDOR/library" ]; then
+  if [ -n "$ADI_GIT_BRANCH" ]; then
+    say "0/8 fetching ADI HDL $ADI_GIT_BRANCH -> $ADI_VENDOR"
+    command -v git >/dev/null || { echo "git not found: sudo apt install git"; exit 2; }
+    if [ "$DRY_RUN" = 1 ]; then
+      echo "+ git clone --depth 1 -b $ADI_GIT_BRANCH https://github.com/analogdevicesinc/hdl.git $ADI_VENDOR"
+    else
+      git clone --depth 1 -b "$ADI_GIT_BRANCH" https://github.com/analogdevicesinc/hdl.git "$ADI_VENDOR"
+    fi
+  else
+    echo "ADI HDL tree missing: $ADI_VENDOR"; exit 2
   fi
 fi
-if [ "$DRY_RUN" != 1 ]; then
-  for t in vivado vitis bootgen make rsync; do
-    command -v "$t" >/dev/null || { echo "'$t' not found. Set XILINX_SETTINGS to your settings64.sh"; exit 2; }
-  done
-fi
-[ -d "$VENDOR_SRC" ] || { echo "Vendor tree missing: $VENDOR_SRC"; exit 2; }
 mkdir -p "$LOGS" "$IP_REPO" "$(dirname "$BIT")" "$(dirname "$XSA")" "$(dirname "$APP_ELF")" "$BOOT_DIR"
 
 # ---- environment read by create_project.tcl / system_bd.tcl -------------------
 export GNSS_CRPA_ROOT="$ROOT"
 export GNSS_CRPA_IP_REPO="$IP_REPO"
 export ADI_HDL_DIR="$WORK_HDL"
-export REQUIRED_VIVADO_VERSION="2026.1"   # ADI 2026_r1 expects 2025.1
-export ADI_IGNORE_VERSION_CHECK=1
+export REQUIRED_VIVADO_VERSION="$TOOL_VER"
+export ADI_IGNORE_VERSION_CHECK=1          # tolerate 2023.2.x updates / 2026.1 vs 2025.1
 
 # ---- 1  ADI working copy (Vendor/ stays pristine) -----------------------------
 say "1/8 ADI working copy -> $WORK_HDL"
-run 1_vendor_copy rsync -a "$VENDOR_SRC/" "$WORK_HDL/"
+run 1_vendor_copy rsync -a --exclude .git "$ADI_VENDOR/" "$WORK_HDL/"
 
 # ---- 2  ADI library IPs -------------------------------------------------------
 if [ "$SKIP_ADI_LIBS" != 1 ]; then
@@ -126,17 +170,27 @@ need 5_build "BUILD_RESULT: PASS"
 [ "$DRY_RUN" = 1 ] || grep -E "BUILD_TIMING|BUILD_WNS|BUILD_WHS" "$LOGS/5_build.log" || true
 
 # ---- 6  FSBL ------------------------------------------------------------------------
-say "6/8 FSBL"
-run 6_fsbl vitis -s "$ROOT/Vitis/Scripts/build_fsbl.py" -- \
-  "$XSA" "$ROOT/Vitis/Workspace/fsbl" "$FSBL_ELF"
+say "6/8 FSBL ($SW_FLOW)"
+if [ "$SW_FLOW" = xsct ]; then
+  run 6_fsbl xsct "$ROOT/Vitis/Scripts/build_fsbl.tcl" \
+    "$XSA" "$ROOT/Vitis/Workspace/fsbl" "$FSBL_ELF"
+else
+  run 6_fsbl vitis -s "$ROOT/Vitis/Scripts/build_fsbl.py" -- \
+    "$XSA" "$ROOT/Vitis/Workspace/fsbl" "$FSBL_ELF"
+fi
 need 6_fsbl "FSBL_RESULT: PASS"
 
 # ---- 7  application ----------------------------------------------------------------
 DEFINES=""
 [ "$DEPLOY" = 1 ] && DEFINES="GNSS_DEPLOY_AUTO_TX"
-say "7/8 application firmware ${DEFINES:+(defines: $DEFINES)}"
-run 7_app vitis -s "$ROOT/Vitis/Scripts/build_software.py" -- \
-  "$XSA" "$ROOT/Vitis/Workspace/app" "$ROOT/Source/Firmware/app_gnss_e310" "$APP_ELF" "$DEFINES"
+say "7/8 application firmware ($SW_FLOW) ${DEFINES:+defines: $DEFINES}"
+if [ "$SW_FLOW" = xsct ]; then
+  run 7_app xsct "$ROOT/Vitis/Scripts/build_software.tcl" \
+    "$XSA" "$ROOT/Vitis/Workspace/app" "$ROOT/Source/Firmware/app_gnss_e310" "$APP_ELF" "$DEFINES"
+else
+  run 7_app vitis -s "$ROOT/Vitis/Scripts/build_software.py" -- \
+    "$XSA" "$ROOT/Vitis/Workspace/app" "$ROOT/Source/Firmware/app_gnss_e310" "$APP_ELF" "$DEFINES"
+fi
 need 7_app "SW_RESULT: PASS"
 
 # ---- 8  BOOT.BIN -----------------------------------------------------------------
@@ -152,7 +206,7 @@ EOF
 run 8_bootgen bootgen -arch zynq -image "$BOOT_DIR/boot.bif" -o "$BOOT_DIR/BOOT.BIN" -w on
 [ "$DRY_RUN" = 1 ] || [ -s "$BOOT_DIR/BOOT.BIN" ] || { echo "FAILED - BOOT.BIN not produced"; exit 2; }
 
-say "DONE"
+say "DONE ($TOOL_VER)"
 echo "  bitstream : $BIT"
 echo "  XSA       : $XSA"
 echo "  FSBL      : $FSBL_ELF"

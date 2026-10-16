@@ -45,6 +45,10 @@
 #define GNSS_PT_BASEADDR   XPAR_GNSS_PASSTHROUGH_0_BASEADDR
 #elif defined(XPAR_GNSS_PASSTHROUGH_BASEADDR)
 #define GNSS_PT_BASEADDR   XPAR_GNSS_PASSTHROUGH_BASEADDR
+#elif defined(XPAR_GNSS_PASSTHROUGH_S_AXI_BASEADDR)       /* Vitis 2023.2 classic */
+#define GNSS_PT_BASEADDR   XPAR_GNSS_PASSTHROUGH_S_AXI_BASEADDR
+#elif defined(XPAR_GNSS_PASSTHROUGH_0_S_AXI_BASEADDR)
+#define GNSS_PT_BASEADDR   XPAR_GNSS_PASSTHROUGH_0_S_AXI_BASEADDR
 #else
 #warning "gnss_passthrough base address not found in xparameters.h; using the project-assigned 0x43C00000. Verify this against the generated XSA before trusting any register read."
 #define GNSS_PT_BASEADDR   0x43C00000U

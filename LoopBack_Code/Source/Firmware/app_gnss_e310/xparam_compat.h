@@ -48,6 +48,11 @@
  *  again the real definition wins and this file becomes a no-op.
  *
  *  ---------------------------------------------------------------------------
+ *  VITIS 2023.2 (classic, non-SDT BSP)
+ *    The classic BSP still defines the legacy names (XPAR_PS7_*_DEVICE_ID,
+ *    _XPARAMETERS_PS_H_, XPAR_DDR_MEM_BASEADDR, ...), so every guarded mapping
+ *    below is skipped and this file is a no-op apart from the DDR fallback.
+ *
  *  VERIFIED AGAINST
  *    Vitis 2026.1, platform e310_gnss_platform, domain standalone_ps7_cortexa9_0
  *    Every replacement symbol below was confirmed present in the generated
@@ -158,6 +163,8 @@
 #if !defined(XPAR_DDR_MEM_BASEADDR)
 #  if defined(XPAR_PS7_DDR_0_BASEADDRESS)
 #    define XPAR_DDR_MEM_BASEADDR       XPAR_PS7_DDR_0_BASEADDRESS
+#  elif defined(XPAR_PS7_DDR_0_S_AXI_BASEADDR)    /* Vitis 2023.2 classic BSP */
+#    define XPAR_DDR_MEM_BASEADDR       XPAR_PS7_DDR_0_S_AXI_BASEADDR
 #  elif defined(XPAR_PSU_DDR_0_S_AXI_BASEADDR)
 #    define XPAR_DDR_MEM_BASEADDR       XPAR_PSU_DDR_0_S_AXI_BASEADDR
 #  else

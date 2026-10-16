@@ -131,10 +131,11 @@ turns a −45 dB null into +2.7 dB.
 
 ## 5. Build
 
-One command builds everything, from sources to `Build/Boot/BOOT.BIN`, on Linux with Vivado/Vitis 2026.1:
+One command builds everything, from sources to `Build/Boot/BOOT.BIN`, on Linux. **Vivado/Vitis 2023.2 is the default**
+(ADI hdl_2023_r2 plus XSCT); `TOOL_VER=2026.1` selects the 2026.1 flow. See `Docs/BUILD_STEPS.md` for every step.
 
 ```bash
-export XILINX_SETTINGS=/tools/Xilinx/2026.1/Vitis/settings64.sh   # your install path
+export XILINX_SETTINGS=/tools/Xilinx/Vitis/2023.2/settings64.sh   # your install path
 ./Automation/build_all.sh              # bench build
 DEPLOY=1 ./Automation/build_all.sh     # SD deployment build (auto-TX at boot)
 ```

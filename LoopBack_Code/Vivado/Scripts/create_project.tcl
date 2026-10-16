@@ -99,10 +99,17 @@ set p_device "xc7z020clg400-2"
 #  ADI_POST_ROUTE_SCRIPT must be set BEFORE adi_project_files, which is what
 #  adds it to the utils_1 fileset.
 # ---------------------------------------------------------------------------
+#
+#  auto_timing_fix_xilinx.tcl ships with ADI hdl 2024_r1 and later. ADI
+#  hdl_2023_r2 (the release for Vivado 2023.2) does not have it, so it is used
+#  when present and otherwise skipped with a warning; the implementation
+#  strategy below still applies. If ADI_HDL_DIR points at an ADI tree that
+#  should have it, a missing file means the wrong tree is selected.
+# ---------------------------------------------------------------------------
 set ADI_POST_ROUTE_SCRIPT [file normalize $ad_hdl_dir/projects/scripts/auto_timing_fix_xilinx.tcl]
 if {![file exists $ADI_POST_ROUTE_SCRIPT]} {
-  puts "CREATE_RESULT: FAIL - post-route timing script missing: $ADI_POST_ROUTE_SCRIPT"
-  exit 2
+  puts "CREATE_WARNING: post-route timing script not in this ADI release, skipped: $ADI_POST_ROUTE_SCRIPT"
+  unset ADI_POST_ROUTE_SCRIPT
 }
 
 adi_project $proj
@@ -128,9 +135,13 @@ puts "CREATE_CDC_XDC: gnss_passthrough_cdc.xdc added with PROCESSING_ORDER LATE"
 # applied here instead.
 set_property strategy Congestion_SpreadLogic_high [get_runs impl_1]
 set_property STEPS.POST_ROUTE_PHYS_OPT_DESIGN.IS_ENABLED true [get_runs impl_1]
-set_property STEPS.ROUTE_DESIGN.TCL.POST \
-  [get_files $ADI_POST_ROUTE_SCRIPT -of [get_fileset utils_1]] [get_runs impl_1]
-puts "CREATE_TIMING_AIDS: strategy=Congestion_SpreadLogic_high, post-route auto timing fix enabled"
+if {[info exists ADI_POST_ROUTE_SCRIPT]} {
+  set_property STEPS.ROUTE_DESIGN.TCL.POST \
+    [get_files $ADI_POST_ROUTE_SCRIPT -of [get_fileset utils_1]] [get_runs impl_1]
+  puts "CREATE_TIMING_AIDS: strategy=Congestion_SpreadLogic_high, post-route auto timing fix enabled"
+} else {
+  puts "CREATE_TIMING_AIDS: strategy=Congestion_SpreadLogic_high, post-route phys_opt enabled (no ADI auto timing fix in this release)"
+}
 
 # Record where the design came from, visible in the Vivado GUI project summary.
 set_property generic {} [current_fileset]
