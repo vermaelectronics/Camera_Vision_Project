@@ -75,6 +75,16 @@ if {[catch {
   puts "SW_ERROR: $err"
   exit 2
 }
+# The default domain's NAME differs between tool versions: XSCT in Vitis
+# 2023.2 calls it "standalone_domain", the 2026 flow "standalone_ps7_cortexa9_0".
+# Use whatever this Vitis actually created (the active domain right after
+# platform create) instead of assuming one.
+if {[catch {set active_domain [string trim [domain active]]}] || $active_domain eq ""} {
+  set active_domain "standalone_domain"
+}
+puts "SW_DOMAIN: $active_domain"
+set domain $active_domain
+
 platform generate
 
 # ---- application -----------------------------------------------------------
