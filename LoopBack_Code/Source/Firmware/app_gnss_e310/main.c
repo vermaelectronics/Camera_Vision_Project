@@ -589,6 +589,15 @@ int main(void)
 #ifdef XILINX_PLATFORM
 	Xil_ICacheEnable();
 	Xil_DCacheEnable();
+#endif
+	/* GNSS-CRPA MOD-11: first sign of life, BEFORE anything that can hang.
+	 * The next console output normally comes from ad9361_init, about a second
+	 * later. If this line appears and nothing follows, the firmware is running
+	 * and stuck in AD9361/SPI/GPIO bring-up; if even this line is missing, the
+	 * problem is the boot (FSBL/SD) or the console port, not the firmware. */
+	printf("\n\rgnss: firmware started (gnss_passthrough v2.0 + LCMV), "
+	       "initialising AD9361 ...\n\r");
+#ifdef XILINX_PLATFORM
 	default_init_param.spi_param.extra = &xil_spi_param;
 	default_init_param.spi_param.platform_ops = &xil_spi_ops;
 #endif

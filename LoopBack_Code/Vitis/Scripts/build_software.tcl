@@ -85,6 +85,19 @@ if {[catch {set active_domain [string trim [domain active]]}] || $active_domain 
 puts "SW_DOMAIN: $active_domain"
 set domain $active_domain
 
+# Console: the firmware prints with putchar/printf, i.e. the BSP stdout. The
+# block design enables only UART1 (MIO 12/13), the E310 USB console. Pin
+# stdin/stdout to it explicitly instead of trusting the default selection.
+set stdio_uart "ps7_uart_1"
+if {[catch {
+  bsp config stdin  $stdio_uart
+  bsp config stdout $stdio_uart
+} err]} {
+  puts "SW_STDOUT: WARNING could not set $stdio_uart ($err); BSP default kept"
+} else {
+  puts "SW_STDOUT: $stdio_uart"
+}
+
 platform generate
 
 # ---- application -----------------------------------------------------------
