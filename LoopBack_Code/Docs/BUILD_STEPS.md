@@ -1,25 +1,37 @@
 # Build LoopBack_Code (LCMV v2.0) up to BOOT.BIN — step by step
 
 Host: Ubuntu 22.04, **Vivado + Vitis 2026.1** (your `vivado.log`).
-Every command runs from the `LoopBack_Code` folder unless stated otherwise.
+Every command after step 0 runs from `~/AntSDR_LCMV/LoopBack_Code`.
 
-## 0. One-time setup
+## 0. One-time setup  (zip in ~/Downloads, new folder ~/AntSDR_LCMV)
+
+Your old tree `~/Desktop/AntSDR2/LoopBack_Code` is only **read** (its `Vendor/` is copied) and is never changed.
 
 ```bash
-# 0.1  put the v2.0 sources over your existing tree (keeps your Vendor/ folder)
-cd ~/Desktop/AntSDR2
-unzip -o LoopBack_Code_LCMV_v2.zip          # extracts into LoopBack_Code/
-cd LoopBack_Code
+sudo apt install -y unzip rsync make iverilog
+
+# 0.1  get the setup script out of the downloaded zip and run it
+cd ~/Downloads
+unzip -o -j "$(ls -t LoopBack_Code_LCMV_v2*.zip | head -1)" \
+      LoopBack_Code/Automation/setup_antsdr_lcmv.sh -d ~/Downloads
+bash ~/Downloads/setup_antsdr_lcmv.sh
+#   -> creates ~/AntSDR_LCMV/LoopBack_Code  (sources from the zip)
+#   -> copies  ~/Desktop/AntSDR2/LoopBack_Code/Vendor  into it
+#   (old Vendor elsewhere?  OLD_VENDOR=/path/to/Vendor bash ~/Downloads/setup_antsdr_lcmv.sh)
+
+# 0.2  find your Vitis 2026.1 settings file
+ls /tools/Xilinx/*/Vitis/settings64.sh ~/Xilinx/*/Vitis/settings64.sh 2>/dev/null
+
+cd ~/AntSDR_LCMV/LoopBack_Code
+```
+
+The same setup by hand, without the script:
+```bash
+mkdir -p ~/AntSDR_LCMV
+unzip -o "$(ls -t ~/Downloads/LoopBack_Code_LCMV_v2*.zip | head -1)" -d ~/AntSDR_LCMV
+rsync -a ~/Desktop/AntSDR2/LoopBack_Code/Vendor/ ~/AntSDR_LCMV/LoopBack_Code/Vendor/
+cd ~/AntSDR_LCMV/LoopBack_Code
 chmod +x Automation/*.sh Sim/run_sim.sh
-
-# 0.2  check that the vendor tree is present
-ls Vendor/ADI_hdl_2026_r1_update/projects/scripts/auto_timing_fix_xilinx.tcl
-
-# 0.3  host packages (make, rsync; iverilog only for the optional simulation)
-sudo apt install -y make rsync iverilog
-
-# 0.4  remove stale outputs from the v1.1 build
-rm -rf Build/ip_repo Build/VendorWork Vivado/Project/antsdr_e310_gnss.* Vitis/Workspace/*
 ```
 
 ## Option A — everything in one command

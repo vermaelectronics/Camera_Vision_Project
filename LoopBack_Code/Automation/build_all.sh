@@ -66,8 +66,14 @@ need() {                       # need <log> <marker>: build scripts print a PASS
 
 # ---- tools -------------------------------------------------------------------
 if [ -n "${XILINX_SETTINGS:-}" ]; then
-  # shellcheck disable=SC1090
-  source "$XILINX_SETTINGS"
+  if [ -f "$XILINX_SETTINGS" ]; then
+    # shellcheck disable=SC1090
+    source "$XILINX_SETTINGS"
+  elif [ "$DRY_RUN" != 1 ]; then
+    echo "XILINX_SETTINGS=$XILINX_SETTINGS does not exist."
+    echo "Find yours with:  ls /tools/Xilinx/*/Vitis/settings64.sh ~/Xilinx/*/Vitis/settings64.sh"
+    exit 2
+  fi
 fi
 if [ "$DRY_RUN" != 1 ]; then
   for t in vivado vitis bootgen make rsync; do
