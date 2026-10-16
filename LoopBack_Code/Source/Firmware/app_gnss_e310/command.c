@@ -44,6 +44,9 @@
 #include "console.h"
 #include "ad9361_api.h"
 #include "axi_dac_core.h"
+#include "axi_adc_core.h"
+#include "no_os_delay.h"
+#include "ad9361.h"
 //#include "platform.h"
 #include "parameters.h"
 #include "app_config.h"
@@ -136,6 +139,9 @@ command cmd_list[] = {
 	{"gnss_rx_agc=", "1 = AD9361 slow AGC on both channels, 0 = manual (locks both at RX1's gain).", "gnss_rx_agc=0", set_gnss_rx_agc},
 	/* LCMV CRPA, 2 antennas (bitstream v3.0+). Angles come from software:
 	 * the FPGA does no DOA estimation. */
+	/* RX digital interface diagnostics: why RX samples do (not) reach the PL. */
+	{"gnss_adc?", "RX interface status: ADC core, IODELAYs, AD9361 port, RX counters.", "", get_gnss_adc},
+	{"gnss_adc_tune=", "1 = re-run the AD9361 RX interface tuning (prints the delay table).", "gnss_adc_tune=1", set_gnss_adc_tune},
 	{"gnss_lcmv?", "Gets the LCMV CRPA state, angles and weights.", "", get_gnss_lcmv},
 	{"gnss_lcmv=", "1 = TX1 carries LCMV(RX1, RX2): gain 1 at GPS angle, null at jammer.", "gnss_lcmv=1", set_gnss_lcmv},
 	{"gnss_lcmv_angles=", "Sets GPS (look) and jammer (null) angle [deg], -90..90.", "gnss_lcmv_angles=10 40", set_gnss_lcmv_angles},
@@ -1545,4 +1551,99 @@ void set_gnss_lcmv_cal(double* param, char param_no)
 	}
 	gnss_pt_lcmv_set_rx2_cal((float)param[0], (float)param[1]);
 	gnss_pt_lcmv_print_state();
+}
+
+/**************************************************************************//***
+ * @brief RX digital interface diagnostics.
+ *
+ * axi_ad9361 only produces adc_valid when it sees the AD9361 RX_FRAME pattern
+ * on the LVDS port (axi_ad9361_lvds_if.v). STATUS[0] of the ADC core is that
+ * same check (frame pattern OK and interface locked). If it reads 0, the RX
+ * port is not aligned and no RX sample reaches gnss_passthrough or the DMA.
+*******************************************************************************/
+static void gnss_adc_report(void)
+{
+	struct axi_adc *adc;
+	uint32_t v = 0, ratio = 0, freq = 0, st = 0, c0, c1;
+	int i;
+
+	if(!ad9361_phy || !ad9361_phy->rx_adc) {
+		printf("gnss_adc: ad9361_phy / rx_adc is NULL\n");
+		return;
+	}
+	adc = ad9361_phy->rx_adc;
+
+	printf("\n--- RX digital interface (axi_ad9361 ADC core + AD9361 port) ---\n");
+	axi_adc_read(adc, AXI_ADC_REG_RSTN, &v);
+	printf("  ADC RSTN    0x0040 : 0x%08lx  (expect 0x3: rst+mmcm released)\n", (unsigned long)v);
+	axi_adc_read(adc, AXI_ADC_REG_CNTRL, &v);
+	printf("  ADC CNTRL   0x0044 : 0x%08lx  R1_MODE=%lu (expect 0 for 2R2T)\n",
+	       (unsigned long)v, (unsigned long)((v >> 2) & 1U));
+	axi_adc_read(adc, AXI_ADC_REG_CLK_FREQ, &freq);
+	axi_adc_read(adc, AXI_ADC_REG_CLK_RATIO, &ratio);
+	/* CLK_FREQ is l_clk in units of 100 MHz / 2^16 */
+	printf("  ADC CLK     0x0054 : %lu kHz (l_clk; 2R2T at 30.72 MSPS = ~122880 kHz), ratio %lu\n",
+	       (unsigned long)(((uint64_t)freq * 100000ULL) >> 16), (unsigned long)ratio);
+	axi_adc_read(adc, AXI_ADC_REG_STATUS, &st);
+	printf("  ADC STATUS  0x005C : 0x%08lx  %s\n", (unsigned long)st,
+	       (st & AXI_ADC_STATUS) ? "OK (RX_FRAME aligned, locked)"
+				     : "<<< NOT OK: RX_FRAME pattern wrong / not locked -> no adc_valid");
+	axi_adc_read(adc, AXI_ADC_REG_DELAY_CNTRL, &v);
+	printf("  DELAY_CNTRL 0x0060 : 0x%08lx\n", (unsigned long)v);
+	printf("  IDELAY taps 0x0800 :");
+	for(i = 0; i < 7; i++) {
+		axi_adc_read(adc, AXI_ADC_REG_DELAY(i), &v);
+		printf(" %lu", (unsigned long)(v & 0x1FU));
+	}
+	printf("   (lanes 0-5 data, 6 frame)\n");
+	for(i = 0; i < 4; i++) {
+		axi_adc_read(adc, AXI_ADC_REG_CHAN_CNTRL(i), &c0);
+		axi_adc_read(adc, AXI_ADC_REG_CHAN_STATUS(i), &c1);
+		printf("  ch%d CNTRL 0x%08lx enable=%lu  STATUS 0x%lx%s%s%s\n", i,
+		       (unsigned long)c0, (unsigned long)(c0 & 1U), (unsigned long)c1,
+		       (c1 & AXI_ADC_PN_ERR) ? " pn_err" : "",
+		       (c1 & AXI_ADC_PN_OOS) ? " pn_oos" : "",
+		       (c1 & 1U) ? " over_range" : "");
+		axi_adc_write(adc, AXI_ADC_REG_CHAN_STATUS(i), 0x7); /* clear sticky */
+	}
+	printf("  AD9361 0x006 RX clk/data delay : 0x%02lx\n",
+	       (unsigned long)ad9361_spi_read(ad9361_phy->spi, 0x006));
+	printf("  AD9361 0x010/0x011/0x012 port  : 0x%02lx 0x%02lx 0x%02lx\n",
+	       (unsigned long)ad9361_spi_read(ad9361_phy->spi, 0x010),
+	       (unsigned long)ad9361_spi_read(ad9361_phy->spi, 0x011),
+	       (unsigned long)ad9361_spi_read(ad9361_phy->spi, 0x012));
+	printf("  AD9361 0x017 ENSM state        : 0x%02lx  (0x0a = FDD)\n",
+	       (unsigned long)(ad9361_spi_read(ad9361_phy->spi, 0x017) & 0x0F));
+	c0 = gnss_pt_read(GNSS_PT_REG_RX_COUNT_CH0);
+	no_os_mdelay(10);
+	c1 = gnss_pt_read(GNSS_PT_REG_RX_COUNT_CH0);
+	printf("  PL rx count ch0 : %lu -> %lu in 10 ms  %s\n",
+	       (unsigned long)c0, (unsigned long)c1,
+	       (c1 != c0) ? "(RX samples ARE reaching the PL)"
+			  : "<<< RX samples NOT reaching the PL");
+	printf("-----------------------------------------------------------------\n");
+}
+
+void get_gnss_adc(double* param, char param_no)
+{
+	(void)param; (void)param_no;
+	gnss_adc_report();
+}
+
+void set_gnss_adc_tune(double* param, char param_no)
+{
+	int32_t ret;
+
+	if(param_no < 1 || (int)param[0] != 1) {
+		console_print("gnss_adc_tune= needs 1, e.g. gnss_adc_tune=1\n");
+		return;
+	}
+	if(!ad9361_phy) {
+		console_print("gnss_adc_tune: ad9361_phy is NULL\n");
+		return;
+	}
+	printf("gnss_adc_tune: re-tuning the RX interface (TX muted for ~1 s)...\n");
+	ret = ad9361_dig_tune(ad9361_phy, 0, BE_VERBOSE);
+	printf("gnss_adc_tune: ad9361_dig_tune returned %ld\n", (long)ret);
+	gnss_adc_report();
 }

@@ -237,6 +237,10 @@ void set_gnss_tx(double* param, char param_no);
 /* Prints AD9361 and gnss_passthrough runtime state. */
 void get_gnss_status(double* param, char param_no);
 
+/* RX digital interface diagnostics (gnss_adc?, gnss_adc_tune=1). */
+void get_gnss_adc(double* param, char param_no);
+void set_gnss_adc_tune(double* param, char param_no);
+
 /* RX1/RX2 gain: one manual gain on both channels (needed by the LCMV). */
 void get_gnss_rx_gain(double* param, char param_no);
 void set_gnss_rx_gain(double* param, char param_no);

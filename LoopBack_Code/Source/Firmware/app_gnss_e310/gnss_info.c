@@ -816,6 +816,7 @@ void gnss_info_menu(void)
     console_print("    gnss_lcmv=1 / gnss_lcmv=0  LCMV CRPA on TX1 / off\n");
     console_print("    gnss_rx_gain=40            same manual gain on RX1+RX2 (LCMV)\n");
     console_print("    gnss_tx? gnss_status? gnss_lcmv?    read back\n");
+    console_print("    gnss_adc? / gnss_adc_tune=1  RX interface check / re-tune\n");
     console_print("\n");
     console_print("    ?        this menu            help?    every command (long)\n");
     console_print("===============================================================\n");
