@@ -1,4 +1,4 @@
-# Build LoopBack_Code (LCMV v2.0) up to BOOT.BIN — Vivado/Vitis 2023.2
+# Build LoopBack_Code (v2.2: PL-NPI + LCMV) up to BOOT.BIN — Vivado/Vitis 2023.2
 
 Host: Ubuntu 22.04 with **Vivado + Vitis 2023.2**. The zip is in `~/Downloads`, and the work folder is `~/Desktop/AntSDR_LCMV`.
 (2026.1 is still supported: put `TOOL_VER=2026.1` in front of any command.)
@@ -13,7 +13,7 @@ Host: Ubuntu 22.04 with **Vivado + Vitis 2023.2**. The zip is in `~/Downloads`, 
 | BSP | classic `xparameters.h` (legacy names, `xparam_compat.h` becomes a no-op) | SDT `xparameters.h` |
 | Post-route timing fix | not in hdl_2023_r2, so skipped (strategy and phys_opt still applied) | ADI `auto_timing_fix_xilinx.tcl` |
 
-The RTL (gnss_passthrough v2.0 + LCMV), block design, constraints and firmware sources are identical for both.
+The RTL (gnss_passthrough v2.2: PL-NPI streams + LCMV), block design, constraints and firmware sources are identical for both.
 
 ## 0. One-time setup
 
@@ -79,13 +79,21 @@ done
 ls Build/VendorWork/hdl/library/axi_ad9361/component.xml      # must exist
 ```
 
-### Step 5  Package gnss_passthrough v2.0 (with Source/HDL/crpa)
+### Step 5  Package gnss_passthrough v2.2 (with Source/HDL/crpa)
 ```bash
 ( cd Build/Logs && vivado -mode batch -nojournal -nolog \
     -source ../../Source/IP/gnss_passthrough/gnss_passthrough_ip.tcl \
     -tclargs "$GNSS_CRPA_ROOT/Source" "$GNSS_CRPA_IP_REPO" ) | tee Build/Logs/3_gnss_ip.log
 grep "LCMV CRPA sources packaged" Build/Logs/3_gnss_ip.log
 ```
+
+### Step 5b  Build the PL-NPI HLS core (pl_npi_0, about 5–10 min)
+```bash
+( cd Source/HLS/pl_npi && vitis_hls -f build_hls.tcl ) | tee Build/Logs/3b_pl_npi_hls.log
+grep "PL_NPI_HLS: PASS" Build/Logs/3b_pl_npi_hls.log
+ls Build/ip_repo/pl_npi/component.xml                       # must exist
+```
+The block design instantiates `pl_npi_0` from `Build/ip_repo`, so this must run before Step 6.
 
 ### Step 6  Create the Vivado project
 ```bash
@@ -144,10 +152,12 @@ sudo mount /dev/sdb1 /mnt && sudo cp Build/Boot/BOOT.BIN /mnt/ && sync && sudo u
 ```
 Set the boot switch to SD and open the console at 115200 8N1:
 ```
-gnss_status?        -> gnss_passthrough version 2.0
-lcmv_angles=10 40
-lcmv=1
-lcmv?               -> ACTIVE, weights, update count rising
+gnss: firmware started (gnss_passthrough v2.2 with LCMV)   <- first line after boot
+gnss_status?               -> version 2.2
+gnss_lcmv_angles=10 40     GPS look 10 deg, jammer null 40 deg
+gnss_lcmv=1                LCMV on TX1 (turns PL-NPI off)
+gnss_tx=1                  open the TX path (attenuation interlock unchanged)
+gnss_lcmv?                 driving TX1: YES, weights valid, updates rising
 ```
 RF safety rules in `SD_Image/README_SD_CARD.md` still apply.
 
@@ -159,6 +169,7 @@ RF safety rules in `SD_Image/README_SD_CARD.md` still apply.
 | `git clone` fails | No network or proxy. Clone `hdl_2023_r2` on another machine and copy it to `Vendor/ADI_hdl_2023_r2`. |
 | `make` in a library fails | Read `Build/Logs/2_lib_<name>.log`. Usually the wrong Vivado is on PATH. |
 | BD error: IP not found (`axi_ad9361`, ...) | Step 4 is incomplete for that library. |
+| BD error: `pl_npi was not found in the IP catalog` | Step 5b was not run (or failed). Check `Build/Logs/3b_pl_npi_hls.log`. |
 | BD error: `antsdr:gnss:gnss_passthrough` not found | Step 5 was not run, or `GNSS_CRPA_IP_REPO` is not set in this terminal. |
 | `xsct: command not found` | Source the **Vitis** 2023.2 `settings64.sh`, not the Vivado one. |
 | Firmware: `gnss_pt: base address not found ... using 0x43C00000` | A build warning only. The address is fixed by the block design and is correct. |

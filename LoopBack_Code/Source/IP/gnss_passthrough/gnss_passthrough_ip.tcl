@@ -31,7 +31,13 @@ set ip_dir     [file join $ip_repo_dir $ip_name]
 set rtl_file   [file join $src_dir "HDL" "${ip_name}.v"]
 set xdc_file   [file join $src_dir "IP" $ip_name "${ip_name}_constr.xdc"]
 
-foreach f [list $rtl_file $xdc_file] {
+# LCMV CRPA sub-modules (Source/HDL/crpa), instantiated by gnss_passthrough.v.
+set crpa_names {crpa_lcmv_2ch.v crpa_lcmv_weight_2ch.v crpa_sdiv_serial.v
+                crpa_beamformer_2ch.v steering_vector_2x2.v}
+set crpa_files {}
+foreach n $crpa_names { lappend crpa_files [file join $src_dir "HDL" "crpa" $n] }
+
+foreach f [concat [list $rtl_file $xdc_file] $crpa_files] {
   if {![file exists $f]} {
     puts "ERROR: required source not found: $f"
     exit 2
@@ -50,7 +56,7 @@ file mkdir $ip_dir
 create_project -force ${ip_name}_pkg [file join $ip_dir ".pkg_project"] -part xc7z020clg400-2
 set_property target_language Verilog [current_project]
 
-add_files -norecurse $rtl_file
+add_files -norecurse [concat [list $rtl_file] $crpa_files]
 set_property top $ip_name [current_fileset]
 update_compile_order -fileset sources_1
 
@@ -69,7 +75,7 @@ set core [ipx::current_core]
 set_property name           $ip_name                                  $core
 set_property version        1.0                                       $core
 set_property display_name   "GNSS CRPA Passthrough"                   $core
-set_property description    "Phase-1 transparent RX->TX I/Q passthrough and CRPA insertion point for ANTSDR E310 V1" $core
+set_property description    "RX->TX I/Q passthrough with PL-NPI streams and 2-element LCMV CRPA for ANTSDR E310 V1" $core
 set_property vendor_display_name "ANTSDR GNSS CRPA project"           $core
 set_property company_url    "https://github.com/MicroPhase"           $core
 
@@ -195,6 +201,21 @@ foreach n $npi_axis {
   }
 }
 puts "IP_PACKAGE_SELFCHECK: OK - PL-NPI AXI-Stream interfaces: $npi_axis"
+
+# The LCMV sub-modules must travel with the IP, or the block design synthesis
+# fails later with "module crpa_lcmv_2ch not found".
+set packaged {}
+foreach fg [ipx::get_file_groups -of_objects $core] {
+  foreach fl [ipx::get_files -of_objects $fg] { lappend packaged [file tail [get_property name $fl]] }
+}
+foreach n $crpa_names {
+  if {[lsearch -exact $packaged $n] < 0} {
+    puts "IP_PACKAGE_SELFCHECK: FAIL - $n was not packaged into the IP"
+    close_project
+    exit 2
+  }
+}
+puts "IP_PACKAGE_SELFCHECK: OK - LCMV CRPA sources packaged with the IP"
 
 # The CDC constraints are what keep the design timing-clean. If they silently
 # failed to package, the only symptom would be a setup violation much later.

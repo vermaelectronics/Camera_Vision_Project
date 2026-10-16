@@ -1,6 +1,6 @@
 // ============================================================================
 //  tb_gnss_passthrough_lcmv.v
-//  System-level, self-checking testbench for gnss_passthrough v2.0 with the
+//  System-level, self-checking testbench for gnss_passthrough v2.2 (PL-NPI + LCMV) with the
 //  2-element LCMV CRPA. Exercises the block exactly as the firmware does:
 //  AXI4-Lite register writes/reads (100 MHz) and ADC/DAC strobes (125 MHz).
 //
@@ -10,14 +10,17 @@
 //    noise    : 2 LSB rms per I/Q per channel
 //
 //  Tests
-//    T1  ID = 0x47435031, VERSION = 0x00020000
-//    T2  LCMV on (GPS 10, JAM 40): STATUS[18] lcmv_active, weights readable,
+//    T1  ID = 0x47435031, VERSION = 0x00020002, RX2_CAL reset (0x50)
+//    T2  LCMV on (GPS 10, JAM 40): STATUS[19] lcmv_active, weights readable,
 //        TX0 jammer suppression < -40 dB, tone gain 0 dB +/- 1 dB,
 //        TX0 samples left-aligned (low nibble 0)
-//    T3  LCMV on: TX1 carries RX1 (output/input power 0 dB +/- 0.5 dB)
+//    T3  LCMV on: TX2 carries RX2 unprocessed (power 0 dB +/- 0.5 dB)
 //    T4  LCMV off: identity passthrough, TX0 power = RX1 power
 //    T5  RX2 channel error 0.85 x exp(j190 deg) (-1.4 dB, 190 deg): null lost;
 //        LCMV_RX2_CAL = 1/(0.85 exp(j190 deg)) restores suppression < -40 dB
+//    T6  PL-NPI + LCMV both enabled: PL-NPI has priority (STATUS[18]=1,
+//        STATUS[19]=0), TX0 = pl_npi_0 output. pl_npi_0 is modelled here as
+//        an identity (y = x1, one clock), so TX0 must equal RX1.
 //
 //  Run (from LoopBack_Code/Sim):
 //    iverilog -g2012 -o tb.vvp -s tb_gnss_passthrough_lcmv \
@@ -55,6 +58,17 @@ module tb_gnss_passthrough_lcmv;
   wire [1:0]  bresp, rresp;
   wire [31:0] rdata;
 
+  // pl_npi_0 stand-in: identity y = x1 after one clock, held in reset by
+  // npi_rst_n exactly like the HLS core's aresetn.
+  wire [63:0] npi_x;
+  wire        npi_xv, npi_rst_n;
+  reg  [31:0] npi_y  = 32'd0;
+  reg         npi_yv = 1'b0;
+  always @(posedge clk) begin
+    npi_yv <= npi_rst_n & npi_xv;
+    npi_y  <= npi_x[31:0];
+  end
+
   gnss_passthrough dut (
     .clk(clk), .rst(rst),
     .adc_enable_i0(1'b1), .adc_valid_i0(adc_v), .adc_data_i0(adc_i0),
@@ -69,6 +83,9 @@ module tb_gnss_passthrough_lcmv;
     .dma_dac_data_i1(16'h7890), .dma_dac_data_q1(16'hABC0),
     .dac_data_i0(dac_i0), .dac_data_q0(dac_q0),
     .dac_data_i1(dac_i1), .dac_data_q1(dac_q1),
+    .m_axis_npi_tdata(npi_x), .m_axis_npi_tvalid(npi_xv), .m_axis_npi_tready(1'b1),
+    .s_axis_npi_tdata(npi_y), .s_axis_npi_tvalid(npi_yv), .s_axis_npi_tready(),
+    .npi_gamma(), .npi_adapt_en(), .npi_rst_n(npi_rst_n), .npi_band(2'd0),
     .s_axi_aclk(aclk), .s_axi_aresetn(aresetn),
     .s_axi_awvalid(awvalid), .s_axi_awaddr(awaddr), .s_axi_awprot(3'd0),
     .s_axi_awready(awready),
@@ -239,25 +256,26 @@ module tb_gnss_passthrough_lcmv;
     axi_read(16'h00, r);  $display("T1 ID      = 0x%08h", r);
     check(r == 32'h47435031, "ID");
     axi_read(16'h04, r);  $display("T1 VERSION = 0x%08h", r);
-    check(r == 32'h00020000, "VERSION 2.0");
-    axi_read(16'h4C, r);  $display("T1 RX2_CAL reset = 0x%08h", r);
+    check(r == 32'h00020002, "VERSION 2.2");
+    axi_read(16'h50, r);  $display("T1 RX2_CAL reset = 0x%08h", r);
     check(r == 32'h00004000, "RX2_CAL reset value (1.0, Q2.14)");
 
     // ---------------- T2 ----------------
     axi_write(16'h40, 32'd10);                 // GPS angle
     axi_write(16'h44, 32'd40);                 // JAM angle
-    axi_write(16'h48, 32'd0);                  // EPS
+    axi_write(16'h4C, 32'd0);                  // EPS
     axi_write(16'h0C, 32'h11);                 // pass_en | lcmv_en
     repeat (4000) @(posedge clk);
 
     axi_read(16'h10, r);
-    $display("T2 STATUS = 0x%08h  (pass_en=%0d lcmv_en=%0d lcmv_active=%0d)", r, r[16], r[17], r[18]);
-    check(r[18] == 1'b1, "STATUS[18] lcmv_active");
-    axi_read(16'h50, w1r); axi_read(16'h54, w1i);
-    axi_read(16'h58, w2r); axi_read(16'h5C, w2i);
+    $display("T2 STATUS = 0x%08h  (pass_en=%0d lcmv_en=%0d lcmv_active=%0d)", r, r[16], r[17], r[19]);
+    check(r[19] == 1'b1, "STATUS[19] lcmv_active");
+    check(r[18] == 1'b0, "STATUS[18] npi_en clear");
+    axi_read(16'h54, w1r); axi_read(16'h58, w1i);
+    axi_read(16'h5C, w2r); axi_read(16'h60, w2i);
     $display("T2 weights  w1 = %0.5f %+0.5fj   w2 = %0.5f %+0.5fj",
              w1r/65536.0, w1i/65536.0, w2r/65536.0, w2i/65536.0);
-    axi_read(16'h64, r); $display("T2 LCMV_UPDATES = %0d", r);
+    axi_read(16'h68, r); $display("T2 LCMV_UPDATES = %0d", r);
     check(r > 0, "LCMV_UPDATES > 0");
 
     measure(6000);
@@ -268,8 +286,8 @@ module tb_gnss_passthrough_lcmv;
     check(nib_err == 0, "TX0 left-aligned");
 
     // ---------------- T3 ----------------
-    $display("T3 LCMV on : TX1/RX1 power %6.2f dB (TX1 = RX1 reference)", out1_db);
-    check(out1_db > -0.5 && out1_db < 0.5, "TX1 carries RX1");
+    $display("T3 LCMV on : TX2 power re RX1 %6.2f dB (TX2 = RX2 unprocessed, same power in this scene)", out1_db);
+    check(out1_db > -0.5 && out1_db < 0.5, "TX2 carries RX2 unprocessed");
 
     // ---------------- T4 ----------------
     axi_write(16'h0C, 32'h01);                 // pass_en only
@@ -278,7 +296,7 @@ module tb_gnss_passthrough_lcmv;
     $display("T4 LCMV off: TX0/RX1 power %6.2f dB (identity)", out_db);
     check(out_db > -0.2 && out_db < 0.2, "identity passthrough");
     axi_read(16'h10, r);
-    check(r[18] == 1'b0, "STATUS[18] clear with LCMV off");
+    check(r[19] == 1'b0, "STATUS[19] clear with LCMV off");
 
     // ---------------- T5 ----------------
     rx2_err_deg  = 190.0;                      // e.g. inversion + 10 deg skew
@@ -290,8 +308,8 @@ module tb_gnss_passthrough_lcmv;
     check(res_db > -20.0, "uncalibrated phase error degrades the null");
 
     // c = 1/(0.85 exp(j190 deg)) = -1.15860 + j0.20429  ->  Q2.14 re -18982, im 3347
-    axi_write(16'h4C, {16'sd3347, -16'sd18982});
-    axi_read(16'h4C, r); $display("T5 RX2_CAL = 0x%08h", r);
+    axi_write(16'h50, {16'sd3347, -16'sd18982});
+    axi_read(16'h50, r); $display("T5 RX2_CAL = 0x%08h", r);
     repeat (4000) @(posedge clk);
     measure(6000);
     $display("T5 RX2 error 0.85/190 deg, cal on : residual %6.1f dB re RX1, tone gain %5.2f dB",
@@ -299,8 +317,26 @@ module tb_gnss_passthrough_lcmv;
     check(res_db < -40.0, "calibration restores the null");
     check(tone_db > -1.0 && tone_db < 1.0, "look gain with calibration");
 
-    axi_read(16'h60, r);  $display("LCMV_STATUS = 0x%08h", r);
-    axi_read(16'h68, r);  $display("LCMV_SAT_COUNT = %0d", r);
+    axi_read(16'h64, r);  $display("LCMV_STATUS = 0x%08h", r);
+    axi_read(16'h6C, r);  $display("LCMV_SAT_COUNT = %0d", r);
+    axi_write(16'h48, 32'd12345);              // PL-NPI gamma sits between the LCMV registers
+    axi_read(16'h48, r);  check(r == 32'd12345, "NPI gamma 0x48 independent of LCMV");
+    axi_read(16'h4C, r);  check(r == 32'd0, "LCMV_EPS untouched by gamma write");
+
+    // ---------------- T6 ----------------
+    rx2_err_deg  = 0.0;
+    rx2_err_gain = 1.0;
+    axi_write(16'h0C, 32'h31);                 // pass_en | lcmv_en | npi_en
+    repeat (2000) @(posedge clk);
+    axi_read(16'h10, r);
+    $display("T6 STATUS = 0x%08h  (npi_en=%0d lcmv_active=%0d)", r, r[18], r[19]);
+    check(r[18] == 1'b1 && r[19] == 1'b0, "PL-NPI has priority over LCMV");
+    measure(4000);
+    $display("T6 PL-NPI (identity model) + LCMV: TX0/RX1 power %6.2f dB, nibble errors %0d", out_db, nib_err);
+    check(out_db > -0.2 && out_db < 0.2, "TX0 = PL-NPI output while both enabled");
+    check(nib_err == 0, "TX0 left-aligned on the PL-NPI path");
+    axi_read(16'h1C, r);  $display("OVERFLOW_COUNT = %0d", r);
+    axi_read(16'h20, r);  $display("UNDERFLOW_COUNT = %0d", r);
 
     if (errors == 0) $display("PASS");
     else             $display("FAIL (%0d errors)", errors);

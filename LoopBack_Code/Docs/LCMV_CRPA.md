@@ -1,7 +1,8 @@
-# LCMV CRPA integration — gnss_passthrough v2.0
+# LCMV CRPA integration — gnss_passthrough v2.2 (with PL-NPI)
 
-This change adds a 2-element robust LCMV anti-jamming beamformer to the existing
-ANTSDR E310 V1 GNSS loopback pipeline. It lives in the **PROCESSING CORE** section of
+This change adds a 2-element robust LCMV anti-jamming beamformer to the v2.1
+ANTSDR E310 V1 GNSS loopback pipeline (the one with the PL-NPI HLS core `pl_npi_0`).
+PL-NPI is untouched; the LCMV is a second, selectable canceller for TX1. It lives in the **PROCESSING CORE** section of
 `Source/HDL/gnss_passthrough.v`, the insertion point reserved for the CRPA. Everything
 else in the pipeline is unchanged: the radio datapath, AXI DMA capture path, elastic
 buffers, output alignment, counters and CDC scheme.
@@ -20,17 +21,19 @@ Beamforming Algorithm", *PIER C*, vol. 4, pp. 43–52, 2008, eq. (9).
                          │     ├─► y = conj(w1)·x1 + conj(w2)·(c·x2) ─ sat 12b ─► FIFO0 ─► [15:4] ─────┤
                          │     │        ▲                                                               │
                          │     │   w = C^-H [1 ε]^T, C = [a(θ_GPS) a(θ_JAM)]                           │
-                         │     └─ RX1 (reference) ─────────────────────────────► FIFO1 ─► [15:4] ─────┼─► axi_ad9361 ─► TX2
+                         │     └─ RX2 (unprocessed) ───────────────────────────► FIFO1 ─► [15:4] ─────┼─► axi_ad9361 ─► TX2
                          └── AXI-Lite: angles θ_GPS, θ_JAM, ε, RX2 cal c  ◄── PS firmware / console ──┘
 ```
 
-| CONTROL[4] | TX ch0 (TX1) | TX ch1 (TX2) |
-|---|---|---|
-| 0 (reset, boot default) | RX1, identity (Phase-1 behaviour, bit-exact) | RX2 |
-| 1 | **LCMV output**: gain 1 toward GPS angle, null toward jammer angle | RX1 unprocessed (A/B reference) |
+| CONTROL[5] npi_en | CONTROL[4] lcmv_en | TX ch0 (TX1) | TX ch1 (TX2) |
+|---|---|---|---|
+| 0 | 0 (boot default) | RX1, identity (v2.1 behaviour) | RX2 |
+| 0 | 1 | **LCMV output**: gain 1 toward GPS angle, null toward jammer angle | RX2 |
+| 1 | x | PL-NPI output (`pl_npi_0`), **PL-NPI has priority** | RX2 |
 
-Both TX channels are delayed by the beamformer latency (5 `l_clk`) in **both** modes, so
-switching LCMV on or off never changes RX→TX timing.
+TX1 switches to the LCMV output only after the first weight set is valid (STATUS[19]).
+`gnss_lcmv=1` turns PL-NPI off and `gnss_npi=1` turns the LCMV off, so only one canceller is
+ever selected.
 
 The jammer angle comes from software. **The FPGA does no DOA estimation.**
 
@@ -67,17 +70,17 @@ null), and wᴴA_J = ε (enforcement, deepens the null).
 ### Modified
 | File | Change |
 |---|---|
-| `Source/HDL/gnss_passthrough.v` | LCMV in PROCESSING CORE; CONTROL[4]; registers 0x40–0x68; config CDC handshake; STATUS[19:17]; VERSION 2.0 |
-| `Source/IP/gnss_passthrough/gnss_passthrough_ip.tcl` | Packages `crpa/*.v`; self-check fails if they are missing |
-| `Source/XDC/gnss_passthrough_cdc.xdc` and `Source/IP/.../gnss_passthrough_constr.xdc` | Constraints for the new config crossing |
-| `Source/Firmware/app_gnss_e310/gnss_passthrough.[ch]` | LCMV registers and API, version 2.0 |
-| `Source/Firmware/app_gnss_e310/command.[ch]` | `lcmv?` `lcmv=` `lcmv_angles=` `lcmv_eps=` `lcmv_cal=` |
-| `Source/Firmware/app_gnss_e310/gnss_info.c` | Menu, register page, version text |
+| `Source/HDL/gnss_passthrough.v` | LCMV next to the PL-NPI path; CONTROL[4]; registers 0x40/0x44/0x4C–0x6C (0x48 stays PL-NPI gamma); `lcmv_ctrl_meta` two-flop sync; STATUS[17], [19], [22]; VERSION 2.2 |
+| `Source/IP/gnss_passthrough/gnss_passthrough_ip.tcl` | Also packages `crpa/*.v`; self-check fails if they are missing. PL-NPI AXIS interfaces unchanged |
+| `Source/Firmware/app_gnss_e310/gnss_passthrough.[ch]` | LCMV registers and API, expected version 2.2 |
+| `Source/Firmware/app_gnss_e310/command.[ch]` | `gnss_lcmv?` `gnss_lcmv=` `gnss_lcmv_angles=` `gnss_lcmv_eps=` `gnss_lcmv_cal=`; `gnss_npi=1` turns LCMV off |
+| `Source/Firmware/app_gnss_e310/gnss_info.c` | Menu, CONTROL page, register page, version text |
+| `Source/Firmware/app_gnss_e310/main.c` | First console line `gnss: firmware started ...` |
 | `Source/Config/board_e310_v1.json` | Register map and processing description |
-| `SD_Image/README_SD_CARD.md` | Note that the shipped BOOT.BIN predates v2.0 |
+| `Automation/build_all.sh` | Stage 3b builds the PL-NPI HLS core |
 
-Unchanged: block design (`system_bd.tcl`; the IP VLNV stays `antsdr:gnss:gnss_passthrough:1.0`,
-same ports), `system_top.v`, Vivado and Vitis build scripts, and the vendor tree.
+Unchanged: block design (`system_bd.tcl`, same ports and VLNV), both XDC files (the existing
+`*ctrl_meta_reg*`, `cap_*`/`h_*` patterns already cover the LCMV crossings), the HLS core, `system_top.v`.
 
 ---
 
@@ -86,17 +89,19 @@ same ports), `system_top.v`, Vivado and Vitis build scripts, and the vendor tree
 | Offset | Name | Access | Description |
 |---|---|---|---|
 | 0x0C | CONTROL | RW | **[4] lcmv_en** (other bits unchanged) |
-| 0x10 | STATUS | RO | [17] lcmv_en (synced), **[18] lcmv_active**, [19] output clipped (sticky) |
+| 0x10 | STATUS | RO | [17] lcmv_en (synced), **[19] lcmv_active** (LCMV drives TX1), [22] LCMV output clipped (sticky) |
 | 0x40 | LCMV_GPS_ANGLE | RW | [15:0] signed deg −90..90, look direction (gain 1) |
 | 0x44 | LCMV_JAM_ANGLE | RW | [15:0] signed deg −90..90, null direction |
-| 0x48 | LCMV_EPS | RW | [15:0] Q0.16 gain toward the jammer, 0 = ideal null |
-| 0x4C | LCMV_RX2_CAL | RW | {im, re} **Q2.14**, reset 0x00004000 = 1.0 |
-| 0x50–0x5C | LCMV_W1_RE/IM, W2_RE/IM | RO | Active weights, Q16.16 (w2 includes calibration) |
-| 0x60 | LCMV_STATUS | RO | [0] en [1] weights_valid [2] busy [3] sat_sticky |
-| 0x64 | LCMV_UPDATES | RO | Weight sets computed |
-| 0x68 | LCMV_SAT_COUNT | RO | Output samples clipped to 12 bits |
+| 0x48 | CRPA_COEF2 | RW | **PL-NPI gamma, unchanged** |
+| 0x4C | LCMV_EPS | RW | [15:0] Q0.16 gain toward the jammer, 0 = ideal null |
+| 0x50 | LCMV_RX2_CAL | RW | {im, re} **Q2.14**, reset 0x00004000 = 1.0 |
+| 0x54–0x60 | LCMV_W1_RE/IM, W2_RE/IM | RO | Active weights, Q16.16 (w2 includes calibration) |
+| 0x64 | LCMV_STATUS | RO | [0] en [1] weights_valid [2] busy [3] sat_sticky |
+| 0x68 | LCMV_UPDATES | RO | Weight sets computed |
+| 0x6C | LCMV_SAT_COUNT | RO | Output samples clipped to 12 bits (cleared by CONTROL[8]) |
 
-0x40–0x4C cross to `l_clk` through a toggle handshake and take effect within about 1 µs.
+The angle/eps/cal registers cross to `l_clk` through the `lcmv_ctrl_meta` two-flop synchroniser
+plus a stability filter, and take effect within about 1 µs.
 Readbacks lag by one status capture (256 `l_clk`).
 
 ---
@@ -104,18 +109,21 @@ Readbacks lag by one status capture (256 `l_clk`).
 ## 4. Using it (UART console)
 
 ```
-lcmv_angles=10 40      GPS look 10 deg, jammer null 40 deg
-lcmv=1                 LCMV on  (TX1 = beamformed, TX2 = RX1)
-gnss_tx=1              open the TX path as before (attenuation interlock unchanged)
-lcmv?                  angles, weights, update count, clipping
-lcmv_eps=0.001         optional: paper's enforcement value (shallower null)
-lcmv_cal=-1.1586 0.2043   RX2 calibration from Tools/lcmv_rx2_cal.py
-lcmv=0                 back to identity passthrough
+gnss_lcmv_angles=10 40       GPS look 10 deg, jammer null 40 deg
+gnss_lcmv=1                  LCMV on TX1 (PL-NPI off, RX gain -> matched auto)
+gnss_tx=1                    open the TX path as before (attenuation interlock unchanged)
+gnss_lcmv?                   angles, weights, update count, clipping
+gnss_lcmv_eps=0.001          optional: paper's enforcement value (shallower null)
+gnss_lcmv_cal=-1.1586 0.2043 RX2 calibration from Tools/lcmv_rx2_cal.py
+gnss_lcmv=0                  back to identity passthrough on TX1
+gnss_npi=1                   switch to PL-NPI instead (turns the LCMV off)
 ```
 
-The LCMV is **off at boot**, so the auto-transmit deployment behaviour in
-`SD_Image/README_SD_CARD.md` is unchanged until `lcmv=1`. All RF safety rules there
-still apply. LCMV changes what is transmitted, not whether or how loudly.
+Numbers are space-separated and at most 9 characters each (console parser limit).
+
+The LCMV is **off at boot**, so the deployment behaviour in `SD_Image/README_SD_CARD.md`
+is unchanged until `gnss_lcmv=1`. All RF safety rules there still apply. LCMV changes what is
+transmitted, not whether or how loudly.
 
 ### RX2 calibration (do this first)
 The null lands on `jam_angle` only if RX1 and RX2 match in gain and phase. Note that
@@ -124,7 +132,7 @@ turns a −45 dB null into +2.7 dB.
 
 1. Split one CW tone (2-way splitter, equal cables) into RX1 and RX2, below full scale.
 2. Capture with the existing `gnss_capture` path and pull the buffer as a binary file.
-3. Run `python3 Tools/lcmv_rx2_cal.py capture.bin` and enter the printed `lcmv_cal=` command.
+3. Run `python3 Tools/lcmv_rx2_cal.py capture.bin` and enter the printed values as `gnss_lcmv_cal=<re> <im>`.
 4. Separately, match or measure the antenna-to-splitter cable lengths.
 
 ---
@@ -147,7 +155,7 @@ The IP must be repackaged because the stale `Build/ip_repo/gnss_passthrough` doe
    Expect `IP_PACKAGE_SELFCHECK: OK - LCMV CRPA sources packaged with the IP`.
 2. `Vivado/Scripts/create_project.tcl`, then `Vivado/Scripts/build.tcl`. Check `timing_impl.rpt`; the LCMV runs on `rx_clk` (8 ns).
 3. `Vitis/Scripts/build_software.py` (firmware), then BOOT.BIN as before.
-4. On the board, `gnss_status?` should report version **2.0**.
+4. On the board, `gnss_status?` should report version **2.2**.
 
 ---
 
@@ -158,11 +166,12 @@ with 125 MHz `l_clk`, 100 MHz AXI clock, 2R2T ADC strobes and DAC strobes:
 
 | Test | Result |
 |---|---|
-| T1 ID / VERSION / RX2_CAL reset | 0x47435031 / 0x00020000 / 0x00004000 |
+| T1 ID / VERSION / RX2_CAL reset | 0x47435031 / 0x00020002 / 0x00004000 |
 | T2 LCMV on, GPS 10°, jammer 40° (JNR 46 dB) | jammer + noise residual **−45.3 dB** re RX1 (noise floor); GPS-direction tone gain **0.00 dB**; TX left-aligned |
-| T3 TX2 with LCMV on | = RX1, 0.00 dB |
+| T3 TX2 with LCMV on | RX2 unprocessed, 0.00 dB |
 | T4 LCMV off | identity, 0.00 dB |
-| T5 RX2 error 0.85× / 190° | no cal: +2.7 dB (null lost); with `LCMV_RX2_CAL`: **−44.6 dB**, tone gain −0.01 dB |
+| T5 RX2 error 0.85× / 190° | no cal: +2.7 dB (null lost); with `LCMV_RX2_CAL`: **−44.6 dB**, tone gain −0.01 dB; gamma at 0x48 independent of the LCMV registers |
+| T6 PL-NPI + LCMV both enabled | PL-NPI has priority (STATUS[18]=1, [19]=0); TX1 = `pl_npi_0` output (identity model in the testbench), 0.00 dB, no over/underflow |
 
 Weights read over AXI (`w1 = 0.5 + 0.55098j`, `w2 = 0.71333 − 0.21156j`) match the
 floating-point paper formula.

@@ -117,6 +117,121 @@ void gnss_pt_set_npi_freeze(int freeze)
     gnss_pt_write(GNSS_PT_REG_CONTROL, c);
 }
 
+/* ---- LCMV CRPA ----------------------------------------------------------- */
+
+void gnss_pt_lcmv_enable(int enable)
+{
+    uint32_t c = gnss_pt_read(GNSS_PT_REG_CONTROL);
+    if (enable) { c |= GNSS_PT_CTRL_LCMV_EN; }
+    else        { c &= ~GNSS_PT_CTRL_LCMV_EN; }
+    gnss_pt_write(GNSS_PT_REG_CONTROL, c);
+}
+
+static int lcmv_clamp_deg(int d)
+{
+    if (d >  90) { return  90; }
+    if (d < -90) { return -90; }
+    return d;
+}
+
+void gnss_pt_lcmv_set_angles(int gps_deg, int jam_deg)
+{
+    gnss_pt_write(GNSS_PT_REG_LCMV_GPS_ANGLE, (uint32_t)lcmv_clamp_deg(gps_deg) & 0xFFFFU);
+    gnss_pt_write(GNSS_PT_REG_LCMV_JAM_ANGLE, (uint32_t)lcmv_clamp_deg(jam_deg) & 0xFFFFU);
+}
+
+void gnss_pt_lcmv_set_eps(float eps)
+{
+    if (eps < 0.0f)        { eps = 0.0f; }
+    if (eps > 0.99998f)    { eps = 0.99998f; }
+    gnss_pt_write(GNSS_PT_REG_LCMV_EPS, (uint32_t)(eps * 65536.0f + 0.5f) & 0xFFFFU);
+}
+
+static uint32_t lcmv_q214(float v)
+{
+    float s = v * 16384.0f;
+    if (s >  32767.0f) { s =  32767.0f; }
+    if (s < -32768.0f) { s = -32768.0f; }
+    int32_t q = (int32_t)(s < 0.0f ? s - 0.5f : s + 0.5f);
+    return (uint32_t)q & 0xFFFFU;
+}
+
+void gnss_pt_lcmv_set_rx2_cal(float re, float im)
+{
+    gnss_pt_write(GNSS_PT_REG_LCMV_RX2_CAL, (lcmv_q214(im) << 16) | lcmv_q214(re));
+}
+
+void gnss_pt_lcmv_get_state(gnss_pt_lcmv_state_t *st)
+{
+    if (!st) { return; }
+    uint32_t ctl = gnss_pt_read(GNSS_PT_REG_CONTROL);
+    uint32_t sts = gnss_pt_read(GNSS_PT_REG_STATUS);
+    uint32_t ls  = gnss_pt_read(GNSS_PT_REG_LCMV_STATUS);
+    uint32_t cal = gnss_pt_read(GNSS_PT_REG_LCMV_RX2_CAL);
+
+    st->enabled       = (ctl & GNSS_PT_CTRL_LCMV_EN) ? 1 : 0;
+    st->active        = (sts & GNSS_PT_ST_LCMV_ACTIVE) ? 1 : 0;
+    st->weights_valid = (ls >> 1) & 1U;
+    st->busy          = (ls >> 2) & 1U;
+    st->sat_sticky    = (ls >> 3) & 1U;
+    st->gps_deg = (int16_t)(gnss_pt_read(GNSS_PT_REG_LCMV_GPS_ANGLE) & 0xFFFFU);
+    st->jam_deg = (int16_t)(gnss_pt_read(GNSS_PT_REG_LCMV_JAM_ANGLE) & 0xFFFFU);
+    st->eps     = (float)(gnss_pt_read(GNSS_PT_REG_LCMV_EPS) & 0xFFFFU) / 65536.0f;
+    st->cal_re  = (float)(int16_t)(cal & 0xFFFFU) / 16384.0f;
+    st->cal_im  = (float)(int16_t)(cal >> 16)     / 16384.0f;
+    st->w1_re = (float)(int32_t)gnss_pt_read(GNSS_PT_REG_LCMV_W1_RE) / 65536.0f;
+    st->w1_im = (float)(int32_t)gnss_pt_read(GNSS_PT_REG_LCMV_W1_IM) / 65536.0f;
+    st->w2_re = (float)(int32_t)gnss_pt_read(GNSS_PT_REG_LCMV_W2_RE) / 65536.0f;
+    st->w2_im = (float)(int32_t)gnss_pt_read(GNSS_PT_REG_LCMV_W2_IM) / 65536.0f;
+    st->updates   = gnss_pt_read(GNSS_PT_REG_LCMV_UPDATES);
+    st->sat_count = gnss_pt_read(GNSS_PT_REG_LCMV_SAT_COUNT);
+}
+
+/* Fixed-point to "-0.12345" text without floating-point printf, so the
+ * output does not depend on the C library's float support. */
+static void lcmv_fmt(char *buf, int32_t q, int frac_bits)
+{
+    int64_t  v   = q;
+    int      neg = v < 0;
+    if (neg) { v = -v; }
+    int64_t  ip  = v >> frac_bits;
+    int64_t  fp  = ((v & ((1LL << frac_bits) - 1)) * 100000 + (1LL << (frac_bits - 1))) >> frac_bits;
+    if (fp >= 100000) { ip++; fp -= 100000; }
+    sprintf(buf, "%s%ld.%05ld", neg ? "-" : "+", (long)ip, (long)fp);
+}
+
+void gnss_pt_lcmv_print_state(void)
+{
+    gnss_pt_lcmv_state_t s;
+    char a[16], b[16];
+    uint32_t sts = gnss_pt_read(GNSS_PT_REG_STATUS);
+    uint32_t cal = gnss_pt_read(GNSS_PT_REG_LCMV_RX2_CAL);
+    gnss_pt_lcmv_get_state(&s);
+
+    printf("\n--- LCMV CRPA (2 antennas, look + null) ---\n");
+    printf("  enabled        : %s\n", s.enabled ? "yes" : "no");
+    printf("  driving TX1    : %s\n", s.active ? "YES" :
+           (s.enabled && (sts & GNSS_PT_ST_NPI_EN_SYNCED)) ? "no (PL-NPI has priority, gnss_npi=0)" :
+           (s.enabled && !(sts & GNSS_PT_ST_PASS_EN_SYNCED)) ? "no (passthrough off, gnss_tx=1)" : "no");
+    printf("  gps / jam angle: %d / %d deg\n", s.gps_deg, s.jam_deg);
+    lcmv_fmt(a, (int32_t)(gnss_pt_read(GNSS_PT_REG_LCMV_EPS) & 0xFFFFU), 16);
+    printf("  eps            : %s\n", a);
+    lcmv_fmt(a, (int16_t)(cal & 0xFFFFU), 14);
+    lcmv_fmt(b, (int16_t)(cal >> 16), 14);
+    printf("  rx2 cal        : %s %sj\n", a, b);
+    lcmv_fmt(a, (int32_t)gnss_pt_read(GNSS_PT_REG_LCMV_W1_RE), 16);
+    lcmv_fmt(b, (int32_t)gnss_pt_read(GNSS_PT_REG_LCMV_W1_IM), 16);
+    printf("  w1             : %s %sj\n", a, b);
+    lcmv_fmt(a, (int32_t)gnss_pt_read(GNSS_PT_REG_LCMV_W2_RE), 16);
+    lcmv_fmt(b, (int32_t)gnss_pt_read(GNSS_PT_REG_LCMV_W2_IM), 16);
+    printf("  w2 (with cal)  : %s %sj\n", a, b);
+    printf("  weights        : %s%s, updates=%lu\n", s.weights_valid ? "valid" : "NOT valid",
+           s.busy ? " (solving)" : "", (unsigned long)s.updates);
+    printf("  output clipped : %lu samples%s\n", (unsigned long)s.sat_count,
+           s.sat_sticky ? "  <- lower the RX gain" : "");
+    printf("-------------------------------------------\n");
+}
+
 void gnss_pt_get_state(gnss_pt_state_t *st)
 {
     if (!st) { return; }
@@ -165,6 +280,9 @@ void gnss_pt_print_state(void)
            (s.control & GNSS_PT_CTRL_NPI_FREEZE) ? " (weights frozen)" : "",
            (unsigned long)gnss_pt_read(GNSS_PT_REG_NPI_GAMMA),
            (unsigned long)((s.status >> GNSS_PT_ST_NPI_BAND_SHIFT) & GNSS_PT_ST_NPI_BAND_MASK));
+    printf("  lcmv           : %s%s\n",
+           (s.status & GNSS_PT_ST_LCMV_EN_SYNCED) ? "enabled" : "off",
+           (s.status & GNSS_PT_ST_LCMV_ACTIVE) ? " (ACTIVE on TX1, see gnss_lcmv?)" : "");
     printf("  adc enable i/q : %d / %d\n",
            (s.status & GNSS_PT_ST_ADC_EN_I0) ? 1 : 0,
            (s.status & GNSS_PT_ST_ADC_EN_Q0) ? 1 : 0);

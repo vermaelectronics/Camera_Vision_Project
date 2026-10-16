@@ -176,13 +176,14 @@ static void info_hardware(struct ad9361_rf_phy *phy)
     console_print("   base address    : 0x43C00000, 4 kB aperture\n");
     console_print("   ID register     : 0x%08x  (expect 0x47435031, ASCII 'GCP1')\n",
                   (long)gnss_pt_read(GNSS_PT_REG_ID));
-    console_print("   VERSION         : 0x%08x  (expect 0x00020001 = v2.1)\n",
+    console_print("   VERSION         : 0x%08x  (expect 0x00020002 = v2.2)\n",
                   (long)gnss_pt_read(GNSS_PT_REG_VERSION));
     console_print("     v1.0 is the original identity passthrough and transmits\n");
     console_print("     24 dB LOW. v1.1 adds the RX->TX sample alignment stage.\n");
     console_print("     v2.0 is the PL-NPI-only build: the PL-NPI power-inversion\n");
     console_print("     core (pl_npi_0) on TX1, no PI-NLMS. v2.1 makes pl_npi_0\n");
     console_print("     the pipelined Vitis HLS core (II=2) that meets 8 ns timing.\n");
+    console_print("     v2.2 adds the 2-element LCMV CRPA (CONTROL[4], gnss_lcmv=).\n");
     rule();
 
     console_print(" RF FRONT END                                            [cfg]\n");
@@ -260,6 +261,12 @@ static void info_config(struct ad9361_rf_phy *phy)
                   (char *)(((ctrl >> 1) & 1U) ? "output forced to zero" : "output live"));
     console_print("     [2] swap_iq  : %d\n", (long)((ctrl >> 2) & 1U));
     console_print("     [3] ch1_copy : %d\n", (long)((ctrl >> 3) & 1U));
+    console_print("     [4] lcmv_en  : %d   %s\n", (long)((ctrl >> 4) & 1U),
+                  (char *)(((ctrl >> 4) & 1U) ? "TX1 = LCMV(RX1, RX2) (if PL-NPI off)"
+                                              : "LCMV off"));
+    console_print("   LCMV angles    : GPS %d deg, jammer %d deg (gnss_lcmv_angles=)\n",
+                  (long)(int16_t)(gnss_pt_read(GNSS_PT_REG_LCMV_GPS_ANGLE) & 0xFFFFU),
+                  (long)(int16_t)(gnss_pt_read(GNSS_PT_REG_LCMV_JAM_ANGLE) & 0xFFFFU));
     console_print("     [5] npi_en   : %d   %s\n", (long)((ctrl >> 5) & 1U),
                   (char *)(((ctrl >> 5) & 1U) ? "TX1 = PL-NPI(RX1, RX2)"
                                               : "TX1 = RX1 (PL-NPI off)"));
@@ -534,11 +541,12 @@ static void info_registers(void)
     head("6  gnss_passthrough REGISTER MAP  (base 0x43C00000, 4 kB)");
 
     console_print("   0x00  ID              RO  0x47435031, ASCII 'GCP1'\n");
-    console_print("   0x04  VERSION         RO  0x00020001 = v2.1\n");
+    console_print("   0x04  VERSION         RO  0x00020002 = v2.2\n");
     console_print("   0x08  SCRATCH         RW  read/write test\n");
     console_print("   0x0C  CONTROL         RW  [0] pass_en  [1] mute\n");
     console_print("                             [2] swap_iq  [3] ch1_copy\n");
-    console_print("                             [5] npi_en   [6] npi_freeze\n");
+    console_print("                             [4] lcmv_en  [5] npi_en\n");
+    console_print("                             [6] npi_freeze\n");
     console_print("                             [8] cnt_clear\n");
     console_print("   0x10  STATUS          RO  [0] adc_enable_i0  [1] adc_enable_q0\n");
     console_print("                             [2] dac_enable_i0  [3] dac_enable_q0\n");
@@ -548,8 +556,11 @@ static void info_registers(void)
     console_print("                             [9] underflow_sticky\n");
     console_print("                            [10] npi_drop_sticky (must stay 0)\n");
     console_print("                            [16] pass_en in the sample domain\n");
+    console_print("                            [17] lcmv_en in the sample domain\n");
     console_print("                            [18] npi_en in the sample domain\n");
+    console_print("                            [19] LCMV drives TX1 now\n");
     console_print("                         [21:20] PL-NPI gain band (0..3)\n");
+    console_print("                            [22] LCMV output clipped (sticky)\n");
     console_print("   0x14  RX_COUNT_CH0    RO\n");
     console_print("   0x18  TX_COUNT_CH0    RO\n");
     console_print("   0x1C  OVERFLOW_COUNT  RO\n");
@@ -560,9 +571,17 @@ static void info_registers(void)
     console_print("   0x30  RX_COUNT_CH1    RO\n");
     console_print("   0x34  TX_COUNT_CH1    RO\n");
     console_print("   0x38  RX_SNAPSHOT_CH1 RO\n");
-    console_print("   0x40  CRPA_COEF0..1   RW  stored but unused\n");
+    console_print("   0x40  LCMV_GPS_ANGLE  RW  [15:0] signed deg, look (gain 1)\n");
+    console_print("   0x44  LCMV_JAM_ANGLE  RW  [15:0] signed deg, null\n");
     console_print("   0x48  CRPA_COEF2      RW  PL-NPI regulariser gamma (0 acts as 1)\n");
-    console_print("   0x4C  CRPA_COEF3..15  RW  0x4C-0x7C, stored but unused.\n");
+    console_print("   0x4C  LCMV_EPS        RW  [15:0] Q0.16, 0 = ideal null\n");
+    console_print("   0x50  LCMV_RX2_CAL    RW  {im, re} Q2.14, reset 0x00004000\n");
+    console_print("   0x54  LCMV_W1_RE/IM   RO  0x54/0x58, Q16.16\n");
+    console_print("   0x5C  LCMV_W2_RE/IM   RO  0x5C/0x60, Q16.16 (with RX2 cal)\n");
+    console_print("   0x64  LCMV_STATUS     RO  [0] en [1] wvalid [2] busy [3] sat\n");
+    console_print("   0x68  LCMV_UPDATES    RO  weight sets computed\n");
+    console_print("   0x6C  LCMV_SAT_COUNT  RO  output samples clipped\n");
+    console_print("   0x70  CRPA_COEF12..15 RW  0x70-0x7C, stored but unused.\n");
     rule();
     console_print(" STATUS BITS [2] AND [3] ARE THE IMPORTANT ONES.\n");
     console_print("   They are axi_ad9361's read-back of (dac_data_sel == 4'h2),\n");
@@ -761,6 +780,11 @@ static void info_quickstart(void)
     console_print("   gnss_rx_gain=<dB>           same gain on RX1+RX2 (auto reference)\n");
     console_print("   gnss_rx_agc=2 / =0 / =1     matched auto / manual / AD9361 AGC\n");
     console_print("   gnss_npi?                   PL-NPI on/off, gamma, gain band\n");
+    console_print("   gnss_lcmv_angles=G J        LCMV GPS look / jammer null [deg]\n");
+    console_print("   gnss_lcmv=1 / gnss_lcmv=0   LCMV CRPA on TX1 / off (PL-NPI off)\n");
+    console_print("   gnss_lcmv_eps=E             LCMV gain left at jammer, 0 = null\n");
+    console_print("   gnss_lcmv_cal=RE IM         RX2 calibration (lcmv_rx2_cal.py)\n");
+    console_print("   gnss_lcmv?                  LCMV state, weights, clipping\n");
     console_print("   ?                           this menu\n");
     console_print("   help?                       every command (long)\n");
 }
@@ -808,8 +832,10 @@ void gnss_info_menu(void)
     console_print("                               89750 quietest, 70000 known good\n");
     console_print("    gnss_npi=1 / gnss_npi=0    PL-NPI power inversion on TX1 / off\n");
     console_print("    gnss_npi_auto=1            automatic gamma (default with gnss_npi=1)\n");
+    console_print("    gnss_lcmv_angles=10 40     LCMV: GPS look 10 deg, jammer null 40 deg\n");
+    console_print("    gnss_lcmv=1 / gnss_lcmv=0  LCMV CRPA on TX1 / off\n");
     console_print("    gnss_rx_gain?              gain, level hold, gamma, jammer flag\n");
-    console_print("    gnss_tx? gnss_ddr_tx? gnss_status? gnss_npi?   read back\n");
+    console_print("    gnss_tx? gnss_status? gnss_npi? gnss_lcmv?  read back\n");
     console_print("\n");
     console_print("    ?        this menu            help?    every command (long)\n");
     console_print("===============================================================\n");

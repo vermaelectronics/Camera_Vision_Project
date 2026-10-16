@@ -174,7 +174,7 @@
       "TX attenuation value and the resulting power at the GNSS receiver input have not been calculated yet.",
       "These must be decided and recorded here before any RF test is run."
     ],
-    "phase2_processing": "PL-NPI power inversion (pipelined Vitis HLS core Source/HLS/pl_npi, block pl_npi_0) on channel 0 when CONTROL[5] = 1: TX1 = PL-NPI(RX1, RX2). This build has no PI-NLMS core."
+    "phase2_processing": "PL-NPI power inversion (pipelined Vitis HLS core Source/HLS/pl_npi, block pl_npi_0) on channel 0 when CONTROL[5] = 1: TX1 = PL-NPI(RX1, RX2). This build has no PI-NLMS core. v2.2 adds the 2-element LCMV CRPA (PIER C 2008, look + enforcement constraints, Source/HDL/crpa) on channel 0 when CONTROL[4] = 1 and CONTROL[5] = 0: gain 1 toward LCMV_GPS_ANGLE, null toward LCMV_JAM_ANGLE. PL-NPI has priority. No DOA estimation in the FPGA."
   },
   "custom_ip_register_map": {
     "_comment": "Mirrors the header comment in Source/HDL/gnss_passthrough.v. Offsets are from the base address in address_map.project_assigned.gnss_passthrough.",
@@ -192,8 +192,8 @@
         "offset": "0x04",
         "name": "VERSION",
         "access": "RO",
-        "reset": "0x00020001",
-        "note": "1.0 = Phase-1 identity passthrough. 1.1 = adds the RX->TX sample alignment stage; a board reporting 1.0 transmits 24 dB low. 1.2 = adds the PI-NLMS null-steering core (CONTROL[4]). 1.3 = PI-NLMS is a separate block-design IP (pi_nlms_0), same registers. 2.0 = PL-NPI-only build (pl_npi_0, CONTROL[5], gamma in 0x48), no PI-NLMS. 2.1 = pl_npi_0 is the pipelined Vitis HLS core (II=2), STATUS[10] = npi_drop_sticky."
+        "reset": "0x00020002",
+        "note": "1.0 = Phase-1 identity passthrough. 1.1 = adds the RX->TX sample alignment stage; a board reporting 1.0 transmits 24 dB low. 1.2 = adds the PI-NLMS null-steering core (CONTROL[4]). 1.3 = PI-NLMS is a separate block-design IP (pi_nlms_0), same registers. 2.0 = PL-NPI-only build (pl_npi_0, CONTROL[5], gamma in 0x48), no PI-NLMS. 2.1 = pl_npi_0 is the pipelined Vitis HLS core (II=2), STATUS[10] = npi_drop_sticky. 2.2 = adds the LCMV CRPA (CONTROL[4], 0x40/0x44/0x4C-0x6C, STATUS[17], [19], [22])."
       },
       {
         "offset": "0x08",
@@ -209,6 +209,7 @@
           "1": "mute",
           "2": "swap_iq",
           "3": "ch1_copy",
+          "4": "lcmv_en",
           "8": "cnt_clear",
           "5": "npi_en",
           "6": "npi_freeze"
@@ -231,8 +232,11 @@
           "9": "underflow_sticky",
           "10": "npi_drop_sticky",
           "16": "pass_en_in_sample_domain",
+          "17": "lcmv_en_in_sample_domain",
           "18": "npi_en_in_sample_domain",
-          "21:20": "npi_gain_band"
+          "19": "lcmv_active",
+          "21:20": "npi_gain_band",
+          "22": "lcmv_sat_sticky"
         },
         "note": "Bits [2]/[3] are axi_ad9361's read-back of (dac_data_sel == 4'h2), NOT an enable this block drives and NOT derived from the valid strobes (axi_ad9361_tx_channel.v:272). 0 means the DAC core is sourcing DDS and DISCARDING everything gnss_passthrough outputs, while TX_COUNT still advances. Firmware must write CHAN_CNTRL_7 (0x0418 + c*0x40) = 2."
       },
@@ -289,12 +293,19 @@
         "name": "RX_SNAPSHOT_CH1",
         "access": "RO"
       },
-      {
-        "offset": "0x40",
-        "name": "CRPA_COEF0..15",
-        "access": "RW",
-        "note": "0x48 = PL-NPI regulariser gamma (unsigned, 0 acts as 1). 0x40, 0x44 and 0x4C-0x7C reserved."
-      }
+      { "offset": "0x40", "name": "LCMV_GPS_ANGLE", "access": "RW", "note": "[15:0] signed degrees -90..90 from broadside, look direction (gain 1). Reads back sign-extended." },
+      { "offset": "0x44", "name": "LCMV_JAM_ANGLE", "access": "RW", "note": "[15:0] signed degrees -90..90, null direction. theta > 0 reaches RX2 first." },
+      { "offset": "0x48", "name": "CRPA_COEF2", "access": "RW", "note": "PL-NPI regulariser gamma (unsigned, 0 acts as 1)." },
+      { "offset": "0x4C", "name": "LCMV_EPS", "access": "RW", "note": "[15:0] Q0.16 enforcement value (gain toward the jammer), 0 = ideal null." },
+      { "offset": "0x50", "name": "LCMV_RX2_CAL", "access": "RW", "reset": "0x00004000", "note": "{im[31:16], re[15:0]} Q2.14 RX2 correction c; applied as w2*conj(c)." },
+      { "offset": "0x54", "name": "LCMV_W1_RE", "access": "RO", "note": "Q16.16 sign-extended active weight." },
+      { "offset": "0x58", "name": "LCMV_W1_IM", "access": "RO" },
+      { "offset": "0x5C", "name": "LCMV_W2_RE", "access": "RO", "note": "Includes the RX2 calibration." },
+      { "offset": "0x60", "name": "LCMV_W2_IM", "access": "RO" },
+      { "offset": "0x64", "name": "LCMV_STATUS", "access": "RO", "bits": { "0": "lcmv_en", "1": "weights_valid", "2": "busy", "3": "sat_sticky" } },
+      { "offset": "0x68", "name": "LCMV_UPDATES", "access": "RO", "note": "Weight sets computed." },
+      { "offset": "0x6C", "name": "LCMV_SAT_COUNT", "access": "RO", "note": "Output samples clipped to 12 bits; cleared by CONTROL[8]." },
+      { "offset": "0x70", "name": "CRPA_COEF12..15", "access": "RW", "note": "0x70-0x7C stored but unused." }
     ]
   }
 }

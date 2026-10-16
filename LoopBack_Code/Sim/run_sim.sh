@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs the gnss_passthrough v2.0 (LCMV CRPA) system testbench with Icarus Verilog.
+# Runs the gnss_passthrough v2.2 (PL-NPI + LCMV CRPA) system testbench with Icarus Verilog.
 # Usage:  cd LoopBack_Code/Sim && ./run_sim.sh
 set -e
 cd "$(dirname "$0")"

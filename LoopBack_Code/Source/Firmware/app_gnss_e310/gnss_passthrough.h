@@ -72,6 +72,20 @@
 #define GNSS_PT_REG_CRPA_COEF(n)    (0x40U + ((n) * 4U))  /* RW, n = 0..15    */
 /* CRPA_COEF[2] is the PL-NPI regulariser gamma (unsigned; 0 acts as 1). */
 #define GNSS_PT_REG_NPI_GAMMA       GNSS_PT_REG_CRPA_COEF(2)
+/* v2.2 LCMV CRPA (2-element, PIER C 2008 look + enforcement constraints).
+ * The LCMV registers sit in the CRPA_COEF window, around NPI_GAMMA (0x48). */
+#define GNSS_PT_REG_LCMV_GPS_ANGLE  0x40U   /* RW  [15:0] signed deg, look      */
+#define GNSS_PT_REG_LCMV_JAM_ANGLE  0x44U   /* RW  [15:0] signed deg, null      */
+#define GNSS_PT_REG_LCMV_EPS        0x4CU   /* RW  [15:0] Q0.16, 0 = ideal null */
+#define GNSS_PT_REG_LCMV_RX2_CAL    0x50U   /* RW  {im,re} Q2.14, reset 1.0     */
+#define GNSS_PT_REG_LCMV_W1_RE      0x54U   /* RO  Q16.16 sign-extended         */
+#define GNSS_PT_REG_LCMV_W1_IM      0x58U
+#define GNSS_PT_REG_LCMV_W2_RE      0x5CU   /* w2 includes the RX2 calibration  */
+#define GNSS_PT_REG_LCMV_W2_IM      0x60U
+#define GNSS_PT_REG_LCMV_STATUS     0x64U   /* RO  [0]en [1]wvalid [2]busy [3]sat */
+#define GNSS_PT_REG_LCMV_UPDATES    0x68U   /* RO  weight sets computed         */
+#define GNSS_PT_REG_LCMV_SAT_COUNT  0x6CU   /* RO  output samples clipped       */
+#define GNSS_PT_LCMV_CAL_ONE        0x4000  /* 1.0 in Q2.14                     */
 
 /* ---- expected identity --------------------------------------------------- */
 #define GNSS_PT_EXPECTED_ID         0x47435031U
@@ -82,13 +96,17 @@
 /* 2.0 = PL-NPI-only build: the PL-NPI power-inversion core is a separate
  *       block-design IP (pl_npi_0, CONTROL[5], gamma in 0x48). This design
  *       has no PI-NLMS core. */
-#define GNSS_PT_EXPECTED_VERSION    0x00020001U
+/* 2.1 = PL-NPI HLS core with the matched RX gain loop.
+ * 2.2 = adds the 2-element LCMV CRPA (CONTROL[4], registers 0x40..0x6C
+ *       around NPI_GAMMA). PL-NPI has priority when both are enabled. */
+#define GNSS_PT_EXPECTED_VERSION    0x00020002U
 
 /* ---- CONTROL bits -------------------------------------------------------- */
 #define GNSS_PT_CTRL_PASS_EN        (1U << 0)  /* 1 = RX->TX passthrough      */
 #define GNSS_PT_CTRL_MUTE           (1U << 1)  /* 1 = drive zeros to the DAC  */
 #define GNSS_PT_CTRL_SWAP_IQ        (1U << 2)
 #define GNSS_PT_CTRL_CH1_COPY       (1U << 3)  /* ch1 TX fed from ch0         */
+#define GNSS_PT_CTRL_LCMV_EN        (1U << 4)  /* ch0 TX = LCMV(RX1, RX2)     */
 #define GNSS_PT_CTRL_NPI_EN         (1U << 5)  /* ch0 TX = PL-NPI(RX1, RX2)   */
 #define GNSS_PT_CTRL_NPI_FREEZE     (1U << 6)  /* PL-NPI weights frozen       */
 #define GNSS_PT_CTRL_CNT_CLEAR      (1U << 8)  /* held, not self-clearing     */
@@ -106,7 +124,10 @@
 #define GNSS_PT_ST_UNDERFLOW        (1U << 9)
 #define GNSS_PT_ST_NPI_DROP         (1U << 10) /* v2.1+: pair lost at pl_npi_0 */
 #define GNSS_PT_ST_PASS_EN_SYNCED   (1U << 16)
+#define GNSS_PT_ST_LCMV_EN_SYNCED   (1U << 17)
 #define GNSS_PT_ST_NPI_EN_SYNCED    (1U << 18)
+#define GNSS_PT_ST_LCMV_ACTIVE      (1U << 19) /* LCMV drives ch0 TX now      */
+#define GNSS_PT_ST_LCMV_SAT         (1U << 22) /* LCMV output clipped, sticky */
 #define GNSS_PT_ST_NPI_BAND_SHIFT   20         /* [21:20] PL-NPI gain band    */
 #define GNSS_PT_ST_NPI_BAND_MASK    0x3U
 
@@ -144,6 +165,35 @@ void     gnss_pt_set_npi(int enable);
 void     gnss_pt_set_npi_gamma(uint32_t gamma);
 /* 1 = freeze the PL-NPI weights at their current value, 0 = adapt. */
 void     gnss_pt_set_npi_freeze(int freeze);
+
+/* LCMV CRPA (bitstream v2.2+). Enabled (and PL-NPI off), channel 0 TX
+ * carries y = w1^H x1 + w2^H (c x2): gain 1 toward the GPS angle, a null
+ * toward the jammer angle; channel 1 TX carries RX2 as before. The jammer
+ * angle comes from software: the FPGA does no DOA estimation.
+ * Angles are degrees from broadside, -90..90; theta > 0 reaches RX2 first. */
+void     gnss_pt_lcmv_enable(int enable);
+void     gnss_pt_lcmv_set_angles(int gps_deg, int jam_deg);
+/* eps = gain left toward the jammer, 0.0 .. <1.0 (0 = ideal null). */
+void     gnss_pt_lcmv_set_eps(float eps);
+/* RX2 gain/phase correction c, applied as w2 * conj(c). |re|,|im| < 2. */
+void     gnss_pt_lcmv_set_rx2_cal(float re, float im);
+
+typedef struct {
+    int      enabled;        /* CONTROL[4]                             */
+    int      active;         /* STATUS[19]: LCMV is driving TX ch0     */
+    int      weights_valid;
+    int      busy;
+    int      sat_sticky;
+    int      gps_deg, jam_deg;
+    float    eps;
+    float    cal_re, cal_im;
+    float    w1_re, w1_im, w2_re, w2_im;
+    uint32_t updates;
+    uint32_t sat_count;
+} gnss_pt_lcmv_state_t;
+
+void     gnss_pt_lcmv_get_state(gnss_pt_lcmv_state_t *st);
+void     gnss_pt_lcmv_print_state(void);
 
 /* Snapshot of everything worth observing at runtime (requirement 58). */
 typedef struct {

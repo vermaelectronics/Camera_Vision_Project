@@ -590,6 +590,9 @@ int main(void)
 #ifdef XILINX_PLATFORM
 	Xil_ICacheEnable();
 	Xil_DCacheEnable();
+	/* First line on the console: proves the FSBL handed over and the UART
+	 * works, before anything (AD9361 SPI, DMA) can hang. */
+	printf("\n\rgnss: firmware started (gnss_passthrough v2.2 with LCMV)\n\r");
 	default_init_param.spi_param.extra = &xil_spi_param;
 	default_init_param.spi_param.platform_ops = &xil_spi_ops;
 #endif

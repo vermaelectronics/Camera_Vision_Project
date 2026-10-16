@@ -251,6 +251,15 @@ void set_gnss_rx_agc(double* param, char param_no);
 void set_gnss_npi_auto(double* param, char param_no);
 void set_gnss_npi_k(double* param, char param_no);
 
+/* LCMV CRPA (bitstream v2.2+): 2-element beamformer with gain 1 toward the
+ * GPS angle and a null toward the jammer angle, on TX1 with gnss_tx=1.
+ * gnss_lcmv=1 and gnss_npi=1 switch each other off. */
+void get_gnss_lcmv(double* param, char param_no);
+void set_gnss_lcmv(double* param, char param_no);
+void set_gnss_lcmv_angles(double* param, char param_no);
+void set_gnss_lcmv_eps(double* param, char param_no);
+void set_gnss_lcmv_cal(double* param, char param_no);
+
 /* GNSS-CRPA MOD-9: the main menu, bound to "?".
  * Short and grouped, unlike get_help() which dumps all ~60 vendor commands. */
 void get_menu(double* param, char param_no);
