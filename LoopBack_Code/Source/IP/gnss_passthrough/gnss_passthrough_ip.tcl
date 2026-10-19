@@ -31,13 +31,11 @@ set ip_dir     [file join $ip_repo_dir $ip_name]
 set rtl_file   [file join $src_dir "HDL" "${ip_name}.v"]
 set xdc_file   [file join $src_dir "IP" $ip_name "${ip_name}_constr.xdc"]
 
-# LCMV CRPA sub-modules (Source/HDL/crpa), instantiated by gnss_passthrough.v.
-set crpa_names {crpa_lcmv_2ch.v crpa_lcmv_weight_2ch.v crpa_sdiv_serial.v crpa_cov_2ch.v
-                crpa_beamformer_2ch.v steering_vector_2x2.v}
-set crpa_files {}
-foreach n $crpa_names { lappend crpa_files [file join $src_dir "HDL" "crpa" $n] }
+# The LCMV CRPA core is NOT part of this IP. It is its own Vitis HLS IP
+# (Build/ip_repo/lcmv_crpa, from Source/HLS/lcmv/build_hls.tcl) and the block
+# design connects it to the m_axis_lcmv1/m_axis_lcmv2/s_axis_lcmv ports.
 
-foreach f [concat [list $rtl_file $xdc_file] $crpa_files] {
+foreach f [list $rtl_file $xdc_file] {
   if {![file exists $f]} {
     puts "ERROR: required source not found: $f"
     exit 2
@@ -52,7 +50,7 @@ file mkdir $ip_dir
 create_project -force ${ip_name}_pkg [file join $ip_dir ".pkg_project"] -part xc7z020clg400-2
 set_property target_language Verilog [current_project]
 
-add_files -norecurse [concat [list $rtl_file] $crpa_files]
+add_files -norecurse $rtl_file
 set_property top $ip_name [current_fileset]
 update_compile_order -fileset sources_1
 
@@ -71,7 +69,7 @@ set core [ipx::current_core]
 set_property name           $ip_name                                  $core
 set_property version        1.0                                       $core
 set_property display_name   "GNSS CRPA Passthrough"                   $core
-set_property description    "RX->TX I/Q passthrough with 2-element LCMV CRPA for ANTSDR E310 V1" $core
+set_property description    "RX->TX I/Q passthrough with AXI-Stream ports to the LCMV CRPA HLS IP for ANTSDR E310 V1" $core
 set_property vendor_display_name "ANTSDR GNSS CRPA project"           $core
 set_property company_url    "https://github.com/MicroPhase"           $core
 
@@ -112,11 +110,43 @@ set_bus_param $rst_if POLARITY         ACTIVE_LOW
 # matches BOTH clocks, get_property then returns a two-element reset list, and
 # the next filter becomes the malformed 'NAME == rst s_axi_aresetn'.
 # Clearing ASSOCIATED_BUSIF here is what keeps that lookup unambiguous.
+#
+# The LCMV AXI-Stream interfaces ARE in the sample domain, so clk claims
+# those (and only those). The value never equals "s_axi", so the lookup above
+# still finds s_axi_aclk alone.
+# ---------------------------------------------------------------------------
+#  LCMV AXI-Stream interfaces. Created explicitly, with every port mapped,
+#  so that they match the HLS core's in1/in2/out_r (TDATA, TVALID, TREADY)
+#  and the block design can connect them as interfaces.
+# ---------------------------------------------------------------------------
+proc add_axis_if {core name mode {sigs {TDATA TVALID TREADY}}} {
+  foreach bif [ipx::get_bus_interfaces $name -of_objects $core] {
+    ipx::remove_bus_interface $name $core
+  }
+  set bif [ipx::add_bus_interface $name $core]
+  set_property abstraction_type_vlnv xilinx.com:interface:axis_rtl:1.0 $bif
+  set_property bus_type_vlnv         xilinx.com:interface:axis:1.0     $bif
+  set_property interface_mode        $mode                             $bif
+  foreach sig $sigs {
+    set pm [ipx::add_port_map $sig $bif]
+    set_property physical_name "${name}_[string tolower $sig]" $pm
+  }
+  return $bif
+}
+set lcmv_axis {m_axis_lcmv1 m_axis_lcmv2 s_axis_lcmv}
+add_axis_if $core m_axis_lcmv1 master
+add_axis_if $core m_axis_lcmv2 master
+add_axis_if $core s_axis_lcmv  slave
+
 set sclk_if [ensure_bus_if $core clk xilinx.com:signal:clock_rtl:1.0]
 set srst_if [ensure_bus_if $core rst xilinx.com:signal:reset_rtl:1.0]
 set_bus_param $srst_if POLARITY         ACTIVE_HIGH
 set_bus_param $sclk_if ASSOCIATED_RESET rst
-set_bus_param $sclk_if ASSOCIATED_BUSIF ""
+set_bus_param $sclk_if ASSOCIATED_BUSIF [join $lcmv_axis ":"]
+
+# lcmv_rst_n drives lcmv_0/ap_rst_n: an active-low reset output.
+set lrst_if [ensure_bus_if $core lcmv_rst_n xilinx.com:signal:reset_rtl:1.0]
+set_bus_param $lrst_if POLARITY ACTIVE_LOW
 
 # ---------------------------------------------------------------------------
 #  Memory map: 4 kB aperture.  The actual base address is assigned by the
@@ -158,20 +188,14 @@ if {[llength $claimants] != 1 || [lindex $claimants 0] ne "s_axi_aclk"} {
 puts "IP_PACKAGE_SELFCHECK: OK - s_axi is claimed only by s_axi_aclk"
 
 
-# The LCMV sub-modules must travel with the IP, or the block design synthesis
-# fails later with "module crpa_lcmv_2ch not found".
-set packaged {}
-foreach fg [ipx::get_file_groups -of_objects $core] {
-  foreach fl [ipx::get_files -of_objects $fg] { lappend packaged [file tail [get_property name $fl]] }
-}
-foreach n $crpa_names {
-  if {[lsearch -exact $packaged $n] < 0} {
-    puts "IP_PACKAGE_SELFCHECK: FAIL - $n was not packaged into the IP"
+foreach n $lcmv_axis {
+  if {[llength [ipx::get_bus_interfaces $n -of_objects $core]] != 1} {
+    puts "IP_PACKAGE_SELFCHECK: FAIL - AXI-Stream interface $n missing"
     close_project
     exit 2
   }
 }
-puts "IP_PACKAGE_SELFCHECK: OK - LCMV CRPA sources packaged with the IP"
+puts "IP_PACKAGE_SELFCHECK: OK - LCMV AXI-Stream interfaces: $lcmv_axis"
 
 # The CDC constraints are what keep the design timing-clean. If they silently
 # failed to package, the only symptom would be a setup violation much later.

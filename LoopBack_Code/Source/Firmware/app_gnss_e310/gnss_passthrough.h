@@ -105,7 +105,10 @@
  *       registers 0x40/0x44, 0x4C..0x6C). No PL-NPI / PI core.
  * 3.1 = adds the covariance estimator (0x90..0xA0) and PS-computed weights
  *       (CONTROL[5], 0x80..0x8C). */
-#define GNSS_PT_EXPECTED_VERSION    0x00030001U
+/* 4.0 = the LCMV beamformer + covariance are a separate Vitis HLS IP (lcmv_0)
+ *       on AXI-Stream ports of gnss_passthrough; the weights always come
+ *       from the PS. Same register map as 3.1. */
+#define GNSS_PT_EXPECTED_VERSION    0x00040000U
 
 /* ---- CONTROL bits -------------------------------------------------------- */
 #define GNSS_PT_CTRL_PASS_EN        (1U << 0)  /* 1 = RX->TX passthrough      */
@@ -128,6 +131,7 @@
 #define GNSS_PT_ST_OVERFLOW         (1U << 8)
 #define GNSS_PT_ST_UNDERFLOW        (1U << 9)
 #define GNSS_PT_ST_PASS_EN_SYNCED   (1U << 16)
+#define GNSS_PT_ST_LCMV_DROP        (1U << 10) /* v4.0: pair lost at lcmv_0   */
 #define GNSS_PT_ST_LCMV_EN_SYNCED   (1U << 17)
 #define GNSS_PT_ST_LCMV_ACTIVE      (1U << 19) /* LCMV drives ch0 TX now      */
 #define GNSS_PT_ST_LCMV_SAT         (1U << 22) /* LCMV output clipped, sticky */

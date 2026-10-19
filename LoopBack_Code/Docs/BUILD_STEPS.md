@@ -1,168 +1,148 @@
-# Build LoopBack_Code (v3.0: LCMV CRPA) up to BOOT.BIN — Vivado/Vitis 2023.2
+# Build LoopBack_Code v4.0 (gnss_passthrough + LCMV HLS IP lcmv_0) up to BOOT.BIN
 
-Host: Ubuntu 22.04 with **Vivado + Vitis 2023.2**. The zip is in `~/Downloads`, and the work folder is `~/Desktop/AntSDR_LCMV`.
-(2026.1 is still supported: put `TOOL_VER=2026.1` in front of any command.)
+Host: Ubuntu 22.04, **Vivado + Vitis + Vitis HLS 2023.2**. Zip: `~/Downloads/LoopBack_Code_LCMV_v4.zip`.
+Work folder: `~/Desktop/AntSDR_LCMV/LoopBack_Code`. Run every step in the same terminal and check each ✔ before going on.
 
-## What 2023.2 changes compared with 2026.1
+New in v4.0: **Step 5 builds the LCMV IP with Vitis HLS**. The block design instantiates it as `lcmv_0`, next to
+`gnss_passthrough`, the same way `pi_nlms_0` was connected.
 
-| Part | 2023.2 | 2026.1 |
-|---|---|---|
-| ADI HDL library | **hdl_2023_r2** (ADI's release for Vivado 2023.2), cloned into `Vendor/ADI_hdl_2023_r2` | `Vendor/ADI_hdl_2026_r1_update` |
-| FSBL | `Vitis/Scripts/build_fsbl.tcl` (XSCT `hsi generate_app zynq_fsbl`) | `build_fsbl.py` (Python API) |
-| Firmware | `Vitis/Scripts/build_software.tcl` (XSCT, heap 1 MB, stack 64 KB) | `build_software.py` |
-| BSP | classic `xparameters.h` (legacy names, `xparam_compat.h` becomes a no-op) | SDT `xparameters.h` |
-| Post-route timing fix | not in hdl_2023_r2, so skipped (strategy and phys_opt still applied) | ADI `auto_timing_fix_xilinx.tcl` |
-
-The RTL (gnss_passthrough v3.0 with the LCMV), block design, constraints and firmware sources are identical for both.
-
-## 0. One-time setup
-
-```bash
-sudo apt install -y unzip rsync make git iverilog
-
-# 0.1 extract the setup script from the downloaded zip, then run it
-cd ~/Downloads
-unzip -o -j "$(ls -t LoopBack_Code_LCMV_v3*.zip | head -1)" \
-      LoopBack_Code/Automation/setup_antsdr_lcmv.sh -d ~/Downloads
-bash ~/Downloads/setup_antsdr_lcmv.sh
-#   -> ~/Desktop/AntSDR_LCMV/LoopBack_Code            (sources)
-#   -> copies ~/Desktop/AntSDR2/LoopBack_Code/Vendor if it exists (optional for 2023.2)
-
-# 0.2 find the Vitis 2023.2 settings file
-ls /tools/Xilinx/Vitis/2023.2/settings64.sh ~/Xilinx/Vitis/2023.2/settings64.sh 2>/dev/null
-export XILINX_SETTINGS=/tools/Xilinx/Vitis/2023.2/settings64.sh      # path printed above
-
-cd ~/Desktop/AntSDR_LCMV/LoopBack_Code
-```
-
-## Option A — one command
-
-```bash
-./Automation/build_all.sh              # bench build: LCMV off at boot, no auto-TX
-# DEPLOY=1 ./Automation/build_all.sh   # SD deployment build: transmits at boot
-```
-The script clones ADI `hdl_2023_r2` (about 200 MB, first run only), then builds everything through to
-`Build/Boot/BOOT.BIN`. Logs go to `Build/Logs/`, one per stage, and the script stops at the first failure.
-The first run takes about 1 hour (ADI libraries plus implementation). `SKIP_ADI_LIBS=1` skips the
-library stage on later runs.
-
-## Option B — step by step
-
-### Step 1  Environment (every new terminal)
+## Step 1 — environment
 ```bash
 cd ~/Desktop/AntSDR_LCMV/LoopBack_Code
 export XILINX_SETTINGS=/tools/Xilinx/Vitis/2023.2/settings64.sh
-source Automation/env.sh                  # prints vivado / xsct / bootgen paths
+source Automation/env.sh
 mkdir -p Build/Logs Build/Bit Build/XSA Build/ELF Build/Boot
-vivado -version | head -1                 # must say v2023.2
+vivado -version | head -1; vitis_hls -version | head -1
 ```
+✔ `vivado v2023.2` and `Vitis HLS ... v2023.2`.
 
-### Step 2  Simulate the LCMV block (optional, 1 min)
+## Step 2 — sources from the zip (keeps Build/ and Vendor/)
 ```bash
-./Sim/run_sim.sh                          # must end with: PASS
+rm -rf Source Sim
+unzip -o "$(ls -t ~/Downloads/LoopBack_Code_LCMV_v4*.zip | head -1)" \
+  "LoopBack_Code/Source/*" "LoopBack_Code/Sim/*" "LoopBack_Code/Vitis/*" \
+  "LoopBack_Code/Docs/*" "LoopBack_Code/Automation/*" -d ~/Desktop/AntSDR_LCMV
+chmod +x Automation/*.sh Sim/run_sim.sh
+ls Source/HLS/lcmv/lcmv_crpa.cpp Source/HLS/lcmv/build_hls.tcl
 ```
+✔ both files listed.
 
-### Step 3  ADI HDL hdl_2023_r2 and its working copy
+## Step 3 — system simulation (about 1 min)
+```bash
+./Sim/run_sim.sh | tail -4
+```
+✔ ends with `PASS`.
+
+## Step 4 — ADI libraries (only if missing)
+```bash
+ls Build/VendorWork/hdl/library/axi_ad9361/component.xml
+```
+If "No such file":
 ```bash
 [ -d Vendor/ADI_hdl_2023_r2 ] || \
   git clone --depth 1 -b hdl_2023_r2 https://github.com/analogdevicesinc/hdl.git Vendor/ADI_hdl_2023_r2
 rsync -a --exclude .git Vendor/ADI_hdl_2023_r2/ Build/VendorWork/hdl/
-```
-
-### Step 4  Package the ADI library IPs (about 10–20 min)
-```bash
 for lib in axi_ad9361 axi_dmac axi_gpreg axi_sysid sysid_rom \
            util_pack/util_cpack2 util_pack/util_upack2 \
            util_rfifo util_wfifo util_tdd_sync xilinx/util_clkdiv; do
-  make -C Build/VendorWork/hdl/library/$lib || break
+  echo "=== $lib"; make -C Build/VendorWork/hdl/library/$lib || break
 done
-ls Build/VendorWork/hdl/library/axi_ad9361/component.xml      # must exist
 ```
 
-### Step 5  Package gnss_passthrough v3.0 (with Source/HDL/crpa)
+## Step 5 — LCMV HLS IP (Vitis HLS: C sim, synthesis, IP export, about 5 min)
+```bash
+( cd Source/HLS/lcmv && vitis_hls -f build_hls.tcl ) > Build/Logs/3b_lcmv_hls.log 2>&1
+grep -E "^LCMV_HLS|LCMV_CSIM" Build/Logs/3b_lcmv_hls.log
+ls Build/ip_repo/lcmv_crpa/component.xml
+```
+✔ `LCMV_CSIM: PASS`, `LCMV_HLS: estimated clock period ... achieved II 2`, `LCMV_HLS: PASS`, and the file exists.
+
+## Step 6 — package gnss_passthrough v4.0
 ```bash
 ( cd Build/Logs && vivado -mode batch -nojournal -nolog \
     -source ../../Source/IP/gnss_passthrough/gnss_passthrough_ip.tcl \
-    -tclargs "$GNSS_CRPA_ROOT/Source" "$GNSS_CRPA_IP_REPO" ) | tee Build/Logs/3_gnss_ip.log
-grep "LCMV CRPA sources packaged" Build/Logs/3_gnss_ip.log
+    -tclargs "$GNSS_CRPA_ROOT/Source" "$GNSS_CRPA_IP_REPO" ) > Build/Logs/3_gnss_ip.log 2>&1
+grep -E "^IP_PACKAGE" Build/Logs/3_gnss_ip.log
 ```
+✔ `IP_PACKAGE_SELFCHECK: OK - LCMV AXI-Stream interfaces: m_axis_lcmv1 m_axis_lcmv2 s_axis_lcmv` and `IP_PACKAGE_OK`.
 
-### Step 6  Create the Vivado project
+## Step 7 — Vivado project (block design with lcmv_0, about 5 min)
 ```bash
 ( cd Vivado/Project && rm -rf antsdr_e310_gnss.* && \
-  vivado -mode batch -source ../Scripts/create_project.tcl ) | tee Build/Logs/4_create_project.log
-grep "CREATE_RESULT: PASS" Build/Logs/4_create_project.log
+  vivado -mode batch -source ../Scripts/create_project.tcl ) > Build/Logs/4_create_project.log 2>&1
+grep -E "^CREATE_RESULT|LCMV IP resolved" Build/Logs/4_create_project.log
 ```
-`CREATE_WARNING: post-route timing script not in this ADI release` is expected with 2023.2.
+✔ `GNSS-CRPA: LCMV IP resolved in catalog: antsdr:gnss:lcmv_crpa:1.0` and `CREATE_RESULT: PASS`.
 
-### Step 7  Synthesis, implementation, bitstream and XSA (about 20–40 min)
+## Step 8 — bitstream + XSA (20–40 min)
 ```bash
 ( cd Vivado/Project && vivado -mode batch -source ../Scripts/build.tcl -tclargs \
     "$GNSS_CRPA_ROOT/Vivado/Project/antsdr_e310_gnss.xpr" \
     "$GNSS_CRPA_ROOT/Build/Bit/system_top.bit" \
-    "$GNSS_CRPA_ROOT/Build/XSA/system.xsa" 8 ) | tee Build/Logs/5_build.log
-grep -E "BUILD_RESULT|BUILD_TIMING|BUILD_WNS|BUILD_WHS" Build/Logs/5_build.log
+    "$GNSS_CRPA_ROOT/Build/XSA/system.xsa" 8 ) > Build/Logs/5_build.log 2>&1
+grep -E "^BUILD_RESULT|^BUILD_TIMING|^BUILD_WNS|^BUILD_WHS" Build/Logs/5_build.log
 ```
-You need `BUILD_RESULT: PASS` **and** `BUILD_TIMING: MET`.
+✔ `BUILD_RESULT: PASS` and `BUILD_TIMING: MET`. Progress: `tail -f Build/Logs/5_build.log` in a second terminal.
 
-### Step 8  FSBL (XSCT)
+## Step 9 — FSBL
 ```bash
 xsct Vitis/Scripts/build_fsbl.tcl \
   "$GNSS_CRPA_ROOT/Build/XSA/system.xsa" "$GNSS_CRPA_ROOT/Vitis/Workspace/fsbl" \
-  "$GNSS_CRPA_ROOT/Build/ELF/fsbl.elf" | tee Build/Logs/6_fsbl.log
-grep "FSBL_RESULT: PASS" Build/Logs/6_fsbl.log
+  "$GNSS_CRPA_ROOT/Build/ELF/fsbl.elf" > Build/Logs/6_fsbl.log 2>&1
+grep -E "^FSBL_RESULT" Build/Logs/6_fsbl.log
 ```
+✔ `FSBL_RESULT: PASS`.
 
-### Step 9  Application firmware (XSCT)
+## Step 10 — firmware
 ```bash
+rm -rf Vitis/Workspace/app
 xsct Vitis/Scripts/build_software.tcl \
   "$GNSS_CRPA_ROOT/Build/XSA/system.xsa" "$GNSS_CRPA_ROOT/Vitis/Workspace/app" \
   "$GNSS_CRPA_ROOT/Source/Firmware/app_gnss_e310" \
-  "$GNSS_CRPA_ROOT/Build/ELF/app_gnss_e310.elf" | tee Build/Logs/7_app.log
-#   SD deployment build (auto-TX at boot): add  GNSS_DEPLOY_AUTO_TX  as a 5th argument
-grep "SW_RESULT: PASS" Build/Logs/7_app.log
+  "$GNSS_CRPA_ROOT/Build/ELF/app_gnss_e310.elf" > Build/Logs/7_app.log 2>&1
+grep -E "^SW_RESULT|^SW_ERROR" Build/Logs/7_app.log
 ```
+✔ `SW_RESULT: PASS`. If not: `grep -n "error" Build/Logs/7_app.log | head -20`.
 
-### Step 10  BOOT.BIN
+## Step 11 — BOOT.BIN
 ```bash
-cat > Build/Boot/boot.bif <<EOF
+cat > Build/Boot/boot.bif <<BIF
 the_ROM_image:
 {
   [bootloader] $GNSS_CRPA_ROOT/Build/ELF/fsbl.elf
   $GNSS_CRPA_ROOT/Build/Bit/system_top.bit
   $GNSS_CRPA_ROOT/Build/ELF/app_gnss_e310.elf
 }
-EOF
+BIF
 bootgen -arch zynq -image Build/Boot/boot.bif -o Build/Boot/BOOT.BIN -w on
 ls -l Build/Boot/BOOT.BIN
 ```
+✔ `Bootimage generated successfully`, about 4.5 MB.
 
-### Step 11  SD card and first check
+## Step 12 — SD card and first check
 ```bash
-lsblk                                       # find the SD card partition, e.g. /dev/sdb1 (FAT32)
+lsblk                                       # SD card FAT32 partition, e.g. sdb1
 sudo mount /dev/sdb1 /mnt && sudo cp Build/Boot/BOOT.BIN /mnt/ && sync && sudo umount /mnt
 ```
-Set the boot switch to SD and open the console at 115200 8N1:
+PuTTY 115200, *Local echo: Force on*. Expected at boot:
 ```
-gnss: firmware started (gnss_passthrough v3.0 with LCMV)   <- first line after boot
-gnss_status?               -> version 3.0
-gnss_lcmv_angles=30 60     GPS look 30 deg, jammer null 60 deg (default, from broadside)
-gnss_lcmv=1                LCMV on TX1 (locks RX1+RX2 to one manual gain)
-gnss_tx=1                  open the TX path (attenuation interlock unchanged)
-gnss_lcmv?                 driving TX1: YES, weights valid, updates rising
+gnss: firmware started ...
+gnss_rx: RX link OK ...
+gnss_lcmv: LCMV on, GPS 30 deg, jammer 60 deg ...
 ```
-RF safety rules in `SD_Image/README_SD_CARD.md` still apply.
+Then: `gnss_status?` → version **4.0**; `gnss_lcmv?`; `gnss_tx=1`.
 
-## Troubleshooting (2023.2)
+## One command instead (Steps 4–11)
+```bash
+SKIP_ADI_LIBS=1 ./Automation/build_all.sh       # includes stage 3b (LCMV HLS)
+```
 
-| Symptom | Cause / fix |
+## Troubleshooting
+| Symptom | Fix |
 |---|---|
-| `vivado -version` is not v2023.2 | A different install is on PATH. Open a new terminal and set `XILINX_SETTINGS` to the 2023.2 `settings64.sh`. |
-| `git clone` fails | No network or proxy. Clone `hdl_2023_r2` on another machine and copy it to `Vendor/ADI_hdl_2023_r2`. |
-| `make` in a library fails | Read `Build/Logs/2_lib_<name>.log`. Usually the wrong Vivado is on PATH. |
-| BD error: IP not found (`axi_ad9361`, ...) | Step 4 is incomplete for that library. |
-| BD error: `antsdr:gnss:gnss_passthrough` not found | Step 5 was not run, or `GNSS_CRPA_IP_REPO` is not set in this terminal. |
-| `xsct: command not found` | Source the **Vitis** 2023.2 `settings64.sh`, not the Vivado one. |
-| Firmware: `gnss_pt: base address not found ... using 0x43C00000` | A build warning only. The address is fixed by the block design and is correct. |
-| Board prints nothing after boot | Check `Build/Logs/7_app.log` for `SW_LINKER: heap 0x100000 (set=1)`. If it says set=0, the template linker script changed; set heap and stack in the Vitis IDE. |
-| `BUILD_TIMING: VIOLATED` | Without ADI's post-route fix, hold violations can remain. Send `Build/Bit/timing_impl.rpt`. |
+| `vitis_hls: command not found` | Source the **Vitis** 2023.2 `settings64.sh` (it includes Vitis HLS). |
+| `LCMV_HLS: FAIL - estimated clock period` | Send `Source/HLS/lcmv/build/lcmv_hls/sol/syn/report/lcmv_crpa_csynth.rpt`. |
+| BD error `lcmv_crpa was not found in the IP catalog` | Step 5 did not pass, or `GNSS_CRPA_IP_REPO` is not set in this terminal (Step 1). |
+| BD error on `lcmv_0/in1` or `gnss_passthrough/m_axis_lcmv1` | Re-run Step 5 and Step 6 (both IPs must come from the same zip). |
+| `BUILD_TIMING: VIOLATED` | Send `Build/Bit/timing_impl.rpt`. |
+| Board: `RX link FAILED` | Send the output of `gnss_adc?`. |

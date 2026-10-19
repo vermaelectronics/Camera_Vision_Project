@@ -1,4 +1,4 @@
-# LCMV CRPA integration — gnss_passthrough v3.1 (covariance LCMV, automatic)
+# LCMV CRPA integration — gnss_passthrough v4.0 + LCMV HLS IP (lcmv_0)
 
 This change adds a 2-element robust LCMV anti-jamming beamformer to the
 ANTSDR E310 V1 GNSS loopback pipeline. The v2.1 source was used only as the
@@ -254,3 +254,39 @@ Cable test (coax at L1, velocity factor 0.66, λ ≈ 12.6 cm). A longer cable to
 | 6.3 cm | 180° | −90 |
 
 A longer cable on **RX1** gives the same angles with a positive sign (+19.5, +30, +90).
+
+---
+
+## v4.0: the LCMV as a Vitis HLS IP (lcmv_0), connected like pi_nlms_0
+
+```
+                    gnss_passthrough                                 lcmv_0  (Vitis HLS, lcmv_crpa)
+ axi_ad9361 RX1 ─►  m_axis_lcmv1  ───────────────────────────────►  in1
+ axi_ad9361 RX2 ─►  m_axis_lcmv2  ───────────────────────────────►  in2
+                    s_axis_lcmv   ◄───────────────────────────────  out_r        y = w1ᴴx1 + w2ᴴx2
+                    lcmv_w1_re/im, lcmv_w2_re/im ─────────────────►  w1_re … w2_im  (from PS, 0x80..0x8C)
+                    lcmv_cov_r11/r22/r12_re/r12_im/blocks ◄────────  cov_*        R = E[x xᴴ] (PS reads 0x90..0xA0)
+                    lcmv_sat_count ◄───────────────────────────────  sat_count
+                    lcmv_rst_n ────────────────────────────────────►  ap_rst_n
+ axi_ad9361/l_clk ─────────────────────────────────────────────────►  ap_clk
+```
+
+| Part | File |
+|---|---|
+| HLS core: beamformer + 2×2 covariance, II = 2, 8 ns | `Source/HLS/lcmv/lcmv_crpa.cpp`, `lcmv_crpa.h` |
+| HLS C testbench (uses the firmware's own solver `lcmv_math.c`) | `Source/HLS/lcmv/testbench.cpp` |
+| HLS build + IP export (`antsdr:gnss:lcmv_crpa:1.0`) | `Source/HLS/lcmv/build_hls.tcl` → `Build/ip_repo/lcmv_crpa` |
+| AXI-Stream ports, PS weight path, covariance read-back | `Source/HDL/gnss_passthrough.v` (v4.0) |
+| `lcmv_0` instance and connections | `Source/BlockDesign/system_bd.tcl` |
+| Weight solver w = R⁻¹C(CᴴR⁻¹C)⁻¹f, automatic operation | `lcmv_math.c`, `gnss_lcmv_auto.c` (unchanged) |
+
+The Verilog LCMV (`Source/HDL/crpa/`) is removed. The PL angle solver is gone too: the PS solves the same look + jammer
+constraints (paper eq. 9) and loads the weights. Register map, console commands and defaults (GPS 30°, jammer 60°) are the same as v3.1.
+
+Verification:
+* HLS C simulation (`testbench.cpp`): covariance within 0.2 %. Jammer-angle LCMV (GPS 30 / jammer 60): −43.5 dB, GPS gain 0.00 dB.
+  Covariance-only: null found at 60.0°. Jammer moved to −25°: −48.6 dB. Clipping counted.
+* System testbench with `Sim/lcmv_crpa_model.v` (same ports and arithmetic as the HLS core, II = 2 handshake):
+  no weights → TX1 = RX1; jammer-angle −45.2 dB; covariance −45.2 dB; moved jammer −46.9 dB; no drop, no FIFO over/underflow.
+* Not run here: Vitis HLS synthesis and the Vivado build (no Xilinx tools in this environment). `build_hls.tcl` fails
+  with a clear message if HLS misses II = 2 or 8 ns.

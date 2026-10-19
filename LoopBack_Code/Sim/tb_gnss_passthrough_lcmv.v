@@ -1,8 +1,9 @@
 // ============================================================================
 //  tb_gnss_passthrough_lcmv.v
-//  System-level, self-checking testbench for gnss_passthrough v3.1 with the
-//  2-element LCMV CRPA. Exercises the block exactly as the firmware does:
-//  AXI4-Lite register writes/reads (100 MHz) and ADC/DAC strobes (125 MHz).
+//  System-level, self-checking testbench for gnss_passthrough v4.0 with the
+//  LCMV CRPA HLS IP lcmv_0 (modelled by lcmv_crpa_model.v, same ports and
+//  arithmetic as Source/HLS/lcmv/lcmv_crpa.cpp). Exercises the block exactly
+//  as the firmware does: AXI4-Lite (100 MHz) and ADC/DAC strobes (125 MHz).
 //
 //  Scene: 2-element array, d = lambda/2, a(theta) = [1, exp(j*pi*sin(theta))]
 //    jammer   : noise-like, 40 deg, 400 LSB rms per I/Q (JNR ~ 46 dB)
@@ -10,25 +11,18 @@
 //    noise    : 2 LSB rms per I/Q per channel
 //
 //  Tests
-//    T1  ID = 0x47435031, VERSION = 0x00030001, RX2_CAL reset (0x50)
-//    T2  LCMV on (GPS 10, JAM 40): STATUS[19] lcmv_active, weights readable,
-//        TX0 jammer suppression < -40 dB, tone gain 0 dB +/- 1 dB,
-//        TX0 samples left-aligned (low nibble 0)
-//    T3  LCMV on: TX2 carries RX2 unprocessed (power 0 dB +/- 0.5 dB)
-//    T4  LCMV off: identity passthrough, TX0 power = RX1 power
-//    T5  RX2 channel error 0.85 x exp(j190 deg) (-1.4 dB, 190 deg): null lost;
-//        LCMV_RX2_CAL = 1/(0.85 exp(j190 deg)) restores suppression < -40 dB
-//    T6  Back to LCMV off: TX0 = RX1 again, no FIFO over/underflow
-//    T7  Covariance LCMV (v3.1), exactly as the firmware runs it: read R from
-//        0x90..0xA0, solve w = R^-1 a_s / (a_s^H R^-1 a_s) (paper formula,
-//        look constraint only, NO jammer angle given), write 0x80..0x8C,
-//        CONTROL = pass|lcmv|sw. Jammer 40 deg: null < -40 dB, tone 0 dB.
-//    T8  Jammer moves to -25 deg, nothing else changed: re-read R, re-solve:
-//        null follows (< -40 dB), tone 0 dB.
+//    T1  ID, VERSION 0x00040000, angle registers reset 30/60 (PS storage)
+//    T2  LCMV enabled but no PS weights committed yet: TX0 stays RX1
+//    T3  Jammer-angle LCMV (paper eq. 9, GPS 10 / jammer 40): PS weights over
+//        AXI -> lcmv_0: residual < -40 dB, tone 0 dB, TX0 left-aligned
+//    T4  Covariance LCMV exactly as the firmware runs it: read R (0x90..0xA0)
+//        from lcmv_0, solve, write 0x80..0x8C: < -40 dB, tone 0 dB
+//    T5  Jammer moves to -25 deg, re-read R, re-solve: null follows
+//    T6  LCMV off: TX0 = RX1, TX2 = RX2, no FIFO over/underflow, no drop
 //
 //  Run (from LoopBack_Code/Sim):
 //    iverilog -g2012 -o tb.vvp -s tb_gnss_passthrough_lcmv \
-//      ../Source/HDL/gnss_passthrough.v ../Source/HDL/crpa/*.v \
+//      ../Source/HDL/gnss_passthrough.v lcmv_crpa_model.v \
 //      tb_gnss_passthrough_lcmv.v && vvp -n tb.vvp
 // ============================================================================
 
@@ -62,6 +56,21 @@ module tb_gnss_passthrough_lcmv;
   wire [1:0]  bresp, rresp;
   wire [31:0] rdata;
 
+  // ---- lcmv_0 (Vitis HLS IP) model ---------------------------------------------
+  wire [31:0] l1d, l2d, lyd, lw1r, lw1i, lw2r, lw2i;
+  wire [31:0] lc11, lc22, lc12r, lc12i, lcblk, lsat;
+  wire        l1v, l1r, l2v, l2r, lyv, lyr, lrstn;
+
+  lcmv_crpa_model lcmv_0 (
+    .ap_clk(clk), .ap_rst_n(lrstn),
+    .in1_TDATA(l1d), .in1_TVALID(l1v), .in1_TREADY(l1r),
+    .in2_TDATA(l2d), .in2_TVALID(l2v), .in2_TREADY(l2r),
+    .out_r_TDATA(lyd), .out_r_TVALID(lyv), .out_r_TREADY(lyr),
+    .w1_re(lw1r), .w1_im(lw1i), .w2_re(lw2r), .w2_im(lw2i),
+    .cov_r11(lc11), .cov_r22(lc22), .cov_r12_re(lc12r), .cov_r12_im(lc12i),
+    .cov_blocks(lcblk), .sat_count(lsat)
+  );
+
   gnss_passthrough dut (
     .clk(clk), .rst(rst),
     .adc_enable_i0(1'b1), .adc_valid_i0(adc_v), .adc_data_i0(adc_i0),
@@ -76,6 +85,13 @@ module tb_gnss_passthrough_lcmv;
     .dma_dac_data_i1(16'h7890), .dma_dac_data_q1(16'hABC0),
     .dac_data_i0(dac_i0), .dac_data_q0(dac_q0),
     .dac_data_i1(dac_i1), .dac_data_q1(dac_q1),
+    .m_axis_lcmv1_tdata(l1d), .m_axis_lcmv1_tvalid(l1v), .m_axis_lcmv1_tready(l1r),
+    .m_axis_lcmv2_tdata(l2d), .m_axis_lcmv2_tvalid(l2v), .m_axis_lcmv2_tready(l2r),
+    .s_axis_lcmv_tdata(lyd), .s_axis_lcmv_tvalid(lyv), .s_axis_lcmv_tready(lyr),
+    .lcmv_w1_re(lw1r), .lcmv_w1_im(lw1i), .lcmv_w2_re(lw2r), .lcmv_w2_im(lw2i),
+    .lcmv_rst_n(lrstn),
+    .lcmv_cov_r11(lc11), .lcmv_cov_r22(lc22), .lcmv_cov_r12_re(lc12r), .lcmv_cov_r12_im(lc12i),
+    .lcmv_cov_blocks(lcblk), .lcmv_sat_count(lsat),
     .s_axi_aclk(aclk), .s_axi_aresetn(aresetn),
     .s_axi_awvalid(awvalid), .s_axi_awaddr(awaddr), .s_axi_awprot(3'd0),
     .s_axi_awready(awready),
@@ -302,6 +318,15 @@ module tb_gnss_passthrough_lcmv;
     end
   endtask
 
+  task load_weights(input real a1r, input real a1i, input real a2r, input real a2i);
+    begin
+      axi_write(16'h80, q16(a1r));
+      axi_write(16'h84, q16(a1i));
+      axi_write(16'h88, q16(a2r));
+      axi_write(16'h8C, q16(a2i));             // commit
+    end
+  endtask
+
   initial begin
     repeat (20) @(posedge aclk);
     aresetn = 1;
@@ -313,119 +338,81 @@ module tb_gnss_passthrough_lcmv;
     axi_read(16'h00, r);  $display("T1 ID      = 0x%08h", r);
     check(r == 32'h47435031, "ID");
     axi_read(16'h04, r);  $display("T1 VERSION = 0x%08h", r);
-    check(r == 32'h00030001, "VERSION 3.1");
-    axi_read(16'h50, r);  $display("T1 RX2_CAL reset = 0x%08h", r);
-    check(r == 32'h00004000, "RX2_CAL reset value (1.0, Q2.14)");
-    axi_read(16'h40, r);  check(r == 32'd30, "GPS angle reset 30 deg (reference design)");
-    axi_read(16'h44, r);  check(r == 32'd60, "jammer angle reset 60 deg (reference design)");
+    check(r == 32'h00040000, "VERSION 4.0");
+    axi_read(16'h40, r);  check(r == 32'd30, "GPS angle register reset 30");
+    axi_read(16'h44, r);  check(r == 32'd60, "jammer angle register reset 60");
 
     // ---------------- T2 ----------------
-    axi_write(16'h40, 32'd10);                 // GPS angle
-    axi_write(16'h44, 32'd40);                 // JAM angle
-    axi_write(16'h4C, 32'd0);                  // EPS
-    axi_write(16'h0C, 32'h11);                 // pass_en | lcmv_en
-    repeat (4000) @(posedge clk);
-
+    axi_write(16'h0C, 32'h31);                 // pass_en | lcmv_en | lcmv_sw
+    repeat (3000) @(posedge clk);
     axi_read(16'h10, r);
-    $display("T2 STATUS = 0x%08h  (pass_en=%0d lcmv_en=%0d lcmv_active=%0d)", r, r[16], r[17], r[19]);
-    check(r[19] == 1'b1, "STATUS[19] lcmv_active");
-    axi_read(16'h54, w1r); axi_read(16'h58, w1i);
-    axi_read(16'h5C, w2r); axi_read(16'h60, w2i);
-    $display("T2 weights  w1 = %0.5f %+0.5fj   w2 = %0.5f %+0.5fj",
-             w1r/65536.0, w1i/65536.0, w2r/65536.0, w2i/65536.0);
-    axi_read(16'h68, r); $display("T2 LCMV_UPDATES = %0d", r);
-    check(r > 0, "LCMV_UPDATES > 0");
-
-    measure(6000);
-    $display("T2 LCMV on : jammer+noise residual %6.1f dB re RX1, tone gain %5.2f dB, nibble errors %0d",
-             res_db, tone_db, nib_err);
-    check(res_db < -40.0, "jammer suppression < -40 dB");
-    check(tone_db > -1.0 && tone_db < 1.0, "look-direction gain 0 dB +/- 1 dB");
-    check(nib_err == 0, "TX0 left-aligned");
+    $display("T2 STATUS = 0x%08h (lcmv_en=%0d lcmv_active=%0d) - no PS weights yet", r, r[17], r[19]);
+    check(r[17] == 1'b1 && r[19] == 1'b0, "not active before the first PS weight set");
+    measure(3000);
+    $display("T2 TX0/RX1 power %6.2f dB (identity until weights arrive)", out_db);
+    check(out_db > -0.2 && out_db < 0.2, "TX0 = RX1 before weights");
 
     // ---------------- T3 ----------------
-    $display("T3 LCMV on : TX2 power re RX1 %6.2f dB (TX2 = RX2 unprocessed, same power in this scene)", out1_db);
-    check(out1_db > -0.5 && out1_db < 0.5, "TX2 carries RX2 unprocessed");
+    // paper eq. 9, look 10 deg + null 40 deg, eps 0: w = C^-H [1 0]^T
+    load_weights(0.50000, 0.55098, 0.71333, -0.21156);
+    repeat (1000) @(posedge clk);
+    axi_read(16'h10, r);
+    check(r[19] == 1'b1, "STATUS[19] lcmv_active after the commit");
+    axi_read(16'h54, w1r); axi_read(16'h58, w1i);
+    axi_read(16'h5C, w2r); axi_read(16'h60, w2i);
+    $display("T3 weights at lcmv_0: w1 = %0.5f %+0.5fj  w2 = %0.5f %+0.5fj",
+             w1r/65536.0, w1i/65536.0, w2r/65536.0, w2i/65536.0);
+    measure(6000);
+    $display("T3 jammer-angle LCMV: residual %6.1f dB re RX1, tone gain %5.2f dB, nibble errors %0d",
+             res_db, tone_db, nib_err);
+    check(res_db < -40.0, "jammer-angle null < -40 dB");
+    check(tone_db > -1.0 && tone_db < 1.0, "look gain 0 dB +/- 1 dB");
+    check(nib_err == 0, "TX0 left-aligned");
+    $display("T3 TX2 power re RX1 %6.2f dB (TX2 = RX2 unprocessed)", out1_db);
+    check(out1_db > -0.5 && out1_db < 0.5, "TX2 carries RX2");
 
     // ---------------- T4 ----------------
-    axi_write(16'h0C, 32'h01);                 // pass_en only
-    repeat (500) @(posedge clk);
-    measure(4000);
-    $display("T4 LCMV off: TX0/RX1 power %6.2f dB (identity)", out_db);
-    check(out_db > -0.2 && out_db < 0.2, "identity passthrough");
-    axi_read(16'h10, r);
-    check(r[19] == 1'b0, "STATUS[19] clear with LCMV off");
-
-    // ---------------- T5 ----------------
-    rx2_err_deg  = 190.0;                      // e.g. inversion + 10 deg skew
-    rx2_err_gain = 0.85;                       // RX2 1.4 dB weaker
-    axi_write(16'h0C, 32'h11);
-    repeat (4000) @(posedge clk);
-    measure(4000);
-    $display("T5 RX2 error 0.85/190 deg, no cal : residual %6.1f dB re RX1", res_db);
-    check(res_db > -20.0, "uncalibrated phase error degrades the null");
-
-    // c = 1/(0.85 exp(j190 deg)) = -1.15860 + j0.20429  ->  Q2.14 re -18982, im 3347
-    axi_write(16'h50, {16'sd3347, -16'sd18982});
-    axi_read(16'h50, r); $display("T5 RX2_CAL = 0x%08h", r);
-    repeat (4000) @(posedge clk);
-    measure(6000);
-    $display("T5 RX2 error 0.85/190 deg, cal on : residual %6.1f dB re RX1, tone gain %5.2f dB",
-             res_db, tone_db);
-    check(res_db < -40.0, "calibration restores the null");
-    check(tone_db > -1.0 && tone_db < 1.0, "look gain with calibration");
-
-    axi_read(16'h64, r);  $display("LCMV_STATUS = 0x%08h", r);
-    axi_read(16'h6C, r);  $display("LCMV_SAT_COUNT = %0d", r);
-    axi_write(16'h48, 32'd12345);              // reserved word between the LCMV registers
-    axi_read(16'h48, r);  check(r == 32'd12345, "0x48 independent of LCMV");
-    axi_read(16'h4C, r);  check(r == 32'd0, "LCMV_EPS untouched by gamma write");
-
-    // ---------------- T6 ----------------
-    rx2_err_deg  = 0.0;
-    rx2_err_gain = 1.0;
-    axi_write(16'h0C, 32'h01);                 // LCMV off again
-    repeat (2000) @(posedge clk);
-    axi_read(16'h10, r);
-    $display("T6 STATUS = 0x%08h  (lcmv_en=%0d lcmv_active=%0d)", r, r[17], r[19]);
-    check(r[17] == 1'b0 && r[19] == 1'b0, "LCMV off after CONTROL[4]=0");
-    measure(4000);
-    $display("T6 LCMV off again: TX0/RX1 power %6.2f dB, nibble errors %0d", out_db, nib_err);
-    check(out_db > -0.2 && out_db < 0.2, "identity passthrough restored");
-    check(nib_err == 0, "TX0 left-aligned");
-    // ---------------- T7 ----------------
     wait_new_block;
     read_cov;
-    $display("T7 covariance blocks %0d..%0d (coherent read: %0d)", blk0, blk1, blk0 == blk1);
+    $display("T4 covariance blocks %0d..%0d (coherent read: %0d)", blk0, blk1, blk0 == blk1);
     check(blk0 == blk1, "coherent covariance read");
     check(cr11 > 250000.0 && cr11 < 400000.0, "R11 = jammer + tone + noise power");
     solve_and_load(10.0);
-    axi_write(16'h0C, 32'h31);                 // pass_en | lcmv_en | lcmv_sw
     repeat (1000) @(posedge clk);
-    axi_read(16'h10, r);
-    check(r[23] == 1'b1 && r[19] == 1'b1, "STATUS lcmv_sw and lcmv_active");
     measure(6000);
-    $display("T7 covariance LCMV (no jammer angle): residual %6.1f dB re RX1, tone gain %5.2f dB, nibble errors %0d",
-             res_db, tone_db, nib_err);
+    $display("T4 covariance LCMV: residual %6.1f dB re RX1, tone gain %5.2f dB", res_db, tone_db);
     check(jnr_db > 20.0, "jammer detected from the eigenvalues");
     check(res_db < -40.0, "covariance LCMV null < -40 dB");
     check(tone_db > -1.0 && tone_db < 1.0, "covariance LCMV look gain 0 dB");
 
-    // ---------------- T8 ----------------
+    // ---------------- T5 ----------------
     jam_deg = -25.0;
     wait_new_block;
     read_cov;
     solve_and_load(10.0);
     repeat (1000) @(posedge clk);
     measure(6000);
-    $display("T8 jammer moved to -25 deg, re-solved from R: residual %6.1f dB, tone gain %5.2f dB",
+    $display("T5 jammer moved to -25 deg, re-solved from R: residual %6.1f dB, tone gain %5.2f dB",
              res_db, tone_db);
     check(res_db < -40.0, "null follows the jammer");
     check(tone_db > -1.0 && tone_db < 1.0, "look gain 0 dB after the move");
     axi_read(16'h68, r);  $display("LCMV_UPDATES (PS weight sets) = %0d", r);
+    check(r == 3, "three PS weight sets committed");
 
+    // ---------------- T6 ----------------
+    axi_write(16'h0C, 32'h01);                 // LCMV off
+    repeat (1000) @(posedge clk);
+    measure(4000);
+    $display("T6 LCMV off: TX0/RX1 power %6.2f dB, nibble errors %0d", out_db, nib_err);
+    check(out_db > -0.2 && out_db < 0.2, "identity passthrough");
+    axi_read(16'h10, r);
+    $display("T6 STATUS = 0x%08h", r);
+    check(r[19] == 1'b0, "STATUS[19] clear");
+    check(r[10] == 1'b0, "no RX pair dropped at lcmv_0");
     axi_read(16'h1C, r);  $display("OVERFLOW_COUNT = %0d", r);
+    check(r == 0, "no FIFO overflow");
     axi_read(16'h20, r);  $display("UNDERFLOW_COUNT = %0d", r);
+    check(r == 0, "no FIFO underflow");
 
     if (errors == 0) $display("PASS");
     else             $display("FAIL (%0d errors)", errors);

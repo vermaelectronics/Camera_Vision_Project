@@ -148,13 +148,25 @@ else
   say "2/8 ADI libraries skipped (SKIP_ADI_LIBS=1)"
 fi
 
-# ---- 3  custom IP: gnss_passthrough v3.0 + LCMV crpa/ ---------------------------
-say "3/8 package gnss_passthrough v3.0 (LCMV CRPA)"
+# ---- 3  custom IP: gnss_passthrough v4.0 (AXI-Stream ports to the LCMV IP) ------
+say "3/8 package gnss_passthrough v4.0"
 run 3_gnss_ip bash -c "cd '$LOGS' && vivado -mode batch -nojournal -nolog \
   -source '$ROOT/Source/IP/gnss_passthrough/gnss_passthrough_ip.tcl' \
   -tclargs '$ROOT/Source' '$IP_REPO'"
-need 3_gnss_ip "IP_PACKAGE_SELFCHECK: OK - LCMV CRPA sources packaged"
+need 3_gnss_ip "IP_PACKAGE_SELFCHECK: OK - LCMV AXI-Stream interfaces"
 need 3_gnss_ip "IP_PACKAGE_OK"
+
+# ---- 3b LCMV CRPA HLS core (lcmv_0 in the block design) -----------------------
+# Vitis HLS C-sim + synthesis + export to $IP_REPO/lcmv_crpa. SKIP_HLS=1 reuses
+# an existing $IP_REPO/lcmv_crpa (it only changes when Source/HLS/lcmv changes).
+if [ "${SKIP_HLS:-0}" = 1 ] && [ -f "$IP_REPO/lcmv_crpa/component.xml" ]; then
+  say "3b/8 LCMV HLS skipped (SKIP_HLS=1, $IP_REPO/lcmv_crpa exists)"
+else
+  command -v vitis_hls >/dev/null || { echo "vitis_hls not found: source the Vitis $TOOL_VER settings64.sh"; exit 2; }
+  say "3b/8 build LCMV CRPA HLS core (vitis_hls, ~5 min)"
+  run 3b_lcmv_hls bash -c "cd '$ROOT/Source/HLS/lcmv' && GNSS_CRPA_IP_REPO='$IP_REPO' vitis_hls -f build_hls.tcl"
+  need 3b_lcmv_hls "LCMV_HLS: PASS"
+fi
 
 # ---- 4  Vivado project ----------------------------------------------------------
 say "4/8 create Vivado project"

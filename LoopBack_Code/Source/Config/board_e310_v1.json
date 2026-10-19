@@ -192,8 +192,8 @@
         "offset": "0x04",
         "name": "VERSION",
         "access": "RO",
-        "reset": "0x00030001",
-        "note": "1.0 = Phase-1 identity passthrough. 1.1 = adds the RX->TX sample alignment stage; a board reporting 1.0 transmits 24 dB low. 2.x = PL-NPI builds (not this design). 3.0 = LCMV CRPA build (CONTROL[4], 0x40/0x44/0x4C-0x6C, STATUS[17], [19], [22]), no PL-NPI. 3.1 = adds the 2x2 covariance estimator (0x90-0xA0) and PS-computed weights (CONTROL[5], 0x80-0x8C): the ARM solves w = R^-1 C (C^H R^-1 C)^-1 f."
+        "reset": "0x00040000",
+        "note": "1.0 = Phase-1 identity passthrough. 1.1 = adds the RX->TX sample alignment stage; a board reporting 1.0 transmits 24 dB low. 2.x = PL-NPI builds (not this design). 3.0 = LCMV CRPA build (CONTROL[4], 0x40/0x44/0x4C-0x6C, STATUS[17], [19], [22]), no PL-NPI. 3.1 = adds the 2x2 covariance estimator (0x90-0xA0) and PS-computed weights (CONTROL[5], 0x80-0x8C): the ARM solves w = R^-1 C (C^H R^-1 C)^-1 f. 4.0 = the beamformer and covariance are the Vitis HLS IP lcmv_0 (Source/HLS/lcmv) on AXI-Stream ports; STATUS[10] = lcmv_drop_sticky."
       },
       {
         "offset": "0x08",
@@ -229,6 +229,7 @@
           "7": "fifo1_full",
           "8": "overflow_sticky",
           "9": "underflow_sticky",
+          "10": "lcmv_drop_sticky",
           "16": "pass_en_in_sample_domain",
           "17": "lcmv_en_in_sample_domain",
           "19": "lcmv_active",

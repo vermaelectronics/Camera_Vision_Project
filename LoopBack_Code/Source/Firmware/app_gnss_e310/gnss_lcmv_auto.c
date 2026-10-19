@@ -249,6 +249,10 @@ static void apply_mode(void)
 void gnss_lcmv_set_mode(int m)
 {
     if (m < GNSS_LCMV_OFF || m > GNSS_LCMV_PL) return;
+    /* v4.0: there is no PL angle solver any more (lcmv_0 is the HLS
+     * beamformer); the PS solves the same look + jammer constraints. */
+    if (m == GNSS_LCMV_PL && gnss_pt_read(GNSS_PT_REG_VERSION) >= 0x00040000U)
+        m = GNSS_LCMV_ANGLE;
     if ((m == GNSS_LCMV_AUTO || m == GNSS_LCMV_ANGLE) && !cov_hw) {
         printf("gnss_lcmv: bitstream has no covariance estimator (needs v3.1); "
                "using the PL angle solver\n\r");

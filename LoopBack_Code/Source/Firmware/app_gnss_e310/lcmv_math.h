@@ -28,6 +28,10 @@
 #ifndef LCMV_MATH_H_
 #define LCMV_MATH_H_
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef struct { double re, im; } lcmv_c_t;
 
 typedef struct {
@@ -65,5 +69,9 @@ int  lcmv_solve(const lcmv_cov_t *r, double gps_deg,
 
 /* Array response |w^H a(theta)|^2 in dB (for reports and tests). */
 double lcmv_response_db(const lcmv_result_t *w, double theta_deg);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* LCMV_MATH_H_ */

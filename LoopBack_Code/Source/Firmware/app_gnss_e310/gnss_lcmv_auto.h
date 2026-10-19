@@ -28,7 +28,7 @@
 #define GNSS_LCMV_OFF    0   /* TX1 = RX1                                  */
 #define GNSS_LCMV_AUTO   1   /* covariance LCMV, look constraint only      */
 #define GNSS_LCMV_ANGLE  2   /* covariance LCMV, look + jammer (default)   */
-#define GNSS_LCMV_PL     3   /* PL angle solver only (no covariance)       */
+#define GNSS_LCMV_PL     3   /* v3.x PL angle solver; v4.0 maps it to ANGLE */
 
 struct ad9361_rf_phy;
 

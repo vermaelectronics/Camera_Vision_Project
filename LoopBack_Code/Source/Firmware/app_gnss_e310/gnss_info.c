@@ -176,13 +176,15 @@ static void info_hardware(struct ad9361_rf_phy *phy)
     console_print("   base address    : 0x43C00000, 4 kB aperture\n");
     console_print("   ID register     : 0x%08x  (expect 0x47435031, ASCII 'GCP1')\n",
                   (long)gnss_pt_read(GNSS_PT_REG_ID));
-    console_print("   VERSION         : 0x%08x  (expect 0x00030001 = v3.1)\n",
+    console_print("   VERSION         : 0x%08x  (expect 0x00040000 = v4.0)\n",
                   (long)gnss_pt_read(GNSS_PT_REG_VERSION));
     console_print("     v1.0 is the original identity passthrough and transmits\n");
     console_print("     24 dB LOW. v1.1 adds the RX->TX sample alignment stage.\n");
     console_print("     v3.0 is the LCMV CRPA build: 2-element LCMV beamformer on\n");
     console_print("     TX1 (CONTROL[4], gnss_lcmv=). v3.1 adds the covariance\n");
     console_print("     estimator: the ARM solves w = R^-1 C (C^H R^-1 C)^-1 f.\n");
+    console_print("     v4.0 moves the beamformer + covariance into the Vitis HLS\n");
+    console_print("     IP lcmv_0, connected to gnss_passthrough by AXI-Stream.\n");
     rule();
 
     console_print(" RF FRONT END                                            [cfg]\n");
@@ -545,6 +547,7 @@ static void info_registers(void)
     console_print("                             [6] fifo1_empty    [7] fifo1_full\n");
     console_print("                             [8] overflow_sticky\n");
     console_print("                             [9] underflow_sticky\n");
+    console_print("                            [10] lcmv_drop_sticky (must stay 0)\n");
     console_print("                            [16] pass_en in the sample domain\n");
     console_print("                            [17] lcmv_en in the sample domain\n");
     console_print("                            [19] LCMV drives TX1 now\n");
@@ -560,8 +563,8 @@ static void info_registers(void)
     console_print("   0x30  RX_COUNT_CH1    RO\n");
     console_print("   0x34  TX_COUNT_CH1    RO\n");
     console_print("   0x38  RX_SNAPSHOT_CH1 RO\n");
-    console_print("   0x40  LCMV_GPS_ANGLE  RW  [15:0] signed deg, look (gain 1)\n");
-    console_print("   0x44  LCMV_JAM_ANGLE  RW  [15:0] signed deg, null\n");
+    console_print("   0x40  LCMV_GPS_ANGLE  RW  [15:0] signed deg, storage for the PS\n");
+    console_print("   0x44  LCMV_JAM_ANGLE  RW  [15:0] signed deg, storage for the PS\n");
     console_print("   0x48  CRPA_COEF2      RW  stored but unused\n");
     console_print("   0x4C  LCMV_EPS        RW  [15:0] Q0.16, 0 = ideal null\n");
     console_print("   0x50  LCMV_RX2_CAL    RW  {im, re} Q2.14, reset 0x00004000\n");

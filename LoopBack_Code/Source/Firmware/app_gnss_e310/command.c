@@ -1408,7 +1408,7 @@ void get_gnss_lcmv(double* param, char param_no)
  *       constraint, solved on the measured covariance
  *   0 = off (TX1 = RX1)
  *   2 = covariance only (look constraint, no jammer angle)
- *   3 = PL angle solver (no covariance)
+ *   3 = (v3.x PL angle solver; on v4.0 the same as 1)
  * Only selects what feeds TX1; gnss_tx=1 still opens the transmitter.
 *******************************************************************************/
 void set_gnss_lcmv(double* param, char param_no)

@@ -75,6 +75,15 @@ if {[llength $gnss_ipdef] == 0} {
          Source/IP/gnss_passthrough/gnss_passthrough_ip.tcl, or run\
          Automation/Linux/build_all.sh --from ip."
 }
+# The LCMV CRPA core is a separate Vitis HLS IP in the same repository
+# (Source/HLS/lcmv/build_hls.tcl, build_all.sh stage 3b).
+set lcmv_ipdef [get_ipdefs -all -quiet -filter \
+  {VLNV =~ *:lcmv_crpa:* && design_tool_contexts =~ *IPI* && UPGRADE_VERSIONS == ""}]
+if {[llength $lcmv_ipdef] == 0} {
+  error "ERROR: lcmv_crpa was not found in the IP catalog at $gnss_ip_repo.\
+         Build it with Source/HLS/lcmv/build_hls.tcl (vitis_hls)."
+}
+puts "GNSS-CRPA: LCMV IP resolved in catalog: $lcmv_ipdef"
 puts "GNSS-CRPA: custom IP repository registered: $gnss_ip_repo"
 puts "GNSS-CRPA: custom IP resolved in catalog: $gnss_ipdef"
 # GNSS-CRPA MOD-0 END
@@ -492,6 +501,29 @@ ad_connect gnss_passthrough/dac_data_i0 axi_ad9361/dac_data_i0
 ad_connect gnss_passthrough/dac_data_q0 axi_ad9361/dac_data_q0
 ad_connect gnss_passthrough/dac_data_i1 axi_ad9361/dac_data_i1
 ad_connect gnss_passthrough/dac_data_q1 axi_ad9361/dac_data_q1
+
+# LCMV CRPA core (Vitis HLS IP, II=2), next to gnss_passthrough, like pi_nlms_0.
+#   gnss_passthrough streams RX1/RX2 to it (in1/in2), takes the beamformer
+#   output back (out_r) for TX1 when CONTROL[4] = 1, supplies the PS weights
+#   (registers 0x80..0x8C) and reads the covariance R (registers 0x90..0xA0).
+#   Same clock (l_clk), so no clock crossing.
+ad_ip_instance lcmv_crpa lcmv_0
+
+ad_connect axi_ad9361/l_clk                lcmv_0/ap_clk
+ad_connect gnss_passthrough/lcmv_rst_n     lcmv_0/ap_rst_n
+ad_connect gnss_passthrough/m_axis_lcmv1   lcmv_0/in1
+ad_connect gnss_passthrough/m_axis_lcmv2   lcmv_0/in2
+ad_connect lcmv_0/out_r                    gnss_passthrough/s_axis_lcmv
+ad_connect gnss_passthrough/lcmv_w1_re     lcmv_0/w1_re
+ad_connect gnss_passthrough/lcmv_w1_im     lcmv_0/w1_im
+ad_connect gnss_passthrough/lcmv_w2_re     lcmv_0/w2_re
+ad_connect gnss_passthrough/lcmv_w2_im     lcmv_0/w2_im
+ad_connect lcmv_0/cov_r11                  gnss_passthrough/lcmv_cov_r11
+ad_connect lcmv_0/cov_r22                  gnss_passthrough/lcmv_cov_r22
+ad_connect lcmv_0/cov_r12_re               gnss_passthrough/lcmv_cov_r12_re
+ad_connect lcmv_0/cov_r12_im               gnss_passthrough/lcmv_cov_r12_im
+ad_connect lcmv_0/cov_blocks               gnss_passthrough/lcmv_cov_blocks
+ad_connect lcmv_0/sat_count                gnss_passthrough/lcmv_sat_count
 
 # GNSS-CRPA MOD-2 END
 # ---------------------------------------------------------------------------
