@@ -154,7 +154,7 @@ C simulation (testbench.cpp, run by the build), jammer 600 LSB, `h = 0.6-0.5j`:
   estimated clock is above 8 ns, then exports `antsdr:gnss:pl_npi:1.0` to
   `Build/ip_repo/pl_npi` (with `pl_npi_csynth.rpt`). Overrides:
   `PL_NPI_CLK_NS=7` (more margin), `PL_NPI_II=<n>`, `PL_NPI_SKIP_CSIM=1`,
-  `PL_NPI_EXTRA_DELAY=<n>` (default 4), `PL_NPI_STEP_SHIFT=<n>` (default 1).
+  `PL_NPI_EXTRA_DELAY=<n>` (default 4), `PL_NPI_STEP_SHIFT=<n>` (default 2).
 - It works at the raw ADC scale its calibration assumes: RX samples go in as
   received (12-bit, sign-extended) and the output is saturated back to 12
   bits.
@@ -197,22 +197,43 @@ C model gives the satellites -39 dB (none visible), and with a jammer they are
 20 ms:
 
 - **Automatic gamma:** `gamma = 2^17 x k x noise power per channel`. k is
-  itself automatic (firmware v2.1.9): **k = 32** while no jammer is seen, so
-  the satellites pass almost untouched, and **k = 1** from the poll a jammer
-  is detected, for the deepest null. Detection means the input is more than
-  6 dB above the noise floor or the ADC is near clipping. k returns to 32
-  after 200 ms clean. C model output SINR in dB:
+  itself automatic: **k = 32** while no jammer is seen, so the satellites
+  pass almost untouched, and **k = 1/8** (v2.1.10; 1 before) from the poll a
+  jammer is detected, for the deepest null. Detection means the input is
+  more than 6 dB above the noise floor or the ADC is near clipping. k returns
+  to 32 after 200 ms clean. `gnss_npi_k=N` fixes k (1..64); `gnss_npi_k=0`
+  returns to automatic.
 
-  | k | no jammer | jammer 60 | jammer 300 | jammer 1500 LSB |
-  |---|---|---|---|---|
-  | 1 | -10.1 | -9.7 | -7.1 | -7.0 |
-  | 4 (v2.1.7) | -9.8 | -14.3 | -8.4 | -7.0 |
-  | 32 | -9.1 | -20.2 | -20.1 | -10.5 |
-  | RX1 alone | -8.9 | -20.1 | -33.2 | -44.5 |
+**Core v2.1.10 (stronger jammers).** With a jammer 10-15 dB stronger the
+satellites became weak. The matched gain loop turns the RX gain down by the
+same 10-15 dB, so at the core the noise and satellites are only a few LSB.
+There, two things in the core cost SINR:
+1. **Output truncation.** `y = s >> 20` was a floor, which gives a -0.5 LSB
+   DC offset and extra quantisation noise. Now rounded.
+2. **Step size.** The step was 1/2. It is now 1/4 (`PL_NPI_STEP_SHIFT=2`),
+   which gives less weight jitter.
 
-  After the switch to k = 1 the core is at the deep-null optimum within
-  about 4000 samples (130 us). `gnss_npi_k=N` fixes k (1..64);
-  `gnss_npi_k=0` returns to automatic. The noise power is measured from 512 snapshot samples
+The jammer-mode k is also lowered from 1 to 1/8. C model output SINR (dB),
+real HLS core, CW jammer held at ~1200 LSB by the gain loop, noise and
+satellite reduced by the gain cut:
+
+| gain cut (jammer increase) | 0 | 10 | 15 | 20 | 25 dB |
+|---|---|---|---|---|---|
+| v2.1.9 core, k = 1 | -6.7 | -7.4 | -8.2 | -9.8 | -12.4 |
+| **v2.1.10 core, k = 1/8** | **-6.8** | **-7.0** | **-7.2** | **-7.8** | **-9.3** |
+| SMI-PI | -6.6 | -6.6 | -6.8 | -7.2 | -8.3 |
+
+Weak jammers (jammer amplitude in LSB, noise +-20 LSB):
+
+| jammer | 60 | 150 | 300 | 1500 |
+|---|---|---|---|---|
+| v2.1.10, k = 1 | -11.6 | -8.6 | -7.4 | -6.9 |
+| **v2.1.10, k = 1/8** | **-8.1** | **-7.1** | **-7.0** | **-7.0** |
+| SMI-PI | -7.2 | -6.9 | -6.9 | -6.8 |
+
+Testbench: 600 LSB null -52.6 dB, converged at 200 samples (was -50.7 dB,
+300). No jammer: output = RX1 (0.0 dB). A jammer switched on and off every
+3000 samples settles within 3 blocks, then stays within 1.6 dB. The noise power is measured from 512 snapshot samples
   per channel. It is followed only while the input is within 3 dB of it, so
   a jammer never pulls gamma up, and it is rescaled with every gain step. The
   last clean value per dB of gain is remembered, so switching on with the

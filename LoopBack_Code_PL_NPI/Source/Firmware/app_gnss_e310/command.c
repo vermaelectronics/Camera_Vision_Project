@@ -135,7 +135,7 @@ command cmd_list[] = {
 	{"gnss_npi=", "1 = TX1 carries PL-NPI(RX1, RX2), 0 = TX1 carries RX1.", "gnss_npi=1", set_gnss_npi},
 	{"gnss_npi_gamma=", "Sets a FIXED PL-NPI gamma (>= 1); turns automatic gamma off.", "gnss_npi_gamma=100000000", set_gnss_npi_gamma},
 	{"gnss_npi_auto=", "1 = automatic gamma from the noise floor (default), 0 = fixed.", "gnss_npi_auto=1", set_gnss_npi_auto},
-	{"gnss_npi_k=", "0 = automatic k (default: 32 clean, 1 with jammer), 1..64 = fixed k.", "gnss_npi_k=0", set_gnss_npi_k},
+	{"gnss_npi_k=", "0 = automatic k (default: 32 clean, 1/8 with jammer), 1..64 = fixed k.", "gnss_npi_k=0", set_gnss_npi_k},
 	{"gnss_rx_gain?", "Gets RX1/RX2 gain, mode, TX level hold and gamma.", "", get_gnss_rx_gain},
 	{"gnss_rx_gain=", "Sets RX1 AND RX2 to the same gain [dB] (also the auto reference).", "gnss_rx_gain=40", set_gnss_rx_gain},
 	{"gnss_rx_agc=", "0 = manual locked, 1 = AD9361 AGC per channel, 2 = matched auto (PL-NPI).", "gnss_rx_agc=2", set_gnss_rx_agc},

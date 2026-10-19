@@ -23,7 +23,7 @@
 #    PL_NPI_II=<n>        pipeline II, default 2
 #    PL_NPI_SKIP_CSIM=1   skip step 1
 #    PL_NPI_EXTRA_DELAY=<n>  delay registers in the weight loop, default 4
-#    PL_NPI_STEP_SHIFT=<n>   step reduction 2^-n, default 1 (keep >= 1 when
+#    PL_NPI_STEP_SHIFT=<n>   step reduction 2^-n, default 2 (keep >= 1 when
 #                            PL_NPI_EXTRA_DELAY > 0, or the loop oscillates)
 #
 #  OUTPUT

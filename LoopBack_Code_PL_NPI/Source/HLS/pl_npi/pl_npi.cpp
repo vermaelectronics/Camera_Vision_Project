@@ -76,12 +76,17 @@
 //
 //    The cost is a delayed LMS: the update reaches the weights NQ samples
 //    later. With the full step that oscillates (simulated: 93 dB output even
-//    at NQ = 1), so the step is halved (PL_NPI_STEP_SHIFT = 1). C-simulation
-//    with NQ = 4, shift 1 against the original (NQ = 0, shift 0):
-//      jammer 600 LSB      null -50.7 dB (was -50.0), converged at 300 samples
-//      jammer 2000 steady  residual 18-19 dB (was 19-20 dB)
+//    at NQ = 1), so the step is reduced by 2^PL_NPI_STEP_SHIFT. v2.1.10 uses
+//    shift 2 (quarter step) together with a rounded output; C-simulation,
+//    NQ = 4:
+//      jammer 600 LSB      null -52.6 dB, converged at 200 samples
+//                          (shift 1, truncated output: -50.7 dB, 300)
+//      jammer 2000 steady  residual 17.9 dB (shift 1: 18.3 dB)
 //      jammer 3000 on/off every 3000 samples: settles within 3 blocks, then
-//                          flat (same as the original)
+//                          within 1.6 dB
+//      jammer 25 dB above the RX gain reference (noise ~1 LSB at the core):
+//                          output SINR -9.3 dB (shift 1, truncated: -12.4 dB;
+//                          SMI-PI -8.3 dB)
 // ============================================================================
 #include "pl_npi.h"
 
@@ -99,7 +104,7 @@ static const int NQ = PL_NPI_EXTRA_DELAY;
 // The step is alpha*gain / 2^PL_NPI_STEP_SHIFT. A delayed LMS is only stable
 // if step x delay stays small, so the extra delay above needs a smaller step.
 #ifndef PL_NPI_STEP_SHIFT
-#define PL_NPI_STEP_SHIFT 1
+#define PL_NPI_STEP_SHIFT 2
 #endif
 
 static const ap_uint<17> GAIN_K[4] = {65536, 68812, 72089, 78643};
@@ -336,9 +341,15 @@ void pl_npi(hls::stream<ap_uint<64> > &s_axis_x,
         s_im += (ap_int<50>)(x_re[i] * wi) + (ap_int<50>)(x_im[i] * wr);
     }
 
+    // Round to nearest, not floor. Truncation added a -0.5 LSB DC offset and
+    // extra quantisation noise to every output sample; once the gain loop has
+    // turned the RX gain down for a strong jammer the noise and satellites are
+    // only a few LSB, and that error cost up to 3.7 dB of output SINR (C model,
+    // jammer 25 dB above the gain reference). This is the output path only,
+    // not the weight-update loop.
     ap_uint<32> out;
-    out(15, 0)  = (ap_uint<16>)sat16(s_re >> 20);
-    out(31, 16) = (ap_uint<16>)sat16(s_im >> 20);
+    out(15, 0)  = (ap_uint<16>)sat16((s_re + (ap_int<50>)(1 << 19)) >> 20);
+    out(31, 16) = (ap_uint<16>)sat16((s_im + (ap_int<50>)(1 << 19)) >> 20);
     m_axis_y.write(out);
 
     // ---- commit all registers (every stage reads the OLD values above) ---
