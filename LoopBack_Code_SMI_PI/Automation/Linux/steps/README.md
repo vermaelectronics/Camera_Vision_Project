@@ -7,7 +7,7 @@ the check passes. Each script can be run from any folder.
 | Script | Stage | Check |
 |---|---|---|
 | `01_vendor.sh`  | copy ADI HDL library | `STEP 1 vendor: PASS` |
-| `02_libip.sh`   | ADI library IP | end of `libip.log` |
+| `02_libip.sh`   | ADI library IP | `STEP 2 libip: PASS` |
 | `03_smi.sh`     | Vitis HLS SMI-PI core | `SMI_PI_HLS: PASS`, clock <= 8 ns, II 2 |
 | `04_ip.sh`      | gnss_passthrough IP | `IP_PACKAGE_OK` |
 | `05_project.sh` | Vivado project | `CREATE_RESULT: PASS` |
