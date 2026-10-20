@@ -1,0 +1,453 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+% The preceding line is only needed to identify funding in the first footnote. If that is unneeded, please comment it out.
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+% Gutter between columns widened to meet IEEE PDF eXpress (>= 0.2 in);
+% column width is kept unchanged and the text block stays centred.
+\newdimen\gutterdelta
+\gutterdelta=0.21in
+\advance\gutterdelta by -\columnsep
+\setlength{\columnsep}{0.21in}
+\addtolength{\textwidth}{\gutterdelta}
+\addtolength{\oddsidemargin}{-0.5\gutterdelta}
+\addtolength{\evensidemargin}{-0.5\gutterdelta}
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+\begin{document}
+
+\title{FPGA-Based Magnetotelluric Data Acquisition and DSP System for Landslide Detection\\
+{\footnotesize \textsuperscript{}}
+}
+
+\author{
+\IEEEauthorblockN{Sandeep Kumar Verma}
+\IEEEauthorblockA{\textit{MTech, Microelectronics \& VLSI Design} \\
+\textit{Dept. of ECE} \\
+\textit{National Institute of Technology} \\
+\textit{Silchar, Assam 788010, India} \\
+sandeepkrverma22@gmail.com}
+\and
+\IEEEauthorblockN{Dr. Kavicharan Mummaneni}
+\IEEEauthorblockA{\textit{Assistant Professor} \\
+\textit{Dept. of ECE} \\
+\textit{National Institute of Technology} \\
+\textit{Silchar, Assam 788010, India} \\
+kavicharan@ece.nits.ac.in}
+\and
+\IEEEauthorblockN{Dr. Olympa Baro}
+\IEEEauthorblockA{\textit{Assistant Professor} \\
+\textit{Dept. of Civil Engineering} \\
+\textit{National Institute of Technology} \\
+\textit{Silchar, Assam 788010, India} \\
+olympa@civil.nits.ac.in}
+}
+
+
+\maketitle
+
+\begin{abstract}
+Landslides are among the most dangerous natural hazards, damaging infrastructure, environment, and human life. This paper presents an FPGA-based data acquisition and DSP system for landslide detection using the magnetotelluric (MT) method, processing natural EM field variations in real time. The architecture (Xilinx Artix-7) includes EM sensors, signal conditioning, a 10-bit 100\,MSPS ADC, buffering, 2048-point FFT computation, magnitude estimation, and UART communication to detect abnormal EM variations linked to landslide activity. Verified through simulation and hardware implementation in Vivado, the design shows reliable high-speed operation, efficient resource utilisation, and low power-making it a strong, scalable platform for future landslide early-warning applications.
+\end{abstract}
+
+\begin{IEEEkeywords}
+FPGA, Landslide Detection, Magnetotelluric (MT), Data Acquisition System, Digital Signal Processing (DSP), Fast Fourier Transform (FFT), Real-Time Monitoring, Artix-7 FPGA.
+\end{IEEEkeywords}
+
+\section{Introduction}
+
+Landslides cause significant loss of life and infrastructure damage, particularly in tectonically active regions such as the Himalayan foothills. Reliable early warning requires continuous, real-time monitoring of subsurface changes preceding slope failure. The Magnetotelluric (MT) method is a passive electromagnetic technique that characterises subsurface resistivity without artificial source infrastructure~\cite{Tikhonov1950,Cagniard1953}, making it well suited for landslide monitoring.
+
+MT records five field components ($E_x$, $E_y$, $H_x$, $H_y$, $H_z$) over $10^{-3}$\,Hz to 10\,kHz, with depth sensitivity $\delta \approx 503\sqrt{\rho/f}$ (m), enabling investigation of both shallow slip surfaces and deeper structures. Li et al.~\cite{LiuCheng2024} presented an EM acquisition circuit for landslide monitoring but lacked a complete FPGA-based real-time DSP architecture. Liu et al.~\cite{ChenWang2020} proposed an FPGA-based multi-channel system with wireless telemetry, limited to low bandwidth and sampling rates. Ren et al.~\cite{RenZhang2020} introduced a lightweight Zynq SoC-based acquisition module lacking an integrated high-speed MT processing pipeline. A need therefore remains for a low-power, high-speed FPGA platform integrating real-time MT acquisition with on-chip DSP for continuous landslide monitoring.
+
+
+
+
+This paper presents an FPGA-based MT acquisition and DSP system for landslide detection on a Xilinx Artix-7 (Digilent Nexys\,4\,DDR), offering low-power, high-speed, real-time on-chip processing suited for portable, long-term monitoring. The system performs entirely on-chip:
+\begin{itemize}
+    \item 10-bit ADC capture at 100\,MSPS (single-channel);
+    \item 2048-point pipelined radix-2 FFT for real-time spectral analysis;
+    \item CORDIC-based magnitude computation
+          $|X[k]| = \sqrt{\mathrm{Re}^2[k] + \mathrm{Im}^2[k]}$;
+    \item Trigger-based acquisition with adjustable gain and threshold;
+    \item UART interface for host-PC transfer and configuration;
+    \item Estimated on-chip power of 0.333\,W (Vivado post-implementation netlist analysis), enabling energy-efficient continuous monitoring.
+\end{itemize}
+
+
+Section II presents the theoretical background of the Magnetotelluric (MT) method. Section III details the proposed FPGA architecture and its sub-modules. Section IV presents the simulation, hardware implementation, and post-implementation results for on-chip FPGA. Section V concludes the paper and outlines directions for future work. Finally, section VI provides the acknowledgment of the financial support received for this research.
+\vspace{0.01mm}
+
+\section{Magnetotelluric Method: Theoretical Background}
+The MT method is a passive EM technique using natural electric and magnetic fields to infer subsurface resistivity~\cite{Tikhonov1950, Cagniard1953}. Fields above 1\,Hz arise from thunderstorm activity, below 1\,Hz from solar wind–magnetosphere interaction~\cite{Simpson2005, Vozoff1972}. The field decays exponentially with depth via the skin depth~\cite{Hohmann1988}:
+\begin{equation}
+    \delta = 503\,\sqrt{\frac{\rho}{f}} \quad [\text{m}],
+\end{equation}
+\noindent where $\rho$ ($\Omega\cdot$m) is resistivity and $f$ (Hz) is frequency, giving depth sensitivity from metres to tens of kilometres~\cite{Simpson2005, Vozoff1972}. The impedance tensor $\mathbf{Z}(\omega)$ relates orthogonal field components~\cite{Tikhonov1950, Cagniard1953}:
+\begin{equation}
+    \begin{pmatrix} E_x \\ E_y \end{pmatrix}
+    =
+    \begin{pmatrix} Z_{xx} & Z_{xy} \\
+                    Z_{yx} & Z_{yy} \end{pmatrix}
+    \begin{pmatrix} H_x \\ H_y \end{pmatrix}.
+\end{equation}
+\vspace{-7mm}
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.40\textwidth]{mtSetup.png}
+  \caption{Schematic of a five-component MT field deployment showing
+           orthogonal electric dipoles ($E_x$, $E_y$), three-axis
+           induction coil magnetometers ($B_x$, $B_y$, $B_z$), and
+           a central data logger at a single survey site~\cite{Simpson2005}.}
+  \label{fig:MT_field_layout}
+\end{figure}
+\vspace{-4mm}
+Apparent resistivity and phase are:
+\begin{align}
+    \rho_{a,ij} &= \frac{1}{\mu_0\,\omega}\bigl|Z_{ij}\bigr|^2, \\
+    \phi_{ij}   &= \arctan\!\left(
+    \frac{\mathrm{Im}[Z_{ij}]}{\mathrm{Re}[Z_{ij}]}\right),
+\end{align}
+Table~\ref{tab:em_comparison} compares the principal EM methods.
+\vspace{-2mm}
+\begin{table}[htbp]
+\centering
+\caption{Comparison of EM Methods for Landslide Monitoring}
+\label{tab:em_comparison}
+\renewcommand{\arraystretch}{1.25}
+\setlength{\tabcolsep}{3pt}
+\small
+\begin{tabular}{|p{1.50cm}|p{1.3cm}|p{1.0cm}|p{2.5cm}|}
+\hline
+\textbf{Method} &
+\textbf{Freq.\ Range} &
+\textbf{Max Depth} &
+\textbf{Key Limitation} \\
+\hline
+MT~\cite{ChaveJones2012}   & 0.001\,Hz--10\,kHz & 100\,km & Cultural EM noise \\
+\hline
+CSAMT~\cite{Vozoff1972}   & 0.1\,Hz--100\,kHz  & 1\,km   & 10--30\,kW transmitter \\
+\hline
+ERT~\cite{Loke1996}     & DC--10\,Hz         & 50\,m   & Shallow; galvanic contact \\
+\hline
+GPR~\cite{Daniels2004}     & 10\,MHz--3\,GHz    & 10\,m   & Severe clay attenuation \\
+\hline
+TEM~\cite{Hohmann1988}     & 0.001\,Hz--100\,kHz& 500\,m  & Large transmitter loop \\
+\hline
+\end{tabular}
+\end{table}
+
+\vspace{-4mm}
+
+\section{Proposed FPGA-Based Acquisition Architecture}
+
+\subsection{System Overview}
+
+The proposed system is implemented on a \textbf{Xilinx Artix-7} FPGA (Digilent Nexys\,4\,DDR) for on-chip MT-based landslide monitoring~\cite{LiuCheng2024}: a 10-bit ADC input at 100\,MSPS feeds a 2048-point real-time FFT, and spectral magnitude is transmitted to a host PC via UART~\cite{ChenWang2020}.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.90\columnwidth]{I2.png}
+    \caption{Top-level block diagram of the proposed FPGA-based data acquisition and DSP system.}
+    \label{fig:fpga_block}
+\end{figure}
+
+As shown in Fig.~\ref{fig:fpga_block}, the ADC input is sampled, buffered, and processed by the FFT core, with resulting magnitudes sent via UART for real-time display. The signal chain is:
+\vspace{1mm}
+\begin{equation}
+\underbrace{\text{ADC}}_{\scriptscriptstyle 100\text{M,}10b}
+\!\xrightarrow{\scriptscriptstyle\texttt{rd\_adc}}\!
+\underbrace{\text{RAM}}_{\scriptscriptstyle 2048}
+\!\xrightarrow{\scriptscriptstyle\texttt{dec}}\!
+\underbrace{\text{FFT}}_{\scriptscriptstyle 2048\text{pt}}
+\!\xrightarrow{\scriptscriptstyle\text{Re,Im}}\!
+\underbrace{|X(k)|}_{\scriptscriptstyle\text{Sq,Sum,Rt}}
+\!\xrightarrow{\scriptscriptstyle\texttt{UART}}\!
+\text{PC}
+\label{eq:signal_chain}
+\end{equation}
+
+
+\subsection{Sub-Module Descriptions}
+
+The design is partitioned into nine sub-modules: \texttt{PLL\_loop} generates 50/100/200\,MHz clocks; \texttt{read\_adc} captures 10-bit ADC samples; \texttt{RAM\_ADC} buffers 2048 samples; \texttt{decoder} converts binary-offset to two's complement; \texttt{FFT} performs a 2048-point pipelined radix-2 transform; \texttt{Square/Sum} and \texttt{Root} compute the magnitude, stored in \texttt{RAM\_FFT}; \texttt{serial\_tx/rx} handles UART communication; and \texttt{TOP} provides FSM control and integration.
+\vspace{-3mm}
+\subsection{Finite State Machine Control}
+\vspace{-1mm}
+Three co-operating FSMs in the TOP module govern the workflow. \textbf{FSM\,1}, on command \texttt{`P'}, sequences: \textit{Wait} $\rightarrow$ \textit{Trig} $\rightarrow$ \textit{Acq} $\rightarrow$ \textit{FFT} $\rightarrow$ \textit{FFT\_write} $\rightarrow$ \textit{Square} $\rightarrow$ \textit{Send} $\rightarrow$ \textit{Wait}; commands \texttt{A}--\texttt{D} set time-base, trigger level, slope, and gain in \textit{Wait}. \textbf{FSM\,2}, on the 100\,MHz ADC clock, fills \texttt{RAM\_ADC} with 2048 samples during \textit{Acq}, else computes $\Delta x = x(k+1)-x(k)$ for trigger detection. \textbf{FSM\,3} transmits the FFT magnitude bytes, sync bytes (\texttt{`F','F','T'}), and raw ADC samples via UART.
+\vspace{-4mm}
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.92\columnwidth]{I3.png}
+    \caption{FSM~1: signal-processing state machine. States \texttt{s1}--\texttt{s4} perform $s(k)$ calculation, ADC acquisition, $s(k+1)$ computation, and differential $x(k+1)-x(k)$ compilation.}
+    \label{fig:fsm1}
+\end{figure}
+
+\vspace{-7mm}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.90\columnwidth]{I4.png}
+    \caption{FSM~2: UART transmission state machine sequentially dispatching the FFT buffer, flag bytes~\texttt{F}, period value~\texttt{T}, and waveform buffer, conditioned on the TX-enable flag.}
+    \label{fig:fsm2}
+\end{figure}
+\vspace{-2mm}
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=1.00\columnwidth]{I5.png}
+\vspace{-7mm}
+    \caption{FSM~3: top-level control cycling through initialisation, command reception, trigger, acquisition, FFT processing, and transmission, with a reconfiguration branch.}
+    \label{fig:fsm3}
+\end{figure}
+\vspace{-2mm}
+\subsection{FFT Engine and Magnitude Computation}
+The 2048-point pipelined radix-2 Cooley--Tukey FFT~\cite{ChenWang2020} runs at 200\,MHz, giving 48.828\,kHz resolution ($\Delta f = f_s/N = 100{\times}10^6/2048$) and 62.51\,$\mu$s latency, with ADC samples passing through the \texttt{decoder} before the FFT core. Spectral magnitude is:
+\vspace{-1mm}
+\begin{equation}
+    |X[k]| = \sqrt{\mathrm{Re}[k]^2 + \mathrm{Im}[k]^2},
+    \label{eq:magnitude}
+\end{equation}
+\noindent computed via \texttt{Square}, \texttt{Sum}, and CORDIC-based \texttt{Root} modules, yielding a 10-bit magnitude stored in \texttt{RAM\_FFT\_10bit}. The 48.828\,kHz/bin resolution is used for broadband spectral analysis to detect abnormal EM variations. For resolving low-frequency MT signals below 10\,kHz, decimation-based sub-band processing is planned as future work.
+\vspace{-1mm}
+\subsection{Key System Parameters}
+
+The system runs on a Xilinx Artix-7 (XC7A100T, Nexys\,4\,DDR) FPGA with a single-channel 10-bit SAR differential ADC at 100\,MSPS (50\,MHz Nyquist). The 2048-point radix-2 pipelined FFT runs at 200\,MHz, giving 62.51\,$\mu$s latency and 48.828\,kHz resolution per bin. The current hardware acquires one MT field component at a time; for full five-component MT acquisition ($E_x$, $E_y$, $H_x$, $H_y$, $H_z$), five such channels can be instantiated by replicating the same RTL design with Clock Domain Crossing (CDC) handling, planned as future hardware revision. Post-implementation: 50 DSP slices (20.83\%), 7.5 Block RAMs (5.56\%), 0.333\,W power, with UART to the host PC.
+\vspace{-1mm}
+\section{Simulation and Post-Implementation Results}
+
+\subsection{Simulation Environment}
+
+Functional correctness was verified via behavioural simulation in Vivado\,2025 using two Verilog testbenches. The primary testbench (\texttt{tb\_TOP}) simulates the end-to-end pipeline using a 64-entry sine wave LUT as ADC stimulus, with key parameters in Table~\ref{tab:sim_params}.
+Field measurements and real landslide datasets are not part of this work; sensor integration and field trials are planned as future work.
+\vspace{-4mm}
+\begin{table}[htbp]
+\caption{Key Simulation Parameters of \texttt{tb\_TOP}}
+\label{tab:sim_params}
+\centering
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{lll}
+\hline
+\textbf{Parameter} & \textbf{Value} & \textbf{Description} \\
+\hline
+Clock period      & 10\,ns              & 100\,MHz system clock   \\
+Timescale         & 1\,ns/1\,ps         & Time unit/precision     \\
+ADC word width    & 10\,bit             & Matches physical ADC    \\
+Sine LUT size     & 64 entries          & One complete period     \\
+UART trigger byte & \texttt{0x50}       & ASCII \texttt{`P'}      \\
+Startup settling  & 100 cycles          & PLL lock emulation      \\
+Sim.\ timeout     & 5{,}000{,}000       & Deadlock detection      \\
+\hline
+\end{tabular}
+\end{table}
+
+
+The testbench bypasses UART timing by injecting the trigger byte directly via Verilog \texttt{force}/\texttt{release}, cutting latency from $\sim$8\,000 to 6 cycles. It is self-checking, passing only if the FSM returns to \texttt{wait\_state} after cycle 1000, confirming deadlock-free completion.
+
+\subsection{FSM State Transition Verification}
+
+The TOP module FSM was verified through all seven states in simulation: \texttt{wait\_state} (0\,ns, idle/polling UART) $\rightarrow$ \texttt{trig\_state} (1{,}075{,}000\,ns, on \texttt{`P'}) $\rightarrow$ \texttt{acq\_state} (1{,}305{,}000\,ns, ADC acquisition) $\rightarrow$ \texttt{fft\_state} (FFT activated) $\rightarrow$ \texttt{fft\_write} (bins written to RAM) $\rightarrow$ \texttt{square\_state} (magnitude computed) $\rightarrow$ \texttt{send\_state} (UART transmission).
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.90\columnwidth]{SIM1_FULL.png}
+    \caption{Behavioural simulation waveform of the top-level FPGA design (\texttt{tb\_TOP}) in Vivado.}
+    \label{fig:sim1_full}
+\end{figure}
+\vspace{-3mm}
+\subsection{FFT Core Simulation}
+
+The second testbench (\texttt{tb\_fft\_vivado2025}) validated the 2048-point FFT core using multi-tone inputs applied one frequency at a time, confirming correct spectral analysis for each of the five MT field component types ($E_x$, $E_y$, $H_x$, $H_y$, $H_z$)~\cite{ChenWang2020}, achieving 62.51\,$\mu$s latency and 48.828\,kHz resolution at 200\,MHz. Fig.~\ref{fig:sim1_full} verifies complete system operation (ADC acquisition, UART communication, FSM control), while Fig.~\ref{fig:fft_sim1} confirms correct pipelined FFT operation with output coefficients generated after the initial data-loading interval.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.90\columnwidth]{FFT_SIM1.png}
+    \caption{Behavioural simulation waveform of the 2048-point FFT core in Vivado.}
+    \label{fig:fft_sim1}
+\end{figure}
+\vspace{-2mm}
+\subsection{Post-Implementation Resource Utilisation}
+\vspace{-3mm}
+\begin{table}[htbp]
+\centering
+\caption{FPGA Resource Utilisation Summary (Xilinx Artix-7
+         XC7A100T, Vivado Post-Implementation Netlist)}
+\label{tab:resources}
+\renewcommand{\arraystretch}{1.2}
+\setlength{\tabcolsep}{3pt}
+\vspace{-2mm}
+\begin{tabular}{lccc}
+\hline
+\textbf{Module} & \textbf{Slice LUTs} & \textbf{DSPs} & \textbf{BRAMs} \\
+\hline
+TOP (full)   & 3067\,(4.84\,\%) & 50\,(20.83\,\%) & 7.5\,(5.56\,\%) \\
+FFT core     & 1524             & 48              & 6.0             \\
+RAM\_ADC     & 602              & 0               & 0               \\
+RAM\_FFT     & 601              & 0               & 0               \\
+Root\_Square & 155              & 0               & 0               \\
+\hline
+\end{tabular}
+\end{table}
+\vspace{-3mm}
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.70\columnwidth]{overall_schematic_sim.png}
+    \caption{RTL schematic of the complete FPGA design generated by Vivado.}
+    \label{fig:overall_schematic}
+\end{figure}
+\vspace{-5mm}
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.50\columnwidth]{sim5.png}
+    \caption{Partial RTL schematic of the FFT magnitude computation module.}
+    \label{fig:sim5_schematic}
+\end{figure}
+\vspace{-5mm}
+\subsection{Power Analysis}
+\vspace{-1mm}
+The on-chip power of 0.333\,W was obtained from Vivado post-implementation netlist analysis of the Artix-7 XC7A100T FPGA only; this is not a direct hardware measurement. The MMCM clock generation block dominates at 0.096\,W (41\% of dynamic power), summarised in Table~\ref{tab:power}.
+\vspace{-3mm}
+
+\begin{table}[htbp]
+\caption{On-Chip Power Breakdown (Vivado Post-Implementation Netlist Analysis,
+         Artix-7 XC7A100T)}
+\label{tab:power}
+\centering
+\renewcommand{\arraystretch}{1.0}
+\begin{tabular}{lcc}
+\hline
+\textbf{Component} & \textbf{Power (W)} & \textbf{Share (\%)} \\
+\hline
+\multicolumn{3}{c}{\textit{Dynamic Power -- 0.234\,W (70\,\%)}} \\
+\hline
+MMCM          & 0.096 & 41 \\
+DSP           & 0.031 & 13 \\
+BRAM          & 0.025 & 11 \\
+Signals       & 0.024 & 10 \\
+Clocks        & 0.023 & 10 \\
+I/O           & 0.021 &  8 \\
+Logic         & 0.015 &  7 \\
+\hline
+\multicolumn{3}{c}{\textit{Static Power -- 0.098\,W (30\,\%)}} \\
+\hline
+Device static & 0.098 & 30 \\
+\hline
+\textbf{Total} & \textbf{0.333} & \textbf{100} \\
+\hline
+\end{tabular}
+\end{table}
+\vspace{-4mm}
+\subsection{Comparative Performance}
+\vspace{-1mm}
+Table~\ref{tab:comparison} compares the proposed system against published FPGA-based geophysical DAQ systems on the basis of FPGA platform, ADC resolution, channel count, sampling rate, and on-chip power. Power values of Shu~\cite{Shu2018}, Ren~\cite{RenZhang2020}, and Liu~\cite{ChenWang2020} are all NA; therefore no direct power comparison is claimed.
+\vspace{-2mm}
+\begin{table}[htbp]
+\caption{Comparison of FPGA-Based Geophysical DAQ Systems
+         (Ch.\ = channel count; NA = not available in cited work)}
+\label{tab:comparison}
+\centering
+\renewcommand{\arraystretch}{0.90}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{llcccc}
+\hline
+\textbf{Reference} & \textbf{FPGA} & \textbf{ADC} & \textbf{Ch.} & \textbf{Rate} & \textbf{Power} \\
+\hline
+Shu~\cite{Shu2018}          & Intel Cyclone      & 12-bit          & 3            & 80\,MSPS            & NA        \\
+
+Ren~\cite{RenZhang2020}              & Zynq-7020        & 16-bit          & 4            & 100\,kSPS          & NA           \\
+Liu~\cite{ChenWang2020}               & Cyclone\,V       & 24-bit          & 5            & 10\,kSPS           & NA           \\
+\textbf{Proposed} & \textbf{Artix-7} & \textbf{10-bit} & \textbf{1}   & \textbf{100\,MSPS} & \textbf{0.333\,W$^{*}$} \\
+\hline
+\multicolumn{6}{p{0.9\columnwidth}}{$^{*}$Vivado post-implementation netlist estimate; not a hardware measurement.} \\
+\hline
+\end{tabular}
+\end{table}
+\vspace{1mm}
+\section{Conclusion and Future Work}
+\vspace{-1mm}
+\subsection{Conclusion}
+\vspace{0mm}
+This paper presented an FPGA-based MT DAQ and DSP system on Xilinx Artix-7 (Nexys\,4\,DDR), validated via behavioural simulation in Vivado\,2025, achieving 3067 LUTs (4.84\%), 50 DSPs (20.83\%), 7.5 BRAMs (5.56\%), and 0.333\,W estimated on-chip power. With a 100\,MSPS 10-bit ADC, 2048-point pipelined FFT, CORDIC magnitude computation, and seven-state FSM, it offers the highest sampling rate in the comparison group, suited for portable landslide monitoring in regions such as the Barak Valley.
+
+\vspace{-1.5mm}
+\subsection{Future Work}
+\vspace{-0.5mm}
+Future work includes \textbf{sensor integration and field trials}, \textbf{five-channel hardware expansion} with CDC for simultaneous $E_x$, $E_y$, $H_x$, $H_y$, $H_z$ acquisition, \textbf{decimation-based sub-band processing} for MT signals below 10\,kHz, \textbf{Zynq SoC migration} (ARM Cortex-A9 for GPS timestamping and network management), \textbf{on-chip anomaly detection} (lightweight FFT-based classifiers for pre-landslide EM signatures), and \textbf{hardware power measurement} as part of prototype validation.
+\section{Acknowledgement:}
+
+This work was supported by National Mission on Himalayan Studies (NMHS) under Grant No. NMHS2024-25/SC-XIII/SG/SL-25, dated 20/03/2025.
+
+\vspace{-2mm}
+
+\begin{thebibliography}{00}
+
+\bibitem{Tikhonov1950} A. N. Tikhonov, ``The determination of the electrical
+properties of deep layers of the Earth's crust,''
+\textit{Doklady Akademii Nauk SSSR}, vol. 73, 1950.
+
+\bibitem{Cagniard1953} L. Cagniard, ``Basic theory of the magneto-telluric
+method of geophysical prospecting,'' \textit{Geophysics}, vol. 18,
+no. 3, pp. 605--635, 1953.
+
+\bibitem{LiuCheng2024} B. Li, Q. Xu, T. Liu, Q. Cheng, M. Tang, G. Zheng,
+and Z. Wang, ``Design and realization of electromagnetic instrument
+data acquisition circuit for landslide detection,''
+\textit{Applied Geophysics}, vol. 21, no. 2, pp. 316--330, 2024,
+doi: 10.1007/s11770-024-1061-3.
+
+\bibitem{ChenWang2020} C. Liu, W. Chen, and Y. Wang, ``An FPGA-based
+multi-channel monitoring system for landslide resistivity and
+self-potential signals with long-range wireless telemetry,''
+\textit{IEEE Sensors Journal}, vol. 20, no. 21,
+pp. 12941--12953, 2020.
+
+
+\bibitem{RenZhang2020} X. Ren, J. Li, and H. Zhang, ``A lightweight Zynq
+SoC-based data acquisition module for UAV-borne geophysical
+surveys,'' \textit{Sensors}, vol. 20, no. 18, Art. no. 5172, 2020.
+
+
+\bibitem{Vozoff1972}
+K.~Vozoff,
+``The magnetotelluric method in the exploration of sedimentary
+basins,''
+\textit{Geophysics}, vol.~37, no.~1, pp.~98--141, 1972.
+
+\bibitem{Simpson2005}
+F.~Simpson and K.~Bahr,
+\textit{Practical Magnetotellurics}.
+Cambridge University Press, 2005.
+
+
+\bibitem{Hohmann1988} S.~H.~Ward and G.~W.~Hohmann,
+``Electromagnetic theory for geophysical applications,''
+in \textit{Electromagnetic Methods in Applied Geophysics},
+vol.~1, pp.~130--311, SEG, 1988.
+
+\bibitem{ChaveJones2012}
+A.~D.~Chave and A.~G.~Jones (Eds.),
+\textit{The Magnetotelluric Method: Theory and Practice}.
+Cambridge University Press, 2012.
+
+\bibitem{Loke1996} M. H. Loke and R. D. Barker, ``Rapid least-squares inversion of apparent resistivity pseudosections by a quasi-Newton method,'' \textit{Geophysical Prospecting}, vol. 44, no. 1, pp. 131--152, 1996.
+
+
+\bibitem{Daniels2004} D. J. Daniels, Ed., \textit{Ground Penetrating Radar}, 2nd ed. London, U.K.: Institution of Engineering and Technology (IET), 2004.
+
+
+
+
+\bibitem{Shu2018}
+S. Shu, L. Wang, D. Liu, M. Chen, Y. Zhang, J. Luo, and F. Ji,
+``A high-speed data acquisition system based on FPGA for tokamak,''
+\textit{Review of Scientific Instruments}, vol. 89, no. 10, Art. no. 10K120, 2018.
+
+
+
+
+\end{thebibliography}
+
+
+\end{document}
