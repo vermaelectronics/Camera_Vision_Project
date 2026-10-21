@@ -166,16 +166,42 @@ channels step together. `gnss_smi=1` therefore switches to **matched
 automatic gain** (`gnss_rx_agc=2`):
 
 - Both channels are always set to the same manual gain.
-- Every 20 ms the firmware reads 512 snapshot samples per channel. A peak
-  above 1700 of 2047 lowers both gains (6 dB if the ADC clips). A peak below
-  600 for 60 ms raises both by 1 dB, never above the reference (the clean
-  gain when the loop started, or `gnss_rx_gain=`).
+- Every 5 ms (v3.1.0; 20 ms before) the firmware reads 256 snapshot samples
+  per channel.
+  - **Fast attack:** a peak above 1850 of 2047 lowers both gains by up to
+    12 dB per step. A jammer 80 dB above the noise is absorbed in ~20 ms; it
+    took ~200 ms before.
+  - **Fast release:** 20 ms below 1000 raises both gains in one step sized
+    from the peak, back to the reference in ~100 ms (~3 s before). The
+    reference is the clean gain when the loop started, or `gnss_rx_gain=`.
+  - **ADC loading:** the jammer is held at ~1450 of 2047 (~1200 before), so
+    less ADC range is wasted.
 - **TX level hold:** while the gain is G dB below the reference, TX1
-  attenuation is lowered by G dB (at most 30 dB), so the retransmitted GNSS
-  level does not drop. It is only applied while TX1 transmits, SMI-PI is on,
-  and the output is no louder than the clean output +3 dB. A jammer that is
-  not nulled is therefore never amplified. `gnss_smi=0`, `gnss_tx=0` or a
-  new `tx1_attenuation=` hands control back to the operator's value.
+  attenuation is lowered by G dB. That is at most 50 dB (30 dB before) and
+  never below 30 dB absolute attenuation, so the retransmitted GNSS level
+  does not drop. It is only applied while TX1 transmits, SMI-PI is on, and
+  the output is no louder than the clean output +3 dB. A jammer that is not
+  nulled is therefore never amplified. `gnss_smi=0`, `gnss_tx=0` or a new
+  `tx1_attenuation=` hands control back to the operator's value.
+
+**Core v3.1.0: rounded output.** `y = x1 - (a*x2 >> 16)` floored `a*x2`. That
+put a +0.5 LSB DC offset and extra quantisation noise on every output sample.
+It mattered once the gain loop had cut the RX gain for a strong jammer and
+the satellites were only a few LSB. Now `a*x2` is rounded. C model with the
+real HLS core, CW jammer held at ~1200 LSB, output SINR (dB) by gain cut (=
+jammer increase):
+
+| gain cut | 0 | 20 | 30 | 40 | 50 dB |
+|---|---|---|---|---|---|
+| v3.0 (floor) | -6.6 | -7.2 | -10.6 | -18.6 | -27.9 |
+| **v3.1.0 (rounded)** | **-6.6** | **-6.9** | **-9.3** | **-16.4** | **-25.9** |
+
+At a 40-50 dB cut the jammer is ~77-87 dB above the receiver noise, which
+then lies below the 12-bit ADC's own quantisation noise. That is the
+hardware limit; no weight can remove it. "80 dB" in CRPA data sheets is
+usually J/S (jammer to satellite). GPS is ~28 dB below the noise in 18 MHz,
+so J/S 80 dB is a gain cut of about 15 dB here, which is well inside the
+table. All 4 testbench scenarios pass; `SMI_PI_IP/` carries the same core.
 
 The null itself needs no speed-up: −40 dB within about 8 µs of jammer
 switch-on (C model, any SMI_PI_K from 8 to 10). Start `gnss_smi=1` with the

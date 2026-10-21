@@ -13,10 +13,13 @@
  * WHAT (mode GNSS_RXG_MATCHED, the default with gnss_smi=1)
  *   - Both channels in manual gain, ALWAYS at the same value, so the SMI-PI
  *     weight is not disturbed by gain changes.
- *   - Every ~20 ms the firmware reads 512 RX samples of each channel from the
+ *   - Every 5 ms the firmware reads 256 RX samples of each channel from the
  *     gnss_passthrough snapshot registers. Peak above GNSS_RXG_PEAK_HIGH
- *     (close to ADC clipping): both gains down together. Peak below
- *     GNSS_RXG_PEAK_LOW for 60 ms: both up 1 dB, never above the reference
+ *     (close to ADC clipping): both gains down together, by up to 12 dB per
+ *     step (fast attack: a jammer 80 dB above the noise is absorbed in
+ *     ~20 ms). Peak below
+ *     GNSS_RXG_PEAK_LOW for 20 ms: both up in one step sized from the peak
+ *     (fast release, ~100 ms back to the reference), never above the reference
  *     gain (the clean, no-jammer gain captured when the loop starts).
  *   - TX level hold: while the gain is G dB below the reference, TX1
  *     attenuation is lowered by G dB (at most GNSS_RXG_MAX_COMP_MDB), so the
@@ -34,9 +37,10 @@
 #define GNSS_RXG_AD9361   1   /* AD9361 slow AGC per channel (old default) */
 #define GNSS_RXG_MATCHED  2   /* matched loop + TX level hold             */
 
-#define GNSS_RXG_PEAK_HIGH     1700   /* of 2047: back off before clipping  */
-#define GNSS_RXG_PEAK_LOW       600   /* both below this: room to go up     */
-#define GNSS_RXG_MAX_COMP_MDB 30000U  /* TX level hold limited to 30 dB     */
+#define GNSS_RXG_PEAK_HIGH     1850   /* of 2047: back off before clipping  */
+#define GNSS_RXG_PEAK_LOW      1000   /* both below this: room to go up     */
+#define GNSS_RXG_MAX_COMP_MDB 50000U  /* TX level hold limited to 50 dB     */
+#define GNSS_RXG_MIN_ATT_MDB  30000U  /* hold never below 30 dB attenuation */
 
 void    gnss_rxg_set_mode(int mode);   /* starts/stops the loop             */
 int     gnss_rxg_mode(void);

@@ -119,8 +119,12 @@ void smi_pi(hls::stream<ap_uint<64> > &s_axis_x,
     // ---- output y = x1 - a*x2 ----------------------------------------------
     ap_int<42> pr = ar * x2r - ai * x2i;               // Q.16
     ap_int<42> pi = ar * x2i + ai * x2r;
-    ap_int<16> yr = sat16(ap_int<44>(x1r) - (pr >> 16));
-    ap_int<16> yi = sat16(ap_int<44>(x1i) - (pi >> 16));
+    // a*x2 rounded to nearest, not floored: the floor put a +0.5 LSB DC
+    // offset and extra quantisation noise on every output sample, which cost
+    // up to 2.2 dB of output SINR once the gain loop has cut the RX gain for a
+    // strong jammer (C model, cut 40 dB: -18.6 -> -16.4 dB). Output path only.
+    ap_int<16> yr = sat16(ap_int<44>(x1r) - ((pr + ap_int<42>(1 << 15)) >> 16));
+    ap_int<16> yi = sat16(ap_int<44>(x1i) - ((pi + ap_int<42>(1 << 15)) >> 16));
     ap_uint<32> out;
     out(15, 0)  = (ap_uint<16>)yr;
     out(31, 16) = (ap_uint<16>)yi;

@@ -11,9 +11,11 @@
 
 extern struct ad9361_rf_phy *ad9361_phy;
 
-#define RXG_PERIOD_US      20000U   /* one measurement every 20 ms           */
-#define RXG_NSAMP            512    /* snapshot reads per channel            */
-#define RXG_UP_AFTER           3    /* quiet periods (60 ms) before +1 dB    */
+#define RXG_PERIOD_US       5000U   /* one measurement every 5 ms            */
+#define RXG_NSAMP            256    /* snapshot reads per channel            */
+#define RXG_UP_AFTER           4    /* quiet polls (20 ms) before going up   */
+#define RXG_TARGET_PEAK    1450.0   /* where a down step aims the peak       */
+#define RXG_MAX_STEP_DB       12    /* largest single down step              */
 #define RXG_MIN_DB             1
 #define RXG_ATT_STEP_MDB    1000U   /* only rewrite TX attenuation if the    */
                                     /* target moved by at least 1 dB         */
@@ -182,12 +184,18 @@ void gnss_rxg_poll(void)
 	last_peak = peak;
 
 	if(peak > GNSS_RXG_PEAK_HIGH) {
-		/* Down by enough to bring the peak to ~1200; 6 dB if clipping. */
-		int32_t step = 6;
+		/* Fast attack. Clipping hides how strong the jammer really is, so
+		 * the gain drops by the largest step (12 dB) and is checked again
+		 * 5 ms later: a jammer 80 dB above the noise needs ~4 steps, i.e.
+		 * ~20 ms (it took ~200 ms with 6 dB per 20 ms). Below clipping the
+		 * step brings the peak to ~1450 of 2047, keeping the ADC well
+		 * loaded: every dB of headroom left unused is a dB of dynamic range
+		 * lost against a strong jammer. */
+		int32_t step = RXG_MAX_STEP_DB;
 		if(peak < 2040) {
 			double lvl = peak;
 			step = 0;
-			while(step < 6 && lvl > 1200.0) { lvl /= 1.122; step++; }  /* 1 dB */
+			while(step < RXG_MAX_STEP_DB && lvl > RXG_TARGET_PEAK) { lvl /= 1.122; step++; }  /* 1 dB */
 			if(step < 1) step = 1;
 		}
 		{
@@ -197,8 +205,20 @@ void gnss_rxg_poll(void)
 		}
 		rxg_quiet = 0;
 	} else if(peak < GNSS_RXG_PEAK_LOW && rxg_gain < rxg_ref) {
+		/* Fast release: after 20 ms below the low mark, jump up by as much
+		 * as the measured peak allows (towards ~1450, 1 dB margin, at most
+		 * 12 dB, never above the clean reference). With the jammer gone the
+		 * gain is back at the reference in ~100 ms instead of ~3 s, so the
+		 * satellites do not sit in the ADC's quantisation noise for long.
+		 * A jammer that returns is caught again by the fast attack. */
 		if(++rxg_quiet >= RXG_UP_AFTER) {
-			set_both(rxg_gain + 1);
+			double lvl = (peak < 1) ? 1.0 : (double)peak;
+			int32_t up = 0;
+			while(up < RXG_MAX_STEP_DB && lvl * 1.122 < RXG_TARGET_PEAK) { lvl *= 1.122; up++; }
+			if(up > 1) up -= 1;
+			if(up < 1) up = 1;
+			if(rxg_gain + up > rxg_ref) up = rxg_ref - rxg_gain;
+			set_both(rxg_gain + up);
 			rxg_quiet = 0;
 		}
 	} else {
@@ -226,7 +246,7 @@ void gnss_rxg_poll(void)
 			if(pout_ref <= 0.0)
 				pout_ref = last_pout;
 			else if(last_pout < 4.0 * pout_ref)
-				pout_ref = 0.9 * pout_ref + 0.1 * last_pout;
+				pout_ref = 0.975 * pout_ref + 0.025 * last_pout;
 		}
 		if(att_holding) gnss_rxg_stop_tx_hold();
 		return;
@@ -243,6 +263,10 @@ void gnss_rxg_poll(void)
 		if(comp * 1000.0 > (double)GNSS_RXG_MAX_COMP_MDB)
 			comp = GNSS_RXG_MAX_COMP_MDB / 1000.0;
 		floor_mdb = att_base > GNSS_RXG_MAX_COMP_MDB ? att_base - GNSS_RXG_MAX_COMP_MDB : 0U;
+		/* ... and never louder than the firmware's 30 dB safe-start level
+		 * (or the operator's own value if that is already lower). */
+		if(floor_mdb < GNSS_RXG_MIN_ATT_MDB)
+			floor_mdb = (att_base < GNSS_RXG_MIN_ATT_MDB) ? att_base : GNSS_RXG_MIN_ATT_MDB;
 		target = att_base - (uint32_t)(comp * 1000.0);
 		target = (target / 250U) * 250U;           /* AD9361 0.25 dB steps */
 		if(target < floor_mdb) target = floor_mdb;

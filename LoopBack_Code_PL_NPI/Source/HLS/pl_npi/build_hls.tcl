@@ -23,8 +23,9 @@
 #    PL_NPI_II=<n>        pipeline II, default 2
 #    PL_NPI_SKIP_CSIM=1   skip step 1
 #    PL_NPI_EXTRA_DELAY=<n>  delay registers in the weight loop, default 4
-#    PL_NPI_STEP_SHIFT=<n>   step reduction 2^-n, default 2 (keep >= 1 when
+#    PL_NPI_STEP_SHIFT=<n>   step reduction 2^-n, default 1 (keep >= 1 when
 #                            PL_NPI_EXTRA_DELAY > 0, or the loop oscillates)
+#    PL_NPI_CONSTRAIN_W1=0|1 1 = RX1 weight held at 1 (default), 0 = paper
 #
 #  OUTPUT
 #    $GNSS_CRPA_IP_REPO/pl_npi/component.xml, VLNV antsdr:gnss:pl_npi:1.0
@@ -73,7 +74,7 @@ cd $work
 open_project -reset pl_npi_hls
 set_top pl_npi
 set defs ""
-foreach v {PL_NPI_EXTRA_DELAY PL_NPI_STEP_SHIFT} {
+foreach v {PL_NPI_EXTRA_DELAY PL_NPI_STEP_SHIFT PL_NPI_CONSTRAIN_W1} {
   if {[info exists ::env($v)]} { append defs " -D$v=$::env($v)" }
 }
 if {$defs ne ""} { puts "PL_NPI_HLS: defines$defs" }

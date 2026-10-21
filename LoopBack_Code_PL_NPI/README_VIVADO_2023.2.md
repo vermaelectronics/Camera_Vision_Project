@@ -190,70 +190,84 @@ C model, noise +-20 LSB (267 LSB^2 per channel), 800000 samples, output vs RX1:
 | 1e7 | -12 dB | -48 dB |
 | 1e8 | -1.6 dB | -39 dB (output = noise, jammer nulled) |
 
-**Automatic gamma and gain (firmware v2.1.7, `gnss_npi_agc.c`).** With the
-power-on gamma of 1, PL-NPI cancels the noise and the satellites with it. The
-C model gives the satellites -39 dB (none visible), and with a jammer they are
--15 dB. `gnss_npi=1` now starts a loop, run from the console idle hook every
-20 ms:
+**Automatic gamma and gain (firmware, `gnss_npi_agc.c`).** With the
+power-on gamma of 1, the original PL-NPI cancelled the noise and the
+satellites with it. The C model gave the satellites -39 dB (none visible),
+and -15 dB with a jammer. `gnss_npi=1` starts a loop, run from the console
+idle hook every 5 ms (v2.2.0; 20 ms before):
 
-- **Automatic gamma:** `gamma = 2^17 x k x noise power per channel`. k is
-  itself automatic: **k = 32** while no jammer is seen, so the satellites
-  pass almost untouched, and **k = 1/8** (v2.1.10; 1 before) from the poll a
-  jammer is detected, for the deepest null. Detection means the input is
-  more than 6 dB above the noise floor or the ADC is near clipping. k returns
+- **Automatic gamma:** `gamma = 2^17 x k x noise power per channel`. The
+  noise power is measured from 256 snapshot samples per channel. It is
+  followed only while the input is within 3 dB of it, so a jammer never
+  pulls gamma up, and it is rescaled with every gain step. The last clean
+  value per dB of gain is remembered, so switching on with the jammer
+  already present still gets the right gamma.
+- **Automatic k:** **k = 32** while no jammer is seen, so the satellites pass
+  almost untouched, and **k = 1/8** from the poll a jammer is detected (input
+  more than 6 dB above the noise floor, or the ADC near clipping). k returns
   to 32 after 200 ms clean. `gnss_npi_k=N` fixes k (1..64); `gnss_npi_k=0`
   returns to automatic.
-
-**Core v2.1.10 (stronger jammers).** With a jammer 10-15 dB stronger the
-satellites became weak. The matched gain loop turns the RX gain down by the
-same 10-15 dB, so at the core the noise and satellites are only a few LSB.
-There, two things in the core cost SINR:
-1. **Output truncation.** `y = s >> 20` was a floor, which gives a -0.5 LSB
-   DC offset and extra quantisation noise. Now rounded.
-2. **Step size.** The step was 1/2. It is now 1/4 (`PL_NPI_STEP_SHIFT=2`),
-   which gives less weight jitter.
-
-The jammer-mode k is also lowered from 1 to 1/8. C model output SINR (dB),
-real HLS core, CW jammer held at ~1200 LSB by the gain loop, noise and
-satellite reduced by the gain cut:
-
-| gain cut (jammer increase) | 0 | 10 | 15 | 20 | 25 dB |
-|---|---|---|---|---|---|
-| v2.1.9 core, k = 1 | -6.7 | -7.4 | -8.2 | -9.8 | -12.4 |
-| **v2.1.10 core, k = 1/8** | **-6.8** | **-7.0** | **-7.2** | **-7.8** | **-9.3** |
-| SMI-PI | -6.6 | -6.6 | -6.8 | -7.2 | -8.3 |
-
-Weak jammers (jammer amplitude in LSB, noise +-20 LSB):
-
-| jammer | 60 | 150 | 300 | 1500 |
-|---|---|---|---|---|
-| v2.1.10, k = 1 | -11.6 | -8.6 | -7.4 | -6.9 |
-| **v2.1.10, k = 1/8** | **-8.1** | **-7.1** | **-7.0** | **-7.0** |
-| SMI-PI | -7.2 | -6.9 | -6.9 | -6.8 |
-
-Testbench: 600 LSB null -52.6 dB, converged at 200 samples (was -50.7 dB,
-300). No jammer: output = RX1 (0.0 dB). A jammer switched on and off every
-3000 samples settles within 3 blocks, then stays within 1.6 dB. The noise power is measured from 512 snapshot samples
-  per channel. It is followed only while the input is within 3 dB of it, so
-  a jammer never pulls gamma up, and it is rescaled with every gain step. The
-  last clean value per dB of gain is remembered, so switching on with the
-  jammer already present still gets the right gamma. C model, noise +-20
-  LSB, 1500 LSB jammer, gamma 1.4e8: output SINR -7.0 dB (SMI-PI -6.8 dB,
-  RX1 alone -48 dB), satellites -1.0 dB with no jammer.
-- **Matched RX gain:** both channels are always set to the same manual gain,
-  lowered together when the ADC peak nears clipping, and raised back to the
-  clean reference afterwards. With independent AGC steps the null fell to
-  -20 dB in the C model; with matched steps it stays at -55 dB.
+- **Matched RX gain:** both channels are always set to the same manual gain.
+  With independent AGC steps the null fell to -20 dB in the C model; with
+  matched steps it stays at -55 dB.
+  - **Fast attack (v2.2.0):** a peak above 1850 of 2047 lowers both gains
+    by up to 12 dB per 5 ms step. A jammer 80 dB above the noise is
+    absorbed in ~20 ms; this took ~200 ms before.
+  - **Fast release:** 20 ms below 1000 raises both gains in one step sized
+    from the peak, back to the clean reference in ~100 ms (~3 s before).
+  - **ADC loading:** the jammer is held at ~1450 of 2047 (~1200 before), so
+    less ADC range is wasted.
 - **TX level hold:** while a jammer is present, TX1 attenuation is lowered
-  so the output power returns to the clean output power (at most 30 dB).
-  This undoes both the RX gain cut and the level the null itself takes. It
-  is only applied while TX and PL-NPI are on, and it can never make the
-  output louder than the clean level.
-- **Speed:** the null reaches -40 dB 33 us after jammer switch-on, and the
-  gain settles within about 100 ms.
+  so the output power returns to the clean output power. That is at most
+  50 dB (30 dB before) and never below 30 dB absolute attenuation. This undoes
+  both the RX gain cut and the level the null itself takes. It is only
+  applied while TX and PL-NPI are on, and it can never make the output
+  louder than the clean level.
 
 `gnss_npi_gamma=<n>` still sets a fixed value and turns the automatic gamma
 off; `gnss_npi_auto=1` turns it back on.
+
+**Core v2.2.0 (strong and very strong jammers).** Each change below was found
+with the real HLS core in the C model. A CW jammer is held at ~1200 LSB by
+the gain loop, and the noise and satellite shrink by the gain cut.
+
+1. **Output rounding (v2.1.10).** `y = s >> 20` was a floor, which gives a
+   -0.5 LSB DC offset and extra quantisation noise once the satellites are
+   only a few LSB. Now rounded.
+2. **RX1 weight held at 1 (v2.2.0, `PL_NPI_CONSTRAIN_W1=1`).** The paper's
+   leak keeps w1 only *near* 1. Under a strong jammer, power minimisation
+   shrank the whole weight vector: |w1| = 0.19, and 0.04 at a 40 dB gain cut.
+   The output, satellites included, fell below 1 LSB and was rounded away.
+   Now only w2 adapts (Compton's constraint), so everything but the jammer
+   keeps RX1's level. Step 1/2 (`PL_NPI_STEP_SHIFT=1`).
+
+Output SINR (dB) by gain cut, which equals the jammer increase:
+
+| gain cut | 0 | 20 | 30 | 40 | 50 dB |
+|---|---|---|---|---|---|
+| v2.1.9 | -6.7 | -9.8 | | | |
+| v2.1.10 (rounded) | -6.8 | -7.8 | -13.3 | -25.7 | -37.7 |
+| **v2.2.0 (rounded + w1 = 1)** | **-6.7** | **-7.1** | **-9.5** | **-16.6** | **-26.1** |
+| SMI-PI v3.1.0 (rounded) | -6.6 | -6.9 | -9.3 | -16.4 | -25.9 |
+
+Weak jammers, v2.2.0, k = 1/8 (noise +-20 LSB): -7.3 / -6.9 / -6.9 / -6.9 dB
+at 60 / 150 / 300 / 1500 LSB (SMI-PI -7.2 / -6.9 / -6.9 / -6.8). No jammer,
+k = 32: -9.0 dB (RX1 alone -8.9 dB).
+
+Testbench: 600 LSB jammer, output 44.8 dB below the input (the noise is now
+kept, not cancelled), converged at 200 samples. A 1500 LSB jammer switched
+on is nulled within the first 1000 samples (~30 us); switched off, w2
+relaxes to 0 through the 2^-18 leak (~8.5 ms).
+
+**What limits very strong jammers.** At a 40-50 dB gain cut the jammer is
+~77-87 dB above the receiver noise. The receiver noise is then below the
+12-bit ADC's own quantisation noise (1/6 LSB^2 per channel), which no weight
+can remove. Both cores sit on that limit. A real GNSS receiver filters to a
+~2 MHz band, which removes ~12 dB of that wideband quantisation noise, so it
+sees a smaller loss than these full-band figures. "80 dB" in CRPA data sheets
+is usually J/S (jammer to *satellite*). GPS is ~28 dB below the noise in
+18 MHz, so J/S 80 dB is a gain cut of about 15 dB here, which is well inside
+the table.
 
 **Timing.** The first 2023.2 build failed in HLS: estimated clock 13.433 ns
 at the 8 ns target. The weight-update loop had only 10 clocks (5 registers at

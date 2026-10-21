@@ -2,7 +2,8 @@
 //  pl_npi.cpp  --  pipelined PL-NPI power-inversion core (Vitis HLS)
 //  ANTSDR E310 V1 / GNSS CRPA project
 // ----------------------------------------------------------------------------
-//  ALGORITHM (unchanged from the original RTL)
+//  ALGORITHM (from the original RTL; v2.2.0 adds the w1 = 1 constraint, see
+//  "CONSTRAINED POWER INVERSION" below)
 //    PL-NPI, Jia et al., "FPGA Implementation of Variable Step Power
 //    Inversion Array for BeiDou Receiver", IEEE Access vol. 11, 2023, Eq. 11,
 //    as implemented in Source/HDL/pl_npi_reference/rtl/
@@ -23,6 +24,32 @@
 //    2 x^T x << gamma its steady state is diagonally loaded power inversion,
 //    w = L (R + L I)^-1 wo with L ~= gamma / 2^17 [LSB^2]: directions of the
 //    input covariance R much stronger than L are nulled, weaker ones pass.
+//
+//  CONSTRAINED POWER INVERSION (v2.2.0, PL_NPI_CONSTRAIN_W1 = 1)
+//    The paper keeps RX1's weight near 1 only through the leak towards
+//    wo = [1, 0]. Power minimisation pulls the whole weight vector towards 0,
+//    and with a strong jammer it wins: the C model gave |w1| = 0.19 at
+//    jammer 1500 LSB and 0.04 once the gain loop had cut the RX gain by
+//    40 dB. The null direction stayed right (w2/w1 = -a), but the whole
+//    output -- satellites included -- shrank below 1 LSB and was lost to the
+//    output rounding and the 12-bit DAC (satellite gain -19 dB, output SINR
+//    -25.7 dB against -18.6 dB for SMI-PI).
+//    Now w1 is held at exactly 1 (Compton's power-inversion constraint: wp1
+//    is never updated) and only w2 adapts; its leak pulls it towards 0, so
+//    the jammer is nulled by w2 alone and everything else keeps RX1's level.
+//    C model output SINR in dB, CW jammer held at ~1200 LSB by the gain loop,
+//    noise and satellite reduced by the gain cut:
+//
+//      gain cut (jammer increase)   0     20     30     40     50 dB
+//      unconstrained v2.1.10      -6.8   -7.8  -13.3  -25.7  -37.7
+//      constrained   v2.2.0       -6.7   -7.1   -9.5  -16.6  -26.1
+//      SMI-PI (rounded output)    -6.6   -6.9   -9.3  -16.4  -25.9
+//
+//    The remaining loss at very large cuts is the 12-bit ADC: the receiver
+//    noise falls below the ADC's own quantisation noise (1/6 LSB^2 per
+//    channel), which no weight can remove.
+//    The weight-1 update logic is now unused, which also shortens the
+//    timing-critical loop.
 //
 //  WHAT IS DIFFERENT, AND WHY
 //    The original RTL computes a whole weight update in ONE clock: a 67x51-bit
@@ -76,17 +103,13 @@
 //
 //    The cost is a delayed LMS: the update reaches the weights NQ samples
 //    later. With the full step that oscillates (simulated: 93 dB output even
-//    at NQ = 1), so the step is reduced by 2^PL_NPI_STEP_SHIFT. v2.1.10 uses
-//    shift 2 (quarter step) together with a rounded output; C-simulation,
-//    NQ = 4:
-//      jammer 600 LSB      null -52.6 dB, converged at 200 samples
-//                          (shift 1, truncated output: -50.7 dB, 300)
-//      jammer 2000 steady  residual 17.9 dB (shift 1: 18.3 dB)
-//      jammer 3000 on/off every 3000 samples: settles within 3 blocks, then
-//                          within 1.6 dB
-//      jammer 25 dB above the RX gain reference (noise ~1 LSB at the core):
-//                          output SINR -9.3 dB (shift 1, truncated: -12.4 dB;
-//                          SMI-PI -8.3 dB)
+//    at NQ = 1), so the step is reduced by 2^PL_NPI_STEP_SHIFT. v2.2.0 uses
+//    shift 1 (half step) with the w1 constraint and a rounded output;
+//    C-simulation, NQ = 4: jammer 600 LSB testbench null 44.8 dB below the
+//    input (the noise is now passed, not cancelled), converged at 200
+//    samples; a 1500 LSB jammer switched on is nulled within the first 1000
+//    samples (~30 us), switched off the weight relaxes to 0 through the
+//    2^-18 leak (~8.5 ms).
 // ============================================================================
 #include "pl_npi.h"
 
@@ -103,8 +126,11 @@ typedef ap_int<32> w_t;       // weight, Q12.20
 static const int NQ = PL_NPI_EXTRA_DELAY;
 // The step is alpha*gain / 2^PL_NPI_STEP_SHIFT. A delayed LMS is only stable
 // if step x delay stays small, so the extra delay above needs a smaller step.
+#ifndef PL_NPI_CONSTRAIN_W1
+#define PL_NPI_CONSTRAIN_W1 1      // 1 = w1 held at 1 (v2.2.0), 0 = paper/leak only
+#endif
 #ifndef PL_NPI_STEP_SHIFT
-#define PL_NPI_STEP_SHIFT 2
+#define PL_NPI_STEP_SHIFT 1
 #endif
 
 static const ap_uint<17> GAIN_K[4] = {65536, 68812, 72089, 78643};
@@ -292,6 +318,9 @@ void pl_npi(hls::stream<ap_uint<64> > &s_axis_x,
         ap_int<49> li = ((ap_int<49>)wp_im[i] + TE_IM(i)) >> 18;
         nwp_re[i] = adapt_en ? sat32((ap_int<49>)wp_re[i] - lr) : wp_re[i];
         nwp_im[i] = adapt_en ? sat32((ap_int<49>)wp_im[i] - li) : wp_im[i];
+#if PL_NPI_CONSTRAIN_W1
+        if (i == 0) { nwp_re[i] = 0; nwp_im[i] = 0; }   // w1 = wo1 = 1, fixed
+#endif
     }
 
     // ---- stage D: shift the stage-C product into Q.20 weight units -------
