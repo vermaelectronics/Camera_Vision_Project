@@ -1,4 +1,4 @@
-# LoopBack_Code_SMI_PI: closed-form power inversion (SMI-PI), Vivado / Vitis 2023.2
+# LoopBack_Code_SMI_PI: space-time SMI power inversion (SMI-PI v4.0), Vivado / Vitis 2023.2
 
 This project was first built with Vivado/Vitis 2026.1 and the Analog Devices
 `hdl_2026_r1` library. This version builds with **Vivado/Vitis 2023.2** on
@@ -68,8 +68,12 @@ The HDL (`Source/HDL`), constraints (`Source/XDC`) and block design contents are
 
 ## Status
 
-The SMI-PI HLS core (v3.0) was checked in C simulation only: Vitis HLS
-synthesis, the II and timing have not been run yet.
+SMI-PI v4.0 was checked in C simulation (the HLS testbench runs the real
+filter with the firmware's own weight solver, 6 scenarios), with a host
+build of the firmware engine against a simulated radio, and with an RTL
+simulation of the changed gnss_passthrough (iverilog). Vitis HLS synthesis,
+the block design and timing have not been run by me; check
+`SMI_PI_HLS: PASS` and `BUILD_TIMING: MET` on your machine.
 
 These changes have **not yet been built** under Vivado 2023.2. The archive was
 prepared without access to the tools. The scripts were syntax-checked, and
@@ -83,7 +87,157 @@ the post-route fix to close timing, and 2023.2 may route differently.
 board whatever tools you have installed. A 2023.2 build writes its own
 `Build/Output/BOOT.BIN`.
 
-## SMI-PI power inversion (bitstream v3.0)
+## SMI-PI v4.0: space-time anti-jam (bitstream v4.0)
+
+### Why v4
+
+Bench test of v3.1.0 (one weight): with a 15 dB continuous jammer the
+receiver kept 5 GPS / 3 GLONASS / 6 Galileo at C/N0 ~36 dB-Hz (cold start
+47 s); at 20 dB, and with a wideband jammer, every satellite was lost. Three
+causes, all fixed here:
+
+1. **One weight cannot null a wideband jammer.** `y = x1 - a*x2` matches the
+   two receive paths at one frequency only. Across 50 MHz the RX1/RX2 ratio
+   changes (cable lengths, antenna spacing, the two AD9361 analog filters,
+   reflections), so the null is shallow. Simulated at 50 MS/s, jammer 30 dB
+   above the noise filling the band:
+
+   | path difference between RX1 and RX2 | one weight (v3) | **v4, 31 taps** |
+   |---|---|---|
+   | 0.5 ns cable + 2 % filter mismatch | 29.5 dB | **48 dB** |
+   | 3 ns cable (~60 cm) | 12.9 dB, satellites -12 dB | **41 dB**, satellites ~0 dB |
+   | reflection -6 dB, 50 ns later | 5 dB | **38-40 dB** |
+   | CW tone | 55 dB | 46-64 dB |
+
+   12.9 dB of suppression against a 20-30 dB jammer is exactly "all
+   satellites gone".
+2. **The bitstream was timed for 30.72 MS/s, but the board ran at 50 MS/s.**
+   In 2R2T mode the AD9361 data clock is 4x the sample rate. The 8 ns rx_clk
+   constraint (vendor value) covers 30.72 MS/s (122.88 MHz); 50 MS/s is
+   200 MHz, outside what Vivado checked. v4 constrains rx_clk at 4 ns
+   (61.44 MS/s) and moves the filter off that clock entirely.
+3. **The GUI switched both channels to the AD9361 slow-attack AGC.** Two
+   independent AGCs step the gains apart and break the null. v4's matched
+   gain loop now checks every 200 ms and puts both channels back to the same
+   manual gain, with a console message.
+
+### What it is
+
+    axi_ad9361 RX1,RX2 ─► gnss_passthrough ─ m_axis_smi ─► smi_fifo_in (async) ─► smi_pi_0
+                          gnss_passthrough ◄─ s_axis_smi ◄─ smi_fifo_out (async) ◄─┘
+                          gnss_passthrough ─► axi_ad9361 TX1      (CONTROL[5] = 1)
+                          gnss_passthrough AJ_W/AJ_COMMIT ─ aj_wts[1023:0] ─► smi_pi_0/wts
+       ARM: RX DMA capture (4096 samples) ─► gnss_aj_math.c ─► 31 weights ─► AJ_W ─► commit
+       smi_pi_0, both FIFOs' core side: sys_cpu_clk 100 MHz.  gnss_passthrough: l_clk (4 x fs).
+
+- **FPGA filter** (`Source/HLS/smi_pi`, IP `smi_pi` 2.0): 16 taps on RX1 and 16
+  on RX2, `y[n] = x1[n-8] - sum_{k!=8} a_k x1[n-k] - sum_k b_k x2[n-k]`. The
+  RX1 tap at delay 8 is fixed at 1 (power inversion), so the output can
+  never be turned down as a whole and with no jammer it is RX1. One sample
+  per clock at 100 MHz (II=1), 93 multipliers (3 per complex tap).
+  The RX2 taps follow the frequency-dependent RX1/RX2 ratio across the band;
+  the RX1 taps cancel a reflected copy of the jammer from another direction.
+- **Weights on the ARM** (`gnss_aj_math.c`): the exact SMI solution of the
+  space-time power-inversion problem from one 4096-sample capture of both
+  channels: 63 lag sums + edge terms give the exact 32x32 sample covariance,
+  complex Cholesky in double precision. Diagonal loading = the noise power,
+  estimated from the canceller's own output and iterated (no `gnss_smi_load`
+  any more). RX1's own taps get 4x the loading so they do not start
+  predicting the satellites away. ~100-200 updates per second; a jammer that
+  appears is nulled in 1-2 updates (~10-20 ms).
+- **Jammer indicator** (`gnss_aj.c`): J/N from the learned noise floor,
+  suppression and residual measured with the weights that were actually
+  running (out-of-sample), jammer bandwidth and centre frequency from the
+  lag correlations. Printed on the console:
+
+      [AJ] *** JAMMER ON ***  J/N +30.1 dB, WIDEBAND, fills the whole 50.0 MHz band (~48.8 MHz seen), RX gain cut 7 dB, suppression 36.8 dB, residual +0.3 dB
+      [AJ] JAMMED  J/N +30.0 dB  suppression 36.9 dB  residual +0.3 dB | WIDEBAND, fills the whole 50.0 MHz band | RX 65/70 dB  TX att 70.0 dB | 165 upd/s
+      [AJ] jammer OFF after 4.5 s (peak J/N +30.4 dB)
+      [AJ] *** JAMMER ON ***  J/N +50.1 dB, CW tone at +3.0 MHz (RF 1587.5 MHz), RX gain cut 17 dB, suppression 57.1 dB, residual +0.8 dB
+
+  (from the host test of the firmware against a simulated radio). Residual
+  ~0 dB = the jammer is fully removed; above 3 dB for a second prints a
+  WARNING with what to check.
+- **Automatic, nothing to tune:** at boot the firmware sets the RF profile
+  (`gnss_band=1`: LO 1584.5 MHz RX and TX, 50 MS/s, 56 MHz, which carries GPS,
+  Galileo, GLONASS G1 and BeiDou B1I), switches both RX gains to the matched
+  loop and starts the anti-jam engine. `gnss_tx=1` is then the only command
+  needed (it also turns anti-jam on, unless you switched it off with
+  `gnss_smi=0`).
+
+### Console (PuTTY)
+
+| Command | What it does |
+|---|---|
+| `gnss_tx=1` / `gnss_tx=0` | transmit (anti-jam output) / silence, as before |
+| `tx1_attenuation=70000` | output level, as before (bigger = quieter) |
+| `gnss_aj?` | everything: jammer type and frequency, J/N, suppression, residual, noise, weights, gains, update rate, radio |
+| `gnss_smi?` | one line: on/off, jammer, J/N, suppression |
+| `gnss_smi=1` / `=0` | anti-jam on (default) / off (TX1 = RX1) |
+| `gnss_aj_log=5` | status line every 5 s (default); `=0`: only JAMMER ON/OFF lines |
+| `gnss_aj_mode=0/1/2` | 31 taps (default) / RX2 taps only / one weight (old v3, for an A/B test) |
+| `gnss_band=0/1/2` | 1575.42 MHz 30.72 MS/s / 1584.5 MHz 50 MS/s (default) / 1584.5 MHz 61.44 MS/s |
+| `gnss_smi_freeze=1/0` | keep / track the weights |
+| `gnss_rx_gain?`, `gnss_rx_gain=`, `gnss_rx_agc=` | as before |
+
+Do not use the GUI's "GC Mode"/"RX Gain" or the vendor `rx1_gc_mode=`,
+`rx_samp_freq=`, `rx_lo_freq=` while anti-jam is on: the gain loop undoes
+gain-mode changes (and says so); use `gnss_band=` for rate and LO, so RX and
+TX stay identical.
+
+### Test it the same way as before
+
+1. Boot, wait for `ANTI-JAM ... ON`, then `gnss_tx=1`, `tx1_attenuation=70000`.
+2. Jammer off: note satellites and C/N0 (`gnss_aj?` shows `jammer: none`).
+3. Jammer on at 15, 20, 25, 30 dB, CW and wideband: note satellites, average
+   C/N0, the `[AJ]` line (J/N, suppression, residual).
+4. Same steps with `gnss_aj_mode=2` (the old single weight) for comparison,
+   then `gnss_aj_mode=0` again.
+
+### Lock time
+
+A receiver's **cold start** needs the satellites' ephemeris, which is
+broadcast in 30 s frames (subframes 1-3, 18 s minimum after bit sync); that
+is why your cold starts were 31-36 s without a jammer. No anti-jam processor
+can make a cold start shorter than that. What v4 changes is that a jammer
+should no longer add to it (your 47 s cold start with 15 dB was most likely
+the lower C/N0 slowing navigation-data decoding): the null forms within
+~10-20 ms of the jammer appearing, faster than the receiver's tracking loops
+notice. For under 20 s
+use the receiver's hot start (ephemeris kept: 4 s in your test) or warm
+start with valid ephemeris/almanac (A-GNSS).
+
+### Limits
+
+- Two antennas null ONE jammer direction (plus its reflections). A second
+  jammer from another direction, or a satellite in the jammer's direction,
+  is not separable.
+- The 12-bit ADC: a jammer more than ~60 dB above the noise forces gain cuts
+  that push the satellites towards the quantisation noise (v3.1.0 table
+  below still applies).
+- IQ imbalance images of a strong wideband jammer are not cancelled by a
+  linear filter (AD9361 quadrature tracking keeps them ~50 dB down).
+
+### Build notes
+
+- Stage `smi`: `vitis_hls -f build_hls.tcl`, 6 C-sim scenarios (bit-exact
+  filter, wideband 30 dB, no jammer, CW 40 dB, wideband + reflection,
+  wideband 50 dB), synthesis at 10 ns, **fails** if II > 1 or the clock
+  estimate > 10 ns. IP `antsdr:gnss:smi_pi:2.0`.
+- The block design adds two `axis_data_fifo` (independent clocks) and wires
+  `gnss_passthrough/aj_wts` to `smi_pi_0/wts`; the filter runs on
+  `sys_cpu_clk`.
+- `rx_clk` is constrained at **4 ns** (`Source/XDC/system.xdc`). If step 6
+  misses timing on rx_clk, 5 ns still covers the default 50 MS/s.
+- gnss_passthrough VERSION reads **4.0**. New registers `AJ_W` 0x100-0x17C,
+  `AJ_COMMIT` 0x180, `AJ_INFO` 0x184; 0x48 (loading) and STATUS[21:20] are
+  gone. The ch0 output buffer is flushed and re-primed when CONTROL[5]
+  changes (no underflow from the extra FIFO latency).
+- The firmware's weight solver compiles itself with `-O3` (`#pragma`), as
+  the XSCT flow builds the application at `-O0`.
+
+## Previous version: one-weight SMI-PI (bitstream v3.0 / v3.1.0)
+
 
 This folder is the **SMI-PI** variant: closed-form ("sample matrix
 inversion") power inversion. It has no PI-NLMS core (`LoopBack_Code`) and no

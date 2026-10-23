@@ -70,8 +70,13 @@
 #define GNSS_PT_REG_TX_COUNT_CH1    0x34U   /* RO                             */
 #define GNSS_PT_REG_RX_SNAPSHOT_CH1 0x38U   /* RO                             */
 #define GNSS_PT_REG_CRPA_COEF(n)    (0x40U + ((n) * 4U))  /* RW, n = 0..15    */
-/* CRPA_COEF[2] is the SMI-PI diagonal loading L in LSB^2 (0 acts as 1). */
-#define GNSS_PT_REG_SMI_LOAD       GNSS_PT_REG_CRPA_COEF(2)
+/* SMI-PI v4.0 space-time weights (see gnss_aj_math.h for the layout).
+ * AJ_W are a SHADOW copy; a write to AJ_COMMIT hands all 32 to the filter in
+ * one clock. AJ_COMMIT reads back a commit counter. */
+#define GNSS_PT_REG_AJ_W(k)         (0x100U + ((k) * 4U)) /* RW, k = 0..31    */
+#define GNSS_PT_REG_AJ_COMMIT       0x180U  /* W: commit, R: count            */
+#define GNSS_PT_REG_AJ_INFO         0x184U  /* RO 0x10080C01                  */
+#define GNSS_PT_AJ_INFO_EXPECTED    0x10080C01U
 
 /* ---- expected identity --------------------------------------------------- */
 #define GNSS_PT_EXPECTED_ID         0x47435031U
@@ -82,8 +87,11 @@
 /* 2.x = PL-NPI builds (LoopBack_Code_PL_NPI).
  * 3.0 = SMI-PI build: closed-form power inversion y = x1 - a*x2 in a separate
  *       block-design IP (smi_pi_0, CONTROL[5], loading L in 0x48, weight band
- *       in STATUS[21:20]). No PI-NLMS or PL-NPI core. */
-#define GNSS_PT_EXPECTED_VERSION    0x00030000U
+ *       in STATUS[21:20]). No PI-NLMS or PL-NPI core.
+ * 4.0 = SMI-PI space-time build: 16+16-tap filter (smi_pi_0 v2.0) whose 32
+ *       weights the ARM computes and writes to AJ_W / AJ_COMMIT. No 0x48
+ *       loading, no weight band. */
+#define GNSS_PT_EXPECTED_VERSION    0x00040000U
 
 /* ---- CONTROL bits -------------------------------------------------------- */
 #define GNSS_PT_CTRL_PASS_EN        (1U << 0)  /* 1 = RX->TX passthrough      */
@@ -91,7 +99,6 @@
 #define GNSS_PT_CTRL_SWAP_IQ        (1U << 2)
 #define GNSS_PT_CTRL_CH1_COPY       (1U << 3)  /* ch1 TX fed from ch0         */
 #define GNSS_PT_CTRL_SMI_EN         (1U << 5)  /* ch0 TX = SMI-PI(RX1, RX2)   */
-#define GNSS_PT_CTRL_SMI_FREEZE     (1U << 6)  /* SMI-PI weights frozen       */
 #define GNSS_PT_CTRL_CNT_CLEAR      (1U << 8)  /* held, not self-clearing     */
 
 /* ---- STATUS bits --------------------------------------------------------- */
@@ -108,8 +115,6 @@
 #define GNSS_PT_ST_SMI_DROP         (1U << 10) /* pair lost at smi_pi_0      */
 #define GNSS_PT_ST_PASS_EN_SYNCED   (1U << 16)
 #define GNSS_PT_ST_SMI_EN_SYNCED    (1U << 18)
-#define GNSS_PT_ST_SMI_BAND_SHIFT   20         /* [21:20] SMI-PI |a| band     */
-#define GNSS_PT_ST_SMI_BAND_MASK    0x3U
 
 /* ---- return codes -------------------------------------------------------- */
 #define GNSS_PT_OK                   0
@@ -134,16 +139,13 @@ void     gnss_pt_set_passthrough(int enable);
 void     gnss_pt_set_mute(int mute);
 void     gnss_pt_clear_counters(void);
 
-/* SMI-PI power inversion (bitstream v3.0+). Enabled, channel 0 TX carries
- * y = x1 - a*x2, a = R12/(R22 + L), instead of RX1 alone; passthrough must
- * also be on. Disabling holds the core in reset, so re-enabling restarts from
- * a = 0 (output = RX1) and builds the covariance again (about 2^10 samples). */
+/* SMI-PI space-time filter (bitstream v4.0). Enabled, channel 0 TX carries
+ * the filter output (RX1 and RX2 combined) instead of RX1 alone; passthrough
+ * must also be on. The weights are whatever was last committed. */
 void     gnss_pt_set_smi(int enable);
-/* Diagonal loading L in LSB^2 of a = R12/(R22 + L). Only keeps the division
- * well-behaved; reset value 16. 0 is used as 1 by the hardware. */
-void     gnss_pt_set_smi_load(uint32_t load);
-/* 1 = freeze the SMI-PI weight at its current value, 0 = track. */
-void     gnss_pt_set_smi_freeze(int freeze);
+/* Writes the 32 weight words (Q3.12, see gnss_aj_math.h) and commits them in
+ * one go: the filter never runs a half-written set. */
+void     gnss_pt_write_weights(const int16_t *re, const int16_t *im);
 
 /* Snapshot of everything worth observing at runtime (requirement 58). */
 typedef struct {

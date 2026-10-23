@@ -104,17 +104,14 @@ void gnss_pt_set_smi(int enable)
     gnss_pt_write(GNSS_PT_REG_CONTROL, c);
 }
 
-void gnss_pt_set_smi_load(uint32_t load)
+void gnss_pt_write_weights(const int16_t *re, const int16_t *im)
 {
-    gnss_pt_write(GNSS_PT_REG_SMI_LOAD, load);
-}
-
-void gnss_pt_set_smi_freeze(int freeze)
-{
-    uint32_t c = gnss_pt_read(GNSS_PT_REG_CONTROL);
-    if (freeze) { c |= GNSS_PT_CTRL_SMI_FREEZE; }
-    else        { c &= ~GNSS_PT_CTRL_SMI_FREEZE; }
-    gnss_pt_write(GNSS_PT_REG_CONTROL, c);
+    uint32_t k;
+    for (k = 0; k < 32U; k++) {
+        gnss_pt_write(GNSS_PT_REG_AJ_W(k),
+                      ((uint32_t)(uint16_t)im[k] << 16) | (uint32_t)(uint16_t)re[k]);
+    }
+    gnss_pt_write(GNSS_PT_REG_AJ_COMMIT, 1U);
 }
 
 void gnss_pt_get_state(gnss_pt_state_t *st)
@@ -160,11 +157,10 @@ void gnss_pt_print_state(void)
     printf("  control        : 0x%08lx\n", (unsigned long)s.control);
     printf("  status         : 0x%08lx\n", (unsigned long)s.status);
     printf("  passthrough    : %s\n", s.passthrough_enabled ? "ON" : "off");
-    printf("  smi-pi         : %s%s, load L=%lu, |a| band=%lu\n",
-           (s.status & GNSS_PT_ST_SMI_EN_SYNCED) ? "ON" : "off",
-           (s.control & GNSS_PT_CTRL_SMI_FREEZE) ? " (weight frozen)" : "",
-           (unsigned long)gnss_pt_read(GNSS_PT_REG_SMI_LOAD),
-           (unsigned long)((s.status >> GNSS_PT_ST_SMI_BAND_SHIFT) & GNSS_PT_ST_SMI_BAND_MASK));
+    printf("  smi-pi v4      : %s, %lu weight commits, layout 0x%08lx\n",
+           (s.status & GNSS_PT_ST_SMI_EN_SYNCED) ? "ON (TX1 = space-time filter)" : "off",
+           (unsigned long)gnss_pt_read(GNSS_PT_REG_AJ_COMMIT),
+           (unsigned long)gnss_pt_read(GNSS_PT_REG_AJ_INFO));
     printf("  adc enable i/q : %d / %d\n",
            (s.status & GNSS_PT_ST_ADC_EN_I0) ? 1 : 0,
            (s.status & GNSS_PT_ST_ADC_EN_Q0) ? 1 : 0);

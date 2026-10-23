@@ -50,12 +50,12 @@
 //                                    [3]  ch1_copy   1 = ch1 DAC fed from ch0
 //                                    [4]  reserved (reads back what was written)
 //                                    [5]  smi_en     1 = ch0 TX carries the
-//                                                        SMI-PI power-inversion
-//                                                        output y = x1 - a*x2
-//                                                        (RX1 and RX2 combined)
-//                                                    0 = SMI-PI held in reset
-//                                    [6]  smi_freeze 1 = SMI-PI weight frozen
-//                                                        (adapt_en = 0)
+//                                                        SMI-PI space-time filter
+//                                                        output (RX1 and RX2
+//                                                        combined, see AJ_W)
+//                                                    0 = ch0 TX carries RX1
+//                                    [6]  reserved (reads back; the v3 weight
+//                                         freeze is done in firmware in v4)
 //                                    [8]  cnt_clear  1 = hold counters cleared
 //    0x10    STATUS          RO      [0]  adc_enable_i0   [1]  adc_enable_q0
 //                                    [2]  dac_enable_i0   [3]  dac_enable_q0
@@ -68,8 +68,6 @@
 //                                         expected; cleared with cnt_clear)
 //                                    [16] pass_en (as seen in the clk domain)
 //                                    [18] smi_en  (as seen in the clk domain)
-//                                    [21:20] SMI-PI weight band |a| of the latest
-//                                         sample (0..3 = x1.00/1.05/1.10/1.20)
 //
 //            READ [2]/[3] CAREFULLY. dac_enable_* is NOT an enable this block
 //            drives, and it is NOT derived from the valid strobes. It is a
@@ -105,12 +103,31 @@
 //    0x34    TX_COUNT_CH1    RO      dac_valid_i1 pulses served
 //    0x38    RX_SNAPSHOT_CH1 RO      {adc_data_q1, adc_data_i1} last accepted
 //    0x3C    RESERVED        RO      reads 0
-//    0x40    CRPA_COEF[0..1] RW      reserved; stored and returned
-//    0x48    CRPA_COEF[2]    RW      SMI-PI diagonal loading L in LSB^2
-//                                    (unsigned, 32 bits; 0 is used as 1).
-//                                    a = R12 / (R22 + L). Reset value 16.
-//    0x4C..  CRPA_COEF[3..15] RW     reserved; stored and returned, no logic
-//                                    consumes them.
+//    0x40..  CRPA_COEF[0..15] RW     reserved; stored and returned, no logic
+//                                    consumes them. (0x48 was the v3 SMI-PI
+//                                    loading L; v4 needs no loading register.)
+//    0x100.. AJ_W[0..31]     RW      SMI-PI v4 space-time weights, SHADOW copy.
+//    0x17C                           Word k: {imag[31:16], real[15:0]}, signed
+//                                    Q3.12 (1.0 = 0x1000).
+//                                      k = 0..15  RX1 tap at delay k
+//                                                 (k = 8 is the reference,
+//                                                 fixed at 1; its word is
+//                                                 ignored by the core)
+//                                      k = 16..31 RX2 tap at delay k-16
+//                                    Writing here does NOT change the filter.
+//    0x180   AJ_COMMIT       W/RO    Any write copies all 32 shadow words to the
+//                                    weights the core uses, in one s_axi_aclk
+//                                    edge, so the core never runs a half-old,
+//                                    half-new set. Reads a commit counter.
+//    0x184   AJ_INFO         RO      {8'd taps per channel, 8'd reference delay,
+//                                     8'd fraction bits, 8'd layout version}
+//                                    = 0x10080C01
+//
+//  SMI-PI v4 CLOCKING
+//    smi_pi_0 runs on sys_cpu_clk (= s_axi_aclk), not on clk: the block design
+//    puts an asynchronous AXI-Stream FIFO on each side of it (m_axis_smi ->
+//    FIFO -> core -> FIFO -> s_axis_smi). The committed weights (aj_wts) are
+//    therefore driven from the same clock the core runs on -- no crossing.
 //
 //  LICENCE
 //    Original work for this project.  Not derived from Analog Devices or
@@ -162,24 +179,20 @@ module gnss_passthrough #(
   output     [15:0]   dac_data_i1,
   output     [15:0]   dac_data_q1,
 
-  // ---- SMI-PI core: separate block-design IP (smi_pi_0) -------------------
-  //  All in the clk domain. Source/BlockDesign/system_bd.tcl connects:
-  //    m_axis_smi    -> smi_pi_0/s_axis_x  {rx2_q, rx2_i, rx1_q, rx1_i}
-  //    smi_pi_0/m_axis_y -> s_axis_smi     {y_q, y_i}
-  //    smi_load      -> smi_pi_0/load      (register 0x48)
-  //    smi_adapt_en  -> smi_pi_0/adapt_en  (~CONTROL[6])
-  //    smi_rst_n     -> smi_pi_0/ap_rst_n  (CONTROL[0] & CONTROL[5])
-  //    smi_pi_0/wt_band -> smi_band      (STATUS[21:20])
+  // ---- SMI-PI v4 core: separate block-design IP (smi_pi_0) ----------------
+  //  Source/BlockDesign/system_bd.tcl connects:
+  //    m_axis_smi (clk) -> async FIFO -> smi_pi_0/s_axis_x {rx2_q, rx2_i, rx1_q, rx1_i}
+  //    smi_pi_0/m_axis_y -> async FIFO -> s_axis_smi (clk)  {y_q, y_i}
+  //    smi_rst_n (clk)  -> input FIFO reset (CONTROL[0] & CONTROL[5])
+  //    aj_wts (s_axi_aclk) -> smi_pi_0/wts, the committed AJ_W weights
   output     [63:0]   m_axis_smi_tdata,
   output              m_axis_smi_tvalid,
   input               m_axis_smi_tready,
   input      [31:0]   s_axis_smi_tdata,
   input               s_axis_smi_tvalid,
   output              s_axis_smi_tready,
-  output     [31:0]   smi_load,
-  output              smi_adapt_en,
   output              smi_rst_n,
-  input      [1:0]    smi_band,
+  output     [1023:0] aj_wts,
 
   // ---- AXI4-Lite slave (sys_cpu_clk domain) -------------------------------
   input               s_axi_aclk,
@@ -214,7 +227,13 @@ module gnss_passthrough #(
   //         weight band in STATUS[21:20]. The input to it goes through a
   //         one-entry holding register, STATUS[10] flags a sample pair it
   //         could not take. No PI-NLMS or PL-NPI core in this design.
-  localparam [31:0] CORE_VERSION = 32'h00030000;   // v3.0
+  // v4.0 -- SMI-PI space-time build: 16+16-tap filter (smi_pi_0 v2.0) on
+  //         sys_cpu_clk behind two async FIFOs, 32 weight words AJ_W at 0x100
+  //         committed atomically by AJ_COMMIT (0x180); the ARM computes them.
+  //         0x48 loading and the weight band are gone; the ch0 elastic buffer
+  //         is flushed and re-primed whenever CONTROL[5] changes.
+  localparam [31:0] CORE_VERSION = 32'h00040000;   // v4.0
+  localparam [31:0] AJ_INFO      = 32'h10080C01;
   localparam        AW           = FIFO_ADDR_WIDTH;
 
   // ==========================================================================
@@ -283,9 +302,6 @@ module gnss_passthrough #(
   reg  [31:0] reg_scratch = 32'd0;
   reg  [31:0] reg_control = 32'd0;
   reg  [31:0] crpa_coef [0:15];
-  // CRPA_COEF[2] is also kept in a plain register: it feeds the SMI-PI
-  // loading L in the clk domain, through the synchroniser below.
-  reg  [31:0] reg_smi_load = 32'd16;
 
   integer ci;
   initial for (ci = 0; ci < 16; ci = ci + 1) crpa_coef[ci] = 32'd0;
@@ -294,18 +310,45 @@ module gnss_passthrough #(
     if (s_axi_aresetn == 1'b0) begin
       reg_scratch <= 32'd0;
       reg_control <= 32'd0;
-      reg_smi_load <= 32'd16;
     end else if (reg_wr) begin
       case (reg_waddr)
         12'h002: reg_scratch <= s_axi_wdata;   // 0x08
         12'h003: reg_control <= s_axi_wdata;   // 0x0C
-        12'h012: reg_smi_load <= s_axi_wdata;       // 0x48
         default: ;
       endcase
       if (reg_waddr >= 12'h010 && reg_waddr <= 12'h01F)   // 0x40..0x7C
         crpa_coef[reg_waddr[3:0]] <= s_axi_wdata;
     end
   end
+
+  // ---- SMI-PI v4 weights: shadow (0x100..0x17C), committed by 0x180 -------
+  // All in s_axi_aclk, which is also the clock of smi_pi_0, so aj_wts changes
+  // in one edge for the whole set. Reset: all zero = TX1 carries RX1 delayed
+  // by 8 samples until the firmware has computed weights.
+  reg  [31:0]   aj_shadow [0:31];
+  reg  [1023:0] aj_active  = 1024'd0;
+  reg  [31:0]   aj_commits = 32'd0;
+  wire          aj_w_sel   = (reg_waddr >= 12'h040) && (reg_waddr <= 12'h05F);
+  wire          aj_commit  = reg_wr && (reg_waddr == 12'h060);
+  integer ai;
+  initial for (ai = 0; ai < 32; ai = ai + 1) aj_shadow[ai] = 32'd0;
+
+  always @(posedge s_axi_aclk) begin
+    if (s_axi_aresetn == 1'b0) begin
+      for (ai = 0; ai < 32; ai = ai + 1) aj_shadow[ai] <= 32'd0;
+      aj_active  <= 1024'd0;
+      aj_commits <= 32'd0;
+    end else begin
+      if (reg_wr && aj_w_sel)
+        aj_shadow[reg_waddr[4:0]] <= s_axi_wdata;
+      if (aj_commit) begin
+        for (ai = 0; ai < 32; ai = ai + 1)
+          aj_active[32*ai +: 32] <= aj_shadow[ai];
+        aj_commits <= aj_commits + 1'b1;
+      end
+    end
+  end
+  assign aj_wts = aj_active;
 
   // Status view, refreshed from the clk domain (see CDC section).
   wire [31:0] v_status, v_rx_cnt0, v_tx_cnt0, v_ovf_cnt, v_unf_cnt;
@@ -321,9 +364,13 @@ module gnss_passthrough #(
   // 0x47435031 -- the ID -- because the ID read had immediately preceded it.
   // The first read after reset happened to be correct only because
   // axi_araddr_r resets to 0, which is the ID offset.
+  wire [11:0] rd_idx = s_axi_araddr[13:2];
   always @(posedge s_axi_aclk) begin
     if (s_axi_arvalid && axi_arready) begin
-    case (s_axi_araddr[13:2])
+    if (rd_idx >= 12'h040 && rd_idx <= 12'h05F)
+      axi_rdata <= aj_shadow[rd_idx[4:0]];         // 0x100..0x17C
+    else
+    case (rd_idx)
       12'h000: axi_rdata <= CORE_ID;
       12'h001: axi_rdata <= CORE_VERSION;
       12'h002: axi_rdata <= reg_scratch;
@@ -339,10 +386,9 @@ module gnss_passthrough #(
       12'h00C: axi_rdata <= v_rx_cnt1;
       12'h00D: axi_rdata <= v_tx_cnt1;
       12'h00E: axi_rdata <= v_rx_snap1;
-      // 0x48 reads the value the core actually uses (reset 16), not the
-      // generic CRPA_COEF store, which resets to 0.
-      12'h012: axi_rdata <= reg_smi_load;
-      12'h010, 12'h011,          12'h013,
+      12'h060: axi_rdata <= aj_commits;            // 0x180
+      12'h061: axi_rdata <= AJ_INFO;               // 0x184
+      12'h010, 12'h011, 12'h012, 12'h013,
       12'h014, 12'h015, 12'h016, 12'h017,
       12'h018, 12'h019, 12'h01A, 12'h01B,
       12'h01C, 12'h01D, 12'h01E, 12'h01F:
@@ -371,19 +417,15 @@ module gnss_passthrough #(
   wire swap_iq   = ctrl_sync[2];
   wire ch1_copy  = ctrl_sync[3];
   wire smi_en    = ctrl_sync[5];
-  wire smi_freeze = ctrl_sync[6];
   wire cnt_clear = ctrl_sync[8];
 
-  // SMI-PI loading L. Quasi-static like the CONTROL bits, so bit-wise
-  // synchronisation is enough. The name keeps the "ctrl_meta" pattern so the
-  // existing false-path constraint covers it.
-  (* ASYNC_REG = "TRUE" *) reg [31:0] load_ctrl_meta = 32'd16;
-  (* ASYNC_REG = "TRUE" *) reg [31:0] load_ctrl_sync = 32'd16;
-
-  always @(posedge clk) begin
-    load_ctrl_meta <= reg_smi_load;
-    load_ctrl_sync <= load_ctrl_meta;
-  end
+  // CONTROL[5] edges: the ch0 buffer changes source (RX1 <-> filter output,
+  // which arrives through two FIFOs and the filter, a few hundred ns later).
+  // The buffer is flushed and re-primed on every edge, so it restarts half
+  // full of the NEW source instead of draining into an underflow.
+  reg  smi_en_d = 1'b0;
+  always @(posedge clk) smi_en_d <= smi_en;
+  wire smi_switch = smi_en ^ smi_en_d;
 
   // ==========================================================================
   //  Elastic buffer (one per channel)
@@ -414,6 +456,8 @@ module gnss_passthrough #(
     if (rst || !pass_en) begin
       primed0 <= 1'b0;
       primed1 <= 1'b0;
+    end else if (smi_switch) begin
+      primed0 <= 1'b0;
     end else begin
       if (level0 >= (1<<(AW-1))) primed0 <= 1'b1;
       if (level1 >= (1<<(AW-1))) primed1 <= 1'b1;
@@ -436,13 +480,13 @@ module gnss_passthrough #(
   //  smi_en = 1 : channel 0 carries the SMI-PI output (RX1 and RX2
   //               combined). Channel 1 is left as raw RX2.
   //
-  //  RESET. The core is held in reset whenever pass_en or smi_en is 0, so
-  //  re-enabling restarts from a = 0 (output = RX1) with an empty covariance.
+  //  RESET. smi_rst_n holds the input FIFO in reset whenever pass_en or
+  //  smi_en is 0. The filter keeps its weights; the firmware writes and
+  //  commits new ones.
   // ==========================================================================
   // --------------------------------------------------------------------------
-  //  SMI-PI (smi_pi_0), a separate block-design IP. The SMI-PI core
-  //  works at the RAW ADC scale (its loading L is in raw LSB^2), so RX
-  //  samples go in as received -- 12-bit right-aligned,
+  //  SMI-PI (smi_pi_0), a separate block-design IP. It works at the RAW ADC
+  //  scale, so RX samples go in as received -- 12-bit right-aligned,
   //  sign-extended to 16 -- and its 16-bit output is saturated back to the
   //  12-bit range the elastic buffer and output alignment stage expect.
   // --------------------------------------------------------------------------
@@ -452,11 +496,11 @@ module gnss_passthrough #(
   always @(posedge clk) smi_rst_n_r <= ~rst & smi_run;
   assign smi_rst_n = smi_rst_n_r;
 
-  // The HLS core accepts one sample pair every 2 clocks (II=2) and its
-  // TREADY may be low in the clock a pair arrives. The pair is therefore held
-  // in a one-entry register until accepted. Pairs arrive at most every 2nd
-  // clock, so one entry is enough; a pair that finds the register still
-  // occupied is dropped and flagged (STATUS[10]).
+  // The input FIFO's TREADY may be low in the clock a pair arrives (it is
+  // only low when full, which a 100 MS/s filter behind it never lets happen).
+  // The pair is held in a one-entry register until accepted. Pairs arrive at
+  // most every 2nd clock, so one entry is enough; a pair that finds the
+  // register still occupied is dropped and flagged (STATUS[10]).
   wire smi_in_valid = smi_rst_n_r & adc_valid_i0 & adc_valid_i1 &
                       adc_enable_i0 & adc_enable_i1;
   reg  [63:0] smi_x_data  = 64'd0;
@@ -477,8 +521,6 @@ module gnss_passthrough #(
   assign m_axis_smi_tvalid = smi_x_valid;
   assign s_axis_smi_tready = 1'b1;        // the elastic buffer always accepts
   assign smi_out_valid     = s_axis_smi_tvalid;
-  assign smi_load         = load_ctrl_sync;
-  assign smi_adapt_en      = ~smi_freeze;
 
   function [15:0] sat12(input [15:0] v);
     begin
@@ -505,13 +547,17 @@ module gnss_passthrough #(
       wptr0 <= 0; rptr0 <= 0;
       wptr1 <= 0; rptr1 <= 0;
     end else begin
-      if (wr_en0 && !full0) begin
-        fifo0[wptr0[AW-1:0]] <= {proc_q0, proc_i0};
-        wptr0 <= wptr0 + 1'b1;
-      end
-      if (rd_en0 && !empty0) begin
-        rd_data0 <= fifo0[rptr0[AW-1:0]];
-        rptr0 <= rptr0 + 1'b1;
+      if (smi_switch) begin
+        rptr0 <= wptr0;                 // flush ch0; re-primed above
+      end else begin
+        if (wr_en0 && !full0) begin
+          fifo0[wptr0[AW-1:0]] <= {proc_q0, proc_i0};
+          wptr0 <= wptr0 + 1'b1;
+        end
+        if (rd_en0 && !empty0) begin
+          rd_data0 <= fifo0[rptr0[AW-1:0]];
+          rptr0 <= rptr0 + 1'b1;
+        end
       end
       if (wr_en1 && !full1) begin
         fifo1[wptr1[AW-1:0]] <= {proc_q1, proc_i1};
@@ -627,7 +673,7 @@ module gnss_passthrough #(
   end
 
   wire [31:0] status_w;
-  assign status_w = { 10'd0, smi_band, 1'b0, smi_en, 1'b0, pass_en,
+  assign status_w = { 12'd0,           1'b0, smi_en, 1'b0, pass_en,
                       5'd0, smi_drop_sticky, unf_sticky, ovf_sticky,
                       full1, empty1, full0, empty0,
                       dac_enable_q0, dac_enable_i0,

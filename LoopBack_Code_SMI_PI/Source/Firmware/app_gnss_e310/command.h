@@ -237,14 +237,19 @@ void set_gnss_tx(double* param, char param_no);
 /* Prints AD9361 and gnss_passthrough runtime state. */
 void get_gnss_status(double* param, char param_no);
 
-/* SMI-PI power inversion in the PL (bitstream v3.0+).
- * gnss_smi=1 puts y = RX1 - a*RX2 on TX1 (with gnss_tx=1), gnss_smi=0
- * returns TX1 to plain RX1. gnss_smi_load= sets the diagonal loading L,
- * gnss_smi_freeze= freezes the weight. */
+/* SMI-PI v4.0 space-time anti-jam (bitstream v4.0, gnss_aj.c).
+ * gnss_smi=1/0 switches it on/off (on by default; gnss_tx=1 also switches
+ * it on), gnss_smi_freeze= keeps the weights, gnss_aj? prints everything,
+ * gnss_aj_log= sets the periodic status line, gnss_aj_mode= the filter,
+ * gnss_band= the RF profile. No loading or other tuning value to set. */
 void get_gnss_smi(double* param, char param_no);
 void set_gnss_smi(double* param, char param_no);
-void set_gnss_smi_load(double* param, char param_no);
 void set_gnss_smi_freeze(double* param, char param_no);
+void get_gnss_aj(double* param, char param_no);
+void set_gnss_aj_log(double* param, char param_no);
+void set_gnss_aj_mode(double* param, char param_no);
+void get_gnss_band(double* param, char param_no);
+void set_gnss_band(double* param, char param_no);
 void get_gnss_rx_gain(double* param, char param_no);
 void set_gnss_rx_gain(double* param, char param_no);
 void set_gnss_rx_agc(double* param, char param_no);

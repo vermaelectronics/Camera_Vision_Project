@@ -1,10 +1,9 @@
 // ============================================================================
-//  smi_pi.h  --  closed-form (sample-matrix-inversion) power inversion core
+//  smi_pi.h  --  space-time SMI power inversion core (SMI-PI v4.0)
 //  ANTSDR E310 V1 / GNSS CRPA project, Vitis HLS 2023.2
 //
-//  See smi_pi.cpp for the algorithm, the fixed-point formats and why this
-//  core meets the 8 ns rx_clk where the LMS-type cores (PI-NLMS, PL-NPI)
-//  struggle.
+//  See smi_pi.cpp for the filter, the fixed-point formats and why the
+//  weights are computed on the ARM instead of in this core.
 // ============================================================================
 #ifndef SMI_PI_H
 #define SMI_PI_H
@@ -12,24 +11,25 @@
 #include "ap_int.h"
 #include "hls_stream.h"
 
-// Averaging time constant of the covariance estimate: 2^SMI_PI_K samples.
-// 10 = 1024 samples, 33 us at 30.72 MS/s. Overridable from build_hls.tcl.
-#ifndef SMI_PI_K
-#define SMI_PI_K 10
-#endif
+// Taps per channel (delays 0..15) and the RX1 reference delay. Must match
+// AJ_NT / AJ_REF in Source/Firmware/app_gnss_e310/gnss_aj_math.h.
+#define SMI_NT   16
+#define SMI_REF   8
+#define SMI_WFRAC 12          // weights are signed Q3.12 (1.0 = 4096)
 
-// s_axis_x : {rx2_q, rx2_i, rx1_q, rx1_i}, each a signed 16-bit sample at the
-//            raw ADC scale (12-bit RX samples, sign-extended, not shifted).
-// m_axis_y : {y_q, y_i} = x1 - a*x2, same scale, saturated to signed 16 bits.
-// load     : diagonal loading L in LSB^2 added to E|x2|^2. Only keeps the
-//            division well-behaved; 0 acts as 1. Typical 16..1000.
-// adapt_en : 1 = covariance (and so the weight) tracks, 0 = frozen.
-// wt_band  : |a| of the current weight, 0: <0.25  1: <1  2: <4  3: >=4.
-//            0 means essentially nothing is being cancelled (no jammer).
+// s_axis_x : {rx2_q, rx2_i, rx1_q, rx1_i}, each a 16-bit word holding a
+//            12-bit RX sample right-aligned ([11:0] is used).
+// m_axis_y : {y_q, y_i}, signed 16-bit, same scale as RX1:
+//            y[n] = x1[n-8] - sum_{k!=8} a_k x1[n-k] - sum_k b_k x2[n-k]
+// wts      : 32 weight words of 32 bits, word k at bits [32k+31 : 32k]:
+//              k = 0..15  -> a_k (RX1, delay k); word 8 is ignored
+//              k = 16..31 -> b_{k-16} (RX2, delay k-16)
+//            each {imag[31:16], real[15:0]}, signed Q3.12.
+//            Driven by gnss_passthrough's committed weight registers, in the
+//            same clock domain as this core, so a commit is atomic: every
+//            sample uses either the whole old set or the whole new set.
 void smi_pi(hls::stream<ap_uint<64> > &s_axis_x,
             hls::stream<ap_uint<32> > &m_axis_y,
-            ap_uint<32> load,
-            ap_uint<1>  adapt_en,
-            ap_uint<2> *wt_band);
+            ap_uint<1024> wts);
 
 #endif

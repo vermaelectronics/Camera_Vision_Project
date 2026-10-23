@@ -41,6 +41,7 @@
 #define GNSS_RXG_PEAK_LOW      1000   /* both below this: room to go up     */
 #define GNSS_RXG_MAX_COMP_MDB 50000U  /* TX level hold limited to 50 dB     */
 #define GNSS_RXG_MIN_ATT_MDB  30000U  /* hold never below 30 dB attenuation */
+#define GNSS_RXG_REF_MIN_DB       64  /* clean reference never starts lower */
 
 void    gnss_rxg_set_mode(int mode);   /* starts/stops the loop             */
 int     gnss_rxg_mode(void);
@@ -48,5 +49,10 @@ void    gnss_rxg_set_gain(int32_t db); /* both channels; also the reference */
 void    gnss_rxg_stop_tx_hold(void);   /* operator attenuation back         */
 void    gnss_rxg_poll(void);           /* console idle hook                 */
 void    gnss_rxg_print(void);
+
+/* For the anti-jam engine (gnss_aj.c). */
+int32_t  gnss_rxg_gain(void);          /* present RX gain [dB]              */
+int32_t  gnss_rxg_ref(void);           /* clean reference gain [dB]         */
+uint32_t gnss_rxg_changes(void);       /* counts every gain step            */
 
 #endif

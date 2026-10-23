@@ -1,15 +1,19 @@
 # ============================================================================
 #  build_hls.tcl  --  Vitis HLS 2023.2: smi_pi.cpp -> block-design IP smi_pi
 #
-#  Builds the SMI power-inversion core (see smi_pi.cpp) and packages it as a
-#  Vivado IP that Source/BlockDesign/system_bd.tcl instantiates as smi_pi_0,
-#  in the AD9361 sample clock domain (axi_ad9361/l_clk, 8 ns).
+#  Builds the space-time SMI power-inversion filter (SMI-PI v4.0, see
+#  smi_pi.cpp) and packages it as a Vivado IP that
+#  Source/BlockDesign/system_bd.tcl instantiates as smi_pi_0, in the
+#  sys_cpu_clk domain (100 MHz), between two clock-crossing FIFOs.
 #
 #  Steps
-#    1. C simulation, scenarios 1 (jammer null), 2 (no jammer), 3 (jammer on/off)
-#       and 4 (weak jammer). Each needs a freshly reset core, so each is a
+#    1. C simulation, scenarios 1 (bit-exact), 2 (wideband jammer), 3 (no
+#       jammer), 4 (CW jammer), 5 (jammer + reflection) and 6 (50 dB jammer).
+#       The weights come from the firmware's solver
+#       (Source/Firmware/app_gnss_e310/gnss_aj_math.c), compiled into the
+#       testbench. Each scenario needs a freshly reset core, so each is a
 #       separate csim_design run.
-#    2. C synthesis at an 8 ns target, II=2.
+#    2. C synthesis at a 10 ns target, II=1 (one sample per clock).
 #    3. Checks the synthesis report: the pipeline must reach the requested II
 #       and the estimated clock must not exceed the target. Otherwise the
 #       script fails here instead of producing a bitstream that misses timing.
@@ -19,13 +23,12 @@
 #    vitis_hls -f build_hls.tcl
 #
 #  OVERRIDES (environment)
-#    SMI_PI_CLK_NS=<ns>   HLS clock target, default 8
-#    SMI_PI_II=<n>        pipeline II, default 2
+#    SMI_PI_CLK_NS=<ns>   HLS clock target, default 10 (sys_cpu_clk, 100 MHz)
+#    SMI_PI_II=<n>        pipeline II, default 1
 #    SMI_PI_SKIP_CSIM=1   skip step 1
-#    SMI_PI_K=<k>         averaging time constant 2^k samples, default 10
 #
 #  OUTPUT
-#    $GNSS_CRPA_IP_REPO/smi_pi/component.xml, VLNV antsdr:gnss:smi_pi:1.0
+#    $GNSS_CRPA_IP_REPO/smi_pi/component.xml, VLNV antsdr:gnss:smi_pi:2.0
 #    $GNSS_CRPA_IP_REPO/smi_pi/smi_pi_csynth.rpt
 #
 #  SUCCESS MARKER
@@ -40,13 +43,16 @@ if {[info exists ::env(GNSS_CRPA_IP_REPO)]} {
   set ip_repo [file normalize [file join $here .. .. .. Build ip_repo]]
 }
 set out_ip [file join $ip_repo smi_pi]
+# The firmware's weight solver, compiled into the C simulation.
+set fw_dir [file normalize [file join $here .. .. Firmware app_gnss_e310]]
 
-# Same reasoning as Source/HLS/pi_nlms (LoopBack_Code): in the E310 2R2T LVDS
-# mode the AD9361 interface delivers at most one sample pair every second
-# l_clk, so II=2 loses nothing and gives each adaptive stage two clocks.
-set clk_period 8
+# v4.0: the core runs on sys_cpu_clk (100 MHz) behind two clock-crossing
+# FIFOs, NOT on the AD9361 l_clk, whose rate follows the sample rate (245.76
+# MHz at 61.44 MS/s). One sample per clock is 100 MS/s, more than the AD9361
+# can deliver, so the FIFOs never fill.
+set clk_period 10
 if {[info exists ::env(SMI_PI_CLK_NS)]} { set clk_period $::env(SMI_PI_CLK_NS) }
-set pipeline_ii 2
+set pipeline_ii 1
 if {[info exists ::env(SMI_PI_II)]} { set pipeline_ii $::env(SMI_PI_II) }
 set clk_uncertainty 1.0
 puts "SMI_PI_HLS: HLS clock target $clk_period ns (uncertainty $clk_uncertainty ns), II=$pipeline_ii"
@@ -57,8 +63,8 @@ file mkdir $work
 set fh  [open [file join $here smi_pi.cpp] r]
 set src [read $fh]
 close $fh
-if {[regsub {#pragma HLS PIPELINE II=2} $src "#pragma HLS PIPELINE II=$pipeline_ii" src] != 1} {
-  puts "SMI_PI_HLS: FAIL - expected one '#pragma HLS PIPELINE II=2' in smi_pi.cpp"
+if {[regsub {#pragma HLS PIPELINE II=1} $src "#pragma HLS PIPELINE II=$pipeline_ii" src] != 1} {
+  puts "SMI_PI_HLS: FAIL - expected one '#pragma HLS PIPELINE II=1' in smi_pi.cpp"
   exit 1
 }
 set hls_src [file join $work smi_pi_hls.cpp]
@@ -70,11 +76,9 @@ close $fh
 cd $work
 open_project -reset smi_pi_hls
 set_top smi_pi
-# Averaging time constant 2^K samples (smi_pi.h, default 10).
-set kdef ""
-if {[info exists ::env(SMI_PI_K)]} { set kdef "-DSMI_PI_K=$::env(SMI_PI_K)" }
-add_files $hls_src -cflags "-I$here $kdef"
-add_files -tb [file join $here testbench.cpp] -cflags "-I$here $kdef -Wno-unknown-pragmas"
+add_files $hls_src -cflags "-I$here"
+add_files -tb [file join $here testbench.cpp] -cflags "-I$here -I$fw_dir -Wno-unknown-pragmas"
+add_files -tb [file join $fw_dir gnss_aj_math.c] -cflags "-I$fw_dir"
 open_solution -reset sol -flow_target vivado
 set_part {xc7z020clg400-2}
 create_clock -period $clk_period -name default
@@ -82,7 +86,7 @@ set_clock_uncertainty $clk_uncertainty
 
 # ---- 1 C simulation -------------------------------------------------------------
 if {![info exists ::env(SMI_PI_SKIP_CSIM)] || $::env(SMI_PI_SKIP_CSIM) eq "0"} {
-  foreach scen {1 2 3 4} {
+  foreach scen {1 2 3 4 5 6} {
     puts "SMI_PI_HLS: csim scenario $scen"
     if {[catch {csim_design -argv $scen} err]} {
       puts "SMI_PI_HLS: FAIL - C simulation scenario $scen: $err"
@@ -123,9 +127,9 @@ if {$ii eq "" || $ii > $pipeline_ii} {
 
 # ---- 4 package as a Vivado IP ------------------------------------------------------
 export_design -format ip_catalog -rtl verilog \
-  -vendor antsdr -library gnss -version 1.0 -ipname smi_pi \
-  -display_name "SMI power inversion" \
-  -description "Two-element closed-form SMI power-inversion anti-jam core (Vitis HLS). s_axis_x = RX1 and RX2 IQ, m_axis_y = RX1 minus a times RX2."
+  -vendor antsdr -library gnss -version 2.0 -ipname smi_pi \
+  -display_name "SMI power inversion, space-time" \
+  -description "Two-element space-time SMI power-inversion anti-jam filter (Vitis HLS): 16 taps on RX1 (reference tap fixed at 1) and 16 on RX2, weights from the ARM via gnss_passthrough. s_axis_x = RX1 and RX2 IQ, m_axis_y = filtered RX1."
 
 set impl_dir [file join $work smi_pi_hls sol impl]
 set ip_src   [file join $impl_dir ip]
@@ -150,6 +154,6 @@ file delete -force $out_ip
 file copy -force $ip_src $out_ip
 if {[file exists $rpt_txt]} { file copy -force $rpt_txt $out_ip }
 
-puts "SMI_PI_HLS: IP antsdr:gnss:smi_pi:1.0 -> $out_ip"
+puts "SMI_PI_HLS: IP antsdr:gnss:smi_pi:2.0 -> $out_ip"
 puts "SMI_PI_HLS: PASS"
 exit 0

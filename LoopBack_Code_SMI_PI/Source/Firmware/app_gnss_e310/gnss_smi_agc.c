@@ -25,6 +25,8 @@ static int32_t  rxg_gain;                     /* present gain, both channels */
 static int32_t  rxg_ref;                      /* clean (no-jammer) gain      */
 static int      rxg_quiet;
 static XTime    rxg_next;
+static uint32_t rxg_changes;                  /* gain steps, for gnss_aj.c   */
+static int      rxg_check;                    /* polls since the mode check  */
 
 static uint32_t att_base;        /* operator's TX1 attenuation [mdB]        */
 static uint32_t att_written;     /* last value written by this loop         */
@@ -67,6 +69,7 @@ static double tx_power(void)
 
 static int set_both(int32_t db)
 {
+	rxg_changes++;
 	if(ad9361_set_rx_rf_gain(ad9361_phy, 0, db) != 0) return -1;
 	if(ad9361_set_rx_rf_gain(ad9361_phy, 1, db) != 0) return -1;
 	rxg_gain = db;
@@ -121,6 +124,11 @@ static void start_loop(void)
 
 	ad9361_get_rx_rf_gain(ad9361_phy, 0, &g);   /* AGC's clean choice */
 	manual_both();
+	/* If a jammer was already on when the loop started, the AGC's choice
+	 * is the jammed gain and would become the "clean" reference. Never
+	 * start the reference below GNSS_RXG_REF_MIN_DB: the fast attack takes
+	 * the gain down again within milliseconds if the ADC is too hot. */
+	if(g < GNSS_RXG_REF_MIN_DB) g = GNSS_RXG_REF_MIN_DB;
 	set_both(g);
 	rxg_ref = g;
 	rxg_quiet = 0;
@@ -154,6 +162,45 @@ void gnss_rxg_set_mode(int mode)
 
 int gnss_rxg_mode(void) { return rxg_mode; }
 
+int32_t gnss_rxg_gain(void)
+{
+	int32_t g = rxg_gain;
+	if(rxg_mode == GNSS_RXG_AD9361 && ad9361_phy)
+		ad9361_get_rx_rf_gain(ad9361_phy, 0, &g);
+	return g;
+}
+
+int32_t gnss_rxg_ref(void)
+{
+	return (rxg_mode == GNSS_RXG_AD9361) ? gnss_rxg_gain() : rxg_ref;
+}
+
+uint32_t gnss_rxg_changes(void) { return rxg_changes; }
+
+/* Matched mode only: both channels must stay in manual gain at rxg_gain.
+ * Anything else changing them (the vendor rx1_gc_mode= / rx2_rf_gain=
+ * commands, or a GUI that sends them -- e.g. "GC Mode 2 slow attack AGC")
+ * would let the AD9361 step the two channels independently and break the
+ * null. Put them back and say so. */
+static void enforce_matched(void)
+{
+	uint8_t m1 = 0, m2 = 0;
+	int32_t g1 = 0, g2 = 0;
+	ad9361_get_rx_gain_control_mode(ad9361_phy, 0, &m1);
+	ad9361_get_rx_gain_control_mode(ad9361_phy, 1, &m2);
+	ad9361_get_rx_rf_gain(ad9361_phy, 0, &g1);
+	ad9361_get_rx_rf_gain(ad9361_phy, 1, &g2);
+	if(m1 == RF_GAIN_MGC && m2 == RF_GAIN_MGC && g1 == rxg_gain && g2 == rxg_gain)
+		return;
+	console_print("[AJ] RX gain was changed outside the matched loop (RX1 %s %d dB, "
+		      "RX2 %s %d dB) -> restored: both manual at %d dB.\n"
+		      "     Use gnss_rx_gain= / gnss_rx_agc= instead of rx1_gc_mode= etc.\n",
+		      (char*)(m1 == RF_GAIN_MGC ? "manual" : "AGC"), (long)g1,
+		      (char*)(m2 == RF_GAIN_MGC ? "manual" : "AGC"), (long)g2, (long)rxg_gain);
+	manual_both();
+	set_both(rxg_gain);
+}
+
 void gnss_rxg_set_gain(int32_t db)
 {
 	if(!ad9361_phy) return;
@@ -176,6 +223,10 @@ void gnss_rxg_poll(void)
 	XTime_GetTime(&now);
 	if(now < rxg_next) return;
 	rxg_next = now + (XTime)((uint64_t)COUNTS_PER_SECOND * RXG_PERIOD_US / 1000000U);
+	if(++rxg_check >= 40) {            /* every ~200 ms */
+		rxg_check = 0;
+		enforce_matched();
+	}
 
 	/* ---- 1. matched RX gain ------------------------------------------------ */
 	p0 = rx_peak(GNSS_PT_REG_RX_SNAPSHOT_CH0);

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Step 3: Vitis HLS SMI-PI core. Want clock <= 8 ns, II 2, SMI_PI_HLS: PASS.
+# Step 3: Vitis HLS SMI-PI v4 space-time filter. Want clock <= 10 ns, II 1, SMI_PI_HLS: PASS.
 set -e
 cd "$(dirname "$0")/../../.."
 ./Automation/Linux/build_all.sh --from smi --to smi

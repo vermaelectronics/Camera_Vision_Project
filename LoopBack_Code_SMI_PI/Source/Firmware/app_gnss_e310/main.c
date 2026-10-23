@@ -70,6 +70,7 @@
 #include "gnss_l1.h"
 #include "gnss_passthrough.h"
 #include "gnss_smi_agc.h"
+#include "gnss_aj.h"
 #include "gnss_capture.h"
 #include "gnss_info.h"   /* GNSS-CRPA MOD-10 */
 
@@ -1115,6 +1116,14 @@ int main(void)
 	}
 	/* GNSS-CRPA MOD-3 END */
 
+	/* SMI-PI v4.0: the RF profile the receiver needs for GPS + Galileo +
+	 * GLONASS + BeiDou (1584.5 MHz, 50 MS/s, 56 MHz), set for RX and TX
+	 * together. gnss_band= changes it at run time. This bitstream is timed
+	 * for the AD9361's full 61.44 MS/s (rx_clk 4 ns). */
+	if (gnss_band_set(GNSS_BAND_DEFAULT) != 0)
+		printf("gnss_band: the AD9361 refused part of the default profile\n\r");
+	gnss_band_print();
+
 	/* ---------------------------------------------------------------------
 	 * GNSS-CRPA MOD-8: unattended auto-start for the SD-card deployment.
 	 *
@@ -1179,8 +1188,17 @@ int main(void)
 	 * full ~60-line vendor command dump. `help?` still prints everything. */
 	gnss_info_menu();
 
-	/* SMI-PI matched RX gain loop runs while the console is idle. */
-	console_set_idle_hook(gnss_rxg_poll);
+	/* SMI-PI v4.0: anti-jam starts by itself -- matched RX gain on both
+	 * channels, weights computed continuously, the filter in the TX1 path,
+	 * jammer ON/OFF reported on this console. It transmits nothing: TX1 is
+	 * still opened only by gnss_tx=1 (or the deployment build above).
+	 * gnss_smi=0 switches it off. Both loops run while the console is idle. */
+	gnss_aj_init();
+	gnss_aj_enable(1);
+	console_print("\nANTI-JAM (SMI-PI v4.0, space-time 31 taps): ON. Jammer events are\n"
+		      "printed as [AJ] lines; gnss_aj? shows everything, gnss_aj_log=0 quiets\n"
+		      "the periodic line. Nothing to tune.\n");
+	console_set_idle_hook(gnss_idle);
 
 	while(1)
 	{

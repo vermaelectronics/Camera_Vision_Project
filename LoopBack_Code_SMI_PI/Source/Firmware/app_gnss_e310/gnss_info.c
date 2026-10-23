@@ -176,13 +176,13 @@ static void info_hardware(struct ad9361_rf_phy *phy)
     console_print("   base address    : 0x43C00000, 4 kB aperture\n");
     console_print("   ID register     : 0x%08x  (expect 0x47435031, ASCII 'GCP1')\n",
                   (long)gnss_pt_read(GNSS_PT_REG_ID));
-    console_print("   VERSION         : 0x%08x  (expect 0x00030000 = v3.0)\n",
+    console_print("   VERSION         : 0x%08x  (expect 0x00040000 = v4.0)\n",
                   (long)gnss_pt_read(GNSS_PT_REG_VERSION));
     console_print("     v1.0 is the original identity passthrough and transmits\n");
     console_print("     24 dB LOW. v1.1 adds the RX->TX sample alignment stage.\n");
-    console_print("     v2.x are the PL-NPI builds. v3.0 is the SMI-PI build:\n");
-    console_print("     closed-form power inversion (smi_pi_0) on TX1, no PI-NLMS\n");
-    console_print("     or PL-NPI.\n");
+    console_print("     v2.x are the PL-NPI builds. v3.0 was the one-weight SMI-PI.\n");
+    console_print("     v4.0 is the SMI-PI space-time build: a 16+16-tap filter\n");
+    console_print("     (smi_pi_0) on TX1, 31 weights computed by the ARM.\n");
     rule();
 
     console_print(" RF FRONT END                                            [cfg]\n");
@@ -261,11 +261,10 @@ static void info_config(struct ad9361_rf_phy *phy)
     console_print("     [2] swap_iq  : %d\n", (long)((ctrl >> 2) & 1U));
     console_print("     [3] ch1_copy : %d\n", (long)((ctrl >> 3) & 1U));
     console_print("     [5] smi_en   : %d   %s\n", (long)((ctrl >> 5) & 1U),
-                  (char *)(((ctrl >> 5) & 1U) ? "TX1 = SMI-PI(RX1, RX2)"
-                                              : "TX1 = RX1 (SMI-PI off)"));
-    console_print("     [6] smi_freeze: %d\n", (long)((ctrl >> 6) & 1U));
-    console_print("   SMI-PI load L  : %d LSB^2  (gnss_smi_load=, register 0x48)\n",
-                  (long)gnss_pt_read(GNSS_PT_REG_SMI_LOAD));
+                  (char *)(((ctrl >> 5) & 1U) ? "TX1 = SMI-PI space-time filter (RX1, RX2)"
+                                              : "TX1 = RX1 (anti-jam off)"));
+    console_print("   SMI-PI weights : %d commits so far (AJ_COMMIT, 0x180)\n",
+                  (long)gnss_pt_read(GNSS_PT_REG_AJ_COMMIT));
     console_print("   DDR replay     : %s\n",
                   (char *)(gnss_txdma_is_running() ? "RUNNING" : "stopped"));
 }
@@ -392,18 +391,20 @@ static void info_pl(void)
     console_print("   axi_ad9361 -> AD9361 -> [TX1 SMA]\n");
     rule();
 
-    console_print("\n SMI-PI POWER INVERSION (v3.0)                          [cfg]\n");
+    console_print("\n SMI-PI SPACE-TIME POWER INVERSION (v4.0)               [cfg]\n");
     rule();
-    console_print("   smi_pi_0 is a Vitis HLS IP next to gnss_passthrough, on the same\n");
-    console_print("   l_clk. It takes RX1 and RX2 at the raw ADC scale over one\n");
-    console_print("   AXI-Stream (s_axis_x) and returns y = RX1 - a*RX2 (m_axis_y),\n");
-    console_print("   a = R12/(R22 + L) from covariances averaged over 1024 samples.\n");
-    console_print("   RX1's weight is fixed at 1, so with no jammer a ~ 0 and the\n");
-    console_print("   output is RX1: GNSS is not cancelled. CONTROL[5] puts it on TX1\n");
-    console_print("   instead of RX1, register 0x48 is the loading L, CONTROL[6]\n");
-    console_print("   freezes the weight, STATUS[21:20] is the |a| band. No AXI-Lite\n");
-    console_print("   port: all control goes through gnss_passthrough. TX2 always\n");
-    console_print("   carries plain RX2.\n");
+    console_print("   smi_pi_0 is a Vitis HLS filter on sys_cpu_clk (100 MHz), fed\n");
+    console_print("   from gnss_passthrough through an async FIFO and returning\n");
+    console_print("   through another. 16 taps on RX1 and 16 on RX2:\n");
+    console_print("     y = x1[n-8] - sum a_k x1[n-k] - sum b_k x2[n-k]\n");
+    console_print("   RX1's tap at delay 8 is fixed at 1, so the output can never be\n");
+    console_print("   turned down as a whole and with no jammer it is RX1. The ARM\n");
+    console_print("   computes the 31 weights from 4096-sample DMA captures of both\n");
+    console_print("   channels (gnss_aj.c), ~100-200 times a second, and commits\n");
+    console_print("   them all at once (AJ_W 0x100-0x17C, AJ_COMMIT 0x180). Many\n");
+    console_print("   taps let the null follow a wideband jammer across the band\n");
+    console_print("   (cable, antenna and filter differences) and its reflections.\n");
+    console_print("   CONTROL[5] puts it on TX1. TX2 always carries plain RX2.\n");
     rule();
 
     console_print("\n THE ONE MODIFICATION THAT MATTERS\n");
@@ -419,8 +420,9 @@ static void info_pl(void)
 
     console_print("\n CLOCK DOMAINS                                          [cfg]\n");
     rule();
-    console_print("   l_clk        61.44 MHz  AD9361 interface, the custom block\n");
-    console_print("                           core, wfifo din, rfifo dout\n");
+    console_print("   l_clk        4 x fs     AD9361 interface, gnss_passthrough,\n");
+    console_print("                           wfifo din, rfifo dout (timed 4 ns)\n");
+    console_print("   sys_cpu_clk  100 MHz    smi_pi_0 space-time filter (II=1)\n");
     console_print("   divclk       divided     cpack2, upack2, both DMA stream sides\n");
     console_print("   sys_cpu_clk  100 MHz     all AXI-Lite control\n");
     console_print("   The two FIFOs exist BECAUSE of that crossing. They are not\n");
@@ -466,9 +468,9 @@ static void info_about(void)
     rule();
     console_print("   This is the skeleton of a CRPA anti-jam front end. With\n");
     console_print("   gnss_smi=0 gnss_passthrough is transparent -- Iout = Iin.\n");
-    console_print("   With gnss_smi=1 the SMI-PI core (smi_pi_0) replaces the\n");
-    console_print("   identity on TX1 with adaptive power inversion across the two\n");
-    console_print("   antenna elements RX1 and RX2.\n");
+    console_print("   With gnss_smi=1 (the default) the SMI-PI space-time filter\n");
+    console_print("   (smi_pi_0) replaces the identity on TX1 with adaptive power\n");
+    console_print("   inversion across the two antenna elements RX1 and RX2.\n");
     console_print("   Proving the loop end to end FIRST means that when the\n");
     console_print("   algorithm goes in, any change it causes is measurable\n");
     console_print("   immediately at a real receiver.\n");
@@ -512,8 +514,9 @@ static void info_about(void)
     console_print("     shares 1575.42 MHz and the 18 MHz retransmit bandwidth\n");
     console_print("     carries GPS, Galileo and SBAS together.\n");
     console_print("   * Position ACCURACY was never checked against a reference.\n");
-    console_print("   * SMI-PI power inversion has NOT yet been verified on hardware\n");
-    console_print("     against a jammer. Treat it as under test.\n");
+    console_print("   * SMI-PI v4.0 (space-time) is verified in C simulation against\n");
+    console_print("     wideband, CW and reflected jammers, NOT yet on this board.\n");
+    console_print("     Treat it as under test until gnss_aj? confirms it.\n");
     rule();
 
     console_print("\n SAFETY -- READ THIS\n");
@@ -536,7 +539,7 @@ static void info_registers(void)
     head("6  gnss_passthrough REGISTER MAP  (base 0x43C00000, 4 kB)");
 
     console_print("   0x00  ID              RO  0x47435031, ASCII 'GCP1'\n");
-    console_print("   0x04  VERSION         RO  0x00030000 = v3.0\n");
+    console_print("   0x04  VERSION         RO  0x00040000 = v4.0\n");
     console_print("   0x08  SCRATCH         RW  read/write test\n");
     console_print("   0x0C  CONTROL         RW  [0] pass_en  [1] mute\n");
     console_print("                             [2] swap_iq  [3] ch1_copy\n");
@@ -551,7 +554,6 @@ static void info_registers(void)
     console_print("                            [10] smi_drop_sticky (must stay 0)\n");
     console_print("                            [16] pass_en in the sample domain\n");
     console_print("                            [18] smi_en in the sample domain\n");
-    console_print("                         [21:20] SMI-PI |a| band: 0 <0.25 1 <1 2 <4 3 >=4\n");
     console_print("   0x14  RX_COUNT_CH0    RO\n");
     console_print("   0x18  TX_COUNT_CH0    RO\n");
     console_print("   0x1C  OVERFLOW_COUNT  RO\n");
@@ -562,9 +564,11 @@ static void info_registers(void)
     console_print("   0x30  RX_COUNT_CH1    RO\n");
     console_print("   0x34  TX_COUNT_CH1    RO\n");
     console_print("   0x38  RX_SNAPSHOT_CH1 RO\n");
-    console_print("   0x40  CRPA_COEF0..1   RW  stored but unused\n");
-    console_print("   0x48  CRPA_COEF2      RW  SMI-PI loading L, LSB^2 (reset 16)\n");
-    console_print("   0x4C  CRPA_COEF3..15  RW  0x4C-0x7C, stored but unused.\n");
+    console_print("   0x40  CRPA_COEF0..15  RW  0x40-0x7C, stored but unused\n");
+    console_print("   0x100 AJ_W0..31       RW  SMI-PI weights (shadow), Q3.12\n");
+    console_print("                             {imag, real}; 0-15 RX1, 16-31 RX2\n");
+    console_print("   0x180 AJ_COMMIT       W/R write: weights -> filter; read: count\n");
+    console_print("   0x184 AJ_INFO         RO  0x10080C01 (16 taps, ref 8, Q3.12)\n");
     rule();
     console_print(" STATUS BITS [2] AND [3] ARE THE IMPORTANT ONES.\n");
     console_print("   They are axi_ad9361's read-back of (dac_data_sel == 4'h2),\n");
@@ -671,7 +675,7 @@ static void info_issues(void)
     rule();
     console_print("   Both RX channels are wired in the PL, so a TWO-ELEMENT CRPA\n");
     console_print("   is in place -- but with nothing on RX2 it sees only its own\n");
-    console_print("   noise and gnss_smi=1 cannot null anything. A second antenna\n");
+    console_print("   noise and anti-jam cannot null anything. A second antenna\n");
     console_print("   or a splitter is required before any array work.\n");
     console_print("   One AD9361 gives only TWO coherent channels. More elements\n");
     console_print("   than that needs more hardware.\n");
@@ -755,13 +759,16 @@ static void info_quickstart(void)
     console_print("   gnss_ddr_tx=1 / =0          DDR round trip / stop\n");
     console_print("   tx1_attenuation=N           mdB. BIGGER = QUIETER.\n");
     console_print("   gnss_tx? / gnss_status?     state, read back from hardware\n");
-    console_print("   gnss_smi=1 / gnss_smi=0     SMI-PI power inversion on TX1 / off\n");
-    console_print("   gnss_smi_load=N             SMI-PI loading L, >= 1, 16 = default\n");
-    console_print("   gnss_smi_freeze=1 / =0      freeze / track the SMI-PI weight\n");
+    console_print("   gnss_smi=1 / gnss_smi=0     anti-jam on (default) / off\n");
+    console_print("   gnss_aj?                    jammer, J/N, suppression, noise, rates\n");
+    console_print("   gnss_aj_log=N               status line every N s, 0 = events only\n");
+    console_print("   gnss_aj_mode=0 / 1 / 2      31 taps (default) / RX2 taps / one weight\n");
+    console_print("   gnss_band=0 / 1 / 2         RF profile (1 = multi-GNSS, default)\n");
+    console_print("   gnss_smi_freeze=1 / =0      keep / track the weights\n");
     console_print("   gnss_rx_gain?               RX1/RX2 gain, mode, TX level hold\n");
     console_print("   gnss_rx_gain=<dB>           same gain on RX1+RX2 (auto reference)\n");
     console_print("   gnss_rx_agc=2 / =0 / =1     matched auto / manual / AD9361 AGC\n");
-    console_print("   gnss_smi?                   SMI-PI on/off, L, |a| band, drops\n");
+    console_print("   gnss_smi?                   anti-jam one-line state\n");
     console_print("   ?                           this menu\n");
     console_print("   help?                       every command (long)\n");
 }
@@ -807,8 +814,9 @@ void gnss_info_menu(void)
     console_print("    gnss_ddr_tx=1 / =0         DDR round trip / stop\n");
     console_print("    tx1_attenuation=N          mdB. BIGGER = QUIETER.\n");
     console_print("                               89750 quietest, 70000 known good\n");
-    console_print("    gnss_smi=1 / gnss_smi=0    SMI-PI power inversion on TX1 / off\n");
-    console_print("    gnss_smi_load=N            SMI-PI loading L, >= 1, 16 = default\n");
+    console_print("    gnss_smi=1 / gnss_smi=0    anti-jam on (default) / off\n");
+    console_print("    gnss_aj?   gnss_aj_log=N   anti-jam status / status line period\n");
+    console_print("    gnss_band=0/1/2            RF profile (1 = multi-GNSS, default)\n");
     console_print("    gnss_tx? gnss_ddr_tx? gnss_status? gnss_smi?   read back\n");
     console_print("\n");
     console_print("    ?        this menu            help?    every command (long)\n");

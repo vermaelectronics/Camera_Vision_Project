@@ -76,11 +76,12 @@ if {[llength $gnss_ipdef] == 0} {
          Automation/Linux/build_all.sh --from ip."
 }
 # The SMI-PI core is a separate Vitis HLS IP in the same repository
-# (Source/HLS/smi_pi/build_hls.tcl, build_all.sh stage "smi").
+# (Source/HLS/smi_pi/build_hls.tcl, build_all.sh stage "smi"). v4.0 needs
+# version 2.0 of it (the space-time filter with the 1024-bit weight port).
 set smi_ipdef [get_ipdefs -all -quiet -filter \
-  {VLNV =~ *:smi_pi:* && design_tool_contexts =~ *IPI* && UPGRADE_VERSIONS == ""}]
+  {VLNV =~ *:smi_pi:2.* && design_tool_contexts =~ *IPI* && UPGRADE_VERSIONS == ""}]
 if {[llength $smi_ipdef] == 0} {
-  error "ERROR: smi_pi was not found in the IP catalog at $gnss_ip_repo.\
+  error "ERROR: smi_pi 2.x was not found in the IP catalog at $gnss_ip_repo.\
          Build it with Source/HLS/smi_pi/build_hls.tcl (vitis_hls), or run\
          Automation/Linux/build_all.sh --from smi."
 }
@@ -503,18 +504,42 @@ ad_connect gnss_passthrough/dac_data_q0 axi_ad9361/dac_data_q0
 ad_connect gnss_passthrough/dac_data_i1 axi_ad9361/dac_data_i1
 ad_connect gnss_passthrough/dac_data_q1 axi_ad9361/dac_data_q1
 
-# SMI-PI power-inversion core (pipelined Vitis HLS IP, II=2), next to gnss_passthrough.
-#   gnss_passthrough selects it for TX1 with CONTROL[5], supplies the loading L (register 0x48) and adapt_en (~CONTROL[6]), and
-#   holds it in reset while disabled. Same clock, so no clock crossing.
-ad_ip_instance smi_pi smi_pi_0
+# SMI-PI v4.0 space-time power-inversion filter (Vitis HLS IP smi_pi 2.0, II=1).
+#   It runs on sys_cpu_clk (100 MHz), NOT on axi_ad9361/l_clk: l_clk follows the
+#   sample rate (4x it in 2R2T, 200 MHz at 50 MS/s, 245.76 MHz at 61.44 MS/s),
+#   while sys_cpu_clk is fixed, so the filter's timing does not depend on the
+#   sample rate. One sample per clock = 100 MS/s, more than the AD9361 delivers.
+#   Two asynchronous AXI-Stream FIFOs carry the samples across:
+#     gnss_passthrough/m_axis_smi (l_clk) -> smi_fifo_in -> smi_pi_0 (sys_cpu_clk)
+#     smi_pi_0 -> smi_fifo_out -> gnss_passthrough/s_axis_smi (l_clk)
+#   The 32 weights come from gnss_passthrough's AJ_W registers (written by the
+#   ARM, committed in one sys_cpu_clk edge), on the same clock as the filter.
+#   gnss_passthrough selects the filter for TX1 with CONTROL[5] and holds the
+#   input FIFO in reset while it is off.
+ad_ip_instance axis_data_fifo smi_fifo_in
+ad_ip_parameter smi_fifo_in CONFIG.IS_ACLK_ASYNC 1
+ad_ip_parameter smi_fifo_in CONFIG.FIFO_DEPTH 64
+ad_ip_parameter smi_fifo_in CONFIG.TDATA_NUM_BYTES 8
+ad_connect axi_ad9361/l_clk           smi_fifo_in/s_axis_aclk
+ad_connect sys_cpu_clk                smi_fifo_in/m_axis_aclk
+ad_connect gnss_passthrough/smi_rst_n smi_fifo_in/s_axis_aresetn
+ad_connect gnss_passthrough/m_axis_smi smi_fifo_in/S_AXIS
 
-ad_connect axi_ad9361/l_clk             smi_pi_0/ap_clk
-ad_connect gnss_passthrough/smi_rst_n   smi_pi_0/ap_rst_n
-ad_connect gnss_passthrough/m_axis_smi  smi_pi_0/s_axis_x
-ad_connect smi_pi_0/m_axis_y            gnss_passthrough/s_axis_smi
-ad_connect gnss_passthrough/smi_load    smi_pi_0/load
-ad_connect gnss_passthrough/smi_adapt_en smi_pi_0/adapt_en
-ad_connect smi_pi_0/wt_band           gnss_passthrough/smi_band
+ad_ip_instance smi_pi smi_pi_0
+ad_connect sys_cpu_clk                smi_pi_0/ap_clk
+ad_connect sys_cpu_resetn             smi_pi_0/ap_rst_n
+ad_connect smi_fifo_in/M_AXIS         smi_pi_0/s_axis_x
+ad_connect gnss_passthrough/aj_wts    smi_pi_0/wts
+
+ad_ip_instance axis_data_fifo smi_fifo_out
+ad_ip_parameter smi_fifo_out CONFIG.IS_ACLK_ASYNC 1
+ad_ip_parameter smi_fifo_out CONFIG.FIFO_DEPTH 64
+ad_ip_parameter smi_fifo_out CONFIG.TDATA_NUM_BYTES 4
+ad_connect sys_cpu_clk                smi_fifo_out/s_axis_aclk
+ad_connect axi_ad9361/l_clk           smi_fifo_out/m_axis_aclk
+ad_connect sys_cpu_resetn             smi_fifo_out/s_axis_aresetn
+ad_connect smi_pi_0/m_axis_y          smi_fifo_out/S_AXIS
+ad_connect smi_fifo_out/M_AXIS        gnss_passthrough/s_axis_smi
 
 # GNSS-CRPA MOD-2 END
 # ---------------------------------------------------------------------------
