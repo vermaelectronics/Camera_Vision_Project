@@ -114,20 +114,38 @@
 //                                                 fixed at 1; its word is
 //                                                 ignored by the core)
 //                                      k = 16..31 RX2 tap at delay k-16
+//                                                 (applied to the NORMALISED
+//                                                 RX2, see AJ_NORM)
 //                                    Writing here does NOT change the filter.
-//    0x180   AJ_COMMIT       W/RO    Any write copies all 32 shadow words to the
-//                                    weights the core uses, in one s_axi_aclk
+//    0x180   AJ_COMMIT       W/RO    Any write copies ALL shadow registers
+//                                    (AJ_W, AJ_CFG, AJ_NORM, AJ_WC) to the
+//                                    values the core uses, in one s_axi_aclk
 //                                    edge, so the core never runs a half-old,
 //                                    half-new set. Reads a commit counter.
 //    0x184   AJ_INFO         RO      {8'd taps per channel, 8'd reference delay,
 //                                     8'd fraction bits, 8'd layout version}
-//                                    = 0x10080C01
+//                                    = 0x10080C02 (layout 2 = v4.1)
+//    0x188   AJ_CFG          RW      SHADOW. [0] bypass: 1 = TX1 carries RX1
+//                                    delayed by 8 samples, no weights (reset
+//                                    value 0x1: nothing is filtered until the
+//                                    firmware has seen a jammer).
+//                                    [10:8] output make-up shift s, 0..4: the
+//                                    filter output x 2^s (6 dB per step).
+//    0x18C   AJ_NORM         RW      SHADOW. RX2 input normalisation g2,
+//                                    {imag[31:16], real[15:0]} signed Q3.13
+//                                    (1.0 = 0x2000, the reset value). The core
+//                                    filters g2 * RX2.
+//    0x190   AJ_WC0          RW      SHADOW. Image tap c1 on conj(RX1[n-8]),
+//                                    weight-word format.
+//    0x194   AJ_WC1          RW      SHADOW. Image tap c2 on conj(RX2n[n-8]).
+//    0x198   AJ_CFG_ACTIVE   RO      AJ_CFG as committed (what the core runs).
 //
 //  SMI-PI v4 CLOCKING
 //    smi_pi_0 runs on sys_cpu_clk (= s_axi_aclk), not on clk: the block design
 //    puts an asynchronous AXI-Stream FIFO on each side of it (m_axis_smi ->
-//    FIFO -> core -> FIFO -> s_axis_smi). The committed weights (aj_wts) are
-//    therefore driven from the same clock the core runs on -- no crossing.
+//    FIFO -> core -> FIFO -> s_axis_smi). The committed values (aj_wts,
+//    aj_wcj, aj_cfg, aj_nrm) are therefore driven from the same clock the core
+//    runs on -- no crossing.
 //
 //  LICENCE
 //    Original work for this project.  Not derived from Analog Devices or
@@ -185,6 +203,9 @@ module gnss_passthrough #(
   //    smi_pi_0/m_axis_y -> async FIFO -> s_axis_smi (clk)  {y_q, y_i}
   //    smi_rst_n (clk)  -> input FIFO reset (CONTROL[0] & CONTROL[5])
   //    aj_wts (s_axi_aclk) -> smi_pi_0/wts, the committed AJ_W weights
+  //    aj_wcj (s_axi_aclk) -> smi_pi_0/wcj, the committed image taps AJ_WC
+  //    aj_cfg (s_axi_aclk) -> smi_pi_0/cfg, the committed AJ_CFG
+  //    aj_nrm (s_axi_aclk) -> smi_pi_0/nrm, the committed AJ_NORM
   output     [63:0]   m_axis_smi_tdata,
   output              m_axis_smi_tvalid,
   input               m_axis_smi_tready,
@@ -193,6 +214,9 @@ module gnss_passthrough #(
   output              s_axis_smi_tready,
   output              smi_rst_n,
   output     [1023:0] aj_wts,
+  output     [63:0]   aj_wcj,
+  output     [31:0]   aj_cfg,
+  output     [31:0]   aj_nrm,
 
   // ---- AXI4-Lite slave (sys_cpu_clk domain) -------------------------------
   input               s_axi_aclk,
@@ -232,8 +256,13 @@ module gnss_passthrough #(
   //         committed atomically by AJ_COMMIT (0x180); the ARM computes them.
   //         0x48 loading and the weight band are gone; the ch0 elastic buffer
   //         is flushed and re-primed whenever CONTROL[5] changes.
-  localparam [31:0] CORE_VERSION = 32'h00040000;   // v4.0
-  localparam [31:0] AJ_INFO      = 32'h10080C01;
+  // v4.1 -- adds AJ_CFG (bypass, output make-up shift), AJ_NORM (RX2 input
+  //         normalisation) and the two image-tap words AJ_WC, all shadowed
+  //         and committed together with the weights (smi_pi_0 v2.1).
+  localparam [31:0] CORE_VERSION = 32'h00040001;   // v4.1
+  localparam [31:0] AJ_INFO      = 32'h10080C02;
+  localparam [31:0] AJ_CFG_RESET = 32'h00000001;   // bypass
+  localparam [31:0] AJ_NRM_RESET = 32'h00002000;   // g2 = 1.0
   localparam        AW           = FIFO_ADDR_WIDTH;
 
   // ==========================================================================
@@ -321,12 +350,16 @@ module gnss_passthrough #(
     end
   end
 
-  // ---- SMI-PI v4 weights: shadow (0x100..0x17C), committed by 0x180 -------
-  // All in s_axi_aclk, which is also the clock of smi_pi_0, so aj_wts changes
-  // in one edge for the whole set. Reset: all zero = TX1 carries RX1 delayed
-  // by 8 samples until the firmware has computed weights.
+  // ---- SMI-PI v4 weights: shadow (0x100..0x17C, 0x188..0x194), committed by
+  // 0x180. All in s_axi_aclk, which is also the clock of smi_pi_0, so the
+  // whole set changes in one edge. Reset: bypass (TX1 carries RX1 delayed by
+  // 8 samples), weights zero, g2 = 1.
   reg  [31:0]   aj_shadow [0:31];
   reg  [1023:0] aj_active  = 1024'd0;
+  reg  [31:0]   aj_cfg_sh  = AJ_CFG_RESET, aj_cfg_act = AJ_CFG_RESET;
+  reg  [31:0]   aj_nrm_sh  = AJ_NRM_RESET, aj_nrm_act = AJ_NRM_RESET;
+  reg  [31:0]   aj_wc0_sh  = 32'd0, aj_wc1_sh = 32'd0;
+  reg  [63:0]   aj_wcj_act = 64'd0;
   reg  [31:0]   aj_commits = 32'd0;
   wire          aj_w_sel   = (reg_waddr >= 12'h040) && (reg_waddr <= 12'h05F);
   wire          aj_commit  = reg_wr && (reg_waddr == 12'h060);
@@ -337,18 +370,37 @@ module gnss_passthrough #(
     if (s_axi_aresetn == 1'b0) begin
       for (ai = 0; ai < 32; ai = ai + 1) aj_shadow[ai] <= 32'd0;
       aj_active  <= 1024'd0;
+      aj_cfg_sh  <= AJ_CFG_RESET;  aj_cfg_act <= AJ_CFG_RESET;
+      aj_nrm_sh  <= AJ_NRM_RESET;  aj_nrm_act <= AJ_NRM_RESET;
+      aj_wc0_sh  <= 32'd0;         aj_wc1_sh  <= 32'd0;
+      aj_wcj_act <= 64'd0;
       aj_commits <= 32'd0;
     end else begin
       if (reg_wr && aj_w_sel)
         aj_shadow[reg_waddr[4:0]] <= s_axi_wdata;
+      if (reg_wr) begin
+        case (reg_waddr)
+          12'h062: aj_cfg_sh <= s_axi_wdata;     // 0x188
+          12'h063: aj_nrm_sh <= s_axi_wdata;     // 0x18C
+          12'h064: aj_wc0_sh <= s_axi_wdata;     // 0x190
+          12'h065: aj_wc1_sh <= s_axi_wdata;     // 0x194
+          default: ;
+        endcase
+      end
       if (aj_commit) begin
         for (ai = 0; ai < 32; ai = ai + 1)
           aj_active[32*ai +: 32] <= aj_shadow[ai];
+        aj_cfg_act <= aj_cfg_sh;
+        aj_nrm_act <= aj_nrm_sh;
+        aj_wcj_act <= {aj_wc1_sh, aj_wc0_sh};
         aj_commits <= aj_commits + 1'b1;
       end
     end
   end
   assign aj_wts = aj_active;
+  assign aj_wcj = aj_wcj_act;
+  assign aj_cfg = aj_cfg_act;
+  assign aj_nrm = aj_nrm_act;
 
   // Status view, refreshed from the clk domain (see CDC section).
   wire [31:0] v_status, v_rx_cnt0, v_tx_cnt0, v_ovf_cnt, v_unf_cnt;
@@ -388,6 +440,11 @@ module gnss_passthrough #(
       12'h00E: axi_rdata <= v_rx_snap1;
       12'h060: axi_rdata <= aj_commits;            // 0x180
       12'h061: axi_rdata <= AJ_INFO;               // 0x184
+      12'h062: axi_rdata <= aj_cfg_sh;             // 0x188
+      12'h063: axi_rdata <= aj_nrm_sh;             // 0x18C
+      12'h064: axi_rdata <= aj_wc0_sh;             // 0x190
+      12'h065: axi_rdata <= aj_wc1_sh;             // 0x194
+      12'h066: axi_rdata <= aj_cfg_act;            // 0x198
       12'h010, 12'h011, 12'h012, 12'h013,
       12'h014, 12'h015, 12'h016, 12'h017,
       12'h018, 12'h019, 12'h01A, 12'h01B,

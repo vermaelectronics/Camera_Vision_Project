@@ -4,6 +4,7 @@
  *  Original work for this project.
  *****************************************************************************/
 
+#include "app_config.h"      /* build-variant defines (GNSS_BOOT_DIAG) */
 #include "gnss_l1.h"
 #include "gnss_passthrough.h"
 #include "no_os_delay.h"
@@ -479,8 +480,14 @@ int32_t gnss_l1_selftest(struct ad9361_rf_phy *phy)
            "      transmission, and only once the attenuation is calculated.\n");
 
     /* 5. ISSUE-0008. Runs after the graded SELFTEST line so it cannot affect
-     *    the markers Test_Hardware.ps1 greps for. Receive-only and harmless. */
+     *    the markers Test_Hardware.ps1 greps for. Receive-only and harmless.
+     *    SMI-PI v4.1: only in a GNSS_BOOT_DIAG build -- it takes ~1 s of
+     *    boot (two 500 ms settles) and the band polarity is settled. */
+#ifdef GNSS_BOOT_DIAG
     gnss_l1_band_probe(phy);
+#else
+    printf("gnss_l1: band-select probe skipped (fast boot; build with GNSS_BOOT_DIAG)\n");
+#endif
 
     return GNSS_L1_OK;
 }

@@ -1,4 +1,15 @@
-# LoopBack_Code_SMI_PI: space-time SMI power inversion (SMI-PI v4.0), Vivado / Vitis 2023.2
+# LoopBack_Code_SMI_PI: space-time SMI power inversion (SMI-PI v4.1), Vivado / Vitis 2023.2
+
+> **v4.1.0** (this version): gated adaptation (filter bypassed with no jammer),
+> RX2 input normalisation, image taps for 50 dB jammers, output make-up gain,
+> a new default RF profile that carries **BeiDou B1I and all of GLONASS**
+> (1582.5 MHz, 61.44 MS/s), FIRs kept off, a radio guard, faster TX start,
+> `gnss_report?` and CSV output.
+> **What changed and why: `README_SMI_PI_v4.1.md`.**
+> **Build commands to BOOT.BIN: `BUILD_STEPS.md`.**
+> **PuTTY tests and the report template: `TESTING_PUTTY.md`.**
+> The v4.0 notes below are kept for reference. Where they differ (band plan,
+> commands, registers), the v4.1 files win.
 
 This project was first built with Vivado/Vitis 2026.1 and the Analog Devices
 `hdl_2026_r1` library. This version builds with **Vivado/Vitis 2023.2** on
@@ -68,8 +79,8 @@ The HDL (`Source/HDL`), constraints (`Source/XDC`) and block design contents are
 
 ## Status
 
-SMI-PI v4.0 was checked in C simulation (the HLS testbench runs the real
-filter with the firmware's own weight solver, 6 scenarios), with a host
+SMI-PI v4.1 was checked in C simulation (the HLS testbench runs the real
+filter with the firmware's own weight solver, 8 scenarios), with a host
 build of the firmware engine against a simulated radio, and with an RTL
 simulation of the changed gnss_passthrough (iverilog). Vitis HLS synthesis,
 the block design and timing have not been run by me; check
@@ -87,7 +98,7 @@ the post-route fix to close timing, and 2023.2 may route differently.
 board whatever tools you have installed. A 2023.2 build writes its own
 `Build/Output/BOOT.BIN`.
 
-## SMI-PI v4.0: space-time anti-jam (bitstream v4.0)
+## Previous version: SMI-PI v4.0 space-time anti-jam (bitstream v4.0)
 
 ### Why v4
 

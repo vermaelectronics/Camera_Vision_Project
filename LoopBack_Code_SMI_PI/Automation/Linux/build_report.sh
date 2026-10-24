@@ -27,7 +27,7 @@ DEEP=0
 [[ "${1:-}" == "--paths" ]] && DEEP=1
 
 # ---- which design is this? --------------------------------------------------
-if   [[ -d "$ROOT/Source/HLS/smi_pi"  ]]; then CORE=smi_pi;  CELL=smi_pi_0;  STAGE=smi;  MARK="SMI_PI_HLS";  NAME="SMI-PI v4.0 (space-time power inversion, 16+16 taps)"
+if   [[ -d "$ROOT/Source/HLS/smi_pi"  ]]; then CORE=smi_pi;  CELL=smi_pi_0;  STAGE=smi;  MARK="SMI_PI_HLS";  NAME="SMI-PI v4.1 (space-time power inversion, 16+16 taps + 2 image taps, gated)"
 elif [[ -d "$ROOT/Source/HLS/pl_npi"  ]]; then CORE=pl_npi;  CELL=pl_npi_0;  STAGE=npi;  MARK="PL_NPI_HLS";  NAME="PL-NPI (pipelined HLS)"
 elif [[ -d "$ROOT/Source/HLS/pi_nlms" ]]; then CORE=pi_nlms; CELL=pi_nlms_0; STAGE=nlms; MARK="PI_NLMS_RTL"; NAME="PI-NLMS"
 else CORE=""; CELL="__none__"; STAGE=""; MARK=""; NAME="unknown"; fi

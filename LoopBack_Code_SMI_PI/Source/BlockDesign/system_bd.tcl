@@ -76,12 +76,13 @@ if {[llength $gnss_ipdef] == 0} {
          Automation/Linux/build_all.sh --from ip."
 }
 # The SMI-PI core is a separate Vitis HLS IP in the same repository
-# (Source/HLS/smi_pi/build_hls.tcl, build_all.sh stage "smi"). v4.0 needs
-# version 2.0 of it (the space-time filter with the 1024-bit weight port).
+# (Source/HLS/smi_pi/build_hls.tcl, build_all.sh stage "smi"). v4.1 needs
+# version 2.1 of it (weights + image taps + cfg + nrm ports); a 2.0 left over
+# from a v4.0 build has no cfg/nrm/wcj ports and is refused here.
 set smi_ipdef [get_ipdefs -all -quiet -filter \
-  {VLNV =~ *:smi_pi:2.* && design_tool_contexts =~ *IPI* && UPGRADE_VERSIONS == ""}]
+  {VLNV =~ *:smi_pi:2.1 && design_tool_contexts =~ *IPI* && UPGRADE_VERSIONS == ""}]
 if {[llength $smi_ipdef] == 0} {
-  error "ERROR: smi_pi 2.x was not found in the IP catalog at $gnss_ip_repo.\
+  error "ERROR: smi_pi 2.1 was not found in the IP catalog at $gnss_ip_repo.\
          Build it with Source/HLS/smi_pi/build_hls.tcl (vitis_hls), or run\
          Automation/Linux/build_all.sh --from smi."
 }
@@ -504,7 +505,7 @@ ad_connect gnss_passthrough/dac_data_q0 axi_ad9361/dac_data_q0
 ad_connect gnss_passthrough/dac_data_i1 axi_ad9361/dac_data_i1
 ad_connect gnss_passthrough/dac_data_q1 axi_ad9361/dac_data_q1
 
-# SMI-PI v4.0 space-time power-inversion filter (Vitis HLS IP smi_pi 2.0, II=1).
+# SMI-PI v4.1 space-time power-inversion filter (Vitis HLS IP smi_pi 2.1, II=1).
 #   It runs on sys_cpu_clk (100 MHz), NOT on axi_ad9361/l_clk: l_clk follows the
 #   sample rate (4x it in 2R2T, 200 MHz at 50 MS/s, 245.76 MHz at 61.44 MS/s),
 #   while sys_cpu_clk is fixed, so the filter's timing does not depend on the
@@ -512,8 +513,10 @@ ad_connect gnss_passthrough/dac_data_q1 axi_ad9361/dac_data_q1
 #   Two asynchronous AXI-Stream FIFOs carry the samples across:
 #     gnss_passthrough/m_axis_smi (l_clk) -> smi_fifo_in -> smi_pi_0 (sys_cpu_clk)
 #     smi_pi_0 -> smi_fifo_out -> gnss_passthrough/s_axis_smi (l_clk)
-#   The 32 weights come from gnss_passthrough's AJ_W registers (written by the
-#   ARM, committed in one sys_cpu_clk edge), on the same clock as the filter.
+#   The 32 weights, the 2 image taps, cfg (bypass, make-up shift) and nrm (RX2
+#   input normalisation) come from gnss_passthrough's AJ_* registers (written
+#   by the ARM, committed in one sys_cpu_clk edge), on the same clock as the
+#   filter.
 #   gnss_passthrough selects the filter for TX1 with CONTROL[5] and holds the
 #   input FIFO in reset while it is off.
 ad_ip_instance axis_data_fifo smi_fifo_in
@@ -530,6 +533,9 @@ ad_connect sys_cpu_clk                smi_pi_0/ap_clk
 ad_connect sys_cpu_resetn             smi_pi_0/ap_rst_n
 ad_connect smi_fifo_in/M_AXIS         smi_pi_0/s_axis_x
 ad_connect gnss_passthrough/aj_wts    smi_pi_0/wts
+ad_connect gnss_passthrough/aj_wcj    smi_pi_0/wcj
+ad_connect gnss_passthrough/aj_cfg    smi_pi_0/cfg
+ad_connect gnss_passthrough/aj_nrm    smi_pi_0/nrm
 
 ad_ip_instance axis_data_fifo smi_fifo_out
 ad_ip_parameter smi_fifo_out CONFIG.IS_ACLK_ASYNC 1

@@ -27,6 +27,10 @@
  *     while TX1 is transmitting, SMI-PI is on and the output is NOT louder
  *     than the clean reference output (i.e. the jammer is really nulled);
  *     otherwise the operator's attenuation is restored.
+ *     v4.1: the anti-jam engine first restores the level DIGITALLY with the
+ *     filter's output make-up shift (6 dB per step, up to 24 dB, no
+ *     precision lost) and reports it with gnss_rxg_set_digital_db(); the TX
+ *     hold only makes up what is left.
  */
 #ifndef GNSS_SMI_AGC_H_
 #define GNSS_SMI_AGC_H_
@@ -54,5 +58,10 @@ void    gnss_rxg_print(void);
 int32_t  gnss_rxg_gain(void);          /* present RX gain [dB]              */
 int32_t  gnss_rxg_ref(void);           /* clean reference gain [dB]         */
 uint32_t gnss_rxg_changes(void);       /* counts every gain step            */
+void     gnss_rxg_set_digital_db(int db); /* make-up gain already applied in */
+                                       /* the filter (6 dB per shift step)  */
+int      gnss_rxg_peak(void);          /* last ADC peak of both channels    */
+uint32_t gnss_rxg_att_base(void);      /* operator's TX1 attenuation [mdB]  */
+int      gnss_rxg_comp_db(void);       /* TX level hold in effect [dB]      */
 
 #endif

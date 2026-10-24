@@ -70,13 +70,20 @@
 #define GNSS_PT_REG_TX_COUNT_CH1    0x34U   /* RO                             */
 #define GNSS_PT_REG_RX_SNAPSHOT_CH1 0x38U   /* RO                             */
 #define GNSS_PT_REG_CRPA_COEF(n)    (0x40U + ((n) * 4U))  /* RW, n = 0..15    */
-/* SMI-PI v4.0 space-time weights (see gnss_aj_math.h for the layout).
- * AJ_W are a SHADOW copy; a write to AJ_COMMIT hands all 32 to the filter in
- * one clock. AJ_COMMIT reads back a commit counter. */
+/* SMI-PI v4 space-time weights (see gnss_aj_math.h for the layout).
+ * AJ_W, AJ_CFG, AJ_NORM and AJ_WC are SHADOW copies; a write to AJ_COMMIT
+ * hands all of them to the filter in one clock. AJ_COMMIT reads back a commit
+ * counter. */
 #define GNSS_PT_REG_AJ_W(k)         (0x100U + ((k) * 4U)) /* RW, k = 0..31    */
 #define GNSS_PT_REG_AJ_COMMIT       0x180U  /* W: commit, R: count            */
-#define GNSS_PT_REG_AJ_INFO         0x184U  /* RO 0x10080C01                  */
-#define GNSS_PT_AJ_INFO_EXPECTED    0x10080C01U
+#define GNSS_PT_REG_AJ_INFO         0x184U  /* RO 0x10080C02                  */
+#define GNSS_PT_REG_AJ_CFG          0x188U  /* RW [0] bypass, [10:8] shift    */
+#define GNSS_PT_REG_AJ_NORM         0x18CU  /* RW g2, Q3.13 {im, re}          */
+#define GNSS_PT_REG_AJ_WC(k)        (0x190U + ((k) * 4U)) /* RW image taps 0,1 */
+#define GNSS_PT_REG_AJ_CFG_ACTIVE   0x198U  /* RO AJ_CFG as committed         */
+#define GNSS_PT_AJ_INFO_EXPECTED    0x10080C02U
+#define GNSS_PT_AJ_CFG_BYPASS       0x1U
+#define GNSS_PT_AJ_CFG_SHIFT(s)     ((uint32_t)((s) & 7) << 8)
 
 /* ---- expected identity --------------------------------------------------- */
 #define GNSS_PT_EXPECTED_ID         0x47435031U
@@ -90,8 +97,10 @@
  *       in STATUS[21:20]). No PI-NLMS or PL-NPI core.
  * 4.0 = SMI-PI space-time build: 16+16-tap filter (smi_pi_0 v2.0) whose 32
  *       weights the ARM computes and writes to AJ_W / AJ_COMMIT. No 0x48
- *       loading, no weight band. */
-#define GNSS_PT_EXPECTED_VERSION    0x00040000U
+ *       loading, no weight band.
+ * 4.1 = adds AJ_CFG (bypass, output make-up shift), AJ_NORM (RX2 input
+ *       normalisation) and the image taps AJ_WC (smi_pi_0 v2.1). */
+#define GNSS_PT_EXPECTED_VERSION    0x00040001U
 
 /* ---- CONTROL bits -------------------------------------------------------- */
 #define GNSS_PT_CTRL_PASS_EN        (1U << 0)  /* 1 = RX->TX passthrough      */
@@ -139,13 +148,17 @@ void     gnss_pt_set_passthrough(int enable);
 void     gnss_pt_set_mute(int mute);
 void     gnss_pt_clear_counters(void);
 
-/* SMI-PI space-time filter (bitstream v4.0). Enabled, channel 0 TX carries
+/* SMI-PI space-time filter (bitstream v4.x). Enabled, channel 0 TX carries
  * the filter output (RX1 and RX2 combined) instead of RX1 alone; passthrough
  * must also be on. The weights are whatever was last committed. */
 void     gnss_pt_set_smi(int enable);
-/* Writes the 32 weight words (Q3.12, see gnss_aj_math.h) and commits them in
- * one go: the filter never runs a half-written set. */
-void     gnss_pt_write_weights(const int16_t *re, const int16_t *im);
+/* Writes the 34 weight words (32 space-time + 2 image, Q3.12, see
+ * gnss_aj_math.h), cfg (GNSS_PT_AJ_CFG_*) and the RX2 normalisation g2
+ * (Q3.13 real part; imaginary 0), and commits them in one go: the filter
+ * never runs a half-written set. re/im may be NULL to keep the weights that
+ * are in the shadow registers (bypass switching). */
+void     gnss_pt_write_aj(const int16_t *re, const int16_t *im,
+                          uint32_t cfg, int32_t g2_q13);
 
 /* Snapshot of everything worth observing at runtime (requirement 58). */
 typedef struct {

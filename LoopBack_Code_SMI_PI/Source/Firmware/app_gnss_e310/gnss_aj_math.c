@@ -107,8 +107,14 @@ static int64_t S11r[AJ_NT], S11i[AJ_NT];
 static int64_t S22r[AJ_NT], S22i[AJ_NT];
 static int64_t S12r[2 * AJ_NT - 1], S12i[2 * AJ_NT - 1];
 
-/* Full 32x32 statistics F_ij = E[conj(v_i) v_j], v_i = x_{p(i)}[n - d(i)] */
+/* Full 34x34 statistics F_ij = E[conj(v_i) v_j] of this block:
+ *   v_i = x_{p(i)}[n - d(i)]       i = 0..31 (the space-time taps)
+ *   v_32 = conj(x1[n-8]), v_33 = conj(x2[n-8])   (the image taps)
+ * RX2 entries are scaled by g2 (the core's input normalisation). */
 static double FR[AJ_NW][AJ_NW], FI[AJ_NW][AJ_NW];
+/* The same, averaged over blocks (what the solve uses). */
+static double AR[AJ_NW][AJ_NW], AI[AJ_NW][AJ_NW];
+static int    avg_valid;
 
 /* Working matrices for the solve */
 static double MR[AJ_MAXDIM][AJ_MAXDIM], MI[AJ_MAXDIM][AJ_MAXDIM];
@@ -120,17 +126,50 @@ static int16_t sx12(uint32_t v)
 	return (int16_t)((s & 0x800) ? s - 0x1000 : s);
 }
 
+/* The sums below run over ~4000 samples, 127 of them per solve: the ARM's
+ * main cost. Each product of two 12-bit samples is below 2^22, so 128 of
+ * them (two per term) fit a 32-bit accumulator: summing in chunks of
+ * AJ_CHUNK in 32 bits and only then in 64 is exact and about twice as fast
+ * on the Cortex-A9 as a 64-bit add per sample. */
+#define AJ_CHUNK 128
+
 static void lag_sum(const int16_t *ar, const int16_t *ai,
                     const int16_t *br, const int16_t *bi,
                     int l, int st, int en, int64_t *sr, int64_t *si)
 {
 	int64_t re = 0, im = 0;
-	int t;
-	for(t = st; t < en; t++) {
-		int32_t a_r = ar[t], a_i = ai[t];
-		int32_t b_r = br[t - l], b_i = bi[t - l];
-		re += (int64_t)(a_r * b_r) + (int64_t)(a_i * b_i);
-		im += (int64_t)(a_r * b_i) - (int64_t)(a_i * b_r);
+	int t = st;
+	while(t < en) {
+		int stop = (en - t > AJ_CHUNK) ? t + AJ_CHUNK : en;
+		int32_t cr = 0, ci = 0;
+		for(; t < stop; t++) {
+			int32_t a_r = ar[t], a_i = ai[t];
+			int32_t b_r = br[t - l], b_i = bi[t - l];
+			cr += a_r * b_r + a_i * b_i;
+			ci += a_r * b_i - a_i * b_r;
+		}
+		re += cr; im += ci;
+	}
+	*sr = re; *si = im;
+}
+
+/* sum_{n=st}^{en-1} x_p[n-a] x_q[n-b]   (no conjugate: the image statistics) */
+static void comp_sum(const int16_t *ar, const int16_t *ai, int a,
+                     const int16_t *br, const int16_t *bi, int b,
+                     int st, int en, int64_t *sr, int64_t *si)
+{
+	int64_t re = 0, im = 0;
+	int n = st;
+	while(n < en) {
+		int stop = (en - n > AJ_CHUNK) ? n + AJ_CHUNK : en;
+		int32_t cr = 0, ci = 0;
+		for(; n < stop; n++) {
+			int32_t a_r = ar[n - a], a_i = ai[n - a];
+			int32_t b_r = br[n - b], b_i = bi[n - b];
+			cr += a_r * b_r - a_i * b_i;
+			ci += a_r * b_i + a_i * b_r;
+		}
+		re += cr; im += ci;
 	}
 	*sr = re; *si = im;
 }
@@ -141,18 +180,27 @@ static void chan(int p, const int16_t **r, const int16_t **i)
 	else       { *r = X2R; *i = X2I; }
 }
 
-/* Builds F from one block. Returns the number of terms per entry. */
-static int build_stats(const uint32_t *buf, int nsamp)
-{
-	const int st = 2 * AJ_NT, en = nsamp - AJ_NT;
-	int t, l, i, j;
-	double inv;
+static int is_rx2(int i) { return (i >= AJ_NT && i < AJ_NSPT) || i == AJ_IMG2; }
 
+static void unpack(const uint32_t *buf, int nsamp)
+{
+	int t;
 	for(t = 0; t < nsamp; t++) {
 		uint32_t w1 = buf[2 * t], w2 = buf[2 * t + 1];
 		X1R[t] = sx12(w1); X1I[t] = sx12(w1 >> 16);
 		X2R[t] = sx12(w2); X2I[t] = sx12(w2 >> 16);
 	}
+}
+
+/* Builds F from one block (g2: RX2 normalisation). Returns the number of
+ * terms per entry. */
+static int build_stats(const uint32_t *buf, int nsamp, double g2)
+{
+	const int st = 2 * AJ_NT, en = nsamp - AJ_NT;
+	int l, i, j;
+	double inv;
+
+	unpack(buf, nsamp);
 	for(l = 0; l < AJ_NT; l++) {
 		lag_sum(X1R, X1I, X1R, X1I, l, st, en, &S11r[l], &S11i[l]);
 		lag_sum(X2R, X2I, X2R, X2I, l, st, en, &S22r[l], &S22i[l]);
@@ -165,11 +213,11 @@ static int build_stats(const uint32_t *buf, int nsamp)
 	 *             = S_pq(b-a) + sum_[st-a,st) - sum_[en-a,en)
 	 * (the window of the lag sum, shifted by a). The edge sums are short. */
 	inv = 1.0 / (double)(en - st);
-	for(i = 0; i < AJ_NW; i++) {
+	for(i = 0; i < AJ_NSPT; i++) {
 		int p = (i < AJ_NT) ? 1 : 2, a = i % AJ_NT;
 		const int16_t *pr, *pi;
 		chan(p, &pr, &pi);
-		for(j = i; j < AJ_NW; j++) {
+		for(j = i; j < AJ_NSPT; j++) {
 			int q = (j < AJ_NT) ? 1 : 2, b = j % AJ_NT;
 			const int16_t *qr, *qi;
 			int64_t sr, si, hr, hi, tr, ti;
@@ -186,10 +234,126 @@ static int build_stats(const uint32_t *buf, int nsamp)
 			FI[j][i] = -FI[i][j];
 		}
 	}
+	/* Image taps (v_32 = conj(x1[n-8]), v_33 = conj(x2[n-8])):
+	 *   F[img_p][j]     = E[x_p[n-8] v_j]               (j a space-time tap)
+	 *   F[img_p][img_q] = conj(F[(p,8)][(q,8)])                            */
+	for(i = AJ_IMG1; i <= AJ_IMG2; i++) {
+		int p = (i == AJ_IMG1) ? 1 : 2, ri = (p == 1) ? AJ_REF : AJ_NT + AJ_REF;
+		const int16_t *pr, *pi;
+		chan(p, &pr, &pi);
+		for(j = 0; j < AJ_NSPT; j++) {
+			int q = (j < AJ_NT) ? 1 : 2, b = j % AJ_NT;
+			const int16_t *qr, *qi;
+			int64_t sr, si;
+			chan(q, &qr, &qi);
+			comp_sum(pr, pi, AJ_REF, qr, qi, b, st, en, &sr, &si);
+			FR[i][j] = (double)sr * inv;
+			FI[i][j] = (double)si * inv;
+			FR[j][i] = FR[i][j];
+			FI[j][i] = -FI[i][j];
+		}
+		for(j = AJ_IMG1; j <= AJ_IMG2; j++) {
+			int rj = (j == AJ_IMG1) ? AJ_REF : AJ_NT + AJ_REF;
+			FR[i][j] = FR[ri][rj];
+			FI[i][j] = -FI[ri][rj];
+		}
+	}
+	/* The core filters g2 x2, not x2: scale the RX2 rows and columns. */
+	if(g2 != 1.0) {
+		for(i = 0; i < AJ_NW; i++)
+			for(j = 0; j < AJ_NW; j++) {
+				double f = (is_rx2(i) ? g2 : 1.0) * (is_rx2(j) ? g2 : 1.0);
+				FR[i][j] *= f; FI[i][j] *= f;
+			}
+	}
 	return en - st;
 }
 
-/* ---- solve (M + s2 I) w = g, Hermitian positive definite ----------------- */
+/* RX1-RX2 coherence |E[conj(x1[t]) x2[t-l]]| / sqrt(P1 P2), best lag.
+ * A jammer both antennas see makes it J/(J+N); noise alone ~1/sqrt(cnt). */
+static void coherence(aj_result_t *r, int cnt)
+{
+	double p1 = (double)S11r[0], p2 = (double)S22r[0], best = 0.0, c;
+	int l, lag = 0;
+	(void)cnt;
+	if(p1 > 0.0 && p2 > 0.0) {
+		double den = 1.0 / (p1 * p2);
+		for(l = 0; l < 2 * AJ_NT - 1; l++) {
+			double re = (double)S12r[l], im = (double)S12i[l];
+			double m2 = (re * re + im * im) * den;
+			if(m2 > best) { best = m2; lag = l - (AJ_NT - 1); }
+		}
+	}
+	c = aj_sqrt(best);
+	if(c > 0.999) c = 0.999;
+	r->coh = c;
+	r->coh_lag = lag;
+	r->jn_coh_db = (c > 0.0) ? aj_db10(c / (1.0 - c)) : -99.0;
+}
+
+/* Jammer centre and bandwidth, from RX1's lag-1 and lag-15 correlations
+ * minus the noise's own (s2 = noise power). */
+static void spectrum(aj_result_t *r, int cnt, double p1, double s2)
+{
+	double inv = 1.0 / (double)cnt;
+	double c1r = (double)S11r[1] * inv, c1i = (double)S11i[1] * inv;
+	double jr, ji, jm, j15;
+	r->rho1_re = (p1 > 0.0) ? c1r / p1 : 0.0;
+	r->rho1_im = (p1 > 0.0) ? c1i / p1 : 0.0;
+	r->foff = 0.0; r->bw = 1.0;
+	if(s2 > 0.0 && p1 - s2 > 0.0) {
+		jr = (c1r - s2 * r->rho_noise_re) / (p1 - s2);
+		ji = (c1i - s2 * r->rho_noise_im) / (p1 - s2);
+		jm = aj_sqrt(jr * jr + ji * ji);
+		if(jm > 1.0) jm = 1.0;
+		r->foff = -aj_atan2(ji, jr) / (2.0 * AJ_PI);
+		if(jm < 0.98) {
+			r->bw = aj_sincinv(jm);
+		} else {
+			/* narrow: the lag-15 correlation resolves below fs/15 */
+			double c15r = (double)S11r[AJ_NT - 1] * inv, c15i = (double)S11i[AJ_NT - 1] * inv;
+			j15 = aj_sqrt(c15r * c15r + c15i * c15i) / (p1 - s2);
+			if(j15 > 1.0) j15 = 1.0;
+			r->bw = aj_sincinv(j15) / (double)(AJ_NT - 1);
+		}
+	}
+}
+
+int aj_detect(const uint32_t *buf, int nsamp, aj_result_t *r)
+{
+	const int st = 2 * AJ_NT, en = nsamp - AJ_NT;
+	int l, cnt = en - st;
+	double inv, noise;
+
+	r->ok = 0;
+	if(!buf || nsamp != AJ_NSAMP) return -1;
+	unpack(buf, nsamp);
+	lag_sum(X1R, X1I, X1R, X1I, 0, st, en, &S11r[0], &S11i[0]);
+	lag_sum(X1R, X1I, X1R, X1I, 1, st, en, &S11r[1], &S11i[1]);
+	lag_sum(X1R, X1I, X1R, X1I, AJ_NT - 1, st, en, &S11r[AJ_NT - 1], &S11i[AJ_NT - 1]);
+	lag_sum(X2R, X2I, X2R, X2I, 0, st, en, &S22r[0], &S22i[0]);
+	for(l = -(AJ_NT - 1); l < AJ_NT; l++)
+		lag_sum(X1R, X1I, X2R, X2I, l, st, en,
+		        &S12r[l + AJ_NT - 1], &S12i[l + AJ_NT - 1]);
+	inv = 1.0 / (double)cnt;
+	r->p1 = (double)S11r[0] * inv;
+	r->p2 = (double)S22r[0] * inv;
+	coherence(r, cnt);
+	noise = r->noise_ref;
+	if(noise > 0.0) {
+		if(noise < AJ_QFLOOR) noise = AJ_QFLOOR;
+		r->noise = noise;
+		r->jn_db = (r->p1 > noise) ? aj_db10((r->p1 - noise) / noise) : -99.0;
+	} else {
+		r->noise = 0.0;
+		r->jn_db = -99.0;
+	}
+	spectrum(r, cnt, r->p1, r->noise);
+	r->ok = 1;
+	return 0;
+}
+
+/* ---- solve (M + s2 D) w = g, Hermitian positive definite ----------------- */
 
 static int chol_solve(int n, double s2, const double *ld, const double *gr,
                       const double *gi, double *wr, double *wi)
@@ -236,28 +400,30 @@ static int chol_solve(int n, double s2, const double *ld, const double *gr,
 /* Weights of the previous block, for the out-of-sample check (they are the
  * weights the FPGA was actually running while this block was captured). */
 static int    prev_n = 0, prev_idx[AJ_MAXDIM];
-static double prev_wr[AJ_MAXDIM], prev_wi[AJ_MAXDIM];
+static double prev_wr[AJ_MAXDIM], prev_wi[AJ_MAXDIM], prev_nr[AJ_MAXDIM];
 
 void aj_reset(void)
 {
 	prev_n = 0;
+	avg_valid = 0;
 }
 
-/* E|y|^2 for weights (wr,wi) on taps idx[], using this block's statistics. */
-static double out_power(int n, const int *idx, const double *wr, const double *wi)
+/* E|y|^2 for weights (wr,wi) on taps idx[], with statistics (fr,fi). */
+static double out_power(double (*fr)[AJ_NW], double (*fi)[AJ_NW],
+                        int n, const int *idx, const double *wr, const double *wi)
 {
 	double mr = 0.0, qr = 0.0;
 	int i, j;
 	for(i = 0; i < n; i++) {
 		double ar = 0.0, ai = 0.0;
-		mr += wr[i] * FR[idx[i]][AJ_REF] + wi[i] * FI[idx[i]][AJ_REF];
+		mr += wr[i] * fr[idx[i]][AJ_REF] + wi[i] * fi[idx[i]][AJ_REF];
 		for(j = 0; j < n; j++) {
-			ar += FR[idx[i]][idx[j]] * wr[j] - FI[idx[i]][idx[j]] * wi[j];
-			ai += FR[idx[i]][idx[j]] * wi[j] + FI[idx[i]][idx[j]] * wr[j];
+			ar += fr[idx[i]][idx[j]] * wr[j] - fi[idx[i]][idx[j]] * wi[j];
+			ai += fr[idx[i]][idx[j]] * wi[j] + fi[idx[i]][idx[j]] * wr[j];
 		}
 		qr += wr[i] * ar + wi[i] * ai;
 	}
-	return FR[AJ_REF][AJ_REF] - 2.0 * mr + qr;
+	return fr[AJ_REF][AJ_REF] - 2.0 * mr + qr;
 }
 
 static int16_t q312(double v)
@@ -296,36 +462,57 @@ int aj_compute(const uint32_t *buf, int nsamp, aj_result_t *r)
 {
 	int idx[AJ_MAXDIM], n = 0, i, j, k, it, cnt;
 	double gr[AJ_MAXDIM], gi[AJ_MAXDIM], wr[AJ_MAXDIM], wi[AJ_MAXDIM], ld[AJ_MAXDIM];
-	double p1, p2, s2, pout = 0.0, wn2 = 0.0, lo, hi, pev, pev_wn2;
+	double nr[AJ_MAXDIM];
+	double p1, p2, s2, pout = 0.0, wn2 = 0.0, lo, hi, pev, pev_wn2, g2, nr2;
 
 	r->ok = 0;
 	if(!buf || nsamp != AJ_NSAMP) return -1;
-	cnt = build_stats(buf, nsamp);
+	g2 = (r->g2 > 0.0) ? r->g2 : 1.0;
+	nr2 = (r->rx2_noise > 0.0) ? r->rx2_noise : 1.0;
+	cnt = build_stats(buf, nsamp, g2);
+	coherence(r, cnt);
+
+	/* statistics for the solve: this block, averaged with the last ones */
+	if(avg_valid && AJ_AVG > 0.0) {
+		for(i = 0; i < AJ_NW; i++)
+			for(j = 0; j < AJ_NW; j++) {
+				AR[i][j] = AJ_AVG * AR[i][j] + (1.0 - AJ_AVG) * FR[i][j];
+				AI[i][j] = AJ_AVG * AI[i][j] + (1.0 - AJ_AVG) * FI[i][j];
+			}
+	} else {
+		for(i = 0; i < AJ_NW; i++)
+			for(j = 0; j < AJ_NW; j++) { AR[i][j] = FR[i][j]; AI[i][j] = FI[i][j]; }
+	}
+	avg_valid = 1;
 
 	/* active taps */
 	if(r->mode == AJ_MODE_NB) {
 		idx[n++] = AJ_NT + AJ_REF;
 	} else {
-		for(k = (r->mode == AJ_MODE_RX2) ? AJ_NT : 0; k < AJ_NW; k++)
+		for(k = (r->mode == AJ_MODE_RX2) ? AJ_NT : 0; k < AJ_NSPT; k++)
 			if(k != AJ_REF) idx[n++] = k;
+		if(r->mode != AJ_MODE_LIN) { idx[n++] = AJ_IMG1; idx[n++] = AJ_IMG2; }
 	}
 	for(i = 0; i < n; i++) {
 		for(j = 0; j < n; j++) {
-			MR[i][j] = FR[idx[i]][idx[j]];
-			MI[i][j] = FI[idx[i]][idx[j]];
+			MR[i][j] = AR[idx[i]][idx[j]];
+			MI[i][j] = AI[idx[i]][idx[j]];
 		}
-		gr[i] = FR[idx[i]][AJ_REF];
-		gi[i] = FI[idx[i]][AJ_REF];
+		gr[i] = AR[idx[i]][AJ_REF];
+		gi[i] = AI[idx[i]][AJ_REF];
 		/* RX1's own taps get 4x (6 dB) the loading. They are there for a
 		 * reflected jammer, which is far above the noise; without the extra
 		 * loading they would also start predicting (and so removing) any
 		 * narrowband signal that sits just under the noise -- the
 		 * satellites. Measured on the testbench satellite: 0.58 dB lost
 		 * with 1x, < 0.2 dB with 4x, no change in jammer suppression. */
-		ld[i] = (idx[i] < AJ_NT) ? AJ_RX1_LOAD : 1.0;
+		/* Each tap is loaded with ITS noise: RX2's normalised noise is
+		 * nr2 x RX1's when g2 could not equalise them (|g2| < 4). */
+		nr[i] = is_rx2(idx[i]) ? nr2 : 1.0;
+		ld[i] = ((idx[i] < AJ_NT) ? AJ_RX1_LOAD : 1.0) * nr[i];
 	}
 	p1 = FR[AJ_REF][AJ_REF];
-	p2 = FR[AJ_NT + AJ_REF][AJ_NT + AJ_REF];
+	p2 = FR[AJ_NT + AJ_REF][AJ_NT + AJ_REF] / (g2 * g2);
 
 	/* Out-of-sample output power: the PREVIOUS weights (the ones the FPGA
 	 * ran while this block was captured) on THIS block. Unlike the power
@@ -334,10 +521,11 @@ int aj_compute(const uint32_t *buf, int nsamp, aj_result_t *r)
 	 * what the suppression and residual figures are computed from. */
 	pev = -1.0; pev_wn2 = 0.0;
 	if(prev_n > 0) {
-		pev = out_power(prev_n, prev_idx, prev_wr, prev_wi);
-		for(k = 0; k < prev_n; k++) pev_wn2 += prev_wr[k] * prev_wr[k] + prev_wi[k] * prev_wi[k];
+		pev = out_power(FR, FI, prev_n, prev_idx, prev_wr, prev_wi);
+		for(k = 0; k < prev_n; k++) pev_wn2 += (prev_wr[k] * prev_wr[k] + prev_wi[k] * prev_wi[k]) * prev_nr[k];
 	}
-	hi = (p1 < p2) ? p1 : p2;
+	hi = AR[AJ_REF][AJ_REF];
+	if(AR[AJ_NT + AJ_REF][AJ_NT + AJ_REF] < hi) hi = AR[AJ_NT + AJ_REF][AJ_NT + AJ_REF];
 	if(hi < AJ_QFLOOR) hi = AJ_QFLOOR;
 	lo = AJ_QFLOOR;
 
@@ -351,8 +539,8 @@ int aj_compute(const uint32_t *buf, int nsamp, aj_result_t *r)
 		double ns, ratio;
 		if(chol_solve(n, s2, ld, gr, gi, wr, wi) != 0) return -2;
 		wn2 = 0.0;
-		for(k = 0; k < n; k++) wn2 += wr[k] * wr[k] + wi[k] * wi[k];
-		pout = out_power(n, idx, wr, wi);
+		for(k = 0; k < n; k++) wn2 += (wr[k] * wr[k] + wi[k] * wi[k]) * nr[k];
+		pout = out_power(AR, AI, n, idx, wr, wi);
 		ns = pout / (1.0 + wn2);
 		if(ns < lo) ns = lo;
 		if(ns > hi) ns = hi;
@@ -366,42 +554,22 @@ int aj_compute(const uint32_t *buf, int nsamp, aj_result_t *r)
 	for(i = 0; i < n; i++) { r->wre[idx[i]] = q312(wr[i]); r->wim[idx[i]] = q312(wi[i]); }
 
 	r->p1 = p1; r->p2 = p2; r->sig2 = s2; r->wn2 = wn2;
-	if(pev < 0.0) { pev = pout; pev_wn2 = wn2; }   /* first block: no history */
+	if(pev < 0.0) {                 /* first block: no history */
+		pev = out_power(FR, FI, n, idx, wr, wi);
+		pev_wn2 = wn2;
+	}
 	r->pout = pev; r->pout_wn2 = pev_wn2;
 	for(i = 0; i < n; i++) {      /* what the FPGA will run: the Q3.12 values */
 		prev_idx[i] = idx[i];
 		prev_wr[i] = (double)r->wre[idx[i]] / (double)(1 << AJ_WFRAC);
 		prev_wi[i] = (double)r->wim[idx[i]] / (double)(1 << AJ_WFRAC);
+		prev_nr[i] = nr[i];
 	}
 	prev_n = n;
 	aj_metrics(r, r->noise_ref);
 
 	/* Spectrum of what is above the noise, from RX1's lag correlations. */
-	s2 = r->noise;
-	{
-		double inv = 1.0 / (double)cnt;
-		double c1r = (double)S11r[1] * inv, c1i = (double)S11i[1] * inv;
-		double jr, ji, jm, j15;
-		r->rho1_re = (p1 > 0.0) ? c1r / p1 : 0.0;
-		r->rho1_im = (p1 > 0.0) ? c1i / p1 : 0.0;
-		r->foff = 0.0; r->bw = 1.0;
-		if(p1 - s2 > 0.0) {
-			jr = (c1r - s2 * r->rho_noise_re) / (p1 - s2);
-			ji = (c1i - s2 * r->rho_noise_im) / (p1 - s2);
-			jm = aj_sqrt(jr * jr + ji * ji);
-			if(jm > 1.0) jm = 1.0;
-			r->foff = -aj_atan2(ji, jr) / (2.0 * AJ_PI);
-			if(jm < 0.98) {
-				r->bw = aj_sincinv(jm);
-			} else {
-				/* narrow: the lag-15 correlation resolves below fs/15 */
-				double c15r = (double)S11r[AJ_NT - 1] * inv, c15i = (double)S11i[AJ_NT - 1] * inv;
-				j15 = aj_sqrt(c15r * c15r + c15i * c15i) / (p1 - s2);
-				if(j15 > 1.0) j15 = 1.0;
-				r->bw = aj_sincinv(j15) / (double)(AJ_NT - 1);
-			}
-		}
-	}
+	spectrum(r, cnt, p1, r->noise);
 	r->ok = 1;
 	return 0;
 }

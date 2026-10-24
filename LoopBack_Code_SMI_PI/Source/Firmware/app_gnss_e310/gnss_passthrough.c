@@ -104,13 +104,22 @@ void gnss_pt_set_smi(int enable)
     gnss_pt_write(GNSS_PT_REG_CONTROL, c);
 }
 
-void gnss_pt_write_weights(const int16_t *re, const int16_t *im)
+void gnss_pt_write_aj(const int16_t *re, const int16_t *im,
+                      uint32_t cfg, int32_t g2_q13)
 {
     uint32_t k;
-    for (k = 0; k < 32U; k++) {
-        gnss_pt_write(GNSS_PT_REG_AJ_W(k),
-                      ((uint32_t)(uint16_t)im[k] << 16) | (uint32_t)(uint16_t)re[k]);
+    if (re && im) {
+        for (k = 0; k < 32U; k++) {
+            gnss_pt_write(GNSS_PT_REG_AJ_W(k),
+                          ((uint32_t)(uint16_t)im[k] << 16) | (uint32_t)(uint16_t)re[k]);
+        }
+        for (k = 0; k < 2U; k++) {
+            gnss_pt_write(GNSS_PT_REG_AJ_WC(k),
+                          ((uint32_t)(uint16_t)im[32U + k] << 16) | (uint32_t)(uint16_t)re[32U + k]);
+        }
     }
+    gnss_pt_write(GNSS_PT_REG_AJ_CFG, cfg);
+    gnss_pt_write(GNSS_PT_REG_AJ_NORM, (uint32_t)(uint16_t)(int16_t)g2_q13);
     gnss_pt_write(GNSS_PT_REG_AJ_COMMIT, 1U);
 }
 
@@ -157,10 +166,18 @@ void gnss_pt_print_state(void)
     printf("  control        : 0x%08lx\n", (unsigned long)s.control);
     printf("  status         : 0x%08lx\n", (unsigned long)s.status);
     printf("  passthrough    : %s\n", s.passthrough_enabled ? "ON" : "off");
-    printf("  smi-pi v4      : %s, %lu weight commits, layout 0x%08lx\n",
-           (s.status & GNSS_PT_ST_SMI_EN_SYNCED) ? "ON (TX1 = space-time filter)" : "off",
-           (unsigned long)gnss_pt_read(GNSS_PT_REG_AJ_COMMIT),
-           (unsigned long)gnss_pt_read(GNSS_PT_REG_AJ_INFO));
+    {
+        uint32_t cfg = gnss_pt_read(GNSS_PT_REG_AJ_CFG_ACTIVE);
+        printf("  smi-pi v4      : %s, %lu weight commits, layout 0x%08lx\n",
+               (s.status & GNSS_PT_ST_SMI_EN_SYNCED) ? "ON (TX1 = space-time filter)" : "off",
+               (unsigned long)gnss_pt_read(GNSS_PT_REG_AJ_COMMIT),
+               (unsigned long)gnss_pt_read(GNSS_PT_REG_AJ_INFO));
+        printf("  smi-pi cfg     : 0x%08lx (%s, make-up shift %lu), g2 0x%08lx\n",
+               (unsigned long)cfg,
+               (cfg & GNSS_PT_AJ_CFG_BYPASS) ? "BYPASS: no jammer, TX1 = RX1" : "FILTER IN",
+               (unsigned long)((cfg >> 8) & 7U),
+               (unsigned long)gnss_pt_read(GNSS_PT_REG_AJ_NORM));
+    }
     printf("  adc enable i/q : %d / %d\n",
            (s.status & GNSS_PT_ST_ADC_EN_I0) ? 1 : 0,
            (s.status & GNSS_PT_ST_ADC_EN_Q0) ? 1 : 0);

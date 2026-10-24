@@ -176,13 +176,14 @@ static void info_hardware(struct ad9361_rf_phy *phy)
     console_print("   base address    : 0x43C00000, 4 kB aperture\n");
     console_print("   ID register     : 0x%08x  (expect 0x47435031, ASCII 'GCP1')\n",
                   (long)gnss_pt_read(GNSS_PT_REG_ID));
-    console_print("   VERSION         : 0x%08x  (expect 0x00040000 = v4.0)\n",
+    console_print("   VERSION         : 0x%08x  (expect 0x00040001 = v4.1)\n",
                   (long)gnss_pt_read(GNSS_PT_REG_VERSION));
     console_print("     v1.0 is the original identity passthrough and transmits\n");
     console_print("     24 dB LOW. v1.1 adds the RX->TX sample alignment stage.\n");
     console_print("     v2.x are the PL-NPI builds. v3.0 was the one-weight SMI-PI.\n");
     console_print("     v4.0 is the SMI-PI space-time build: a 16+16-tap filter\n");
-    console_print("     (smi_pi_0) on TX1, 31 weights computed by the ARM.\n");
+    console_print("     (smi_pi_0) on TX1, 31 weights computed by the ARM. v4.1\n");
+    console_print("     adds bypass, RX2 normalisation, 2 image taps, make-up gain.\n");
     rule();
 
     console_print(" RF FRONT END                                            [cfg]\n");
@@ -391,19 +392,22 @@ static void info_pl(void)
     console_print("   axi_ad9361 -> AD9361 -> [TX1 SMA]\n");
     rule();
 
-    console_print("\n SMI-PI SPACE-TIME POWER INVERSION (v4.0)               [cfg]\n");
+    console_print("\n SMI-PI SPACE-TIME POWER INVERSION (v4.1)               [cfg]\n");
     rule();
     console_print("   smi_pi_0 is a Vitis HLS filter on sys_cpu_clk (100 MHz), fed\n");
     console_print("   from gnss_passthrough through an async FIFO and returning\n");
-    console_print("   through another. 16 taps on RX1 and 16 on RX2:\n");
-    console_print("     y = x1[n-8] - sum a_k x1[n-k] - sum b_k x2[n-k]\n");
+    console_print("   through another. RX2 is first scaled to RX1's level (g2,\n");
+    console_print("   learned from the noise floors), then 16 taps on RX1, 16 on\n");
+    console_print("   RX2 and 2 image taps (the AD9361 I/Q mirror of the jammer):\n");
+    console_print("     y = x1[n-8] - sum a_k x1[n-k] - sum b_k x2n[n-k]\n");
+    console_print("                 - c1 conj(x1[n-8]) - c2 conj(x2n[n-8])\n");
     console_print("   RX1's tap at delay 8 is fixed at 1, so the output can never be\n");
-    console_print("   turned down as a whole and with no jammer it is RX1. The ARM\n");
-    console_print("   computes the 31 weights from 4096-sample DMA captures of both\n");
-    console_print("   channels (gnss_aj.c), ~100-200 times a second, and commits\n");
-    console_print("   them all at once (AJ_W 0x100-0x17C, AJ_COMMIT 0x180). Many\n");
-    console_print("   taps let the null follow a wideband jammer across the band\n");
-    console_print("   (cable, antenna and filter differences) and its reflections.\n");
+    console_print("   turned down as a whole. With no jammer the filter is BYPASSED\n");
+    console_print("   (y = x1[n-8] exactly) and the ARM only runs a cheap detector.\n");
+    console_print("   When a jammer appears the ARM computes the 33 weights from\n");
+    console_print("   4096-sample DMA captures of both channels (gnss_aj.c), a few\n");
+    console_print("   hundred times a second, and commits weights, bypass, make-up\n");
+    console_print("   gain and g2 all at once (0x100-0x194, AJ_COMMIT 0x180).\n");
     console_print("   CONTROL[5] puts it on TX1. TX2 always carries plain RX2.\n");
     rule();
 
@@ -510,12 +514,14 @@ static void info_about(void)
     console_print("   * NO absolute RF power was ever measured. Every dBm figure is\n");
     console_print("     computed from the AD9361 nominal output minus the commanded\n");
     console_print("     attenuation. Cable loss is uncharacterised.\n");
-    console_print("   * The fix is MULTI-CONSTELLATION, not GPS-only. Galileo E1\n");
-    console_print("     shares 1575.42 MHz and the 18 MHz retransmit bandwidth\n");
-    console_print("     carries GPS, Galileo and SBAS together.\n");
+    console_print("   * The fix is MULTI-CONSTELLATION. The default profile\n");
+    console_print("     (gnss_band=1: 1582.5 MHz, 61.44 MS/s, 56 MHz) carries GPS,\n");
+    console_print("     Galileo, QZSS, SBAS, BeiDou B1I/B1C and GLONASS G1. The\n");
+    console_print("     receiver must have each system switched on.\n");
     console_print("   * Position ACCURACY was never checked against a reference.\n");
-    console_print("   * SMI-PI v4.0 (space-time) is verified in C simulation against\n");
-    console_print("     wideband, CW and reflected jammers, NOT yet on this board.\n");
+    console_print("   * SMI-PI v4.1 (space-time) is verified in C simulation against\n");
+    console_print("     wideband (to 60 dB), CW and reflected jammers, I/Q imbalance\n");
+    console_print("     and a weak RX2, NOT yet on this board.\n");
     console_print("     Treat it as under test until gnss_aj? confirms it.\n");
     rule();
 
@@ -539,7 +545,7 @@ static void info_registers(void)
     head("6  gnss_passthrough REGISTER MAP  (base 0x43C00000, 4 kB)");
 
     console_print("   0x00  ID              RO  0x47435031, ASCII 'GCP1'\n");
-    console_print("   0x04  VERSION         RO  0x00040000 = v4.0\n");
+    console_print("   0x04  VERSION         RO  0x00040001 = v4.1\n");
     console_print("   0x08  SCRATCH         RW  read/write test\n");
     console_print("   0x0C  CONTROL         RW  [0] pass_en  [1] mute\n");
     console_print("                             [2] swap_iq  [3] ch1_copy\n");
@@ -567,8 +573,12 @@ static void info_registers(void)
     console_print("   0x40  CRPA_COEF0..15  RW  0x40-0x7C, stored but unused\n");
     console_print("   0x100 AJ_W0..31       RW  SMI-PI weights (shadow), Q3.12\n");
     console_print("                             {imag, real}; 0-15 RX1, 16-31 RX2\n");
-    console_print("   0x180 AJ_COMMIT       W/R write: weights -> filter; read: count\n");
-    console_print("   0x184 AJ_INFO         RO  0x10080C01 (16 taps, ref 8, Q3.12)\n");
+    console_print("   0x180 AJ_COMMIT       W/R write: all AJ_* -> filter; read: count\n");
+    console_print("   0x184 AJ_INFO         RO  0x10080C02 (16 taps, ref 8, Q3.12, v4.1)\n");
+    console_print("   0x188 AJ_CFG          RW  [0] bypass (reset 1), [10:8] make-up\n");
+    console_print("   0x18C AJ_NORM         RW  RX2 normalisation g2, Q3.13 (0x2000=1)\n");
+    console_print("   0x190 AJ_WC0/WC1      RW  image taps (0x190 RX1, 0x194 RX2)\n");
+    console_print("   0x198 AJ_CFG_ACTIVE   RO  AJ_CFG as committed\n");
     rule();
     console_print(" STATUS BITS [2] AND [3] ARE THE IMPORTANT ONES.\n");
     console_print("   They are axi_ad9361's read-back of (dac_data_sel == 4'h2),\n");
@@ -760,11 +770,14 @@ static void info_quickstart(void)
     console_print("   tx1_attenuation=N           mdB. BIGGER = QUIETER.\n");
     console_print("   gnss_tx? / gnss_status?     state, read back from hardware\n");
     console_print("   gnss_smi=1 / gnss_smi=0     anti-jam on (default) / off\n");
-    console_print("   gnss_aj?                    jammer, J/N, suppression, noise, rates\n");
+    console_print("   gnss_aj?                    bypass/filter, jammer, J/N, suppression\n");
+    console_print("   gnss_report?                EVERYTHING in one block, to copy\n");
     console_print("   gnss_aj_log=N               status line every N s, 0 = events only\n");
-    console_print("   gnss_aj_mode=0 / 1 / 2      31 taps (default) / RX2 taps / one weight\n");
-    console_print("   gnss_band=0 / 1 / 2         RF profile (1 = multi-GNSS, default)\n");
-    console_print("   gnss_smi_freeze=1 / =0      keep / track the weights\n");
+    console_print("   gnss_aj_csv=N               CSV line every N ms (100..), 0 = off\n");
+    console_print("   gnss_aj_mode=0 / 1 / 2 / 3  31+2 taps (default) / RX2 / one / no image\n");
+    console_print("   gnss_band=1 / 0 / 2 / 3     RF profile (1 = ALL incl. BeiDou, default)\n");
+    console_print("   gnss_band?                  which GNSS signals the profile carries\n");
+    console_print("   gnss_smi_freeze=1 / =0      hold the filter / automatic\n");
     console_print("   gnss_rx_gain?               RX1/RX2 gain, mode, TX level hold\n");
     console_print("   gnss_rx_gain=<dB>           same gain on RX1+RX2 (auto reference)\n");
     console_print("   gnss_rx_agc=2 / =0 / =1     matched auto / manual / AD9361 AGC\n");
@@ -790,7 +803,7 @@ void gnss_info_menu(void)
     console_print("===============================================================\n");
     console_print("  ANTSDR E310 V1  --  GNSS L1 CRPA loopback\n");
     console_print("  TX1 is %s\n",
-                  (char *)(transmitting ? "TRANSMITTING  (GPS L1, 1575.42 MHz)"
+                  (char *)(transmitting ? "TRANSMITTING  (GNSS 1559-1606 MHz, gnss_band?)"
                                         : "silent"));
     console_print("===============================================================\n");
     console_print("\n");
@@ -813,10 +826,12 @@ void gnss_info_menu(void)
     console_print("    gnss_tx=1 / gnss_tx=0       live retransmit / ABORT\n");
     console_print("    gnss_ddr_tx=1 / =0         DDR round trip / stop\n");
     console_print("    tx1_attenuation=N          mdB. BIGGER = QUIETER.\n");
-    console_print("                               89750 quietest, 70000 known good\n");
+    console_print("                               gnss_tx=1 starts at 70000 (known good)\n");
     console_print("    gnss_smi=1 / gnss_smi=0    anti-jam on (default) / off\n");
     console_print("    gnss_aj?   gnss_aj_log=N   anti-jam status / status line period\n");
-    console_print("    gnss_band=0/1/2            RF profile (1 = multi-GNSS, default)\n");
+    console_print("    gnss_report?               everything in one block (copy it)\n");
+    console_print("    gnss_aj_csv=500            CSV line every 500 ms, =0 off\n");
+    console_print("    gnss_band=1 (default)      ALL: GPS, Galileo, BeiDou, GLONASS; gnss_band?\n");
     console_print("    gnss_tx? gnss_ddr_tx? gnss_status? gnss_smi?   read back\n");
     console_print("\n");
     console_print("    ?        this menu            help?    every command (long)\n");

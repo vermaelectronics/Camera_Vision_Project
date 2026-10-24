@@ -37,8 +37,8 @@
     "mode_1r1t_parameter": 0,
     "cmos_or_lvds_n_parameter": 0,
     "adc_init_delay": 29,
-    "rx_clk_constraint_ns": 8,
-    "rx_clk_constraint_source": "Source/XDC/system.xdc: create_clock -name rx_clk -period 8",
+    "rx_clk_constraint_ns": 4,
+    "rx_clk_constraint_source": "Source/XDC/system.xdc: create_clock -name rx_clk -period 4 (SMI-PI v4: 61.44 MS/s in 2R2T; the vendor value 8 covers only 30.72 MS/s)",
     "spi_control": "PS7 SPI0 routed over EMIO to the AD9361 (spi_csn/spi_clk/spi_mosi/spi_miso)",
     "note_on_sample_rate": "Sample rate, bandwidth, LO and gain are NOT fixed by the FPGA design. They are set at runtime by software over SPI. See Source/Firmware."
   },
@@ -174,7 +174,7 @@
       "TX attenuation value and the resulting power at the GNSS receiver input have not been calculated yet.",
       "These must be decided and recorded here before any RF test is run."
     ],
-    "phase2_processing": "SMI-PI v4.0 space-time power inversion (Vitis HLS filter Source/HLS/smi_pi, block smi_pi_0 v2.0, on sys_cpu_clk between two async AXI-Stream FIFOs) on channel 0 when CONTROL[5] = 1: TX1 = x1[n-8] - sum_{k!=8} a_k x1[n-k] - sum_k b_k x2[n-k], k = 0..15 (RX1 reference tap fixed at 1). The 31 weights are computed by the ARM (Source/Firmware/app_gnss_e310/gnss_aj_math.c) from 4096-sample DMA captures and written to AJ_W / AJ_COMMIT. This build has no PI-NLMS or PL-NPI core."
+    "phase2_processing": "SMI-PI v4.1 space-time power inversion (Vitis HLS filter Source/HLS/smi_pi, block smi_pi_0 v2.1, on sys_cpu_clk between two async AXI-Stream FIFOs) on channel 0 when CONTROL[5] = 1. RX2 is first normalised, x2n = g2 x2 (AJ_NORM, Q3.13); then TX1 = 2^s (x1[n-8] - sum_{k!=8} a_k x1[n-k] - sum_k b_k x2n[n-k] - c1 conj(x1[n-8]) - c2 conj(x2n[n-8])), k = 0..15 (RX1 reference tap fixed at 1), or TX1 = x1[n-8] when AJ_CFG[0] (bypass, the reset value and the state while no jammer is detected). The 31 + 2 weights are computed by the ARM (Source/Firmware/app_gnss_e310/gnss_aj_math.c) from 4096-sample DMA captures, only while a jammer is detected, and committed with AJ_CFG/AJ_NORM by AJ_COMMIT. This build has no PI-NLMS or PL-NPI core."
   },
   "custom_ip_register_map": {
     "_comment": "Mirrors the header comment in Source/HDL/gnss_passthrough.v. Offsets are from the base address in address_map.project_assigned.gnss_passthrough.",
@@ -192,8 +192,8 @@
         "offset": "0x04",
         "name": "VERSION",
         "access": "RO",
-        "reset": "0x00040000",
-        "note": "1.0 = Phase-1 identity passthrough. 1.1 = adds the RX->TX sample alignment stage; a board reporting 1.0 transmits 24 dB low. 1.2 = adds the PI-NLMS null-steering core (CONTROL[4]). 1.3 = PI-NLMS is a separate block-design IP (pi_nlms_0), same registers. 2.0/2.1 = PL-NPI builds (LoopBack_Code_PL_NPI). 3.0 = SMI-PI build: closed-form power inversion (smi_pi_0, Vitis HLS, CONTROL[5], loading L in 0x48, |a| band in STATUS[21:20], STATUS[10] = smi_drop_sticky). 4.0 = SMI-PI space-time build: 16+16-tap filter smi_pi_0 v2.0, weights AJ_W 0x100-0x17C committed by AJ_COMMIT 0x180, AJ_INFO 0x184; no 0x48 loading, no weight band."
+        "reset": "0x00040001",
+        "note": "1.0 = Phase-1 identity passthrough. 1.1 = adds the RX->TX sample alignment stage; a board reporting 1.0 transmits 24 dB low. 1.2 = adds the PI-NLMS null-steering core (CONTROL[4]). 1.3 = PI-NLMS is a separate block-design IP (pi_nlms_0), same registers. 2.0/2.1 = PL-NPI builds (LoopBack_Code_PL_NPI). 3.0 = SMI-PI build: closed-form power inversion (smi_pi_0, Vitis HLS, CONTROL[5], loading L in 0x48, |a| band in STATUS[21:20], STATUS[10] = smi_drop_sticky). 4.0 = SMI-PI space-time build: 16+16-tap filter smi_pi_0 v2.0, weights AJ_W 0x100-0x17C committed by AJ_COMMIT 0x180, AJ_INFO 0x184; no 0x48 loading, no weight band. 4.1 = adds AJ_CFG 0x188 (bypass, make-up shift), AJ_NORM 0x18C (RX2 normalisation), AJ_WC0/1 0x190/0x194 (image taps), AJ_CFG_ACTIVE 0x198; smi_pi_0 v2.1; AJ_INFO 0x10080C02."
       },
       {
         "offset": "0x08",
@@ -299,20 +299,48 @@
         "offset": "0x100",
         "name": "AJ_W0..31",
         "access": "RW",
-        "note": "SMI-PI v4 weights, SHADOW copy. Word k = {imag[31:16], real[15:0]}, signed Q3.12. k = 0..15: RX1 tap at delay k (k = 8 is the fixed reference, ignored); k = 16..31: RX2 tap at delay k-16. No effect until AJ_COMMIT."
+        "note": "SMI-PI v4 weights, SHADOW copy. Word k = {imag[31:16], real[15:0]}, signed Q3.12. k = 0..15: RX1 tap at delay k (k = 8 is the fixed reference, ignored); k = 16..31: tap at delay k-16 on the NORMALISED RX2 (AJ_NORM). No effect until AJ_COMMIT."
       },
       {
         "offset": "0x180",
         "name": "AJ_COMMIT",
         "access": "W/RO",
-        "note": "Any write copies all 32 shadow words to the filter in one sys_cpu_clk edge. Reads a commit counter."
+        "note": "Any write copies ALL shadow registers (AJ_W, AJ_CFG, AJ_NORM, AJ_WC) to the filter in one sys_cpu_clk edge. Reads a commit counter."
       },
       {
         "offset": "0x184",
         "name": "AJ_INFO",
         "access": "RO",
-        "reset": "0x10080C01",
-        "note": "{taps per channel 16, reference delay 8, fraction bits 12, layout 1}"
+        "reset": "0x10080C02",
+        "note": "{taps per channel 16, reference delay 8, fraction bits 12, layout 2 = v4.1}"
+      },
+      {
+        "offset": "0x188",
+        "name": "AJ_CFG",
+        "access": "RW",
+        "reset": "0x00000001",
+        "note": "SHADOW. [0] bypass: TX1 = RX1 delayed 8 samples (reset; the state while no jammer is detected). [10:8] output make-up shift s = 0..4 (x2^s, 6 dB per step). No effect until AJ_COMMIT."
+      },
+      {
+        "offset": "0x18C",
+        "name": "AJ_NORM",
+        "access": "RW",
+        "reset": "0x00002000",
+        "note": "SHADOW. RX2 input normalisation g2 = {imag[31:16], real[15:0]}, signed Q3.13 (0x2000 = 1.0). No effect until AJ_COMMIT."
+      },
+      {
+        "offset": "0x190",
+        "name": "AJ_WC0..1",
+        "access": "RW",
+        "reset": "0x00000000",
+        "note": "SHADOW. Image (widely-linear) taps: 0x190 c1 on conj(RX1[n-8]), 0x194 c2 on conj(RX2n[n-8]); weight-word format. No effect until AJ_COMMIT."
+      },
+      {
+        "offset": "0x198",
+        "name": "AJ_CFG_ACTIVE",
+        "access": "RO",
+        "reset": "0x00000001",
+        "note": "AJ_CFG as committed (what smi_pi_0 runs)."
       }
     ]
   }

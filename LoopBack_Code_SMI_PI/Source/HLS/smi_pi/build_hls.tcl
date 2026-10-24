@@ -1,14 +1,17 @@
 # ============================================================================
 #  build_hls.tcl  --  Vitis HLS 2023.2: smi_pi.cpp -> block-design IP smi_pi
 #
-#  Builds the space-time SMI power-inversion filter (SMI-PI v4.0, see
-#  smi_pi.cpp) and packages it as a Vivado IP that
+#  Builds the space-time SMI power-inversion filter (SMI-PI v4.1, see
+#  smi_pi.cpp: RX2 input normalisation, 31 space-time + 2 image taps, bypass,
+#  output make-up gain) and packages it as a Vivado IP that
 #  Source/BlockDesign/system_bd.tcl instantiates as smi_pi_0, in the
 #  sys_cpu_clk domain (100 MHz), between two clock-crossing FIFOs.
 #
 #  Steps
 #    1. C simulation, scenarios 1 (bit-exact), 2 (wideband jammer), 3 (no
-#       jammer), 4 (CW jammer), 5 (jammer + reflection) and 6 (50 dB jammer).
+#       jammer, bypass), 4 (CW jammer), 5 (jammer + reflection), 6 (50 dB
+#       jammer with I/Q imbalance), 7 (RX2 25 dB weaker: normalisation) and
+#       8 (60 dB jammer with I/Q imbalance).
 #       The weights come from the firmware's solver
 #       (Source/Firmware/app_gnss_e310/gnss_aj_math.c), compiled into the
 #       testbench. Each scenario needs a freshly reset core, so each is a
@@ -28,7 +31,7 @@
 #    SMI_PI_SKIP_CSIM=1   skip step 1
 #
 #  OUTPUT
-#    $GNSS_CRPA_IP_REPO/smi_pi/component.xml, VLNV antsdr:gnss:smi_pi:2.0
+#    $GNSS_CRPA_IP_REPO/smi_pi/component.xml, VLNV antsdr:gnss:smi_pi:2.1
 #    $GNSS_CRPA_IP_REPO/smi_pi/smi_pi_csynth.rpt
 #
 #  SUCCESS MARKER
@@ -46,7 +49,7 @@ set out_ip [file join $ip_repo smi_pi]
 # The firmware's weight solver, compiled into the C simulation.
 set fw_dir [file normalize [file join $here .. .. Firmware app_gnss_e310]]
 
-# v4.0: the core runs on sys_cpu_clk (100 MHz) behind two clock-crossing
+# v4.0/v4.1: the core runs on sys_cpu_clk (100 MHz) behind two clock-crossing
 # FIFOs, NOT on the AD9361 l_clk, whose rate follows the sample rate (245.76
 # MHz at 61.44 MS/s). One sample per clock is 100 MS/s, more than the AD9361
 # can deliver, so the FIFOs never fill.
@@ -86,7 +89,7 @@ set_clock_uncertainty $clk_uncertainty
 
 # ---- 1 C simulation -------------------------------------------------------------
 if {![info exists ::env(SMI_PI_SKIP_CSIM)] || $::env(SMI_PI_SKIP_CSIM) eq "0"} {
-  foreach scen {1 2 3 4 5 6} {
+  foreach scen {1 2 3 4 5 6 7 8} {
     puts "SMI_PI_HLS: csim scenario $scen"
     if {[catch {csim_design -argv $scen} err]} {
       puts "SMI_PI_HLS: FAIL - C simulation scenario $scen: $err"
@@ -127,9 +130,9 @@ if {$ii eq "" || $ii > $pipeline_ii} {
 
 # ---- 4 package as a Vivado IP ------------------------------------------------------
 export_design -format ip_catalog -rtl verilog \
-  -vendor antsdr -library gnss -version 2.0 -ipname smi_pi \
+  -vendor antsdr -library gnss -version 2.1 -ipname smi_pi \
   -display_name "SMI power inversion, space-time" \
-  -description "Two-element space-time SMI power-inversion anti-jam filter (Vitis HLS): 16 taps on RX1 (reference tap fixed at 1) and 16 on RX2, weights from the ARM via gnss_passthrough. s_axis_x = RX1 and RX2 IQ, m_axis_y = filtered RX1."
+  -description "Two-element space-time SMI power-inversion anti-jam filter (Vitis HLS): RX2 normalised to RX1 at the input, 16 taps on RX1 (reference tap fixed at 1), 16 on RX2 and 2 image (conjugate) taps, bypass and output make-up gain; weights from the ARM via gnss_passthrough. s_axis_x = RX1 and RX2 IQ, m_axis_y = filtered RX1."
 
 set impl_dir [file join $work smi_pi_hls sol impl]
 set ip_src   [file join $impl_dir ip]
@@ -154,6 +157,6 @@ file delete -force $out_ip
 file copy -force $ip_src $out_ip
 if {[file exists $rpt_txt]} { file copy -force $rpt_txt $out_ip }
 
-puts "SMI_PI_HLS: IP antsdr:gnss:smi_pi:2.0 -> $out_ip"
+puts "SMI_PI_HLS: IP antsdr:gnss:smi_pi:2.1 -> $out_ip"
 puts "SMI_PI_HLS: PASS"
 exit 0

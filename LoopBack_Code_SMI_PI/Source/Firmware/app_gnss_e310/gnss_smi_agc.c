@@ -34,6 +34,7 @@ static int      att_holding;     /* 1 = att_written is in effect            */
 static double   pout_ref;        /* clean TX output power [LSB^2]           */
 static int      last_peak, last_comp_db;
 static double   last_pout;
+static int      dig_db;          /* make-up gain applied in the filter [dB] */
 
 static int32_t abs16(uint32_t half)
 {
@@ -176,6 +177,10 @@ int32_t gnss_rxg_ref(void)
 }
 
 uint32_t gnss_rxg_changes(void) { return rxg_changes; }
+void     gnss_rxg_set_digital_db(int db) { dig_db = db < 0 ? 0 : db; }
+int      gnss_rxg_peak(void)     { return last_peak; }
+uint32_t gnss_rxg_att_base(void) { return att_base; }
+int      gnss_rxg_comp_db(void)  { return att_holding ? last_comp_db : 0; }
 
 /* Matched mode only: both channels must stay in manual gain at rxg_gain.
  * Anything else changing them (the vendor rx1_gc_mode= / rx2_rf_gain=
@@ -304,9 +309,10 @@ void gnss_rxg_poll(void)
 	}
 	if(pout_ref <= 0.0) return;       /* no clean reference yet: do nothing */
 	{
-		/* Wanted: undo the RX gain cut. Allowed: never louder than the clean
+		/* Wanted: undo the RX gain cut, less what the filter's make-up
+		 * shift already restored. Allowed: never louder than the clean
 		 * output + 3 dB (a jammer that is NOT nulled is never amplified). */
-		double want = (double)(rxg_ref - rxg_gain);
+		double want = (double)(rxg_ref - rxg_gain - dig_db);
 		double room = db10(2.0 * pout_ref / (last_pout + 1e-9));
 		double comp = want < room ? want : room;
 		uint32_t target, floor_mdb;

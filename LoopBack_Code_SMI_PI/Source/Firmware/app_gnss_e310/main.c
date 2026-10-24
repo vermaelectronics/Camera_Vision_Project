@@ -1096,7 +1096,7 @@ int main(void)
 			       "available for investigation.\n\r", (long)gnss_st);
 		}
 
-#ifndef GNSS_DEPLOY_AUTO_TX
+#if defined(GNSS_BOOT_DIAG) && !defined(GNSS_DEPLOY_AUTO_TX)
 		/* I/Q capture to DDR for offline analysis. Receive-only; the RX tap is
 		 * a fan-out so this runs alongside the PL passthrough rather than
 		 * instead of it. Two captures, one per candidate band-select polarity
@@ -1108,18 +1108,20 @@ int main(void)
 			printf("gnss_cap: rx_dmac is NULL; skipping I/Q capture\n\r");
 		}
 #else
-		/* GNSS-CRPA MOD-8: the DEPLOYMENT build skips the dual-polarity capture.
-		 * It is a diagnostic, it flips the band-select GPIOs twice, and it
-		 * lengthens a boot that should be short and deterministic. */
-		printf("gnss_cap: deployment build - dual-polarity capture skipped\n\r");
+		/* GNSS-CRPA MOD-8 / SMI-PI v4.1: skipped unless GNSS_BOOT_DIAG. It is
+		 * a diagnostic, it flips the band-select GPIOs twice, and it adds
+		 * ~0.5 s to a boot that should be short: every second before TX1
+		 * comes up is a second on the receiver's time to fix. */
+		printf("gnss_cap: dual-polarity capture skipped (fast boot; build with GNSS_BOOT_DIAG)\n\r");
 #endif
 	}
 	/* GNSS-CRPA MOD-3 END */
 
-	/* SMI-PI v4.0: the RF profile the receiver needs for GPS + Galileo +
-	 * GLONASS + BeiDou (1584.5 MHz, 50 MS/s, 56 MHz), set for RX and TX
-	 * together. gnss_band= changes it at run time. This bitstream is timed
-	 * for the AD9361's full 61.44 MS/s (rx_clk 4 ns). */
+	/* SMI-PI v4.1: the RF profile the receiver needs for GPS + Galileo +
+	 * QZSS + SBAS + BeiDou B1I/B1C + GLONASS G1 (1582.5 MHz, 61.44 MS/s,
+	 * 56 MHz), set for RX and TX together, AD9361 FIRs off. gnss_band=
+	 * changes it at run time, gnss_band? shows which signals it carries.
+	 * This bitstream is timed for the AD9361's full 61.44 MS/s (rx_clk 4 ns). */
 	if (gnss_band_set(GNSS_BAND_DEFAULT) != 0)
 		printf("gnss_band: the AD9361 refused part of the default profile\n\r");
 	gnss_band_print();
@@ -1188,16 +1190,24 @@ int main(void)
 	 * full ~60-line vendor command dump. `help?` still prints everything. */
 	gnss_info_menu();
 
-	/* SMI-PI v4.0: anti-jam starts by itself -- matched RX gain on both
-	 * channels, weights computed continuously, the filter in the TX1 path,
-	 * jammer ON/OFF reported on this console. It transmits nothing: TX1 is
-	 * still opened only by gnss_tx=1 (or the deployment build above).
+	/* SMI-PI v4.1: anti-jam starts by itself -- matched RX gain on both
+	 * channels, the filter in the TX1 path but BYPASSED (TX1 = RX1) until a
+	 * jammer is detected, then 31 + 2 weights computed continuously; jammer
+	 * ON/OFF reported on this console. It transmits nothing: TX1 is still
+	 * opened only by gnss_tx=1 (or the deployment build above).
 	 * gnss_smi=0 switches it off. Both loops run while the console is idle. */
 	gnss_aj_init();
 	gnss_aj_enable(1);
-	console_print("\nANTI-JAM (SMI-PI v4.0, space-time 31 taps): ON. Jammer events are\n"
-		      "printed as [AJ] lines; gnss_aj? shows everything, gnss_aj_log=0 quiets\n"
-		      "the periodic line. Nothing to tune.\n");
+	console_print("\nANTI-JAM (SMI-PI " GNSS_AJ_VERSION_STR "): ON, bypassed until a jammer appears.\n"
+		      "  Jammer events are printed as [AJ] lines with a time stamp. gnss_aj? = state,\n"
+		      "  gnss_report? = everything (copy it into a report), gnss_aj_csv=500 = CSV log,\n"
+		      "  gnss_aj_log=0 quiets the 5 s status line. Nothing to tune.\n"
+		      "  Start retransmitting with gnss_tx=1 (goes straight to the working level).\n");
+#ifdef GNSS_DEPLOY_AUTO_TX
+	if((gnss_pt_read(GNSS_PT_REG_STATUS) & GNSS_PT_ST_PASS_EN_SYNCED) &&
+	   (gnss_pt_read(GNSS_PT_REG_STATUS) & GNSS_PT_ST_DAC_EN_I0))
+		gnss_aj_note_tx(1);
+#endif
 	console_set_idle_hook(gnss_idle);
 
 	while(1)

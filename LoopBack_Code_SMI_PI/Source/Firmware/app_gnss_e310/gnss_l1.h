@@ -97,6 +97,16 @@
 #define GNSS_DEPLOY_TX_ATTEN_MDB         70000U    /* 70 dB, measured working  */
 #endif
 
+/* SMI-PI v4.1: gnss_tx=1 passes through the maximum attenuation and then goes
+ * straight to this level, instead of staying at 89.75 dB until the operator
+ * steps it down by hand. At 89.75 dB the receiver sees one weak satellite at
+ * best (TEST-025), so every second spent there added to its time to fix.
+ * Default: the deployment level above. Larger number = quieter; override
+ * with -DGNSS_TX_START_ATTEN_MDB=... (build_all.sh --defines). */
+#ifndef GNSS_TX_START_ATTEN_MDB
+#define GNSS_TX_START_ATTEN_MDB          GNSS_DEPLOY_TX_ATTEN_MDB
+#endif
+
 typedef enum {
     GNSS_L1_PATH_UNCONFIRMED = 0,
     GNSS_L1_PATH_CONDUCTED_WITH_ATTENUATION = 0x5AFE

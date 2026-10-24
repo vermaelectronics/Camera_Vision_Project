@@ -132,15 +132,17 @@ command cmd_list[] = {
 	{"gnss_tx?", "Gets the GNSS L1 retransmit state.", "", get_gnss_tx},
 	{"gnss_tx=", "1 = retransmit RX1 on TX1, 0 = silence TX1.", "gnss_tx=0", set_gnss_tx},
 	{"gnss_status?", "Prints AD9361 and gnss_passthrough runtime state.", "", get_gnss_status},
-	/* SMI-PI v4.0 space-time anti-jam (smi_pi_0 v2.0 + gnss_aj.c). */
+	/* SMI-PI v4.1 space-time anti-jam (smi_pi_0 v2.1 + gnss_aj.c). */
 	{"gnss_smi?", "Anti-jam state: on/off, jammer, J/N, suppression.", "", get_gnss_smi},
 	{"gnss_smi=", "1 = anti-jam ON (default at boot), 0 = OFF (TX1 carries RX1).", "gnss_smi=1", set_gnss_smi},
-	{"gnss_smi_freeze=", "1 = keep the present weights, 0 = track (default).", "gnss_smi_freeze=0", set_gnss_smi_freeze},
-	{"gnss_aj?", "Full anti-jam status: jammer type and frequency, J/N, suppression, noise, gains.", "", get_gnss_aj},
+	{"gnss_smi_freeze=", "1 = hold the filter exactly as it is (weights, bypass), 0 = automatic (default).", "gnss_smi_freeze=0", set_gnss_smi_freeze},
+	{"gnss_aj?", "Anti-jam status: bypass/filter, jammer type and frequency, J/N, suppression.", "", get_gnss_aj},
+	{"gnss_report?", "EVERYTHING in one block (radio, gains, g2, jammer, events) to copy into a report.", "", get_gnss_report},
 	{"gnss_aj_log=", "Status line every N s on the console (default 5), 0 = only JAMMER ON/OFF events.", "gnss_aj_log=5", set_gnss_aj_log},
-	{"gnss_aj_mode=", "0 = space-time 31 taps (default), 1 = RX2 16 taps, 2 = one weight (old v3).", "gnss_aj_mode=0", set_gnss_aj_mode},
-	{"gnss_band?", "Gets the RF profile (LO, sample rate, bandwidth).", "", get_gnss_band},
-	{"gnss_band=", "0 = GPS L1 1575.42/30.72 MS/s, 1 = multi-GNSS 1584.5/50 MS/s (default), 2 = 1584.5/61.44 MS/s.", "gnss_band=1", set_gnss_band},
+	{"gnss_aj_csv=", "CSV line (AJCSV,...) every N ms, 100 to 60000; 0 = off (default).", "gnss_aj_csv=0", set_gnss_aj_csv},
+	{"gnss_aj_mode=", "0 = space-time 31 + 2 image taps (default), 1 = RX2 taps, 2 = one weight (v3), 3 = no image taps (v4.0).", "gnss_aj_mode=0", set_gnss_aj_mode},
+	{"gnss_band?", "RF profile and which GNSS signals it carries (GPS, Galileo, BeiDou, GLONASS).", "", get_gnss_band},
+	{"gnss_band=", "1 = ALL incl. BeiDou + GLONASS 1582.5 MHz/61.44 MS/s (default), 0 = L1 only, 2 = no BeiDou B1I, 3 = no GLONASS (2, 3: 50 MS/s).", "gnss_band=1", set_gnss_band},
 	{"gnss_rx_gain?", "Gets RX1/RX2 gain mode and gain [dB].", "", get_gnss_rx_gain},
 	{"gnss_rx_gain=", "Sets RX1 AND RX2 to the same gain [dB] (also the auto reference).", "gnss_rx_gain=40", set_gnss_rx_gain},
 	{"gnss_rx_agc=", "0 = manual locked, 1 = AD9361 AGC per channel, 2 = matched auto (SMI-PI).", "gnss_rx_agc=2", set_gnss_rx_agc},
@@ -205,6 +207,17 @@ void set_gnss_tx(double* param, char param_no)
 			console_print("gnss_tx: attenuation not confirmed; NOT transmitting\n");
 			return;
 		}
+		/* SMI-PI v4.1: then straight to the working level (70 dB, measured
+		 * to give a 3D fix, see GNSS_TX_START_ATTEN_MDB), still BEFORE the
+		 * data path opens. At 89.75 dB the receiver sees almost nothing, and
+		 * every second spent stepping down by hand added to its time to
+		 * fix. tx1_attenuation= still changes it afterwards. */
+		if(gnss_l1_set_tx_attenuation(ad9361_phy,
+				GNSS_TX_START_ATTEN_MDB) != GNSS_L1_OK) {
+			console_print("gnss_tx: attenuation not confirmed; NOT transmitting\n");
+			(void)gnss_l1_set_tx_attenuation(ad9361_phy, GNSS_L1_TX_MAX_ATTEN_MDB);
+			return;
+		}
 
 		gnss_pt_set_passthrough(1);
 		gnss_pt_set_mute(0);
@@ -224,11 +237,12 @@ void set_gnss_tx(double* param, char param_no)
 		if(!gnss_aj_user_off() && !gnss_aj_enabled())
 			gnss_aj_enable(1);
 		console_print("GNSS_TX: ON  - %s is being retransmitted on TX1 at "
-			      "%d mdB attenuation (quietest).\n",
-			      (char*)(gnss_aj_enabled() ? "the ANTI-JAM output (RX1+RX2)" : "RX1"),
-			      (long)GNSS_L1_TX_MAX_ATTEN_MDB);
-		console_print("         Raise power with tx1_attenuation= (smaller = "
+			      "%d mdB attenuation.\n",
+			      (char*)(gnss_aj_enabled() ? "the ANTI-JAM output (RX1+RX2; bypassed = RX1 while no jammer)" : "RX1"),
+			      (long)GNSS_TX_START_ATTEN_MDB);
+		console_print("         Change it with tx1_attenuation= (smaller = "
 			      "louder). Abort with gnss_tx=0\n");
+		gnss_aj_note_tx(1);
 	} else {
 		gnss_l1_set_dac_source(ad9361_phy, AXI_DAC_DATA_SEL_ZERO);
 		gnss_pt_set_mute(1);
@@ -236,6 +250,7 @@ void set_gnss_tx(double* param, char param_no)
 		gnss_tx_on = 0;
 		console_print("GNSS_TX: OFF - DAC source ZERO, passthrough muted, "
 			      "attenuation at maximum.\n");
+		gnss_aj_note_tx(0);
 	}
 }
 
@@ -295,16 +310,16 @@ void get_gnss_status(double* param, char param_no)
 }
 
 /**************************************************************************//***
- * @brief SMI-PI v4.0 anti-jam: one-line state.
+ * @brief SMI-PI v4.1 anti-jam: one-line state.
 *******************************************************************************/
 void get_gnss_smi(double* param, char param_no)
 {
 	uint32_t ver = gnss_pt_read(GNSS_PT_REG_VERSION);
 
 	(void)param; (void)param_no;
-	if(ver < 0x00040000U) {
-		console_print("GNSS_SMI: bitstream v%d.%d has no SMI-PI v4 space-time filter "
-			      "(this firmware needs v4.0)\n",
+	if(ver < 0x00040001U) {
+		console_print("GNSS_SMI: bitstream v%d.%d has no SMI-PI v4.1 filter "
+			      "(this firmware needs v4.1)\n",
 			      (long)(ver >> 16), (long)(ver & 0xFFFFU));
 		return;
 	}
@@ -312,9 +327,10 @@ void get_gnss_smi(double* param, char param_no)
 }
 
 /**************************************************************************//***
- * @brief SMI-PI v4.0. Anti-jam on (1) or off (0). On: TX1 carries the
- * space-time filter output, both RX gains are matched, and the ARM keeps the
- * 31 weights up to date (gnss_aj.c). It does not open the transmitter; that
+ * @brief SMI-PI v4.1. Anti-jam on (1) or off (0). On: TX1 carries the
+ * filter output -- bypassed (= RX1) while there is no jammer, the space-time
+ * filter with 31 + 2 weights computed by the ARM while there is one
+ * (gnss_aj.c) -- and both RX gains are matched. It does not open the transmitter; that
  * is still gnss_tx=1, with its attenuation interlock (which also switches
  * anti-jam on unless gnss_smi=0 was given). RX2 must have its antenna.
 *******************************************************************************/
@@ -324,8 +340,8 @@ void set_gnss_smi(double* param, char param_no)
 		console_print("gnss_smi= needs 0 or 1\n");
 		return;
 	}
-	if(gnss_pt_read(GNSS_PT_REG_VERSION) < 0x00040000U) {
-		console_print("gnss_smi: this bitstream has no SMI-PI v4 filter\n");
+	if(gnss_pt_read(GNSS_PT_REG_VERSION) < 0x00040001U) {
+		console_print("gnss_smi: this bitstream has no SMI-PI v4.1 filter\n");
 		return;
 	}
 	gnss_aj_command((int)param[0] != 0);
@@ -333,13 +349,34 @@ void set_gnss_smi(double* param, char param_no)
 }
 
 /**************************************************************************//***
- * @brief SMI-PI v4.0. Full anti-jam status, log period, filter mode and RF
- * profile.
+ * @brief SMI-PI v4.1. Anti-jam status, full report, log period, CSV, filter
+ * mode and RF profile.
 *******************************************************************************/
 void get_gnss_aj(double* param, char param_no)
 {
 	(void)param; (void)param_no;
 	gnss_aj_print();
+}
+
+void get_gnss_report(double* param, char param_no)
+{
+	(void)param; (void)param_no;
+	gnss_aj_report();
+}
+
+void set_gnss_aj_csv(double* param, char param_no)
+{
+	if(param_no < 1 || param[0] < 0.0 || param[0] > 60000.0) {
+		console_print("gnss_aj_csv= needs a period in ms, 100 to 60000, or 0 = off, e.g. gnss_aj_csv=500\n");
+		return;
+	}
+	gnss_aj_set_csv((int)param[0]);
+	if((int)param[0] == 0)
+		console_print("GNSS_AJ: CSV off\n");
+	else
+		console_print("GNSS_AJ: CSV line every %d ms (at least 100). Log the PuTTY session to a file\n"
+			      "         and keep the lines starting with AJCSV, (columns in the first one).\n",
+			      (long)((int)param[0] < 100 ? 100 : (int)param[0]));
 }
 
 void set_gnss_aj_log(double* param, char param_no)
@@ -355,8 +392,9 @@ void set_gnss_aj_log(double* param, char param_no)
 
 void set_gnss_aj_mode(double* param, char param_no)
 {
-	if(param_no < 1 || param[0] < 0.0 || param[0] > 2.0) {
-		console_print("gnss_aj_mode= needs 0 (space-time, 31 taps), 1 (RX2 taps) or 2 (one weight, v3)\n");
+	if(param_no < 1 || param[0] < 0.0 || param[0] > 3.0) {
+		console_print("gnss_aj_mode= needs 0 (space-time 31 + 2 image taps), 1 (RX2 taps), 2 (one weight, v3)\n"
+			      "              or 3 (space-time without image taps, v4.0)\n");
 		return;
 	}
 	gnss_aj_set_mode((int)param[0]);
@@ -371,8 +409,8 @@ void get_gnss_band(double* param, char param_no)
 
 void set_gnss_band(double* param, char param_no)
 {
-	if(param_no < 1 || param[0] < 0.0 || param[0] > 2.0) {
-		console_print("gnss_band= needs 0, 1 or 2 (gnss_band? lists them)\n");
+	if(param_no < 1 || param[0] < 0.0 || param[0] > (double)(GNSS_BAND_COUNT - 1)) {
+		console_print("gnss_band= needs 0, 1, 2 or 3 (gnss_band? lists them)\n");
 		return;
 	}
 	if(gnss_band_set((int)param[0]) != 0)
@@ -410,7 +448,7 @@ void set_gnss_rx_agc(double* param, char param_no)
 }
 
 /**************************************************************************//***
- * @brief SMI-PI v4.0. Keep (1) or track (0) the 31 weights.
+ * @brief SMI-PI v4.1. Hold (1) the filter as it is, or automatic (0).
 *******************************************************************************/
 void set_gnss_smi_freeze(double* param, char param_no)
 {
