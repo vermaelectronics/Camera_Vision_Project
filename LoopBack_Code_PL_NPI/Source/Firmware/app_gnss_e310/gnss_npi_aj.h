@@ -38,7 +38,7 @@
 #define GNSS_AJ_BUF_ADDR   0x11000000U
 #endif
 
-#define GNSS_AJ_VERSION_STR  "PL-NPI 2.3.5"
+#define GNSS_AJ_VERSION_STR  "PL-NPI 2.3.6"
 
 /* RF profiles (gnss_band=). RX and TX are always set together, so the
  * retransmitted signal comes out on the frequency it came in on and the

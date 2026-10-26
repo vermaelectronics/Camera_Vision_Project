@@ -1,7 +1,17 @@
 # SMI-PI v4.1: what I changed and why
 
-Version 4.1.4 of `LoopBack_Code_SMI_PI`. It builds on v4.0 (the space-time
+Version 4.1.5 of `LoopBack_Code_SMI_PI`. It builds on v4.0 (the space-time
 filter) and makes these changes to the FPGA, the firmware and the scripts.
+
+> **Slower lock than v2.2 (firmware 4.1.5).** After `gnss_band=` (new LO,
+> rate and bandwidth) the AD9361 TX quadrature / LO-leakage calibration is
+> now run again too (the driver only redoes it for LO moves > 100 MHz). A
+> stale one, and an RX DC offset, put a carrier on the LO frequency
+> (1582.5 MHz, 7 MHz above GPS L1) into the GNSS receiver: a CW jammer for
+> the receiver itself. The TX calibration's test tone goes out of TX1, so it
+> runs only while TX1 is off (at boot, before `gnss_tx=1`). Lock time also
+> depends on the level the receiver gets: compare C/N0 at
+> `tx1_attenuation=70000/65000/60000` (TESTING_PUTTY.md, T1).
 
 > **Stuck "JAMMED" after power-on, DC offset (firmware 4.1.4).** A board
 > report showed JAMMED since 0.5 s with no jammer: triggered by the RX gain

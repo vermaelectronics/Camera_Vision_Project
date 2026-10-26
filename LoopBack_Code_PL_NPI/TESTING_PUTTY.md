@@ -70,7 +70,7 @@ things: J/N is relative to the board's noise.
    ```
    gnss_pt: present at 0x43c00000, version 2.3
    SELFTEST: PASS ...
-   ANTI-JAM (PL-NPI 2.3.5): ON, bypassed until a jammer appears.
+   ANTI-JAM (PL-NPI 2.3.6): ON, bypassed until a jammer appears.
    ```
 2. Type `gnss_band?`. All five signals must show `OK` and both FIRs `off`.
 3. Type `gnss_report?` and keep the block.

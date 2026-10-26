@@ -1244,6 +1244,13 @@ int gnss_band_set(int b)
 	ad9361_phy->bbdc_track_en = true;
 	ad9361_phy->rfdc_track_en = true;
 	r |= (ad9361_do_calib_run(ad9361_phy, RFDC_CAL, 0) < 0) ? 1 : 0;
+	/* The TX quadrature / LO-leakage calibration is only redone by the
+	 * driver for LO moves > 100 MHz, not for the rate and bandwidth: a stale
+	 * one leaves a TX LO-leakage carrier on the LO frequency, which the GNSS
+	 * receiver sees as a CW jammer next to L1. Its test tone goes out of
+	 * TX1, so only while TX1 is not retransmitting. */
+	if(tx_noted != 1)
+		r |= (ad9361_do_calib_run(ad9361_phy, TX_QUAD_CAL, -1) < 0) ? 1 : 0;
 	band = b;
 	band_applied = 1;
 	/* noise power at the ADC depends on the bandwidth: learn it again */

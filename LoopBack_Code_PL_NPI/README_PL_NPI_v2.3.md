@@ -1,6 +1,6 @@
 # PL-NPI v2.3: what I changed and why
 
-Version 2.3.5 of `LoopBack_Code_PL_NPI`. It brings the same changes SMI-PI
+Version 2.3.6 of `LoopBack_Code_PL_NPI`. It brings the same changes SMI-PI
 got in v4.1 to the PL-NPI design: gated adaptation, RX2 normalisation, image
 taps for 50 dB jammers, output make-up gain, the full GNSS band (BeiDou B1I
 and GLONASS), FIRs kept off, a radio guard, faster TX start and the same
@@ -24,6 +24,16 @@ the FPGA (NLMS power inversion). The ARM only supervises.
 > and with 8 extra delays). Nothing else changed: registers, IP version
 > (pl_npi 2.0), bitstream VERSION 2.3, firmware (only its version string,
 > PL-NPI 2.3.1).
+
+> **Slower lock than v2.2 (firmware 2.3.6).** After `gnss_band=` (new LO,
+> rate and bandwidth) the AD9361 TX quadrature / LO-leakage calibration is
+> now run again too (the driver only redoes it for LO moves > 100 MHz). A
+> stale one, and an RX DC offset, put a carrier on the LO frequency
+> (1582.5 MHz, 7 MHz above GPS L1) into the GNSS receiver: a CW jammer for
+> the receiver itself. The TX calibration's test tone goes out of TX1, so it
+> runs only while TX1 is off (at boot, before `gnss_tx=1`). Lock time also
+> depends on the level the receiver gets: compare C/N0 at
+> `tx1_attenuation=70000/65000/60000` (TESTING_PUTTY.md, T1).
 
 > **Stuck "JAMMED" after power-on, DC offset (firmware 2.3.5).** A board
 > report showed JAMMED since 0.5 s with no jammer: triggered by the RX gain

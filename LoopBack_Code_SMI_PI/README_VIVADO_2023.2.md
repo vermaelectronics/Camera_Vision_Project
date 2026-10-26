@@ -1,6 +1,6 @@
 # LoopBack_Code_SMI_PI: space-time SMI power inversion (SMI-PI v4.1), Vivado / Vitis 2023.2
 
-> **v4.1.4** (this version): gated adaptation (filter bypassed with no jammer),
+> **v4.1.5** (this version): gated adaptation (filter bypassed with no jammer),
 > RX2 input normalisation, image taps for 50 dB jammers, output make-up gain,
 > a new default RF profile that carries **BeiDou B1I and all of GLONASS**
 > (1582.5 MHz, 61.44 MS/s), FIRs kept off, a radio guard, faster TX start,

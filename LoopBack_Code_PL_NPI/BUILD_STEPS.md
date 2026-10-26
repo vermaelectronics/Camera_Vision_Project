@@ -30,7 +30,7 @@ ls /tools/Xilinx/Vivado/2023.2/settings64.sh /tools/Xilinx/Vitis/2023.2/settings
 ```bash
 mkdir -p ~/pl_npi_v23
 cd ~/pl_npi_v23
-unzip ~/Downloads/LoopBack_Code_PL_NPI_v2.3.5.zip
+unzip ~/Downloads/LoopBack_Code_PL_NPI_v2.3.6.zip
 cd LoopBack_Code_PL_NPI
 chmod +x Automation/Linux/*.sh Automation/Linux/steps/*.sh
 ```
@@ -211,7 +211,7 @@ Only the firmware changed (e.g. a different `--defines`)? Then:
 ```
 gnss_pt: present at 0x43c00000, version 2.3
 SELFTEST: PASS - ...
-ANTI-JAM (PL-NPI 2.3.5): ON, bypassed until a jammer appears.
+ANTI-JAM (PL-NPI 2.3.6): ON, bypassed until a jammer appears.
 ```
 
 If it says `version 2.1`/`2.2` or `NOT started`, the card has an old
