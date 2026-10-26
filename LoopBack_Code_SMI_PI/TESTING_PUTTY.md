@@ -28,7 +28,9 @@ the mouse (that copies it) and paste it with Ctrl+V in your message.
 
 Type commands exactly as shown and press Enter. By default the board prints
 only jammer events; `gnss_aj_log=30` adds a status line every 30 s, which
-waits while you type, so it never runs through a command. `?` shows the menu,
+waits while you type, so it never runs through a command.
+Jammer events also wait while you type; `gnss_aj_events=0` silences the
+console completely (`gnss_report?` still lists every event). `?` shows the menu,
 `help?` lists every command.
 
 ---
@@ -67,7 +69,7 @@ things: J/N is relative to the board's noise.
    ```
    gnss_pt: present at 0x43c00000, version 4.1
    SELFTEST: PASS ...
-   ANTI-JAM (SMI-PI 4.1.2): ON, bypassed until a jammer appears.
+   ANTI-JAM (SMI-PI 4.1.3): ON, bypassed until a jammer appears.
    ```
 2. Type `gnss_band?`. All five signals must show `OK` and both FIRs `off`.
 3. Type `gnss_report?` and keep the block.

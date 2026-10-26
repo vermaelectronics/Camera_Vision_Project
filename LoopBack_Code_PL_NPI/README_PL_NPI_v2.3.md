@@ -1,6 +1,6 @@
 # PL-NPI v2.3: what I changed and why
 
-Version 2.3.3 of `LoopBack_Code_PL_NPI`. It brings the same changes SMI-PI
+Version 2.3.4 of `LoopBack_Code_PL_NPI`. It brings the same changes SMI-PI
 got in v4.1 to the PL-NPI design: gated adaptation, RX2 normalisation, image
 taps for 50 dB jammers, output make-up gain, the full GNSS band (BeiDou B1I
 and GLONASS), FIRs kept off, a radio guard, faster TX start and the same
@@ -24,6 +24,20 @@ the FPGA (NLMS power inversion). The ARM only supervises.
 > and with 8 extra delays). Nothing else changed: registers, IP version
 > (pl_npi 2.0), bitstream VERSION 2.3, firmware (only its version string,
 > PL-NPI 2.3.1).
+
+> **False "JAMMER ON" without a jammer (firmware 2.3.4).** The power
+> detector called any rise of the RX power 6 dB over the learned floor a
+> jammer, also when RX1 and RX2 did not see the same signal. An active
+> antenna's own LNA noise (10-25 MHz wide around L1) that changes, a bias-T
+> supply or a loose cable does exactly that, and the console filled with
+> JAMMER ON / OFF every few seconds. Now: (1) a power rise only counts when
+> some of it is common to RX1 and RX2 (coherence >= -9 dB); one jammer is
+> one source, both antennas see it. (2) A rise with no coherence that stays
+> 3 s re-learns the noise floor ("noise floor rose ... not a jammer").
+> (3) PL-NPI: when the FPGA power detector fires on such a rise, the firmware puts the core back in bypass and reports nothing. (4) A signal that keeps
+> switching on and off is reported as one "intermittent" summary line every
+> 30 s. Event lines wait while you type and `gnss_aj_events=0` silences the
+> console completely (`gnss_report?` still lists every event).
 
 > **Console and detection (firmware 2.3.3).** The board now prints **only
 > jammer events** by default (JAMMER ON / NULLED / OFF); `gnss_aj_log=30`

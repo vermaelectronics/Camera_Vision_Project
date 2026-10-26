@@ -35,7 +35,7 @@
 #define GNSS_AJ_BUF_ADDR   0x11000000U
 #endif
 
-#define GNSS_AJ_VERSION_STR  "4.1.2"
+#define GNSS_AJ_VERSION_STR  "4.1.3"
 
 /* RF profiles (gnss_band=). RX and TX are always set together, so the
  * retransmitted signal comes out on the frequency it came in on and the
@@ -56,6 +56,7 @@ int  gnss_aj_user_off(void);        /* 1 if the operator typed gnss_smi=0    */
 void gnss_aj_freeze(int on);        /* keep the present weights              */
 void gnss_aj_set_mode(int mode);    /* AJ_MODE_STAP / _RX2 / _NB / _LIN      */
 void gnss_aj_set_log(int seconds);  /* periodic status line, 0 = events only */
+void gnss_aj_set_events(int on);  /* 0 = no event lines (gnss_report? keeps them) */
 void gnss_aj_set_csv(int ms);       /* CSV line period, 0 = off              */
 int  gnss_aj_jammer_on(void);
 void gnss_aj_poll(void);

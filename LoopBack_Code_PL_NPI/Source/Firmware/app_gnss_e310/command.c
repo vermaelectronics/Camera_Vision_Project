@@ -140,6 +140,7 @@ command cmd_list[] = {
 	{"gnss_aj?", "Anti-jam status: bypass/filter, jammer type and frequency, J/N, suppression.", "", get_gnss_aj},
 	{"gnss_report?", "EVERYTHING in one block (radio, gains, g2, core, jammer, events) to copy into a report.", "", get_gnss_report},
 	{"gnss_aj_log=", "Status line every N s on the console (default 0 = off: only JAMMER ON/OFF events; held back while you type).", "gnss_aj_log=30", set_gnss_aj_log},
+	{"gnss_aj_events=", "1 = print JAMMER ON/NULLED/OFF events (default), 0 = console silent (gnss_report? still lists them).", "gnss_aj_events=0", set_gnss_aj_events},
 	{"gnss_aj_csv=", "CSV line (AJCSV,...) every N ms, 100 to 60000; 0 = off (default).", "gnss_aj_csv=0", set_gnss_aj_csv},
 	{"gnss_aj_mode=", "0 = gated + image taps (default), 1 = gated, no image, 2 = always on + image, 3 = always on, no image (v2.2).", "gnss_aj_mode=0", set_gnss_aj_mode},
 	{"gnss_band?", "RF profile and which GNSS signals it carries (GPS, Galileo, BeiDou, GLONASS).", "", get_gnss_band},
@@ -389,6 +390,17 @@ void set_gnss_aj_csv(double* param, char param_no)
 		console_print("GNSS_AJ: CSV line every %d ms (at least 100). Log the PuTTY session to a file\n"
 			      "         and keep the lines starting with AJCSV, (columns in the first one).\n",
 			      (long)((int)param[0] < 100 ? 100 : (int)param[0]));
+}
+
+void set_gnss_aj_events(double* param, char param_no)
+{
+	if(param_no < 1 || (param[0] != 0.0 && param[0] != 1.0)) {
+		console_print("gnss_aj_events= needs 0 (silent) or 1 (events printed), e.g. gnss_aj_events=0\n");
+		return;
+	}
+	gnss_aj_set_events((int)param[0]);
+	console_print("GNSS_AJ: jammer events %s\n",
+		      (char*)((int)param[0] ? "printed" : "NOT printed (gnss_report? still lists them; gnss_aj_events=1 to print)"));
 }
 
 void set_gnss_aj_log(double* param, char param_no)

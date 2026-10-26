@@ -1,7 +1,21 @@
 # SMI-PI v4.1: what I changed and why
 
-Version 4.1.2 of `LoopBack_Code_SMI_PI`. It builds on v4.0 (the space-time
+Version 4.1.3 of `LoopBack_Code_SMI_PI`. It builds on v4.0 (the space-time
 filter) and makes these changes to the FPGA, the firmware and the scripts.
+
+> **False "JAMMER ON" without a jammer (firmware 4.1.3).** The power
+> detector called any rise of the RX power 6 dB over the learned floor a
+> jammer, also when RX1 and RX2 did not see the same signal. An active
+> antenna's own LNA noise (10-25 MHz wide around L1) that changes, a bias-T
+> supply or a loose cable does exactly that, and the console filled with
+> JAMMER ON / OFF every few seconds. Now: (1) a power rise only counts when
+> some of it is common to RX1 and RX2 (coherence >= -9 dB); one jammer is
+> one source, both antennas see it. (2) A rise with no coherence that stays
+> 3 s re-learns the noise floor ("noise floor rose ... not a jammer").
+> (3) A signal that keeps
+> switching on and off is reported as one "intermittent" summary line every
+> 30 s. Event lines wait while you type and `gnss_aj_events=0` silences the
+> console completely (`gnss_report?` still lists every event).
 
 > **Console and detection (firmware 4.1.2).** The board now prints **only
 > jammer events** by default (JAMMER ON / NULLED / OFF); `gnss_aj_log=30`

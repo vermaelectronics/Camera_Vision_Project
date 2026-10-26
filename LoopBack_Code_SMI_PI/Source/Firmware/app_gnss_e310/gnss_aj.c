@@ -46,7 +46,7 @@ extern struct axi_dmac *rx_dmac;
 #define AJ_NEV            16      /* event history for gnss_report?             */
 
 enum { ST_CLEAR = 0, ST_JAMMED = 1 };
-enum { EV_ON = 1, EV_NULLED, EV_OFF, EV_LEAK, EV_TX, EV_START, EV_BG };
+enum { EV_ON = 1, EV_NULLED, EV_OFF, EV_LEAK, EV_TX, EV_START, EV_BG, EV_FLOOR };
 
 /* ---- state --------------------------------------------------------------- */
 static int      aj_on, aj_user_off, aj_frozen, aj_mode = AJ_MODE_STAP;
@@ -399,16 +399,137 @@ static void learn(XTime now)
 	}
 }
 
+/* ---- console etiquette ------------------------------------------------------
+ * Event lines wait while the operator types (and AJ_KEY_QUIET_US after the
+ * last key) and are counted instead; gnss_aj_events=0 silences them (they
+ * are still kept for gnss_report?). A signal that switches on again within
+ * AJ_FLAP_US of the last OFF is "intermittent": one summary line every
+ * AJ_FLAP_SUM_US instead of an ON/NULLED/OFF block each time. */
+#define AJ_FLAP_US        10000000U
+#define AJ_FLAP_SUM_US    30000000U
+static int    aj_events = 1, n_held, flap_mode, flap_n, have_off, jam_silent;
+static double flap_peak = -99.0;
+static XTime  last_off_t, flap_t0;
+
+static void key_track(XTime now)
+{
+	if(console_key_count() != keys_seen) {
+		keys_seen = console_key_count();
+		t_key = now;
+	}
+}
+
+static int ev_print(XTime now)
+{
+	key_track(now);
+	if(!aj_events) return 0;
+	if(console_typing() || now - t_key < us(AJ_KEY_QUIET_US)) {
+		n_held++;
+		return 0;
+	}
+	return 1;
+}
+
+/* At each jammer announcement: 1 = intermittent, do not print it. */
+static int flap_check(XTime now)
+{
+	if(!flap_mode && have_off && now - last_off_t < us(AJ_FLAP_US)) {
+		flap_mode = 1;
+		flap_n = 0;
+		flap_peak = -99.0;
+		flap_t0 = now;
+		if(ev_print(now)) {
+			stamp(now);
+			console_print("signal keeps switching on and off: one summary line every %d s from now\n"
+				      "     (gnss_report? lists each event)\n", (long)(AJ_FLAP_SUM_US / 1000000U));
+		}
+	}
+	if(flap_mode) {
+		flap_n++;
+		if(res.jn_db > flap_peak) flap_peak = res.jn_db;
+	}
+	return flap_mode;
+}
+
+static void flap_poll(XTime now)
+{
+	if(n_held > 0 && aj_events && !console_typing() && now - t_key >= us(AJ_KEY_QUIET_US)) {
+		stamp(now);
+		console_print("%d event line(s) held back while you typed: gnss_report? lists them\n", (long)n_held);
+		n_held = 0;
+	}
+	if(!aj_events) n_held = 0;
+	if(!flap_mode || now - flap_t0 < us(AJ_FLAP_SUM_US)) return;
+	if(flap_n == 0 && !(state == ST_JAMMED)) {
+		flap_mode = 0;
+		if(ev_print(now)) {
+			stamp(now);
+			console_print("intermittent signal quiet for %d s: one line per event again\n",
+				      (long)(AJ_FLAP_SUM_US / 1000000U));
+		}
+	} else if(ev_print(now)) {
+		stamp(now);
+		console_print("intermittent: %d on/off in the last %d s, peak J/N %s dB, %s now\n",
+			      (long)flap_n, (long)(AJ_FLAP_SUM_US / 1000000U), f1(flap_peak),
+			      (char*)((state == ST_JAMMED) ? "ON" : "off"));
+	}
+	flap_n = 0;
+	flap_peak = -99.0;
+	flap_t0 = now;
+}
+
+/* ---- incoherent noise rise --------------------------------------------------
+ * Power up in RX1 with no RX1/RX2 coherence and no gain cut, for AJ_RISE_US:
+ * the receivers' own noise rose (active antenna LNA, its bias supply, a
+ * cable), not a jammer: a jammer is one source, both antennas see it. The
+ * learned floor is moved up to it at once. */
+#define AJ_RISE_US        3000000U
+#define AJ_PWR_COH_DB     (-9.0)  /* power detection needs at least this coherence */
+static int   rise_on;
+static XTime rise_t0;
+
+static void rise_track(XTime now)
+{
+	int c = nf0 > 0.0 && res.jn_db >= AJ_OFF_DB && res.jn_coh_db < AJ_PWR_COH_DB &&
+	        cut_db() == 0 && gnss_rxg_ref() == cur_gain();
+	if(!c) {
+		rise_on = 0;
+		return;
+	}
+	if(!rise_on) {
+		rise_on = 1;
+		rise_t0 = now;
+		return;
+	}
+	if(now - rise_t0 >= us(AJ_RISE_US)) {
+		double cand = (res.p1 - AJ_QFLOOR) / db2lin((double)cur_gain()), up;
+		rise_on = 0;
+		if(cand <= nf0) return;
+		up = aj_db10(cand / nf0);
+		nf0 = cand;
+		add_event(now, EV_FLOOR, up, res.jn_coh_db, 0.0);
+		if(ev_print(now)) {
+			stamp(now);
+			console_print("noise floor rose %s dB without RX1/RX2 coherence: not a jammer\n"
+				      "     (active antenna LNA / its bias supply / a cable?). Floor re-learned.\n",
+				      f1(up));
+		}
+	}
+}
+
 /* ---- the state machine ----------------------------------------------------------- */
 static void announce(XTime now)
 {
+	int show;
 	jam_announced = 1;
 	jam_peak = res.jn_db;
-	console_print("\n");
-	stamp(now);
-	console_print("*** JAMMER ON ***  J/N %s dB, ", f1(res.jn_db));
-	print_type();
-	console_print("\n           detected because %s; RX gain cut %d dB\n",
+	jam_silent = flap_check(now);
+	show = !jam_silent && ev_print(now);
+	if(show) console_print("\n");
+	if(show) stamp(now);
+	if(show) console_print("*** JAMMER ON ***  J/N %s dB, ", f1(res.jn_db));
+	if(show) print_type();
+	if(show) console_print("\n           detected because %s; RX gain cut %d dB\n",
 		      (char*)why_txt(on_why), (long)cut_db());
 	/* the ON event was logged at the onset; its figures are the settled ones */
 	if(on_ev > ev_n - AJ_NEV) {
@@ -416,8 +537,8 @@ static void announce(XTime now)
 		ev[on_ev % AJ_NEV].v2 = res.bw;
 	}
 	if(jam_nulled) {
-		stamp(now);
-		console_print("NULLED in %s ms: suppression %s dB, residual %s dB, make-up +%d dB\n",
+		if(show) stamp(now);
+		if(show) console_print("NULLED in %s ms: suppression %s dB, residual %s dB, make-up +%d dB\n",
 			      fmt(null_ms, 0, 0), supp_txt(res.supp_db), f1u(res_disp(res.res_db)),
 			      (long)(6 * shift));
 	}
@@ -458,10 +579,15 @@ static void leave_jammed(XTime now)
 	if(!aj_frozen) commit_bypass();
 	aj_reset();
 	if(!jam_announced) announce(now);
-	console_print("\n");
-	stamp(now);
-	console_print("jammer OFF after %s s (peak J/N %s dB) -> filter bypassed, TX1 = RX1\n",
-		      f1u((double)ms / 1000.0), f1(jam_peak));
+	if(!jam_silent && ev_print(now)) {
+		console_print("\n");
+		stamp(now);
+		console_print("jammer OFF after %s s (peak J/N %s dB) -> filter bypassed, TX1 = RX1\n",
+			      f1u((double)ms / 1000.0), f1(jam_peak));
+	}
+	last_off_t = now;
+	have_off = 1;
+	if(flap_mode && jam_peak > flap_peak) flap_peak = jam_peak;
 	add_event(now, EV_OFF, (double)ms / 1000.0, jam_peak, 0.0);
 	if(null_ms >= 0.0) null_ms_last = null_ms;
 }
@@ -551,8 +677,10 @@ static int detect_capture(XTime now)
 	cnt_det++;
 
 	bg_track(now, 0);
+	rise_track(now);
 	if(res.jn_coh_db >= coh_on())                  why = 1;
-	else if(nf0 > 0.0 && res.jn_db >= AJ_ON_DB)    why = 2;
+	else if(nf0 > 0.0 && res.jn_db >= AJ_ON_DB &&
+	        res.jn_coh_db >= AJ_PWR_COH_DB)        why = 2;
 	else if(cut >= AJ_CUT_DB)                      why = 3;
 	quiet = !why && res.jn_coh_db < coh_quiet() &&
 	        (nf0 <= 0.0 || res.jn_db < AJ_OFF_DB) && cut == 0;
@@ -576,7 +704,7 @@ static void jammed_state(XTime now)
 	if(!jam_nulled && res.res_db <= AJ_NULL_RES_DB) {
 		jam_nulled = 1;
 		null_ms = (double)ms_since(jam_t0, now);
-		if(jam_announced) {
+		if(jam_announced && !jam_silent && ev_print(now)) {
 			stamp(now);
 			console_print("NULLED in %s ms: suppression %s dB, residual %s dB\n",
 				      fmt(null_ms, 0, 0), supp_txt(res.supp_db), f1u(res_disp(res.res_db)));
@@ -591,6 +719,7 @@ static void jammed_state(XTime now)
 		leave_jammed(now);
 		return;
 	}
+	rise_track(now);
 	quiet = res.jn_coh_db < coh_off() && res.jn_db < AJ_OFF_DB && cut_db() == 0;
 	if(!quiet) {
 		quiet_t0 = now;
@@ -602,7 +731,7 @@ static void jammed_state(XTime now)
 	if(res.res_db <= AJ_WARN_RES_DB)
 		res_bad_t0 = now;
 	if(jam_announced && now - res_bad_t0 >= us(AJ_WARN_US) &&
-	   now - t_warn >= us(5000000U)) {
+	   now - t_warn >= us(5000000U) && !jam_silent && ev_print(now)) {
 		t_warn = now;
 		stamp(now);
 		console_print("WARNING residual %s dB: the jammer is not fully nulled.\n"
@@ -712,6 +841,7 @@ void gnss_aj_poll(void)
 		t_csv = now;
 		print_csv(now);
 	}
+	flap_poll(now);
 }
 
 /* ---- control ------------------------------------------------------------------ */
@@ -794,6 +924,12 @@ void gnss_aj_set_mode(int mode)
 	if(mode < 0 || mode >= AJ_NMODES) return;
 	aj_mode = mode;
 	aj_reset();                   /* the old taps are not comparable */
+}
+
+void gnss_aj_set_events(int on)
+{
+	aj_events = on ? 1 : 0;
+	n_held = 0;
 }
 
 void gnss_aj_set_log(int seconds)
@@ -985,6 +1121,7 @@ void gnss_aj_report(void)
 		case EV_NULLED: console_print("NULLED      after %s ms, suppression %s dB, residual %s dB\n",
 					      fmt(e->v1, 0, 0), supp_txt(e->v2), f1u(res_disp(e->v3))); break;
 		case EV_OFF:    console_print("JAMMER OFF  after %s s, peak J/N %s dB\n", f1u(e->v1), f1(e->v2)); break;
+		case EV_FLOOR:   console_print("FLOOR       noise rose %s dB with no RX1/RX2 coherence: floor re-learned, not a jammer\n", f1(e->v1)); break;
 		case EV_BG:
 			if(e->v1 > -90.0)
 				console_print("BACKGROUND  RX1/RX2 common signal, coherence %s dB at power J/N %s dB: not a jammer\n",
