@@ -31,10 +31,15 @@
 //    5. CLOCK  II=1 at 100 MHz on sys_cpu_clk, between two async AXI-Stream
 //       FIFOs (it was II=2 on the AD9361 l_clk, which tied it to 30.72 MS/s):
 //       up to 100 MS/s, enough for the 61.44 MS/s profile that carries
-//       BeiDou B1I and all of GLONASS. At II=1 each register in the weight
-//       loop gives one clock, so the loop has PL_NPI_EXTRA_DELAY = 8 extra
-//       delay registers (budget 13 clocks) and a quarter step (shift 2) to
-//       keep the longer delayed update stable.
+//       BeiDou B1I and all of GLONASS. At II=1 the logic between two
+//       registers of the weight loop must fit in one 10 ns clock, and HLS
+//       cannot move registers written as static variables. v2.3.1 splits the
+//       loop into 9 processing registers (A1 A2 A3 B1 B2 C D1 D2 E1) plus
+//       PL_NPI_EXTRA_DELAY = 3 pure delays: 12 samples of update delay, as
+//       in v2.3.0 (which had 4 + 8 and missed timing: 19.6 ns estimated for
+//       u*w + sum + saturation in one clock). A quarter step (shift 2) keeps
+//       the delayed update stable. Output latency: PL_NPI_LATENCY = 2
+//       samples, the same for filter and bypass.
 //
 //  v2.2.0 and earlier: as described below.
 //  ALGORITHM (from the original RTL; v2.2.0 adds the w1 = 1 constraint, see
@@ -123,7 +128,7 @@
 //       switch-on. Here alpha is computed per sample and delayed through the
 //       pipeline (mkA/mkB) so it always belongs to the sample in stage C.
 //
-//  TIMING (v2.2.0; v2.3: II=1 at 10 ns, NQ = 8, see the top)
+//  TIMING (v2.2.0; v2.3.1: II=1 at 10 ns, 9 stages + NQ = 3, see the top)
 //    One sample every two clocks (pipeline II=2): the AD9361 in
 //    2R2T mode delivers a sample pair at most every 2nd l_clk. build_hls.tcl
 //    fails the build unless HLS reports II=2 and meets the clock target.
@@ -152,10 +157,11 @@ typedef ap_int<16> smp_t;     // input sample, raw ADC scale
 typedef ap_int<19> reg_t;     // regressor, Q2 (raw x 4), conj-safe width
 typedef ap_int<32> w_t;       // weight, Q12.20
 
-// Pure delay registers between stage D and stage E (see "TIMING"). Each one
-// gives the weight-update loop one more clock at II=1.
+// Pure delay registers between stage D2 and stage E1 (see "TIMING"). The
+// weight-update delay is 9 + PL_NPI_EXTRA_DELAY samples (12 by default, the
+// value the C simulation validated).
 #ifndef PL_NPI_EXTRA_DELAY
-#define PL_NPI_EXTRA_DELAY 8
+#define PL_NPI_EXTRA_DELAY 3
 #endif
 static const int NQ = PL_NPI_EXTRA_DELAY;
 #ifndef PL_NPI_CONSTRAIN_W1
@@ -258,51 +264,88 @@ void pl_npi(hls::stream<ap_uint<64> > &s_axis_x,
 #pragma HLS INTERFACE ap_none port=det_pow
 #pragma HLS INTERFACE ap_ctrl_none port=return
 #pragma HLS PIPELINE II=1
-
-    // ---- state: weights (w2, c1, c2) and the pipeline registers ----------
+    // ---- state ---------------------------------------------------------------
+    // Every static below is a register. At II=1 the logic between two of them
+    // must fit in ONE clock: HLS cannot move them (v2.3.0 had the three u*w
+    // products, the 7-term sum and the saturation between wp and sA: 19.6 ns
+    // estimated). The weight loop is now
+    //   wp -> A1 pa -> A2 t0/t1 -> A3 sA -> B1 pb -> B2 cB -> C pC -> D1 vD
+    //      -> D2 tD -> tQ[NQ] -> E1 dl -> E2 wp
+    // and each arrow is at most one wide multiply, two adds, or one add +
+    // saturation. Values that only depend on the input sample (regressors u,
+    // x1, alpha*gain) travel beside it in the *A1/*S/*B registers, so every
+    // stage works on one sample. 9 + NQ registers: NQ = 3 gives the same
+    // 12-sample update delay as v2.3.0 (4 stages + NQ = 8), which the C
+    // simulation validated.
     static w_t wp_re[PL_NPI_NW] = {0, 0, 0}, wp_im[PL_NPI_NW] = {0, 0, 0};
+    static w_t wd_re[PL_NPI_NW] = {0, 0, 0}, wd_im[PL_NPI_NW] = {0, 0, 0};  // wp one sample ago
 #pragma HLS ARRAY_PARTITION variable=wp_re complete
 #pragma HLS ARRAY_PARTITION variable=wp_im complete
+#pragma HLS ARRAY_PARTITION variable=wd_re complete
+#pragma HLS ARRAY_PARTITION variable=wd_im complete
 #pragma HLS RESET variable=wp_re
 #pragma HLS RESET variable=wp_im
-    // stage A -> B : s at Q.8 and the regressors it came from
+#pragma HLS RESET variable=wd_re
+#pragma HLS RESET variable=wd_im
+    // A1: the four real products of u * w for each weight
+    static ap_int<51> pa_rr[PL_NPI_NW], pa_ii[PL_NPI_NW], pa_ri[PL_NPI_NW], pa_ir[PL_NPI_NW];
+#pragma HLS ARRAY_PARTITION variable=pa_rr complete
+#pragma HLS ARRAY_PARTITION variable=pa_ii complete
+#pragma HLS ARRAY_PARTITION variable=pa_ri complete
+#pragma HLS ARRAY_PARTITION variable=pa_ir complete
+#pragma HLS RESET variable=pa_rr
+#pragma HLS RESET variable=pa_ii
+#pragma HLS RESET variable=pa_ri
+#pragma HLS RESET variable=pa_ir
+    // A2: two partial sums of s
+    static ap_int<56> t0_re = 0, t0_im = 0, t1_re = 0, t1_im = 0;
+#pragma HLS RESET variable=t0_re
+#pragma HLS RESET variable=t0_im
+#pragma HLS RESET variable=t1_re
+#pragma HLS RESET variable=t1_im
+    // A3: s at Q.8
     static ap_int<25> sA_re = 0, sA_im = 0;
 #pragma HLS RESET variable=sA_re
 #pragma HLS RESET variable=sA_im
-    static reg_t uA_re[PL_NPI_NW] = {0, 0, 0}, uA_im[PL_NPI_NW] = {0, 0, 0};
-#pragma HLS ARRAY_PARTITION variable=uA_re complete
-#pragma HLS ARRAY_PARTITION variable=uA_im complete
-#pragma HLS RESET variable=uA_re
-#pragma HLS RESET variable=uA_im
-    // stage B -> C : correlation conj(u)*s (Q10) and the Eq. 11 band
+    // B1: the four real products of conj(u) * s, and the Eq. 11 band
+    static ap_int<44> pb_rr[PL_NPI_NW], pb_ii[PL_NPI_NW], pb_ri[PL_NPI_NW], pb_ir[PL_NPI_NW];
+#pragma HLS ARRAY_PARTITION variable=pb_rr complete
+#pragma HLS ARRAY_PARTITION variable=pb_ii complete
+#pragma HLS ARRAY_PARTITION variable=pb_ri complete
+#pragma HLS ARRAY_PARTITION variable=pb_ir complete
+#pragma HLS RESET variable=pb_rr
+#pragma HLS RESET variable=pb_ii
+#pragma HLS RESET variable=pb_ri
+#pragma HLS RESET variable=pb_ir
+    static ap_uint<2> band1 = 0;
+#pragma HLS RESET variable=band1
+    // B2: correlation (Q10), the selected alpha*gain mantissa and shift
     static ap_int<45> cB_re[PL_NPI_NW] = {0, 0, 0}, cB_im[PL_NPI_NW] = {0, 0, 0};
 #pragma HLS ARRAY_PARTITION variable=cB_re complete
 #pragma HLS ARRAY_PARTITION variable=cB_im complete
 #pragma HLS RESET variable=cB_re
 #pragma HLS RESET variable=cB_im
-    static ap_uint<2> bandB = 0;
+    static ap_uint<2>  bandB = 0;
+    static ap_uint<18> mselB = 0;
+    static ap_int<8>   shB = 0;
 #pragma HLS RESET variable=bandB
-    // stage C -> D : corr * mantissa(alpha*gain), and its shift
+#pragma HLS RESET variable=mselB
+#pragma HLS RESET variable=shB
+    // C: corr * mantissa
     static ap_int<64> pC_re[PL_NPI_NW] = {0, 0, 0}, pC_im[PL_NPI_NW] = {0, 0, 0};
 #pragma HLS ARRAY_PARTITION variable=pC_re complete
 #pragma HLS ARRAY_PARTITION variable=pC_im complete
 #pragma HLS RESET variable=pC_re
 #pragma HLS RESET variable=pC_im
-    static ap_int<8> shC = 0;
+    static ap_int<8> shC = 0, shC_img = 0;     // shift for w2, for c1/c2
 #pragma HLS RESET variable=shC
-    // alpha*gain candidates delayed to line up with the stage-C sample:
-    // mkA/ekA hold sample n-1, mkB/ekB sample n-2 (= the sample in cB).
-    static ap_uint<18> mkA[4] = {0, 0, 0, 0}, mkB[4] = {0, 0, 0, 0};
-    static ap_int<8>   ekA[4] = {0, 0, 0, 0}, ekB[4] = {0, 0, 0, 0};
-#pragma HLS ARRAY_PARTITION variable=mkA complete
-#pragma HLS ARRAY_PARTITION variable=mkB complete
-#pragma HLS ARRAY_PARTITION variable=ekA complete
-#pragma HLS ARRAY_PARTITION variable=ekB complete
-#pragma HLS RESET variable=mkA
-#pragma HLS RESET variable=mkB
-#pragma HLS RESET variable=ekA
-#pragma HLS RESET variable=ekB
-    // stage D -> E : update term in Q.20 weight units
+#pragma HLS RESET variable=shC_img
+    // D1: shifted into Q.20 weight units; D2: saturated
+    static ap_int<84> vD_re[PL_NPI_NW], vD_im[PL_NPI_NW];
+#pragma HLS ARRAY_PARTITION variable=vD_re complete
+#pragma HLS ARRAY_PARTITION variable=vD_im complete
+#pragma HLS RESET variable=vD_re
+#pragma HLS RESET variable=vD_im
     static ap_int<48> tD_re[PL_NPI_NW] = {0, 0, 0}, tD_im[PL_NPI_NW] = {0, 0, 0};
 #pragma HLS ARRAY_PARTITION variable=tD_re complete
 #pragma HLS ARRAY_PARTITION variable=tD_im complete
@@ -321,6 +364,53 @@ void pl_npi(hls::stream<ap_uint<64> > &s_axis_x,
 #define TE_RE(i) tD_re[i]
 #define TE_IM(i) tD_im[i]
 #endif
+    // E1: the update incl. the 2^-18 leak, in weight LSBs
+    static ap_int<49> dl_re[PL_NPI_NW] = {0, 0, 0}, dl_im[PL_NPI_NW] = {0, 0, 0};
+#pragma HLS ARRAY_PARTITION variable=dl_re complete
+#pragma HLS ARRAY_PARTITION variable=dl_im complete
+#pragma HLS RESET variable=dl_re
+#pragma HLS RESET variable=dl_im
+    // per-sample values travelling beside the sample
+    static reg_t uA1_re[PL_NPI_NW], uA1_im[PL_NPI_NW], uS_re[PL_NPI_NW], uS_im[PL_NPI_NW];
+    static reg_t uB_re[PL_NPI_NW], uB_im[PL_NPI_NW];
+#pragma HLS ARRAY_PARTITION variable=uA1_re complete
+#pragma HLS ARRAY_PARTITION variable=uA1_im complete
+#pragma HLS ARRAY_PARTITION variable=uS_re complete
+#pragma HLS ARRAY_PARTITION variable=uS_im complete
+#pragma HLS ARRAY_PARTITION variable=uB_re complete
+#pragma HLS ARRAY_PARTITION variable=uB_im complete
+#pragma HLS RESET variable=uA1_re
+#pragma HLS RESET variable=uA1_im
+#pragma HLS RESET variable=uS_re
+#pragma HLS RESET variable=uS_im
+#pragma HLS RESET variable=uB_re
+#pragma HLS RESET variable=uB_im
+    static reg_t x1qA_re = 0, x1qA_im = 0;                          // x1 at Q2, for the sum
+    static smp_t x1A_re = 0, x1A_im = 0, x1S_re = 0, x1S_im = 0;    // raw x1, for bypass
+#pragma HLS RESET variable=x1qA_re
+#pragma HLS RESET variable=x1qA_im
+#pragma HLS RESET variable=x1A_re
+#pragma HLS RESET variable=x1A_im
+#pragma HLS RESET variable=x1S_re
+#pragma HLS RESET variable=x1S_im
+    static ap_uint<18> mkA1[4], mkS[4], mkB0[4], mkB1[4];
+    static ap_int<8>   ekA1[4], ekS[4], ekB0[4], ekB1[4];
+#pragma HLS ARRAY_PARTITION variable=mkA1 complete
+#pragma HLS ARRAY_PARTITION variable=mkS complete
+#pragma HLS ARRAY_PARTITION variable=mkB0 complete
+#pragma HLS ARRAY_PARTITION variable=mkB1 complete
+#pragma HLS ARRAY_PARTITION variable=ekA1 complete
+#pragma HLS ARRAY_PARTITION variable=ekS complete
+#pragma HLS ARRAY_PARTITION variable=ekB0 complete
+#pragma HLS ARRAY_PARTITION variable=ekB1 complete
+#pragma HLS RESET variable=mkA1
+#pragma HLS RESET variable=mkS
+#pragma HLS RESET variable=mkB0
+#pragma HLS RESET variable=mkB1
+#pragma HLS RESET variable=ekA1
+#pragma HLS RESET variable=ekS
+#pragma HLS RESET variable=ekB0
+#pragma HLS RESET variable=ekB1
     // power detector
     static ap_uint<34> pacc = 0;              // average, PL_NPI_DET_FRAC fraction bits
     static ap_uint<1>  det = 0;
@@ -435,68 +525,97 @@ void pl_npi(hls::stream<ap_uint<64> > &s_axis_x,
         ek[k] = (ap_int<8>)qp - 17 + (top ? 17 : 16) - 21;
     }
 
-    // ---- stage E: weight update from the term registered in stage D -----
+    // Every stage below reads the OLD register values (they are written at
+    // the end), i.e. each one is one clock of the pipeline.
+
+    // ---- E2: weights: subtract + saturate, or 0 --------------------------
+    //      bypassed: weights held at 0 (each jammer starts from w = 0);
+    //      image taps off: c1 = c2 = 0. Not adapting: dl is 0 (E1).
     w_t nwp_re[PL_NPI_NW], nwp_im[PL_NPI_NW];
 #pragma HLS ARRAY_PARTITION variable=nwp_re complete
 #pragma HLS ARRAY_PARTITION variable=nwp_im complete
     for (int i = 0; i < PL_NPI_NW; i++) {
 #pragma HLS UNROLL
-        ap_int<49> lr = ((ap_int<49>)wp_re[i] + TE_RE(i)) >> 18;
-        ap_int<49> li = ((ap_int<49>)wp_im[i] + TE_IM(i)) >> 18;
-        nwp_re[i] = adapt ? sat32((ap_int<49>)wp_re[i] - lr) : wp_re[i];
-        nwp_im[i] = adapt ? sat32((ap_int<49>)wp_im[i] - li) : wp_im[i];
-        // bypassed: weights held at 0 (each jammer starts from w = 0);
-        // image taps off: c1 = c2 = 0
-        if (!active || (i > 0 && !img)) { nwp_re[i] = 0; nwp_im[i] = 0; }
+        bool keep = active && (i == 0 || img);
+        nwp_re[i] = keep ? sat32((ap_int<49>)wp_re[i] - dl_re[i]) : w_t(0);
+        nwp_im[i] = keep ? sat32((ap_int<49>)wp_im[i] - dl_im[i]) : w_t(0);
     }
 
-    // ---- stage D: shift the stage-C product into Q.20 weight units -------
-    ap_int<48> ntD_re[PL_NPI_NW], ntD_im[PL_NPI_NW];
-#pragma HLS ARRAY_PARTITION variable=ntD_re complete
-#pragma HLS ARRAY_PARTITION variable=ntD_im complete
+    // ---- E1: update = (w + term) / 2^18, 0 while not adapting. The 2^-18
+    //      leak uses the weight of one sample ago (a 2^-18 term: the
+    //      difference is invisible), so E2 does not need the add -------------
+    ap_int<49> ndl_re[PL_NPI_NW], ndl_im[PL_NPI_NW];
+#pragma HLS ARRAY_PARTITION variable=ndl_re complete
+#pragma HLS ARRAY_PARTITION variable=ndl_im complete
     for (int i = 0; i < PL_NPI_NW; i++) {
 #pragma HLS UNROLL
-        ap_int<8> shi = shC - ((i > 0) ? PL_NPI_IMG_SHIFT : 0);
+        ndl_re[i] = adapt ? (ap_int<49>)(((ap_int<49>)wd_re[i] + TE_RE(i)) >> 18) : ap_int<49>(0);
+        ndl_im[i] = adapt ? (ap_int<49>)(((ap_int<49>)wd_im[i] + TE_IM(i)) >> 18) : ap_int<49>(0);
+    }
+
+    // ---- D2: saturate to 48 bits; D1: shift into Q.20 weight units --------
+    ap_int<48> ntD_re[PL_NPI_NW], ntD_im[PL_NPI_NW];
+    ap_int<84> nvD_re[PL_NPI_NW], nvD_im[PL_NPI_NW];
+#pragma HLS ARRAY_PARTITION variable=ntD_re complete
+#pragma HLS ARRAY_PARTITION variable=ntD_im complete
+#pragma HLS ARRAY_PARTITION variable=nvD_re complete
+#pragma HLS ARRAY_PARTITION variable=nvD_im complete
+    for (int i = 0; i < PL_NPI_NW; i++) {
+#pragma HLS UNROLL
+        ntD_re[i] = sat48(vD_re[i]);
+        ntD_im[i] = sat48(vD_im[i]);
+        ap_int<8> shi = (i > 0) ? shC_img : shC;
         ap_int<84> vr = pC_re[i], vi = pC_im[i];
         if (shi >= 0) { vr = vr << shi;    vi = vi << shi; }
         else          { vr = vr >> (-shi); vi = vi >> (-shi); }
-        ntD_re[i] = sat48(vr);
-        ntD_im[i] = sat48(vi);
+        nvD_re[i] = vr;
+        nvD_im[i] = vi;
     }
 
-    // ---- stage C: corr * mantissa of alpha*gain(band) --------------------
+    // ---- C: corr * mantissa of alpha*gain(band) ----------------------------
     ap_int<64> npC_re[PL_NPI_NW], npC_im[PL_NPI_NW];
 #pragma HLS ARRAY_PARTITION variable=npC_re complete
 #pragma HLS ARRAY_PARTITION variable=npC_im complete
-    ap_uint<18> m_sel  = mkB[bandB];
-    ap_int<8>   sh_sel = ekB[bandB] - PL_NPI_STEP_SHIFT;
     for (int i = 0; i < PL_NPI_NW; i++) {
 #pragma HLS UNROLL
-        npC_re[i] = cB_re[i] * (ap_int<19>)m_sel;
-        npC_im[i] = cB_im[i] * (ap_int<19>)m_sel;
+        npC_re[i] = cB_re[i] * (ap_int<19>)mselB;
+        npC_im[i] = cB_im[i] * (ap_int<19>)mselB;
     }
 
-    // ---- stage B: corr = conj(u) * s, and the Eq. 11 band of |Re s| ------
+    // ---- B2: corr = conj(u) * s summed; alpha*gain of the sample's band ----
     ap_int<45> ncB_re[PL_NPI_NW], ncB_im[PL_NPI_NW];
 #pragma HLS ARRAY_PARTITION variable=ncB_re complete
 #pragma HLS ARRAY_PARTITION variable=ncB_im complete
     for (int i = 0; i < PL_NPI_NW; i++) {
 #pragma HLS UNROLL
-        ncB_re[i] = (ap_int<45>)(uA_re[i] * sA_re) + (ap_int<45>)(uA_im[i] * sA_im);
-        ncB_im[i] = (ap_int<45>)(uA_re[i] * sA_im) - (ap_int<45>)(uA_im[i] * sA_re);
+        ncB_re[i] = (ap_int<45>)pb_rr[i] + (ap_int<45>)pb_ii[i];
+        ncB_im[i] = (ap_int<45>)pb_ri[i] - (ap_int<45>)pb_ir[i];
+    }
+    ap_uint<18> nmsel = mkB1[band1];
+    ap_int<8>   nshB  = ekB1[band1] - PL_NPI_STEP_SHIFT;
+
+    // ---- B1: products conj(u) * s, and the Eq. 11 band of |Re s| ----------
+    ap_int<44> npb_rr[PL_NPI_NW], npb_ii[PL_NPI_NW], npb_ri[PL_NPI_NW], npb_ir[PL_NPI_NW];
+#pragma HLS ARRAY_PARTITION variable=npb_rr complete
+#pragma HLS ARRAY_PARTITION variable=npb_ii complete
+#pragma HLS ARRAY_PARTITION variable=npb_ri complete
+#pragma HLS ARRAY_PARTITION variable=npb_ir complete
+    for (int i = 0; i < PL_NPI_NW; i++) {
+#pragma HLS UNROLL
+        npb_rr[i] = uB_re[i] * sA_re;
+        npb_ii[i] = uB_im[i] * sA_im;
+        npb_ri[i] = uB_re[i] * sA_im;
+        npb_ir[i] = uB_im[i] * sA_re;
     }
     ap_int<25> yabs = (sA_re < 0) ? (ap_int<25>)(-sA_re) : sA_re;
     ap_uint<2> nband = (yabs > TH3) ? 3 : (yabs > TH2) ? 2 : (yabs > TH1) ? 1 : 0;
 
-    // ---- stage A: s = x1 + sum u * w with the current weights (Q22) ------
-    ap_int<56> s_re = (ap_int<56>)x1qr << 20, s_im = (ap_int<56>)x1qi << 20;
-    for (int i = 0; i < PL_NPI_NW; i++) {
-#pragma HLS UNROLL
-        s_re += (ap_int<56>)(u_re[i] * wp_re[i]) - (ap_int<56>)(u_im[i] * wp_im[i]);
-        s_im += (ap_int<56>)(u_re[i] * wp_im[i]) + (ap_int<56>)(u_im[i] * wp_re[i]);
-    }
+    // ---- A3: s = t0 + t1 (Q22); the output; s at Q.8 for the loop ---------
+    ap_int<56> s_re = t0_re + t1_re, s_im = t0_im + t1_im;
 
-    // ---- output: bypass = x1; filter = round(s * 2^sh / 2^22), saturated ---
+    // Output: bypass = x1; filter = round(s * 2^sh / 2^22), saturated. Both
+    // leave PL_NPI_LATENCY samples after their input, so switching between
+    // them never shifts the signal in time.
     // Round to nearest, not floor (v2.1.10: truncation cost up to 3.7 dB of
     // output SINR once the gain loop had turned the RX gain down).
     ap_uint<32> out;
@@ -505,15 +624,37 @@ void pl_npi(hls::stream<ap_uint<64> > &s_axis_x,
         out(15, 0)  = (ap_uint<16>)sat16((((ap_int<62>)s_re << sh) + half) >> 22);
         out(31, 16) = (ap_uint<16>)sat16((((ap_int<62>)s_im << sh) + half) >> 22);
     } else {
-        out(15, 0)  = (ap_uint<16>)x1r;
-        out(31, 16) = (ap_uint<16>)x1i;
+        out(15, 0)  = (ap_uint<16>)x1S_re;
+        out(31, 16) = (ap_uint<16>)x1S_im;
     }
     m_axis_y.write(out);
 
-    // ---- commit all registers (every stage reads the OLD values above) ---
+    // ---- A2: two partial sums of s = x1 + sum u * w ------------------------
+    ap_int<56> nt0_re = ((ap_int<56>)pa_rr[0] - pa_ii[0]) + ((ap_int<56>)pa_rr[1] - pa_ii[1]);
+    ap_int<56> nt0_im = ((ap_int<56>)pa_ri[0] + pa_ir[0]) + ((ap_int<56>)pa_ri[1] + pa_ir[1]);
+    ap_int<56> nt1_re = ((ap_int<56>)pa_rr[2] - pa_ii[2]) + ((ap_int<56>)x1qA_re << 20);
+    ap_int<56> nt1_im = ((ap_int<56>)pa_ri[2] + pa_ir[2]) + ((ap_int<56>)x1qA_im << 20);
+
+    // ---- A1: products u * w with the current weights -----------------------
+    ap_int<51> npa_rr[PL_NPI_NW], npa_ii[PL_NPI_NW], npa_ri[PL_NPI_NW], npa_ir[PL_NPI_NW];
+#pragma HLS ARRAY_PARTITION variable=npa_rr complete
+#pragma HLS ARRAY_PARTITION variable=npa_ii complete
+#pragma HLS ARRAY_PARTITION variable=npa_ri complete
+#pragma HLS ARRAY_PARTITION variable=npa_ir complete
     for (int i = 0; i < PL_NPI_NW; i++) {
 #pragma HLS UNROLL
+        npa_rr[i] = u_re[i] * wp_re[i];
+        npa_ii[i] = u_im[i] * wp_im[i];
+        npa_ri[i] = u_re[i] * wp_im[i];
+        npa_ir[i] = u_im[i] * wp_re[i];
+    }
+
+    // ---- commit all registers ---------------------------------------------
+    for (int i = 0; i < PL_NPI_NW; i++) {
+#pragma HLS UNROLL
+        wd_re[i] = wp_re[i];   wd_im[i] = wp_im[i];
         wp_re[i] = nwp_re[i];  wp_im[i] = nwp_im[i];
+        dl_re[i] = ndl_re[i];  dl_im[i] = ndl_im[i];
 #if PL_NPI_EXTRA_DELAY > 0
         for (int j = NQ - 1; j > 0; j--) {
 #pragma HLS UNROLL
@@ -522,17 +663,32 @@ void pl_npi(hls::stream<ap_uint<64> > &s_axis_x,
         tQ_re[0][i] = tD_re[i];  tQ_im[0][i] = tD_im[i];
 #endif
         tD_re[i] = ntD_re[i];  tD_im[i] = ntD_im[i];
+        vD_re[i] = nvD_re[i];  vD_im[i] = nvD_im[i];
         pC_re[i] = npC_re[i];  pC_im[i] = npC_im[i];
         cB_re[i] = ncB_re[i];  cB_im[i] = ncB_im[i];
-        uA_re[i] = u_re[i];    uA_im[i] = u_im[i];
+        pb_rr[i] = npb_rr[i];  pb_ii[i] = npb_ii[i];
+        pb_ri[i] = npb_ri[i];  pb_ir[i] = npb_ir[i];
+        uB_re[i] = uS_re[i];   uB_im[i] = uS_im[i];
+        uS_re[i] = uA1_re[i];  uS_im[i] = uA1_im[i];
+        uA1_re[i] = u_re[i];   uA1_im[i] = u_im[i];
+        pa_rr[i] = npa_rr[i];  pa_ii[i] = npa_ii[i];
+        pa_ri[i] = npa_ri[i];  pa_ir[i] = npa_ir[i];
     }
     for (int k = 0; k < 4; k++) {
 #pragma HLS UNROLL
-        mkB[k] = mkA[k];  ekB[k] = ekA[k];
-        mkA[k] = mk[k];   ekA[k] = ek[k];
+        mkB1[k] = mkB0[k];  ekB1[k] = ekB0[k];
+        mkB0[k] = mkS[k];   ekB0[k] = ekS[k];
+        mkS[k]  = mkA1[k];  ekS[k]  = ekA1[k];
+        mkA1[k] = mk[k];    ekA1[k] = ek[k];
     }
-    shC   = sh_sel;
-    bandB = nband;
+    mselB = nmsel;  shB = nshB;  bandB = band1;
+    shC   = shB;
+    shC_img = shB - PL_NPI_IMG_SHIFT;
+    band1 = nband;
     sA_re = sat25(s_re >> 14);
     sA_im = sat25(s_im >> 14);
+    t0_re = nt0_re;  t0_im = nt0_im;  t1_re = nt1_re;  t1_im = nt1_im;
+    x1S_re = x1A_re;  x1S_im = x1A_im;
+    x1A_re = x1r;     x1A_im = x1i;
+    x1qA_re = x1qr;   x1qA_im = x1qi;
 }

@@ -17,10 +17,8 @@ the check passes. Each script can be run from any folder.
 | `09_boot.sh`    | BOOT.BIN | file listed |
 | `10_report.sh`  | pass/fail report | verdict at the end |
 
-If step 3 reports a clock above 10 ns or II 2:
-`PL_NPI_EXTRA_DELAY=16 PL_NPI_STEP_SHIFT=3 ./03_npi.sh`
-(more pipeline registers in the update loop, smaller step to keep it stable;
-the C simulation is run again with the same values).
+If step 3 reports a clock above 10 ns or II 2, send the `PL_NPI_HLS` lines
+and the critical path (`grep -A14 "HLS 200-1016" Build/Logs/npi.log`).
 
 Step 6 times the AD9361 interface at 4 ns (61.44 MS/s). If it reports
 `BUILD_TIMING: VIOLATED` with the failing paths on `rx_clk`, change the 4 to 5

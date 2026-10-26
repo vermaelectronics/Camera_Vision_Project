@@ -30,7 +30,7 @@ ls /tools/Xilinx/Vivado/2023.2/settings64.sh /tools/Xilinx/Vitis/2023.2/settings
 ```bash
 mkdir -p ~/pl_npi_v23
 cd ~/pl_npi_v23
-unzip ~/Downloads/LoopBack_Code_PL_NPI_v2.3.0.zip
+unzip ~/Downloads/LoopBack_Code_PL_NPI_v2.3.1.zip
 cd LoopBack_Code_PL_NPI
 chmod +x Automation/Linux/*.sh Automation/Linux/steps/*.sh
 ```
@@ -83,14 +83,14 @@ PL_NPI_HLS: estimated clock period X ns (target 10 ns), achieved II 1 (requested
 PL_NPI_HLS: IP antsdr:gnss:pl_npi:2.0 -> .../Build/ip_repo/pl_npi
 PL_NPI_HLS: PASS
 ```
-**This is the step to watch in v2.3** (the NLMS loop now runs at II=1). If
-it fails on the clock estimate or on II, run the fallback, which adds loop
-delay and halves the step (the C simulation is repeated with it):
+**This is the step to watch in v2.3** (the NLMS loop runs at II=1 on a
+10 ns clock). v2.3.0 failed here (19.6 ns); v2.3.1 splits the loop into
+stages that each fit one clock. If it still fails on the clock estimate or
+on II, send me the `PL_NPI_HLS` lines and the critical path:
 ```bash
-PL_NPI_EXTRA_DELAY=16 PL_NPI_STEP_SHIFT=3 ./Automation/Linux/steps/03_npi.sh
+grep -E "PL_NPI_HLS|Pipelining result|Estimated Fmax" Build/Logs/npi.log
+grep -A14 "HLS 200-1016" Build/Logs/npi.log
 ```
-If that still fails, add `PL_NPI_CLK_NS=8` (HLS pipelines deeper; the
-hardware clock stays 100 MHz) and send me the `npi.log`.
 To see one scenario's numbers: `grep -B1 -A4 "scenario 7" Build/Logs/npi.log`
 
 ### Step 4: package gnss_passthrough (1–2 min)
@@ -211,7 +211,7 @@ Only the firmware changed (e.g. a different `--defines`)? Then:
 ```
 gnss_pt: present at 0x43c00000, version 2.3
 SELFTEST: PASS - ...
-ANTI-JAM (PL-NPI 2.3.0): ON, bypassed until a jammer appears.
+ANTI-JAM (PL-NPI 2.3.1): ON, bypassed until a jammer appears.
 ```
 
 If it says `version 2.1`/`2.2` or `NOT started`, the card has an old

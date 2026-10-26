@@ -27,9 +27,10 @@
 #    PL_NPI_II=<n>        pipeline II, default 1 (2 halves the maximum rate
 #                         to 50 MS/s: then use gnss_band=2 or 3 only)
 #    PL_NPI_SKIP_CSIM=1   skip step 1
-#    PL_NPI_EXTRA_DELAY=<n>  delay registers in the weight loop, default 8;
-#                            if synthesis misses II=1, try 16 together with
-#                            PL_NPI_STEP_SHIFT=3 (C simulation: stable)
+#    PL_NPI_EXTRA_DELAY=<n>  pure delay registers in the weight loop,
+#                            default 3 (update delay 9 + n samples). They do
+#                            NOT shorten any clock: each of the 9 processing
+#                            stages must fit in one clock by itself.
 #    PL_NPI_STEP_SHIFT=<n>   step reduction 2^-n, default 2
 #    PL_NPI_IMG_SHIFT=<n>    extra step reduction of the image taps, default 2
 #

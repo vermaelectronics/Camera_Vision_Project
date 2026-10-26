@@ -68,9 +68,15 @@ static int g_adapt = 1;
 static hls::stream<ap_uint<64> > xs;
 static hls::stream<ap_uint<32> > ys;
 
-struct Out { int yr, yi; unsigned st; double w[6]; unsigned pow; };
+// x1r/x1i: the RX1 input that this output sample belongs to (the core's
+// output is PL_NPI_LATENCY samples late, in bypass and in filter mode).
+struct Out { int yr, yi; unsigned st; double w[6]; unsigned pow; int x1r, x1i; };
+
+static int hx_r[PL_NPI_LATENCY + 1], hx_i[PL_NPI_LATENCY + 1];
 
 static Out step(int x1r, int x1i, int x2r, int x2i) {
+    for (int k = PL_NPI_LATENCY; k > 0; k--) { hx_r[k] = hx_r[k - 1]; hx_i[k] = hx_i[k - 1]; }
+    hx_r[0] = x1r; hx_i[0] = x1i;
     ap_uint<64> w;
     w(15, 0)  = (ap_uint<16>)(ap_int<16>)x1r;
     w(31, 16) = (ap_uint<16>)(ap_int<16>)x1i;
@@ -89,6 +95,8 @@ static Out step(int x1r, int x1i, int x2r, int x2i) {
     for (int k = 0; k < 6; k++)
         o.w[k] = (double)(ap_int<32>)wo(32 * k + 31, 32 * k) / 1048576.0;
     o.pow = (unsigned)pw;
+    o.x1r = hx_r[PL_NPI_LATENCY];
+    o.x1i = hx_i[PL_NPI_LATENCY];
     return o;
 }
 
@@ -202,7 +210,7 @@ static int test_bypass() {
     for (int n = 0; n < 20000; n++) {
         int a, b, c, d; s.next(a, b, c, d);
         Out o = step(a, b, c, d);
-        if (o.yr != a || o.yi != b) bad++;
+        if (o.yr != o.x1r || o.yi != o.x1i) bad++;
         for (int k = 0; k < 6; k++) if (o.w[k] != 0.0) { wbad++; break; }
     }
     printf("bypass with a 1500 LSB jammer: %d samples differ from RX1, %d with non-zero weights\n", bad, wbad);
@@ -218,7 +226,7 @@ static int test_bypass() {
     for (int n = 0; n < 50000; n++) {
         int a, b, c, d; s.next(a, b, c, d);
         Out o = step(a, b, c, d);
-        if (o.yr != a || o.yi != b) bad2++;
+        if (o.yr != o.x1r || o.yi != o.x1i) bad2++;
         if (o.st & PL_NPI_ST_DET) det++;
         cnt = (o.st >> PL_NPI_ST_CNT_LSB) - cnt0;
         if (o.pow > pmax) pmax = o.pow;
@@ -251,7 +259,7 @@ static int test_gating() {
             cnt++;
         }
         if (off_at >= 0 && n > off_at + 20) {
-            if (o.yr != a || o.yi != b) bad_after++;
+            if (o.yr != o.x1r || o.yi != o.x1i) bad_after++;
             for (int k = 0; k < 6; k++) if (o.w[k] != 0.0) { wbad_after++; break; }
         }
         events = o.st >> PL_NPI_ST_CNT_LSB;
@@ -316,7 +324,7 @@ static double img_run(bool image) {
     g_gamma = (unsigned)(131072.0 / 8.0 * n1);
     g_cfg = PL_NPI_MODE_ON | (image ? PL_NPI_CFG_IMAGE : 0u);
     double pt = 0, nt = 0;
-    Out o = {0, 0, 0, {0}, 0};
+    Out o = {0, 0, 0, {0}, 0, 0, 0};
     for (int n = 0; n < 80000; n++) {
         int a, b, c, d; s.next(a, b, c, d);
         o = step(a, b, c, d);
@@ -353,7 +361,7 @@ static int test_shift() {
     for (int n = 0; n < 2000; n++) {
         int a, b, c, d2; s.next(a, b, c, d2);
         Out o = step(a, b, c, d2);
-        if (n > 20 && (o.yr != a || o.yi != b)) bad++;
+        if (n > 20 && (o.yr != o.x1r || o.yi != o.x1i)) bad++;
     }
     printf("make-up shift 2: output %+.2f dB (expected +12.04); in bypass %d samples differ from RX1\n", d, bad);
     return std::fabs(d - 12.04) <= 0.3 && bad == 0;
@@ -390,7 +398,7 @@ static int test_wideband() {
     g_cfg = PL_NPI_MODE_ON;
     cd h(0.6, -0.5);
     double pt = 0, nt = 0;
-    Out o = {0, 0, 0, {0}, 0};
+    Out o = {0, 0, 0, {0}, 0, 0, 0};
     for (int n = 0; n < N; n++) {
         cd x1 = L[n] * js + cd(grand(), grand()) * 20.0;
         cd x2 = h * D[n] * js + cd(grand(), grand()) * 20.0;

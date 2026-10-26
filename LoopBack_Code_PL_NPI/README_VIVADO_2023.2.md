@@ -1,6 +1,6 @@
 # LoopBack_Code_PL_NPI: PL-NPI-only design (PL-NPI v2.3), Vivado / Vitis 2023.2
 
-> **v2.3.0** (this version): gated adaptation in the FPGA (bypass until a
+> **v2.3.1** (this version): gated adaptation in the FPGA (bypass until a
 > jammer), RX2 input normalisation, image taps for 50 dB jammers, output
 > make-up gain, the core moved to `sys_cpu_clk` at II=1, and a new default RF
 > profile that carries **BeiDou B1I and all of GLONASS** (1582.5 MHz,

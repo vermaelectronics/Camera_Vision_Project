@@ -15,6 +15,7 @@
 #define PL_NPI_NW        3     // adaptive weights: w2 (RX2), c1, c2 (image)
 #define PL_NPI_GFRAC    13     // RX2 normalisation g2, signed Q3.13 (1.0 = 8192)
 #define PL_NPI_MAXSH     4     // largest output make-up shift (x16 = +24 dB)
+#define PL_NPI_LATENCY   2     // output sample k carries input sample k-2 (filter and bypass)
 
 // cfg bits
 #define PL_NPI_MODE_AUTO   0u  // [1:0] = 0: the power detector switches the

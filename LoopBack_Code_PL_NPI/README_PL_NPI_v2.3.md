@@ -1,11 +1,29 @@
 # PL-NPI v2.3: what I changed and why
 
-Version 2.3.0 of `LoopBack_Code_PL_NPI`. It brings the same changes SMI-PI
+Version 2.3.1 of `LoopBack_Code_PL_NPI`. It brings the same changes SMI-PI
 got in v4.1 to the PL-NPI design: gated adaptation, RX2 normalisation, image
 taps for 50 dB jammers, output make-up gain, the full GNSS band (BeiDou B1I
 and GLONASS), FIRs kept off, a radio guard, faster TX start and the same
 PuTTY reporting. PL-NPI stays a separate design: its weights still adapt in
 the FPGA (NLMS power inversion). The ARM only supervises.
+
+> **v2.3.1 (fix for step 3).** v2.3.0 failed HLS synthesis on your PC:
+> estimated clock 19.6 ns for a 10 ns target (II 1 was reached; all 8 C
+> simulation scenarios passed). Cause: the three u·w products, the 7-term
+> sum of s and its saturation sat between two registers of the weight loop.
+> At II=1 each such step must fit one clock, and HLS cannot move registers
+> written as static variables, so the documented fallback (more pure delay
+> registers) could not have helped. v2.3.1 splits the loop into 9
+> processing stages (A1 products, A2 partial sums, A3 sum + saturation, B1
+> correlation products, B2 correlation sums + step select, C step multiply,
+> D1 shift, D2 saturation, E1 update + leak) plus 3 pure delays: the same
+> 12-sample update delay as before, so the convergence is unchanged. The
+> weight register itself now only does subtract + saturate. The output
+> leaves 2 samples later than before, the same for filter and bypass. C
+> simulation: all 8 scenarios give the same numbers as v2.3.0 (also with 0
+> and with 8 extra delays). Nothing else changed: registers, IP version
+> (pl_npi 2.0), bitstream VERSION 2.3, firmware (only its version string,
+> PL-NPI 2.3.1).
 
 - How to build it, step by step: **`BUILD_STEPS.md`**
 - How to test it on PuTTY and what to send back: **`TESTING_PUTTY.md`**
@@ -103,7 +121,7 @@ State machine (firmware):
 
 | File | Change |
 |---|---|
-| `Source/HLS/pl_npi/pl_npi.cpp`, `.h` | New interface `pl_npi(s_axis_x, m_axis_y, gamma, adapt_en, cfg, nrm, det_thr, det_hold, *npi_st, *wout[192], *det_pow)`. New: RX2 normalisation, image taps (4× smaller step, `PL_NPI_IMG_SHIFT`), power detector and modes AUTO/BYPASS/ON/HOLD, make-up shift, weight/status outputs. **II=1 at 10 ns** (was II=2 at 8 ns on l_clk). At II=1 every register in the weight loop costs one sample of delay, so the loop has 8 extra delay registers (`PL_NPI_EXTRA_DELAY`) and a quarter step (`PL_NPI_STEP_SHIFT=2`) to keep the delayed update stable. Fallback if HLS misses timing: `PL_NPI_EXTRA_DELAY=16 PL_NPI_STEP_SHIFT=3`, which also passes the C simulation. |
+| `Source/HLS/pl_npi/pl_npi.cpp`, `.h` | New interface `pl_npi(s_axis_x, m_axis_y, gamma, adapt_en, cfg, nrm, det_thr, det_hold, *npi_st, *wout[192], *det_pow)`. New: RX2 normalisation, image taps (4× smaller step, `PL_NPI_IMG_SHIFT`), power detector and modes AUTO/BYPASS/ON/HOLD, make-up shift, weight/status outputs. **II=1 at 10 ns** (was II=2 at 8 ns on l_clk). The weight loop is 9 processing stages, each one clock (v2.3.1), plus 3 pure delays (`PL_NPI_EXTRA_DELAY`): a 12-sample delayed update, with a quarter step (`PL_NPI_STEP_SHIFT=2`) to keep it stable. Output latency 2 samples (`PL_NPI_LATENCY`), the same in bypass. |
 | `Source/HLS/pl_npi/testbench.cpp` | Scenarios 1, 2, 3, 4, 5, 7, 8, 9 (see §5). |
 | `Source/HLS/pl_npi/build_hls.tcl` | 10 ns, II 1, 8 scenarios, IP **`antsdr:gnss:pl_npi:2.0`** (was 1.0). |
 | `Source/HDL/gnss_passthrough.v` | VERSION **0x00020003** (2.3). Shadow registers NPI_CFG/NORM/DET_THR/DET_HOLD + NPI_COMMIT, NPI_INFO, NPI_CFG_ACTIVE, NPI_SNAP and the read-back registers (§4 table). gamma and the freeze bit now drive the core directly: it is on `sys_cpu_clk`, the same clock as AXI, so the old synchroniser is gone. STATUS[21:20] = gain band from the core status. |
@@ -164,8 +182,9 @@ State machine (firmware):
 | 8 | Make-up shift 2 | +12.07 dB (expected +12.04); ignored in bypass |
 | 9 | Wideband 30 dB, 0.15-sample RX1/RX2 path difference (informational) | ~17 dB suppression: the single-weight limit, see §7 |
 
-All 8 also pass with `PL_NPI_EXTRA_DELAY=16 PL_NPI_STEP_SHIFT=3` (the timing
-fallback) and with `PL_NPI_EXTRA_DELAY=4`.
+All 8 also pass with `PL_NPI_EXTRA_DELAY=0` and with
+`PL_NPI_EXTRA_DELAY=8 PL_NPI_STEP_SHIFT=3` (stability margin of the delayed
+update).
 
 **RTL simulation** (iverilog, `gnss_passthrough`): VERSION, NPI_INFO and the
 reset values; nothing reaches the core before NPI_COMMIT and everything
@@ -248,8 +267,10 @@ on RX1 and RX2, and try `tx1_attenuation=65000` / `75000`. Measure from the
 - **BeiDou in the receiver:** switch it on in the receiver (often off by
   default), and check whether the receiver uses B1I or B1C.
 - **HLS timing is the main risk of this version.** II=1 at 100 MHz with an
-  NLMS loop is tight. If step 3 fails, use the documented fallback (more loop
-  delay, smaller step). It is slower to converge, still microseconds.
+  NLMS loop is tight; v2.3.1 gives every loop stage one clock (HLS estimates
+  about 7 ns or less per stage). If step 3 still fails, send the critical
+  path (`grep -A14 "HLS 200-1016" Build/Logs/npi.log`): it names the stage
+  to split further.
 - The thresholds (`AJ_ON_COH_DB −3`, `AJ_ON_DB 6`, `AJ_DET_MARGIN 4` (6 dB),
   `AJ_HOLD_US 0.5 s`) are constants at the top of `gnss_npi_aj.c`. Send the
   `gnss_report?` output if you see false ON events or a missed jammer.
