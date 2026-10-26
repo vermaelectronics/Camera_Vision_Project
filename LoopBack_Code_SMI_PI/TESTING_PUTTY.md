@@ -69,7 +69,7 @@ things: J/N is relative to the board's noise.
    ```
    gnss_pt: present at 0x43c00000, version 4.1
    SELFTEST: PASS ...
-   ANTI-JAM (SMI-PI 4.1.3): ON, bypassed until a jammer appears.
+   ANTI-JAM (SMI-PI 4.1.4): ON, bypassed until a jammer appears.
    ```
 2. Type `gnss_band?`. All five signals must show `OK` and both FIRs `off`.
 3. Type `gnss_report?` and keep the block.

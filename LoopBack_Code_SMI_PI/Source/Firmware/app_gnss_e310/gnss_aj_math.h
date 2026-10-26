@@ -115,6 +115,10 @@ typedef struct {
     int     ok;             /* 1 = weights valid                              */
 } aj_result_t;
 
+/* DC offset of RX1 / RX2 [LSB] in the last capture; removed before the
+ * statistics, the detection and the weights. */
+void aj_last_dc(double *dc1, double *dc2);
+
 /* Detection only (no weights): fills p1, p2, coh, coh_lag, jn_coh_db,
  * rho1_re/im and, with r->noise_ref > 0, noise and jn_db; ok = 1.
  * About a third of the work of aj_compute(). Returns 0 on success. */

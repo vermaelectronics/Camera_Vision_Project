@@ -182,6 +182,10 @@ static void chan(int p, const int16_t **r, const int16_t **i)
 
 static int is_rx2(int i) { return (i >= AJ_NT && i < AJ_NSPT) || i == AJ_IMG2; }
 
+static double dc_1, dc_2;
+
+void aj_last_dc(double *dc1, double *dc2) { *dc1 = dc_1; *dc2 = dc_2; }
+
 static void unpack(const uint32_t *buf, int nsamp)
 {
 	int t;
@@ -189,6 +193,25 @@ static void unpack(const uint32_t *buf, int nsamp)
 		uint32_t w1 = buf[2 * t], w2 = buf[2 * t + 1];
 		X1R[t] = sx12(w1); X1I[t] = sx12(w1 >> 16);
 		X2R[t] = sx12(w2); X2I[t] = sx12(w2 >> 16);
+	}
+	/* Remove each channel's DC (the AD9361's LO leakage / DC offset): a
+	 * constant is "seen" by both channels at every lag and would look like a
+	 * jammer to the coherence detector and the image taps. */
+	{
+		int32_t s1r = 0, s1i = 0, s2r = 0, s2i = 0, h = nsamp / 2;
+		int16_t m1r, m1i, m2r, m2i;
+		for(t = 0; t < nsamp; t++) {
+			s1r += X1R[t]; s1i += X1I[t]; s2r += X2R[t]; s2i += X2I[t];
+		}
+		dc_1 = aj_sqrt((double)s1r * s1r + (double)s1i * s1i) / (double)nsamp;
+		dc_2 = aj_sqrt((double)s2r * s2r + (double)s2i * s2i) / (double)nsamp;
+		m1r = (int16_t)((s1r + (s1r >= 0 ? h : -h)) / nsamp);
+		m1i = (int16_t)((s1i + (s1i >= 0 ? h : -h)) / nsamp);
+		m2r = (int16_t)((s2r + (s2r >= 0 ? h : -h)) / nsamp);
+		m2i = (int16_t)((s2i + (s2i >= 0 ? h : -h)) / nsamp);
+		for(t = 0; t < nsamp; t++) {
+			X1R[t] -= m1r; X1I[t] -= m1i; X2R[t] -= m2r; X2I[t] -= m2i;
+		}
 	}
 }
 

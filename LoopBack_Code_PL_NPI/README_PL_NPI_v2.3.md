@@ -1,6 +1,6 @@
 # PL-NPI v2.3: what I changed and why
 
-Version 2.3.4 of `LoopBack_Code_PL_NPI`. It brings the same changes SMI-PI
+Version 2.3.5 of `LoopBack_Code_PL_NPI`. It brings the same changes SMI-PI
 got in v4.1 to the PL-NPI design: gated adaptation, RX2 normalisation, image
 taps for 50 dB jammers, output make-up gain, the full GNSS band (BeiDou B1I
 and GLONASS), FIRs kept off, a radio guard, faster TX start and the same
@@ -24,6 +24,20 @@ the FPGA (NLMS power inversion). The ARM only supervises.
 > and with 8 extra delays). Nothing else changed: registers, IP version
 > (pl_npi 2.0), bitstream VERSION 2.3, firmware (only its version string,
 > PL-NPI 2.3.1).
+
+> **Stuck "JAMMED" after power-on, DC offset (firmware 2.3.5).** A board
+> report showed JAMMED since 0.5 s with no jammer: triggered by the RX gain
+> loop settling at start-up, then never released because no clean moment
+> came to learn the noise floor; RX1 13 dB above RX2 and an image weight
+> |c1| = 0.57 pointed at a large DC offset (LO leakage). Now: (1) after
+> `gnss_band=` (LO and rate change) the AD9361 RF DC calibration is run
+> again and BB/RF DC tracking kept on; (2) each channel's DC is removed
+> before detection, power and coherence (and before the SMI statistics),
+> and `gnss_report?` prints it on a `dc offset` line, marked LARGE when it
+> is above the noise; (3) a gain cut in the first 2 s is not a jammer;
+> (4) the common-background rule also works when no floor has been learned
+> yet, and then learns it; (5) PL-NPI: image taps are switched off when |c| > 0.1 for 20 captures (an AD9361 mirror needs ~0.01), and the FPGA detector threshold includes the DC power so it can still switch off; (6) "intermittent" now needs 3 switch-ons
+> within 20 s.
 
 > **False "JAMMER ON" without a jammer (firmware 2.3.4).** The power
 > detector called any rise of the RX power 6 dB over the learned floor a

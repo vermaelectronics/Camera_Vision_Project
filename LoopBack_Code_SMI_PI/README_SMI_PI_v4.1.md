@@ -1,7 +1,21 @@
 # SMI-PI v4.1: what I changed and why
 
-Version 4.1.3 of `LoopBack_Code_SMI_PI`. It builds on v4.0 (the space-time
+Version 4.1.4 of `LoopBack_Code_SMI_PI`. It builds on v4.0 (the space-time
 filter) and makes these changes to the FPGA, the firmware and the scripts.
+
+> **Stuck "JAMMED" after power-on, DC offset (firmware 4.1.4).** A board
+> report showed JAMMED since 0.5 s with no jammer: triggered by the RX gain
+> loop settling at start-up, then never released because no clean moment
+> came to learn the noise floor; RX1 13 dB above RX2 and an image weight
+> |c1| = 0.57 pointed at a large DC offset (LO leakage). Now: (1) after
+> `gnss_band=` (LO and rate change) the AD9361 RF DC calibration is run
+> again and BB/RF DC tracking kept on; (2) each channel's DC is removed
+> before detection, power and coherence (and before the SMI statistics),
+> and `gnss_report?` prints it on a `dc offset` line, marked LARGE when it
+> is above the noise; (3) a gain cut in the first 2 s is not a jammer;
+> (4) the common-background rule also works when no floor has been learned
+> yet, and then learns it; (5) "intermittent" now needs 3 switch-ons
+> within 20 s.
 
 > **False "JAMMER ON" without a jammer (firmware 4.1.3).** The power
 > detector called any rise of the RX power 6 dB over the learned floor a

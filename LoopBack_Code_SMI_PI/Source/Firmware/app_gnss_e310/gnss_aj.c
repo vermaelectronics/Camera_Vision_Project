@@ -23,6 +23,7 @@ extern struct axi_dmac *rx_dmac;
 /* CLEAR -> JAMMED: any one of these, AJ_ON_COUNT captures in a row */
 #define AJ_ON_COH_DB      (-3.0)  /* RX1/RX2 coherence J/N (noise alone: ~-15)  */
 #define AJ_ON_DB          6.0     /* power J/N over the learned noise floor     */
+#define AJ_SETTLE_US      2000000U /* gain loop settling after start: a cut is not a jammer */
 #define AJ_CUT_DB         3       /* RX gain cut by the matched gain loop       */
 #define AJ_ON_COUNT       2
 /* JAMMED -> CLEAR (bypass): all of these for AJ_OFF_US */
@@ -402,14 +403,15 @@ static void learn(XTime now)
 /* ---- console etiquette ------------------------------------------------------
  * Event lines wait while the operator types (and AJ_KEY_QUIET_US after the
  * last key) and are counted instead; gnss_aj_events=0 silences them (they
- * are still kept for gnss_report?). A signal that switches on again within
- * AJ_FLAP_US of the last OFF is "intermittent": one summary line every
+ * are still kept for gnss_report?). A signal whose 3rd switch-on comes
+ * within AJ_FLAP_US of the 1st is "intermittent": one summary line every
  * AJ_FLAP_SUM_US instead of an ON/NULLED/OFF block each time. */
-#define AJ_FLAP_US        10000000U
+#define AJ_FLAP_US        20000000U
 #define AJ_FLAP_SUM_US    30000000U
 static int    aj_events = 1, n_held, flap_mode, flap_n, have_off, jam_silent;
 static double flap_peak = -99.0;
-static XTime  last_off_t, flap_t0;
+static XTime  last_off_t, flap_t0, on_hist[2];
+static int    n_on_hist;
 
 static void key_track(XTime now)
 {
@@ -433,7 +435,11 @@ static int ev_print(XTime now)
 /* At each jammer announcement: 1 = intermittent, do not print it. */
 static int flap_check(XTime now)
 {
-	if(!flap_mode && have_off && now - last_off_t < us(AJ_FLAP_US)) {
+	int third = n_on_hist >= 2 && now - on_hist[0] < us(AJ_FLAP_US);
+	on_hist[0] = on_hist[1];
+	on_hist[1] = now;
+	if(n_on_hist < 2) n_on_hist++;
+	if(!flap_mode && third) {
 		flap_mode = 1;
 		flap_n = 0;
 		flap_peak = -99.0;
@@ -615,8 +621,10 @@ static double coh_quiet(void) { double t = coh_bg + 3.0; return t > AJ_QUIET_COH
  * when that state is only the background and must be released. */
 static int bg_track(XTime now, int jammed)
 {
-	int cand = jammed && nf0 > 0.0 && res.jn_coh_db >= coh_on() &&
-	           res.jn_db < AJ_OFF_DB && cut_db() == 0;
+	/* not quiet only because of the coherence; with no learned floor yet
+	 * (no clean moment since start-up) the power cannot be judged */
+	int cand = jammed && res.jn_coh_db >= coh_off() &&
+	           (nf0 <= 0.0 || res.jn_db < AJ_OFF_DB) && cut_db() == 0;
 	if(!cand) {
 		bg_cand = 0;
 	} else if(!bg_cand) {
@@ -629,6 +637,8 @@ static int bg_track(XTime now, int jammed)
 			coh_bg = bg_max;
 			bg_cand = 0;
 			bg_gone_t0 = now;
+			if(nf0 <= 0.0 && res.p1 > AJ_QFLOOR)      /* the floor is this */
+				nf0 = (res.p1 - AJ_QFLOOR) / db2lin((double)cur_gain());
 			console_print("\n");
 			stamp(now);
 			console_print("NOT A JAMMER: RX1 and RX2 have carried the same signal for %d s at the\n"
@@ -681,7 +691,7 @@ static int detect_capture(XTime now)
 	if(res.jn_coh_db >= coh_on())                  why = 1;
 	else if(nf0 > 0.0 && res.jn_db >= AJ_ON_DB &&
 	        res.jn_coh_db >= AJ_PWR_COH_DB)        why = 2;
-	else if(cut >= AJ_CUT_DB)                      why = 3;
+	else if(cut >= AJ_CUT_DB && now - t_boot >= us(AJ_SETTLE_US)) why = 3;
 	quiet = !why && res.jn_coh_db < coh_quiet() &&
 	        (nf0 <= 0.0 || res.jn_db < AJ_OFF_DB) && cut == 0;
 	if(quiet && gnss_rxg_ref() == cur_gain())
@@ -1074,7 +1084,14 @@ void gnss_aj_report(void)
 			      f3u(res.coh), (long)res.coh_lag,
 			      f1(res.jn_coh_db < -30.0 ? -30.0 : res.jn_coh_db), f1(coh_on()),
 			      f1(res.jn_db < -99.0 ? -99.0 : res.jn_db));
-		console_print("powers        : RX1 %s, RX2 %s LSB^2 (raw)\n", f1u(res.p1), f1u(res.p2));
+		console_print("powers        : RX1 %s, RX2 %s LSB^2 (DC removed)\n", f1u(res.p1), f1u(res.p2));
+		{
+			double d1, d2;
+			aj_last_dc(&d1, &d2);
+			console_print("dc offset     : RX1 %s LSB, RX2 %s LSB (removed before detection)%s\n", f1u(d1), f1u(d2),
+				      (char*)((nf0 > 0.0 && d1 * d1 > noise_now()) ?
+					      "\n                LARGE: above the noise; AD9361 DC calibration/tracking not removing it" : ""));
+		}
 		if(coh_bg > -90.0)
 			console_print("background    : RX1/RX2 common signal, coherence %s dB: not a jammer (splitter / one source / TX1 leak?)\n", f1(coh_bg));
 	}
@@ -1221,6 +1238,12 @@ int gnss_band_set(int b)
 	r |= ad9361_set_tx_sampling_freq(ad9361_phy, c->fs);
 	r |= ad9361_set_rx_rf_bandwidth(ad9361_phy, c->bw);
 	r |= ad9361_set_tx_rf_bandwidth(ad9361_phy, c->bw);
+	/* The LO and the rate changed after the start-up calibrations: redo the
+	 * RF DC offset calibration and keep the BB/RF DC tracking on, or the
+	 * receivers' DC offset (LO leakage) stays in the samples. */
+	ad9361_phy->bbdc_track_en = true;
+	ad9361_phy->rfdc_track_en = true;
+	r |= (ad9361_do_calib_run(ad9361_phy, RFDC_CAL, 0) < 0) ? 1 : 0;
 	band = b;
 	band_applied = 1;
 	/* noise power at the ADC depends on the bandwidth: learn it again */

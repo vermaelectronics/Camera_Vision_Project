@@ -43,6 +43,8 @@ typedef struct {
     double  jn_db;          /* power J/N at RX1 [dB], -99 if no floor         */
     double  rho1_re, rho1_im;
     double  foff, bw;       /* jammer centre / bandwidth, fraction of fs      */
+    double  dc1, dc2;       /* DC offset of RX1 / RX2 [LSB], removed before   */
+                            /*   everything above and below                   */
 
     /* ---- npi_measure() ------------------------------------------------ */
     double  w[6];           /* weights used: w2 re/im, c1 re/im, c2 re/im     */
