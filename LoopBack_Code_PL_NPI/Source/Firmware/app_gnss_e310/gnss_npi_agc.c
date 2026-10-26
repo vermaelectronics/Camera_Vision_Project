@@ -5,6 +5,7 @@
  *****************************************************************************/
 
 #include "gnss_npi_agc.h"
+#include "gnss_npi_aj.h"
 #include "gnss_passthrough.h"
 #include "ad9361_api.h"
 #include "console.h"
@@ -26,6 +27,8 @@ static int32_t  rxg_gain;                     /* present gain, both channels */
 static int32_t  rxg_ref;                      /* clean (no-jammer) gain      */
 static int      rxg_quiet;
 static XTime    rxg_next;
+static uint32_t rxg_changes;                  /* gain steps, for the engine  */
+static int      rxg_check;                    /* polls since the mode check  */
 
 static uint32_t att_base;        /* operator's TX1 attenuation [mdB]        */
 static uint32_t att_written;     /* last value written by this loop         */
@@ -66,6 +69,7 @@ static double   last_pout;
 #define JAM_OFF_AFTER 40     /* clean polls (200 ms) before leaving jammer mode */
 static int      gam_auto = 1;
 static int      k_auto = 1;
+static int      gated = 1;       /* v2.3: core adapts only with a jammer    */
 static uint32_t k_fixed_q = 32U; /* manual k (gnss_npi_k=N), eighth units */
 static int      jam_on, jam_quiet;
 static double   nfloor;          /* noise power per channel [LSB^2]          */
@@ -126,6 +130,7 @@ static double lin10(int32_t db)
 static int set_both(int32_t db)
 {
 	int32_t old = rxg_gain;
+	rxg_changes++;
 	if(ad9361_set_rx_rf_gain(ad9361_phy, 0, db) != 0) return -1;
 	if(ad9361_set_rx_rf_gain(ad9361_phy, 1, db) != 0) return -1;
 	rxg_gain = db;
@@ -137,6 +142,7 @@ static int set_both(int32_t db)
 static double cur_kq(void)
 {
 	if(!k_auto) return (double)k_fixed_q;
+	if(gated)   return (double)K_JAM_Q;   /* adapts only with a jammer */
 	return (double)(jam_on ? K_JAM_Q : K_CLEAN_Q);
 }
 
@@ -219,6 +225,11 @@ static void start_loop(void)
 
 	ad9361_get_rx_rf_gain(ad9361_phy, 0, &g);   /* AGC's clean choice */
 	manual_both();
+	/* If a jammer was already on when the loop started, the AGC's choice
+	 * is the jammed gain and would become the "clean" reference. Never
+	 * start the reference below GNSS_RXG_REF_MIN_DB: the fast attack takes
+	 * the gain down again within milliseconds if the ADC is too hot. */
+	if(g < GNSS_RXG_REF_MIN_DB) g = GNSS_RXG_REF_MIN_DB;
 	set_both(g);
 	rxg_ref = g;
 	rxg_quiet = 0;
@@ -272,6 +283,56 @@ void gnss_rxg_set_mode(int mode)
 
 int gnss_rxg_mode(void) { return rxg_mode; }
 
+int32_t gnss_rxg_gain(void)
+{
+	int32_t g = rxg_gain;
+	if(rxg_mode == GNSS_RXG_AD9361 && ad9361_phy)
+		ad9361_get_rx_rf_gain(ad9361_phy, 0, &g);
+	return g;
+}
+
+int32_t gnss_rxg_ref(void)
+{
+	return (rxg_mode == GNSS_RXG_AD9361) ? gnss_rxg_gain() : rxg_ref;
+}
+
+uint32_t gnss_rxg_changes(void)  { return rxg_changes; }
+int      gnss_rxg_peak(void)     { return last_peak; }
+uint32_t gnss_rxg_att_base(void) { return att_base; }
+int      gnss_rxg_comp_db(void)  { return att_holding ? last_comp_db : 0; }
+uint32_t gnss_npi_k_eighths(void) { return (uint32_t)cur_kq(); }
+
+void gnss_npi_set_gated(int on)
+{
+	gated = on ? 1 : 0;
+	gam_written = 0U;
+	write_gamma();
+}
+
+/* Matched mode only: both channels must stay in manual gain at rxg_gain.
+ * Anything else changing them (the vendor rx1_gc_mode= / rx2_rf_gain=
+ * commands, or a GUI that sends them -- e.g. "GC Mode 2 slow attack AGC")
+ * would let the AD9361 step the two channels independently and break the
+ * null. Put them back and say so. */
+static void enforce_matched(void)
+{
+	uint8_t m1 = 0, m2 = 0;
+	int32_t g1 = 0, g2 = 0;
+	ad9361_get_rx_gain_control_mode(ad9361_phy, 0, &m1);
+	ad9361_get_rx_gain_control_mode(ad9361_phy, 1, &m2);
+	ad9361_get_rx_rf_gain(ad9361_phy, 0, &g1);
+	ad9361_get_rx_rf_gain(ad9361_phy, 1, &g2);
+	if(m1 == RF_GAIN_MGC && m2 == RF_GAIN_MGC && g1 == rxg_gain && g2 == rxg_gain)
+		return;
+	console_print("[AJ] RX gain was changed outside the matched loop (RX1 %s %d dB, "
+		      "RX2 %s %d dB) -> restored: both manual at %d dB.\n"
+		      "     Use gnss_rx_gain= / gnss_rx_agc= instead of rx1_gc_mode= etc.\n",
+		      (char*)(m1 == RF_GAIN_MGC ? "manual" : "AGC"), (long)g1,
+		      (char*)(m2 == RF_GAIN_MGC ? "manual" : "AGC"), (long)g2, (long)rxg_gain);
+	manual_both();
+	set_both(rxg_gain);
+}
+
 void gnss_npi_gamma_auto(int on)
 {
 	gam_auto = on ? 1 : 0;
@@ -315,6 +376,10 @@ void gnss_rxg_poll(void)
 	XTime_GetTime(&now);
 	if(now < rxg_next) return;
 	rxg_next = now + (XTime)((uint64_t)COUNTS_PER_SECOND * RXG_PERIOD_US / 1000000U);
+	if(++rxg_check >= 40) {            /* every ~200 ms */
+		rxg_check = 0;
+		enforce_matched();
+	}
 
 	/* ---- 1. matched RX gain ------------------------------------------------ */
 	{
@@ -401,7 +466,7 @@ void gnss_rxg_poll(void)
 		return;
 	}
 	last_pout = tx_power();
-	if(!jam_on && rxg_gain >= rxg_ref) {
+	if(!jam_on && !gnss_aj_jammer_on() && rxg_gain >= rxg_ref) {
 		/* Clean state: learn the reference output power slowly. Not while
 		 * the ADC is near clipping, and not from a sudden jump (a jammer that
 		 * has just appeared), so the reference stays the clean level. */
@@ -481,6 +546,7 @@ void gnss_rxg_print(void)
 			      (char*)(k_auto ? "(auto)" : "(fixed)"),
 			      (long)nfloor, (long)last_prx);
 	}
-	console_print("  jammer: %s\n", (char*)(jam_on ? "DETECTED (deep-null k = 1/8)"
-	                                               : "none (satellite k = 32)"));
+	console_print("  jammer: %s\n", (char*)(gated ? "k follows the gated core (adapts only with a jammer, k = 1/8)"
+	                                     : jam_on ? "DETECTED (deep-null k = 1/8)"
+	                                              : "none (satellite k = 32)"));
 }

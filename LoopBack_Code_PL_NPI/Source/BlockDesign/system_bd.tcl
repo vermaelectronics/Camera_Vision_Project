@@ -76,11 +76,13 @@ if {[llength $gnss_ipdef] == 0} {
          Automation/Linux/build_all.sh --from ip."
 }
 # The PL-NPI core is a separate Vitis HLS IP in the same repository
-# (Source/HLS/pl_npi/build_hls.tcl, build_all.sh stage "npi").
+# (Source/HLS/pl_npi/build_hls.tcl, build_all.sh stage "npi"). v2.3 needs
+# version 2.0 of it (cfg/nrm/detector ports, status and weight outputs); a 1.0
+# left over from an older build is refused here.
 set npi_ipdef [get_ipdefs -all -quiet -filter \
-  {VLNV =~ *:pl_npi:* && design_tool_contexts =~ *IPI* && UPGRADE_VERSIONS == ""}]
+  {VLNV =~ *:pl_npi:2.0 && design_tool_contexts =~ *IPI* && UPGRADE_VERSIONS == ""}]
 if {[llength $npi_ipdef] == 0} {
-  error "ERROR: pl_npi was not found in the IP catalog at $gnss_ip_repo.\
+  error "ERROR: pl_npi 2.0 was not found in the IP catalog at $gnss_ip_repo.\
          Build it with Source/HLS/pl_npi/build_hls.tcl (vitis_hls), or run\
          Automation/Linux/build_all.sh --from npi."
 }
@@ -503,18 +505,51 @@ ad_connect gnss_passthrough/dac_data_q0 axi_ad9361/dac_data_q0
 ad_connect gnss_passthrough/dac_data_i1 axi_ad9361/dac_data_i1
 ad_connect gnss_passthrough/dac_data_q1 axi_ad9361/dac_data_q1
 
-# PL-NPI power-inversion core (pipelined Vitis HLS IP, II=2), next to gnss_passthrough.
-#   gnss_passthrough selects it for TX1 with CONTROL[5], supplies gamma (register 0x48) and adapt_en (~CONTROL[6]), and
-#   holds it in reset while disabled. Same clock, so no clock crossing.
-ad_ip_instance pl_npi pl_npi_0
+# PL-NPI v2.3 power-inversion core (Vitis HLS IP pl_npi 2.0, II=1).
+#   It runs on sys_cpu_clk (100 MHz), NOT on axi_ad9361/l_clk: l_clk follows the
+#   sample rate (4x it in 2R2T, 245.76 MHz at 61.44 MS/s, the rate that carries
+#   BeiDou B1I and GLONASS), while sys_cpu_clk is fixed, so the core's timing
+#   does not depend on the sample rate. One sample per clock = 100 MS/s.
+#   Two asynchronous AXI-Stream FIFOs carry the samples across:
+#     gnss_passthrough/m_axis_npi (l_clk) -> npi_fifo_in -> pl_npi_0 (sys_cpu_clk)
+#     pl_npi_0 -> npi_fifo_out -> gnss_passthrough/s_axis_npi (l_clk)
+#   gamma (0x48), adapt_en (~CONTROL[6]) and the committed NPI_CFG / NPI_NORM /
+#   NPI_DET_* come from gnss_passthrough on the same clock as the core; the
+#   core's status, weights and detector power go back the same way.
+#   gnss_passthrough selects the core for TX1 with CONTROL[5] and holds the
+#   input FIFO in reset while it is off.
+ad_ip_instance axis_data_fifo npi_fifo_in
+ad_ip_parameter npi_fifo_in CONFIG.IS_ACLK_ASYNC 1
+ad_ip_parameter npi_fifo_in CONFIG.FIFO_DEPTH 64
+ad_ip_parameter npi_fifo_in CONFIG.TDATA_NUM_BYTES 8
+ad_connect axi_ad9361/l_clk           npi_fifo_in/s_axis_aclk
+ad_connect sys_cpu_clk                npi_fifo_in/m_axis_aclk
+ad_connect gnss_passthrough/npi_rst_n npi_fifo_in/s_axis_aresetn
+ad_connect gnss_passthrough/m_axis_npi npi_fifo_in/S_AXIS
 
-ad_connect axi_ad9361/l_clk             pl_npi_0/ap_clk
-ad_connect gnss_passthrough/npi_rst_n   pl_npi_0/ap_rst_n
-ad_connect gnss_passthrough/m_axis_npi  pl_npi_0/s_axis_x
-ad_connect pl_npi_0/m_axis_y            gnss_passthrough/s_axis_npi
+ad_ip_instance pl_npi pl_npi_0
+ad_connect sys_cpu_clk                   pl_npi_0/ap_clk
+ad_connect sys_cpu_resetn                pl_npi_0/ap_rst_n
+ad_connect npi_fifo_in/M_AXIS            pl_npi_0/s_axis_x
 ad_connect gnss_passthrough/npi_gamma    pl_npi_0/gamma
 ad_connect gnss_passthrough/npi_adapt_en pl_npi_0/adapt_en
-ad_connect pl_npi_0/gain_band           gnss_passthrough/npi_band
+ad_connect gnss_passthrough/npi_cfg      pl_npi_0/cfg
+ad_connect gnss_passthrough/npi_nrm      pl_npi_0/nrm
+ad_connect gnss_passthrough/npi_det_thr  pl_npi_0/det_thr
+ad_connect gnss_passthrough/npi_det_hold pl_npi_0/det_hold
+ad_connect pl_npi_0/npi_st               gnss_passthrough/npi_st
+ad_connect pl_npi_0/wout                 gnss_passthrough/npi_wout
+ad_connect pl_npi_0/det_pow              gnss_passthrough/npi_det_pow
+
+ad_ip_instance axis_data_fifo npi_fifo_out
+ad_ip_parameter npi_fifo_out CONFIG.IS_ACLK_ASYNC 1
+ad_ip_parameter npi_fifo_out CONFIG.FIFO_DEPTH 64
+ad_ip_parameter npi_fifo_out CONFIG.TDATA_NUM_BYTES 4
+ad_connect sys_cpu_clk                npi_fifo_out/s_axis_aclk
+ad_connect axi_ad9361/l_clk           npi_fifo_out/m_axis_aclk
+ad_connect sys_cpu_resetn             npi_fifo_out/s_axis_aresetn
+ad_connect pl_npi_0/m_axis_y          npi_fifo_out/S_AXIS
+ad_connect npi_fifo_out/M_AXIS        gnss_passthrough/s_axis_npi
 
 # GNSS-CRPA MOD-2 END
 # ---------------------------------------------------------------------------

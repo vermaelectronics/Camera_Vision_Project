@@ -27,8 +27,8 @@ DEEP=0
 [[ "${1:-}" == "--paths" ]] && DEEP=1
 
 # ---- which design is this? --------------------------------------------------
-if   [[ -d "$ROOT/Source/HLS/smi_pi"  ]]; then CORE=smi_pi;  CELL=smi_pi_0;  STAGE=smi;  MARK="SMI_PI_HLS";  NAME="SMI-PI (closed-form power inversion)"
-elif [[ -d "$ROOT/Source/HLS/pl_npi"  ]]; then CORE=pl_npi;  CELL=pl_npi_0;  STAGE=npi;  MARK="PL_NPI_HLS";  NAME="PL-NPI (pipelined HLS)"
+if   [[ -d "$ROOT/Source/HLS/smi_pi"  ]]; then CORE=smi_pi;  CELL=smi_pi_0;  STAGE=smi;  MARK="SMI_PI_HLS";  NAME="SMI-PI (power inversion)"
+elif [[ -d "$ROOT/Source/HLS/pl_npi"  ]]; then CORE=pl_npi;  CELL=pl_npi_0;  STAGE=npi;  MARK="PL_NPI_HLS";  NAME="PL-NPI v2.3 (gated NLMS power inversion, RX2 normalisation + image taps)"
 elif [[ -d "$ROOT/Source/HLS/pi_nlms" ]]; then CORE=pi_nlms; CELL=pi_nlms_0; STAGE=nlms; MARK="PI_NLMS_RTL"; NAME="PI-NLMS"
 else CORE=""; CELL="__none__"; STAGE=""; MARK=""; NAME="unknown"; fi
 
@@ -117,13 +117,19 @@ if [[ -n "$STAGE" ]]; then
     grep -E "$MARK: (HLS clock|estimated)|Pipelining result|Estimated Fmax" "$L" | sed 's/^/   /'
     est=$(grep -oE "estimated clock period [0-9.]+" "$L" | grep -oE "[0-9.]+$" | tail -1)
     ii=$(grep -oE "achieved II [0-9]+" "$L" | grep -oE "[0-9]+$" | tail -1)
+    # target and requested II as the HLS script printed them (PL-NPI v2.3:
+    # 10 ns / II 1 on sys_cpu_clk; v2.2 and older: 8 ns / II 2)
+    tgt=$(grep -oE "HLS clock target [0-9.]+" "$L" | grep -oE "[0-9.]+$" | tail -1)
+    req=$(grep -oE "requested [0-9]+" "$L" | grep -oE "[0-9]+$" | tail -1)
+    [[ -z "$tgt" ]] && tgt=8
+    [[ -z "$req" ]] && req=2
     if [[ -n "$est" ]]; then
-      echo "   -> HLS estimate $est ns for an 8 ns clock: margin $(awk -v e="$est" 'BEGIN{printf "%.2f", 8-e}') ns."
+      echo "   -> HLS estimate $est ns for a $tgt ns clock: margin $(awk -v e="$est" -v t="$tgt" 'BEGIN{printf "%.2f", t-e}') ns."
       echo "      This is an estimate before place-and-route; the real answer is the"
       echo "      Vivado timing in section 3 (paths inside $CELL)."
     fi
-    if [[ -n "$ii" && "$ii" -gt 2 ]]; then
-      VERDICT_BAD+=("HLS II=$ii > 2: the core cannot take every AD9361 sample pair; pairs are dropped (STATUS[10])")
+    if [[ -n "$ii" && "$ii" -gt "$req" ]]; then
+      VERDICT_BAD+=("HLS II=$ii > $req: the core cannot take every AD9361 sample pair; pairs are dropped (STATUS[10])")
     fi
   else
     echo " no $STAGE.log: stage not run in this folder."
@@ -158,8 +164,9 @@ else
     VERDICT_BAD+=("hold violation WHS=$WHS ns")
   fi
   if [[ "$setup_bad" == 0 ]]; then
-    echo " Setup timing MET (WNS >= 0): every path finishes inside the 8 ns sample"
-    echo " clock. The FPGA behaves exactly like the simulation."
+    echo " Setup timing MET (WNS >= 0): every path finishes inside its clock period"
+    echo " (PL-NPI v2.3: rx_clk 4 ns, sys_cpu_clk 10 ns). The FPGA behaves exactly"
+    echo " like the simulation."
   else
     echo " Setup timing NOT met. The worst path of each clock group:"
     awk '/^Slack \(VIOLATED\)/{s=$4} /^  Source:/{src=$2} /^  Destination:/{dst=$2} /^  Path Group:/{if(s!=""){printf "   slack %-10s %s\n     -> %s   [group %s]\n",s,src,dst,$3}; s=""}' "$T" | head -40

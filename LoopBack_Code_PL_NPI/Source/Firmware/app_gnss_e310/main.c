@@ -70,6 +70,7 @@
 #include "gnss_l1.h"
 #include "gnss_passthrough.h"
 #include "gnss_npi_agc.h"
+#include "gnss_npi_aj.h"
 #include "gnss_capture.h"
 #include "gnss_info.h"   /* GNSS-CRPA MOD-10 */
 
@@ -1095,7 +1096,7 @@ int main(void)
 			       "available for investigation.\n\r", (long)gnss_st);
 		}
 
-#ifndef GNSS_DEPLOY_AUTO_TX
+#if defined(GNSS_BOOT_DIAG) && !defined(GNSS_DEPLOY_AUTO_TX)
 		/* I/Q capture to DDR for offline analysis. Receive-only; the RX tap is
 		 * a fan-out so this runs alongside the PL passthrough rather than
 		 * instead of it. Two captures, one per candidate band-select polarity
@@ -1107,13 +1108,25 @@ int main(void)
 			printf("gnss_cap: rx_dmac is NULL; skipping I/Q capture\n\r");
 		}
 #else
-		/* GNSS-CRPA MOD-8: the DEPLOYMENT build skips the dual-polarity capture.
-		 * It is a diagnostic, it flips the band-select GPIOs twice, and it
-		 * lengthens a boot that should be short and deterministic. */
-		printf("gnss_cap: deployment build - dual-polarity capture skipped\n\r");
+		/* GNSS-CRPA MOD-8 / PL-NPI v2.3: skipped unless GNSS_BOOT_DIAG. It is
+		 * a diagnostic, it flips the band-select GPIOs twice, and it adds
+		 * ~0.5 s to a boot that should be short: every second before TX1
+		 * comes up is a second on the receiver's time to fix. */
+		printf("gnss_cap: dual-polarity capture skipped (fast boot; build with GNSS_BOOT_DIAG)\n\r");
 #endif
 	}
 	/* GNSS-CRPA MOD-3 END */
+
+	/* PL-NPI v2.3: the RF profile the receiver needs for GPS + Galileo +
+	 * QZSS + SBAS + BeiDou B1I/B1C + GLONASS G1 (1582.5 MHz, 61.44 MS/s,
+	 * 56 MHz), set for RX and TX together, AD9361 FIRs off. The vendor
+	 * setting (1575.42 MHz, 30.72 MS/s, 18 MHz) carried neither BeiDou B1I
+	 * nor GLONASS. gnss_band= changes it at run time, gnss_band? shows which
+	 * signals it carries. This bitstream is timed for the AD9361's full
+	 * 61.44 MS/s (rx_clk 4 ns). */
+	if (gnss_band_set(GNSS_BAND_DEFAULT) != 0)
+		printf("gnss_band: the AD9361 refused part of the default profile\n\r");
+	gnss_band_print();
 
 	/* ---------------------------------------------------------------------
 	 * GNSS-CRPA MOD-8: unattended auto-start for the SD-card deployment.
@@ -1179,9 +1192,26 @@ int main(void)
 	 * full ~60-line vendor command dump. `help?` still prints everything. */
 	gnss_info_menu();
 
-	/* PL-NPI matched RX gain / automatic gamma loop runs while the console
-	 * is idle. */
-	console_set_idle_hook(gnss_rxg_poll);
+	/* PL-NPI v2.3: anti-jam starts by itself -- matched RX gain on both
+	 * channels, the core in the TX1 path but BYPASSED (TX1 = RX1) until its
+	 * power detector or the firmware's coherence detector sees a jammer,
+	 * then adapting in the FPGA; jammer ON/OFF reported on this console. It
+	 * transmits nothing: TX1 is still opened only by gnss_tx=1 (or the
+	 * deployment build above). gnss_npi=0 switches it off. The gain loop,
+	 * the engine and the radio guard run while the console is idle. */
+	gnss_aj_init();
+	gnss_aj_enable(1);
+	console_print("\nANTI-JAM (" GNSS_AJ_VERSION_STR "): ON, bypassed until a jammer appears.\n"
+		      "  Jammer events are printed as [AJ] lines with a time stamp. gnss_aj? = state,\n"
+		      "  gnss_report? = everything (copy it into a report), gnss_aj_csv=500 = CSV log,\n"
+		      "  gnss_aj_log=0 quiets the 5 s status line. Nothing to tune.\n"
+		      "  Start retransmitting with gnss_tx=1 (goes straight to the working level).\n");
+#ifdef GNSS_DEPLOY_AUTO_TX
+	if((gnss_pt_read(GNSS_PT_REG_STATUS) & GNSS_PT_ST_PASS_EN_SYNCED) &&
+	   (gnss_pt_read(GNSS_PT_REG_STATUS) & GNSS_PT_ST_DAC_EN_I0))
+		gnss_aj_note_tx(1);
+#endif
+	console_set_idle_hook(gnss_idle);
 
 	while(1)
 	{

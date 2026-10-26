@@ -72,6 +72,35 @@
 #define GNSS_PT_REG_CRPA_COEF(n)    (0x40U + ((n) * 4U))  /* RW, n = 0..15    */
 /* CRPA_COEF[2] is the PL-NPI regulariser gamma (unsigned; 0 acts as 1). */
 #define GNSS_PT_REG_NPI_GAMMA       GNSS_PT_REG_CRPA_COEF(2)
+/* PL-NPI v2.3 (pl_npi_0 v2.0). NPI_CFG/NORM/DET_THR/DET_HOLD are SHADOW
+ * registers; a write to NPI_COMMIT hands all four to the core in one clock.
+ * A write to NPI_SNAP latches the core's weights, detector power and status
+ * into NPI_W/NPI_DET_POW/NPI_ST_LATCHED; a read of NPI_SNAP is the live
+ * status. */
+#define GNSS_PT_REG_NPI_COMMIT      0x180U  /* W: commit, R: count            */
+#define GNSS_PT_REG_NPI_INFO        0x184U  /* RO 0x03020801                  */
+#define GNSS_PT_REG_NPI_CFG         0x188U  /* RW [1:0] mode, [2] image, [10:8] shift */
+#define GNSS_PT_REG_NPI_NORM        0x18CU  /* RW g2, Q3.13 {im, re}          */
+#define GNSS_PT_REG_NPI_DET_THR     0x190U  /* RW detector threshold [LSB^2]  */
+#define GNSS_PT_REG_NPI_DET_HOLD    0x194U  /* RW detector hold [samples]     */
+#define GNSS_PT_REG_NPI_CFG_ACTIVE  0x198U  /* RO NPI_CFG as committed        */
+#define GNSS_PT_REG_NPI_SNAP        0x19CU  /* W: latch, R: live core status  */
+#define GNSS_PT_REG_NPI_W(k)        (0x1A0U + ((k) * 4U)) /* RO k = 0..5, Q12.20 */
+#define GNSS_PT_REG_NPI_DET_POW     0x1B8U  /* RO latched detector power      */
+#define GNSS_PT_REG_NPI_ST_LATCHED  0x1BCU  /* RO latched core status         */
+#define GNSS_PT_NPI_INFO_EXPECTED   0x03020801U
+/* NPI_CFG */
+#define GNSS_PT_NPI_MODE_AUTO       0x0U    /* power detector switches it     */
+#define GNSS_PT_NPI_MODE_BYPASS     0x1U    /* TX1 = RX1, weights 0           */
+#define GNSS_PT_NPI_MODE_ON         0x2U    /* filter in, adapting            */
+#define GNSS_PT_NPI_MODE_HOLD       0x3U    /* filter in, weights frozen      */
+#define GNSS_PT_NPI_CFG_IMAGE       0x4U    /* image taps on                  */
+#define GNSS_PT_NPI_CFG_SHIFT(s)    ((uint32_t)((s) & 7) << 8)
+/* core status (NPI_SNAP / NPI_ST_LATCHED) */
+#define GNSS_PT_NPI_ST_DET          0x1U    /* power detector on              */
+#define GNSS_PT_NPI_ST_ACTIVE       0x2U    /* filter in the path             */
+#define GNSS_PT_NPI_ST_ADAPT        0x10U   /* weights adapting               */
+#define GNSS_PT_NPI_ST_CNT(st)      ((uint32_t)(st) >> 16)  /* detector events */
 
 /* ---- expected identity --------------------------------------------------- */
 #define GNSS_PT_EXPECTED_ID         0x47435031U
@@ -81,8 +110,12 @@
  *       bitstream whose TX output is 24 dB low with 4 bits discarded. */
 /* 2.0 = PL-NPI-only build: the PL-NPI power-inversion core is a separate
  *       block-design IP (pl_npi_0, CONTROL[5], gamma in 0x48). This design
- *       has no PI-NLMS core. */
-#define GNSS_PT_EXPECTED_VERSION    0x00020001U
+ *       has no PI-NLMS core.
+ * 2.1 = pl_npi_0 is the pipelined Vitis HLS core (II=2 on l_clk).
+ * 2.3 = pl_npi_0 v2.0 on sys_cpu_clk (II=1) behind async FIFOs (61.44 MS/s),
+ *       RX2 normalisation, image taps, gated adaptation, make-up gain:
+ *       NPI_CFG/NORM/DET_* + NPI_COMMIT, NPI_SNAP/NPI_W read-back. */
+#define GNSS_PT_EXPECTED_VERSION    0x00020003U
 
 /* ---- CONTROL bits -------------------------------------------------------- */
 #define GNSS_PT_CTRL_PASS_EN        (1U << 0)  /* 1 = RX->TX passthrough      */
@@ -107,7 +140,7 @@
 #define GNSS_PT_ST_NPI_DROP         (1U << 10) /* v2.1+: pair lost at pl_npi_0 */
 #define GNSS_PT_ST_PASS_EN_SYNCED   (1U << 16)
 #define GNSS_PT_ST_NPI_EN_SYNCED    (1U << 18)
-#define GNSS_PT_ST_NPI_BAND_SHIFT   20         /* [21:20] PL-NPI gain band    */
+#define GNSS_PT_ST_NPI_BAND_SHIFT   20         /* [21:20] PL-NPI gain band (live) */
 #define GNSS_PT_ST_NPI_BAND_MASK    0x3U
 
 /* ---- return codes -------------------------------------------------------- */
@@ -134,11 +167,16 @@ void     gnss_pt_set_mute(int mute);
 void     gnss_pt_clear_counters(void);
 
 /* PL-NPI power inversion (bitstream v2.0+). Enabled, channel 0 TX carries the
- * PL-NPI array output of RX1 and RX2 instead of RX1 alone; passthrough must
- * also be on. Disabling
- * holds the core in reset, so re-enabling restarts from the quiescent
- * weights [1, 0]. */
+ * PL-NPI core output (v2.3: bypassed = RX1 while no jammer, see NPI_CFG)
+ * instead of RX1 alone; passthrough must also be on. */
 void     gnss_pt_set_npi(int enable);
+/* v2.3: writes NPI_CFG, NPI_NORM (g2 Q3.13, real), NPI_DET_THR and
+ * NPI_DET_HOLD and commits them in one go. */
+void     gnss_pt_npi_write(uint32_t cfg, int32_t g2_q13, uint32_t det_thr, uint32_t det_hold);
+/* v2.3: latches and reads the core's weights (Q12.20: w2 re, w2 im, c1 re,
+ * c1 im, c2 re, c2 im), detector power and status as one coherent set. */
+typedef struct { uint32_t st, pow; int32_t w[6]; } gnss_pt_npi_snap_t;
+void     gnss_pt_npi_snapshot(gnss_pt_npi_snap_t *s);
 /* Regulariser gamma of mu_NPI = 1/(2*x^T x + gamma). 1 is the value the
  * PL-NPI testbench was measured with; 0 is used as 1 by the hardware. */
 void     gnss_pt_set_npi_gamma(uint32_t gamma);

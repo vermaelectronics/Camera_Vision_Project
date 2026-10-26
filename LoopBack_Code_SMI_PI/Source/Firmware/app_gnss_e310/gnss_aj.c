@@ -300,9 +300,9 @@ static void print_type(void)
 static const char *why_txt(int why)
 {
 	switch(why) {
-	case 1:  return "both antennas see the same signal (coherence)";
+	case 1:  return "RX1/RX2 coherence (both antennas see the same signal)";
 	case 2:  return "RX power above the learned noise floor";
-	case 3:  return "the RX gain loop had to cut the gain";
+	case 3:  return "the RX gain loop (it had to cut the gain)";
 	default: return "?";
 	}
 }

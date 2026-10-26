@@ -51,6 +51,7 @@
 #include "gnss_l1.h"
 #include "gnss_passthrough.h"
 #include "gnss_npi_agc.h"
+#include "gnss_npi_aj.h"
 /* GNSS-CRPA MOD-7 */
 #include "gnss_txdma.h"
 #include "axi_dmac.h"
@@ -130,16 +131,23 @@ command cmd_list[] = {
 	{"gnss_tx?", "Gets the GNSS L1 retransmit state.", "", get_gnss_tx},
 	{"gnss_tx=", "1 = retransmit RX1 on TX1, 0 = silence TX1.", "gnss_tx=0", set_gnss_tx},
 	{"gnss_status?", "Prints AD9361 and gnss_passthrough runtime state.", "", get_gnss_status},
-	/* PL-NPI power inversion in pl_npi_0 (bitstream v1.4+). */
-	{"gnss_npi?", "Gets the PL-NPI power-inversion state.", "", get_gnss_npi},
-	{"gnss_npi=", "1 = TX1 carries PL-NPI(RX1, RX2), 0 = TX1 carries RX1.", "gnss_npi=1", set_gnss_npi},
+	/* PL-NPI v2.3 power inversion in pl_npi_0 v2.0 + engine gnss_npi_aj.c. */
+	{"gnss_npi?", "PL-NPI anti-jam state: on/off, bypass/filter, jammer, J/N, suppression.", "", get_gnss_npi},
+	{"gnss_npi=", "1 = anti-jam ON (default at boot), 0 = OFF (TX1 carries RX1).", "gnss_npi=1", set_gnss_npi},
 	{"gnss_npi_gamma=", "Sets a FIXED PL-NPI gamma (>= 1); turns automatic gamma off.", "gnss_npi_gamma=100000000", set_gnss_npi_gamma},
 	{"gnss_npi_auto=", "1 = automatic gamma from the noise floor (default), 0 = fixed.", "gnss_npi_auto=1", set_gnss_npi_auto},
-	{"gnss_npi_k=", "0 = automatic k (default: 32 clean, 1/8 with jammer), 1..64 = fixed k.", "gnss_npi_k=0", set_gnss_npi_k},
+	{"gnss_npi_k=", "0 = automatic k (default: 1/8 while gated; 32 clean / 1/8 jammed when always on), 1..64 = fixed k.", "gnss_npi_k=0", set_gnss_npi_k},
+	{"gnss_aj?", "Anti-jam status: bypass/filter, jammer type and frequency, J/N, suppression.", "", get_gnss_aj},
+	{"gnss_report?", "EVERYTHING in one block (radio, gains, g2, core, jammer, events) to copy into a report.", "", get_gnss_report},
+	{"gnss_aj_log=", "Status line every N s on the console (default 5), 0 = only JAMMER ON/OFF events.", "gnss_aj_log=5", set_gnss_aj_log},
+	{"gnss_aj_csv=", "CSV line (AJCSV,...) every N ms, 100 to 60000; 0 = off (default).", "gnss_aj_csv=0", set_gnss_aj_csv},
+	{"gnss_aj_mode=", "0 = gated + image taps (default), 1 = gated, no image, 2 = always on + image, 3 = always on, no image (v2.2).", "gnss_aj_mode=0", set_gnss_aj_mode},
+	{"gnss_band?", "RF profile and which GNSS signals it carries (GPS, Galileo, BeiDou, GLONASS).", "", get_gnss_band},
+	{"gnss_band=", "1 = ALL incl. BeiDou + GLONASS 1582.5 MHz/61.44 MS/s (default), 0 = L1 only, 2 = no BeiDou B1I, 3 = no GLONASS (2, 3: 50 MS/s).", "gnss_band=1", set_gnss_band},
 	{"gnss_rx_gain?", "Gets RX1/RX2 gain, mode, TX level hold and gamma.", "", get_gnss_rx_gain},
 	{"gnss_rx_gain=", "Sets RX1 AND RX2 to the same gain [dB] (also the auto reference).", "gnss_rx_gain=40", set_gnss_rx_gain},
 	{"gnss_rx_agc=", "0 = manual locked, 1 = AD9361 AGC per channel, 2 = matched auto (PL-NPI).", "gnss_rx_agc=2", set_gnss_rx_agc},
-	{"gnss_npi_freeze=", "1 = freeze the PL-NPI weights, 0 = adapt.", "gnss_npi_freeze=0", set_gnss_npi_freeze},
+	{"gnss_npi_freeze=", "1 = freeze the PL-NPI weights (and the mode), 0 = automatic (default).", "gnss_npi_freeze=0", set_gnss_npi_freeze},
 	/* GNSS-CRPA MOD-7: the DDR round trip. Exercises axi_ad9361_dac_dma,
 	 * util_upack2 and the util_rfifo DATA path, none of which had ever moved a
 	 * real sample. See gnss_txdma.h. */
@@ -201,6 +209,17 @@ void set_gnss_tx(double* param, char param_no)
 			console_print("gnss_tx: attenuation not confirmed; NOT transmitting\n");
 			return;
 		}
+		/* PL-NPI v2.3: then straight to the working level (70 dB, measured
+		 * to give a 3D fix, see GNSS_TX_START_ATTEN_MDB), still BEFORE the
+		 * data path opens. At 89.75 dB the receiver sees almost nothing, and
+		 * every second spent stepping down by hand added to its time to
+		 * fix. tx1_attenuation= still changes it afterwards. */
+		if(gnss_l1_set_tx_attenuation(ad9361_phy,
+				GNSS_TX_START_ATTEN_MDB) != GNSS_L1_OK) {
+			console_print("gnss_tx: attenuation not confirmed; NOT transmitting\n");
+			(void)gnss_l1_set_tx_attenuation(ad9361_phy, GNSS_L1_TX_MAX_ATTEN_MDB);
+			return;
+		}
 
 		gnss_pt_set_passthrough(1);
 		gnss_pt_set_mute(0);
@@ -215,11 +234,17 @@ void set_gnss_tx(double* param, char param_no)
 		}
 
 		gnss_tx_on = 1;
-		console_print("GNSS_TX: ON  - RX1 is being retransmitted on TX1 at "
-			      "%d mdB attenuation (quietest).\n",
-			      (long)GNSS_L1_TX_MAX_ATTEN_MDB);
-		console_print("         Raise power with tx1_attenuation= (smaller = "
+		/* Anti-jam comes with the transmitter unless the operator switched
+		 * it off (gnss_npi=0): one command, gnss_tx=1, is the whole start. */
+		if(!gnss_aj_user_off() && !gnss_aj_enabled())
+			gnss_aj_enable(1);
+		console_print("GNSS_TX: ON  - %s is being retransmitted on TX1 at "
+			      "%d mdB attenuation.\n",
+			      (char*)(gnss_aj_enabled() ? "the PL-NPI output (RX1+RX2; bypassed = RX1 while no jammer)" : "RX1"),
+			      (long)GNSS_TX_START_ATTEN_MDB);
+		console_print("         Change it with tx1_attenuation= (smaller = "
 			      "louder). Abort with gnss_tx=0\n");
+		gnss_aj_note_tx(1);
 	} else {
 		gnss_l1_set_dac_source(ad9361_phy, AXI_DAC_DATA_SEL_ZERO);
 		gnss_pt_set_mute(1);
@@ -227,6 +252,7 @@ void set_gnss_tx(double* param, char param_no)
 		gnss_tx_on = 0;
 		console_print("GNSS_TX: OFF - DAC source ZERO, passthrough muted, "
 			      "attenuation at maximum.\n");
+		gnss_aj_note_tx(0);
 	}
 }
 
@@ -286,7 +312,7 @@ void get_gnss_status(double* param, char param_no)
 }
 
 /**************************************************************************//***
- * @brief PL-NPI. Report whether the power-inversion core is in the TX1 path.
+ * @brief PL-NPI v2.3. One-line anti-jam state plus the core's own registers.
 *******************************************************************************/
 void get_gnss_npi(double* param, char param_no)
 {
@@ -294,27 +320,31 @@ void get_gnss_npi(double* param, char param_no)
 	uint32_t ver    = gnss_pt_read(GNSS_PT_REG_VERSION);
 
 	(void)param; (void)param_no;
-	if(ver < 0x00020000U) {
-		console_print("GNSS_NPI: bitstream v%d.%d has no PL-NPI core\n",
+	if(ver < 0x00020003U) {
+		console_print("GNSS_NPI: bitstream v%d.%d has no PL-NPI v2.3 core "
+			      "(this firmware needs v2.3)\n",
 			      (long)(ver >> 16), (long)(ver & 0xFFFFU));
 		return;
 	}
-	console_print("GNSS_NPI: %s (read from hardware)%s, gamma = %d%d, gain band = %d%s\n",
-		      (char*)((status & GNSS_PT_ST_NPI_EN_SYNCED) ? "ON" : "off"),
+	gnss_aj_print_short();
+	console_print("          core %s (read from hardware)%s, gamma = %d%d, gain band = %d\n",
+		      (char*)((status & GNSS_PT_ST_NPI_EN_SYNCED) ? "in the TX1 path" : "out of the path"),
 		      (char*)((gnss_pt_read(GNSS_PT_REG_CONTROL) & GNSS_PT_CTRL_NPI_FREEZE)
 		          ? ", weights FROZEN" : ""),
 		      /* gamma can exceed 2^31; console_print has only signed %d */
 		      (long)(gnss_pt_read(GNSS_PT_REG_NPI_GAMMA) / 10U),
 		      (long)(gnss_pt_read(GNSS_PT_REG_NPI_GAMMA) % 10U),
-		      (long)((status >> GNSS_PT_ST_NPI_BAND_SHIFT) & GNSS_PT_ST_NPI_BAND_MASK),
-		      (char*)((status & GNSS_PT_ST_NPI_DROP) ? ", SAMPLES DROPPED (STATUS[10])" : ""));
+		      (long)((status >> GNSS_PT_ST_NPI_BAND_SHIFT) & GNSS_PT_ST_NPI_BAND_MASK));
 }
 
 /**************************************************************************//***
- * @brief PL-NPI. Put the power-inversion core in (1) or out (0) of the TX1
- * path. This only selects what feeds TX1. It does not open the
- * transmitter; that is still gnss_tx=1, with its attenuation interlock. Both
- * AD9361 receive channels must be connected: RX2 is the auxiliary element.
+ * @brief PL-NPI v2.3. Anti-jam on (1) or off (0). On: TX1 carries the core
+ * output -- bypassed (= RX1) while there is no jammer, the PL-NPI null while
+ * there is one (gnss_npi_aj.c) -- and both RX gains are matched. It does not
+ * open the transmitter; that is still gnss_tx=1, with its attenuation
+ * interlock (which also switches anti-jam on unless gnss_npi=0 was given).
+ * Both AD9361 receive channels must be connected: RX2 is the auxiliary
+ * element.
 *******************************************************************************/
 void set_gnss_npi(double* param, char param_no)
 {
@@ -322,41 +352,82 @@ void set_gnss_npi(double* param, char param_no)
 		console_print("gnss_npi= needs 0 or 1\n");
 		return;
 	}
-	if(gnss_pt_read(GNSS_PT_REG_VERSION) < 0x00020000U) {
-		console_print("gnss_npi: this bitstream has no PL-NPI core\n");
+	if(gnss_pt_read(GNSS_PT_REG_VERSION) < 0x00020003U) {
+		console_print("gnss_npi: this bitstream has no PL-NPI v2.3 core\n");
 		return;
 	}
-	/* PL-NPI needs the same gain on both channels at all times and a gamma
-	 * that matches the noise floor. gnss_npi=1 therefore switches from the
-	 * AD9361 per-channel AGC to the matched automatic loop (gnss_npi_agc.c),
-	 * which also sets gamma from the measured noise and holds the
-	 * retransmitted level. A manual gain set by the operator (gnss_rx_agc=0
-	 * / gnss_rx_gain=) is kept. gnss_npi=0 first gives the operator's TX
-	 * attenuation back. */
-	if((int)param[0] != 0) {
-		if(gnss_rxg_mode() == GNSS_RXG_AD9361) {
-			gnss_rxg_set_mode(GNSS_RXG_MATCHED);
-			console_print("gnss_npi: RX gain MATCHED AUTO on RX1+RX2, gamma %s "
-				      "(gnss_rx_gain? to see it)\n",
-				      (char*)(gnss_npi_gamma_is_auto() ? "AUTO" : "fixed"));
-		}
-	} else {
-		gnss_rxg_stop_tx_hold();
-	}
-	gnss_pt_set_npi((int)param[0] != 0);
-	/* The enable crosses into the sample-clock domain and its read-back
-	 * crosses back into the AXI domain; reading STATUS straight after the
-	 * write can still show the old state (the first gnss_npi=1 printed
-	 * "off" although the core had been switched on). Wait until the hardware
-	 * confirms, at most ~1 ms. */
-	{
-		uint32_t want = ((int)param[0] != 0) ? GNSS_PT_ST_NPI_EN_SYNCED : 0U;
-		int n;
-		for(n = 0; n < 10000; n++)
-			if((gnss_pt_read(GNSS_PT_REG_STATUS) & GNSS_PT_ST_NPI_EN_SYNCED) == want)
-				break;
-	}
+	gnss_aj_command((int)param[0] != 0);
 	get_gnss_npi(param, param_no);
+}
+
+/**************************************************************************//***
+ * @brief PL-NPI v2.3. Anti-jam status, full report, log period, CSV, mode
+ * and RF profile.
+*******************************************************************************/
+void get_gnss_aj(double* param, char param_no)
+{
+	(void)param; (void)param_no;
+	gnss_aj_print();
+}
+
+void get_gnss_report(double* param, char param_no)
+{
+	(void)param; (void)param_no;
+	gnss_aj_report();
+}
+
+void set_gnss_aj_csv(double* param, char param_no)
+{
+	if(param_no < 1 || param[0] < 0.0 || param[0] > 60000.0) {
+		console_print("gnss_aj_csv= needs a period in ms, 100 to 60000, or 0 = off, e.g. gnss_aj_csv=500\n");
+		return;
+	}
+	gnss_aj_set_csv((int)param[0]);
+	if((int)param[0] == 0)
+		console_print("GNSS_AJ: CSV off\n");
+	else
+		console_print("GNSS_AJ: CSV line every %d ms (at least 100). Log the PuTTY session to a file\n"
+			      "         and keep the lines starting with AJCSV, (columns in the first one).\n",
+			      (long)((int)param[0] < 100 ? 100 : (int)param[0]));
+}
+
+void set_gnss_aj_log(double* param, char param_no)
+{
+	if(param_no < 1 || param[0] < 0.0 || param[0] > 3600.0) {
+		console_print("gnss_aj_log= needs seconds, 0 to 3600 (0 = only JAMMER ON/OFF), e.g. gnss_aj_log=5\n");
+		return;
+	}
+	gnss_aj_set_log((int)param[0]);
+	console_print("GNSS_AJ: status line every %d s%s\n", (long)param[0],
+		      (char*)((int)param[0] == 0 ? " (off; JAMMER ON/OFF events are still printed)" : ""));
+}
+
+void set_gnss_aj_mode(double* param, char param_no)
+{
+	if(param_no < 1 || param[0] < 0.0 || param[0] > 3.0) {
+		console_print("gnss_aj_mode= needs 0 (gated + image taps), 1 (gated, no image taps),\n"
+			      "              2 (always on + image taps) or 3 (always on, no image taps: v2.2)\n");
+		return;
+	}
+	gnss_aj_set_mode((int)param[0]);
+	gnss_aj_print_short();
+}
+
+void get_gnss_band(double* param, char param_no)
+{
+	(void)param; (void)param_no;
+	gnss_band_print();
+}
+
+void set_gnss_band(double* param, char param_no)
+{
+	if(param_no < 1 || param[0] < 0.0 || param[0] > (double)(GNSS_BAND_COUNT - 1)) {
+		console_print("gnss_band= needs 0, 1, 2 or 3 (gnss_band? lists them)\n");
+		return;
+	}
+	if(gnss_band_set((int)param[0]) != 0)
+		console_print("gnss_band: the AD9361 refused part of the setting; check gnss_status?\n");
+	gnss_band_print();
 }
 
 /**************************************************************************//***
@@ -433,7 +504,7 @@ void set_gnss_npi_freeze(double* param, char param_no)
 		console_print("gnss_npi_freeze= needs 0 or 1\n");
 		return;
 	}
-	gnss_pt_set_npi_freeze((int)param[0] != 0);
+	gnss_aj_freeze((int)param[0] != 0);
 	get_gnss_npi(param, param_no);
 }
 
@@ -482,6 +553,9 @@ void set_gnss_ddr_tx(double* param, char param_no)
 	}
 
 	if((int)param[0] != 0) {
+		/* The anti-jam engine captures on the same RX DMA: let its transfer
+		 * in flight finish first (it pauses while the replay runs). */
+		gnss_aj_dma_release();
 		/* Quietest the hardware can manage, BEFORE anything opens. */
 		if(gnss_l1_set_tx_attenuation(ad9361_phy,
 				GNSS_L1_TX_MAX_ATTEN_MDB) != GNSS_L1_OK) {

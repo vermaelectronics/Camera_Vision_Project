@@ -144,7 +144,7 @@ set_bus_param $srst_if POLARITY         ACTIVE_HIGH
 set_bus_param $sclk_if ASSOCIATED_RESET rst
 set_bus_param $sclk_if ASSOCIATED_BUSIF [join $npi_axis ":"]
 
-# npi_rst_n drives pl_npi_0/aresetn: an active-low reset output.
+# npi_rst_n drives npi_fifo_in/s_axis_aresetn (v2.3): an active-low reset output.
 set prst_if [ensure_bus_if $core npi_rst_n xilinx.com:signal:reset_rtl:1.0]
 set_bus_param $prst_if POLARITY ACTIVE_LOW
 

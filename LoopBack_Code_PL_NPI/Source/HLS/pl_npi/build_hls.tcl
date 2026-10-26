@@ -1,15 +1,19 @@
 # ============================================================================
 #  build_hls.tcl  --  Vitis HLS 2023.2: pl_npi.cpp -> block-design IP pl_npi
 #
-#  Builds the pipelined PL-NPI core (see pl_npi.cpp) and packages it as a
-#  Vivado IP that Source/BlockDesign/system_bd.tcl instantiates as pl_npi_0,
-#  in the AD9361 sample clock domain (axi_ad9361/l_clk, 8 ns).
+#  Builds the pipelined PL-NPI core v2.3 (see pl_npi.cpp: RX2 normalisation,
+#  image taps, gated adaptation with a power detector, bypass, make-up gain)
+#  and packages it as a Vivado IP that Source/BlockDesign/system_bd.tcl
+#  instantiates as pl_npi_0, on sys_cpu_clk (100 MHz) between two async
+#  AXI-Stream FIFOs.
 #
 #  Steps
-#    1. C simulation, scenarios 1 (jammer null), 2 (no jammer, large gamma)
-#       and 3 (informational). Each needs a freshly reset core, so each is a
-#       separate csim_design run.
-#    2. C synthesis at an 8 ns target, II=2.
+#    1. C simulation, scenarios 1 (CW null), 2 (no jammer, large gamma),
+#       3 (bypass), 4 (gated adaptation), 5 (RX2 normalisation), 7 (image
+#       taps, 50 dB jammer), 8 (make-up gain), 9 (wideband, informational).
+#       Each needs a freshly reset core, so each is a separate csim_design
+#       run.
+#    2. C synthesis at a 10 ns target, II=1 (one sample per clock).
 #    3. Checks the synthesis report: the pipeline must reach the requested II
 #       and the estimated clock must not exceed the target. Otherwise the
 #       script fails here instead of producing a bitstream that misses timing.
@@ -19,16 +23,18 @@
 #    vitis_hls -f build_hls.tcl
 #
 #  OVERRIDES (environment)
-#    PL_NPI_CLK_NS=<ns>   HLS clock target, default 8
-#    PL_NPI_II=<n>        pipeline II, default 2
+#    PL_NPI_CLK_NS=<ns>   HLS clock target, default 10 (sys_cpu_clk, 100 MHz)
+#    PL_NPI_II=<n>        pipeline II, default 1 (2 halves the maximum rate
+#                         to 50 MS/s: then use gnss_band=2 or 3 only)
 #    PL_NPI_SKIP_CSIM=1   skip step 1
-#    PL_NPI_EXTRA_DELAY=<n>  delay registers in the weight loop, default 4
-#    PL_NPI_STEP_SHIFT=<n>   step reduction 2^-n, default 1 (keep >= 1 when
-#                            PL_NPI_EXTRA_DELAY > 0, or the loop oscillates)
-#    PL_NPI_CONSTRAIN_W1=0|1 1 = RX1 weight held at 1 (default), 0 = paper
+#    PL_NPI_EXTRA_DELAY=<n>  delay registers in the weight loop, default 8;
+#                            if synthesis misses II=1, try 16 together with
+#                            PL_NPI_STEP_SHIFT=3 (C simulation: stable)
+#    PL_NPI_STEP_SHIFT=<n>   step reduction 2^-n, default 2
+#    PL_NPI_IMG_SHIFT=<n>    extra step reduction of the image taps, default 2
 #
 #  OUTPUT
-#    $GNSS_CRPA_IP_REPO/pl_npi/component.xml, VLNV antsdr:gnss:pl_npi:1.0
+#    $GNSS_CRPA_IP_REPO/pl_npi/component.xml, VLNV antsdr:gnss:pl_npi:2.0
 #    $GNSS_CRPA_IP_REPO/pl_npi/pl_npi_csynth.rpt
 #
 #  SUCCESS MARKER
@@ -44,12 +50,13 @@ if {[info exists ::env(GNSS_CRPA_IP_REPO)]} {
 }
 set out_ip [file join $ip_repo pl_npi]
 
-# Same reasoning as Source/HLS/pi_nlms (LoopBack_Code): in the E310 2R2T LVDS
-# mode the AD9361 interface delivers at most one sample pair every second
-# l_clk, so II=2 loses nothing and gives each adaptive stage two clocks.
-set clk_period 8
+# v2.3: the core runs on sys_cpu_clk (100 MHz) behind two clock-crossing
+# FIFOs, NOT on the AD9361 l_clk, whose rate follows the sample rate (245.76
+# MHz at 61.44 MS/s). One sample per clock is 100 MS/s, more than the AD9361
+# can deliver, so the FIFOs never fill.
+set clk_period 10
 if {[info exists ::env(PL_NPI_CLK_NS)]} { set clk_period $::env(PL_NPI_CLK_NS) }
-set pipeline_ii 2
+set pipeline_ii 1
 if {[info exists ::env(PL_NPI_II)]} { set pipeline_ii $::env(PL_NPI_II) }
 set clk_uncertainty 1.0
 puts "PL_NPI_HLS: HLS clock target $clk_period ns (uncertainty $clk_uncertainty ns), II=$pipeline_ii"
@@ -60,8 +67,8 @@ file mkdir $work
 set fh  [open [file join $here pl_npi.cpp] r]
 set src [read $fh]
 close $fh
-if {[regsub {#pragma HLS PIPELINE II=2} $src "#pragma HLS PIPELINE II=$pipeline_ii" src] != 1} {
-  puts "PL_NPI_HLS: FAIL - expected one '#pragma HLS PIPELINE II=2' in pl_npi.cpp"
+if {[regsub {#pragma HLS PIPELINE II=1} $src "#pragma HLS PIPELINE II=$pipeline_ii" src] != 1} {
+  puts "PL_NPI_HLS: FAIL - expected one '#pragma HLS PIPELINE II=1' in pl_npi.cpp"
   exit 1
 }
 set hls_src [file join $work pl_npi_hls.cpp]
@@ -74,7 +81,7 @@ cd $work
 open_project -reset pl_npi_hls
 set_top pl_npi
 set defs ""
-foreach v {PL_NPI_EXTRA_DELAY PL_NPI_STEP_SHIFT PL_NPI_CONSTRAIN_W1} {
+foreach v {PL_NPI_EXTRA_DELAY PL_NPI_STEP_SHIFT PL_NPI_IMG_SHIFT} {
   if {[info exists ::env($v)]} { append defs " -D$v=$::env($v)" }
 }
 if {$defs ne ""} { puts "PL_NPI_HLS: defines$defs" }
@@ -87,7 +94,7 @@ set_clock_uncertainty $clk_uncertainty
 
 # ---- 1 C simulation -------------------------------------------------------------
 if {![info exists ::env(PL_NPI_SKIP_CSIM)] || $::env(PL_NPI_SKIP_CSIM) eq "0"} {
-  foreach scen {1 2 3} {
+  foreach scen {1 2 3 4 5 7 8 9} {
     puts "PL_NPI_HLS: csim scenario $scen"
     if {[catch {csim_design -argv $scen} err]} {
       puts "PL_NPI_HLS: FAIL - C simulation scenario $scen: $err"
@@ -128,9 +135,9 @@ if {$ii eq "" || $ii > $pipeline_ii} {
 
 # ---- 4 package as a Vivado IP ------------------------------------------------------
 export_design -format ip_catalog -rtl verilog \
-  -vendor antsdr -library gnss -version 1.0 -ipname pl_npi \
+  -vendor antsdr -library gnss -version 2.0 -ipname pl_npi \
   -display_name "PL-NPI power inversion" \
-  -description "Two-element PL-NPI anti-jam core (pipelined, Vitis HLS). s_axis_x = RX1 and RX2 IQ, m_axis_y = array output IQ."
+  -description "Two-element PL-NPI anti-jam core v2.3 (pipelined NLMS power inversion, Vitis HLS): RX2 normalised to RX1, RX2 weight + 2 image taps adapted in hardware, gated by a power detector (bypass with no jammer), output make-up gain. s_axis_x = RX1 and RX2 IQ, m_axis_y = array output IQ."
 
 set impl_dir [file join $work pl_npi_hls sol impl]
 set ip_src   [file join $impl_dir ip]
@@ -155,6 +162,6 @@ file delete -force $out_ip
 file copy -force $ip_src $out_ip
 if {[file exists $rpt_txt]} { file copy -force $rpt_txt $out_ip }
 
-puts "PL_NPI_HLS: IP antsdr:gnss:pl_npi:1.0 -> $out_ip"
+puts "PL_NPI_HLS: IP antsdr:gnss:pl_npi:2.0 -> $out_ip"
 puts "PL_NPI_HLS: PASS"
 exit 0

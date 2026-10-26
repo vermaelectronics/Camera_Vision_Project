@@ -50,10 +50,11 @@
 //                                    [3]  ch1_copy   1 = ch1 DAC fed from ch0
 //                                    [4]  reserved (reads back what was written)
 //                                    [5]  npi_en     1 = ch0 TX carries the
-//                                                        PL-NPI power-inversion
-//                                                        output (RX1 and RX2
-//                                                        combined)
-//                                                    0 = PL-NPI held in reset
+//                                                        PL-NPI core output
+//                                                        (bypassed = RX1, or
+//                                                        RX1 and RX2 combined;
+//                                                        see NPI_CFG)
+//                                                    0 = ch0 TX carries RX1
 //                                    [6]  npi_freeze 1 = PL-NPI weights frozen
 //                                                        (adapt_en = 0)
 //                                    [8]  cnt_clear  1 = hold counters cleared
@@ -69,7 +70,8 @@
 //                                    [16] pass_en (as seen in the clk domain)
 //                                    [18] npi_en  (as seen in the clk domain)
 //                                    [21:20] PL-NPI gain band of the latest
-//                                         sample (0..3 = x1.00/1.05/1.10/1.20)
+//                                         sample (0..3 = x1.00/1.05/1.10/1.20),
+//                                         read live from pl_npi_0
 //
 //            READ [2]/[3] CAREFULLY. dac_enable_* is NOT an enable this block
 //            drives, and it is NOT derived from the valid strobes. It is a
@@ -111,6 +113,50 @@
 //                                    1/(2*x^T x + gamma).
 //    0x4C..  CRPA_COEF[3..15] RW     reserved; stored and returned, no logic
 //                                    consumes them.
+//    -------- PL-NPI v2.3 (pl_npi_0 v2.0) ---------------------------------
+//    0x180   NPI_COMMIT      W/RO    Any write copies the SHADOW registers
+//                                    NPI_CFG, NPI_NORM, NPI_DET_THR and
+//                                    NPI_DET_HOLD to the core in one
+//                                    s_axi_aclk edge. Reads a commit counter.
+//    0x184   NPI_INFO        RO      {8'd adaptive weights, 8'd step shift,
+//                                     8'd extra loop delay, 8'd layout}
+//                                    = 0x03020801
+//    0x188   NPI_CFG         RW      SHADOW. [1:0] mode: 0 AUTO (the core's
+//                                    power detector switches the filter in
+//                                    and the adaptation on), 1 BYPASS (TX1 =
+//                                    RX1, weights held at 0), 2 ON (filter
+//                                    in, adapting), 3 HOLD (filter in,
+//                                    weights frozen). [2] image taps on.
+//                                    [10:8] output make-up shift 0..4 (6 dB
+//                                    each, filter only). Reset 0x5 = BYPASS
+//                                    with image taps.
+//    0x18C   NPI_NORM        RW      SHADOW. RX2 input normalisation g2,
+//                                    {imag[31:16], real[15:0]} signed Q3.13
+//                                    (reset 0x2000 = 1.0).
+//    0x190   NPI_DET_THR     RW      SHADOW. Detector threshold on the
+//                                    averaged |x1|^2+|x2|^2 [LSB^2]; reset
+//                                    0xFFFFFFFF (never).
+//    0x194   NPI_DET_HOLD    RW      SHADOW. Samples the filter stays in
+//                                    after the power falls below half the
+//                                    threshold (reset 0).
+//    0x198   NPI_CFG_ACTIVE  RO      NPI_CFG as committed.
+//    0x19C   NPI_SNAP        W/RO    A write latches the core's weights,
+//                                    detector power and status into
+//                                    0x1A0..0x1BC (one coherent set). Reads
+//                                    the LIVE core status: [0] detector on,
+//                                    [1] filter in, [3:2] gain band,
+//                                    [4] adapting, [31:16] detector events.
+//    0x1A0.. NPI_W[0..5]     RO      latched weights, Q12.20 signed:
+//    0x1B4                           w2 re, w2 im, c1 re, c1 im, c2 re, c2 im
+//    0x1B8   NPI_DET_POW     RO      latched detector power [LSB^2]
+//    0x1BC   NPI_ST_LATCHED  RO      latched core status (as 0x19C)
+//
+//  PL-NPI v2.3 CLOCKING
+//    pl_npi_0 runs on sys_cpu_clk (= s_axi_aclk), not on clk: the block design
+//    puts an asynchronous AXI-Stream FIFO on each side of it (m_axis_npi ->
+//    FIFO -> core -> FIFO -> s_axis_npi). gamma, adapt_en and the committed
+//    NPI_* values are therefore driven from the same clock the core runs on,
+//    and its status and weights are read back in that clock -- no crossing.
 //
 //  LICENCE
 //    Original work for this project.  Not derived from Analog Devices or
@@ -163,13 +209,15 @@ module gnss_passthrough #(
   output     [15:0]   dac_data_q1,
 
   // ---- PL-NPI core: separate block-design IP (pl_npi_0) -------------------
-  //  All in the clk domain. Source/BlockDesign/system_bd.tcl connects:
-  //    m_axis_npi    -> pl_npi_0/s_axis_x  {rx2_q, rx2_i, rx1_q, rx1_i}
-  //    pl_npi_0/m_axis_y -> s_axis_npi     {y_q, y_i}
+  //  Source/BlockDesign/system_bd.tcl connects:
+  //    m_axis_npi (clk) -> async FIFO -> pl_npi_0/s_axis_x {rx2_q, rx2_i, rx1_q, rx1_i}
+  //    pl_npi_0/m_axis_y -> async FIFO -> s_axis_npi (clk)  {y_q, y_i}
+  //    npi_rst_n (clk)  -> input FIFO reset (CONTROL[0] & CONTROL[5])
+  //    s_axi_aclk domain (= pl_npi_0's clock):
   //    npi_gamma     -> pl_npi_0/gamma     (register 0x48)
   //    npi_adapt_en  -> pl_npi_0/adapt_en  (~CONTROL[6])
-  //    npi_rst_n     -> pl_npi_0/aresetn   (CONTROL[0] & CONTROL[5])
-  //    pl_npi_0/gain_band -> npi_band      (STATUS[21:20])
+  //    npi_cfg, npi_nrm, npi_det_thr, npi_det_hold -> pl_npi_0 (committed)
+  //    pl_npi_0/npi_st, wout, det_pow -> npi_st, npi_wout, npi_det_pow
   output     [63:0]   m_axis_npi_tdata,
   output              m_axis_npi_tvalid,
   input               m_axis_npi_tready,
@@ -179,7 +227,13 @@ module gnss_passthrough #(
   output     [31:0]   npi_gamma,
   output              npi_adapt_en,
   output              npi_rst_n,
-  input      [1:0]    npi_band,
+  output     [31:0]   npi_cfg,
+  output     [31:0]   npi_nrm,
+  output     [31:0]   npi_det_thr,
+  output     [31:0]   npi_det_hold,
+  input      [31:0]   npi_st,
+  input      [191:0]  npi_wout,
+  input      [31:0]   npi_det_pow,
 
   // ---- AXI4-Lite slave (sys_cpu_clk domain) -------------------------------
   input               s_axi_aclk,
@@ -214,7 +268,17 @@ module gnss_passthrough #(
   // v2.1 -- pl_npi_0 is the pipelined Vitis HLS core (II=2). The input to it
   //         goes through a one-entry holding register, STATUS[10] flags a
   //         sample pair it could not take.
-  localparam [31:0] CORE_VERSION = 32'h00020001;   // v2.1
+  // v2.3 -- pl_npi_0 v2.0 on sys_cpu_clk (II=1) behind two async FIFOs, so
+  //         the board can run 61.44 MS/s (BeiDou B1I + GLONASS); RX2 input
+  //         normalisation, image taps, gated adaptation (power detector,
+  //         bypass), make-up gain: shadow registers NPI_CFG/NORM/DET_* with
+  //         NPI_COMMIT (0x180), weight read-back NPI_SNAP/NPI_W (0x19C-0x1BC).
+  //         The ch0 elastic buffer is flushed and re-primed whenever
+  //         CONTROL[5] changes.
+  localparam [31:0] CORE_VERSION = 32'h00020003;   // v2.3
+  localparam [31:0] NPI_INFO     = 32'h03020801;
+  localparam [31:0] NPI_CFG_RESET = 32'h00000005;  // BYPASS, image taps on
+  localparam [31:0] NPI_NRM_RESET = 32'h00002000;  // g2 = 1.0
   localparam        AW           = FIFO_ADDR_WIDTH;
 
   // ==========================================================================
@@ -284,7 +348,7 @@ module gnss_passthrough #(
   reg  [31:0] reg_control = 32'd0;
   reg  [31:0] crpa_coef [0:15];
   // CRPA_COEF[2] is also kept in a plain register: it feeds the PL-NPI
-  // gamma in the clk domain, through the synchroniser below.
+  // gamma, in s_axi_aclk, the core's own clock (v2.3).
   reg  [31:0] reg_npi_gamma = 32'd1;
 
   integer ci;
@@ -307,6 +371,56 @@ module gnss_passthrough #(
     end
   end
 
+  // ---- PL-NPI v2.3 settings: shadow (0x188..0x194), committed by 0x180 ----
+  // All in s_axi_aclk, which is also the clock of pl_npi_0.
+  reg  [31:0] npi_cfg_sh  = NPI_CFG_RESET, npi_cfg_act  = NPI_CFG_RESET;
+  reg  [31:0] npi_nrm_sh  = NPI_NRM_RESET, npi_nrm_act  = NPI_NRM_RESET;
+  reg  [31:0] npi_thr_sh  = 32'hFFFFFFFF,  npi_thr_act  = 32'hFFFFFFFF;
+  reg  [31:0] npi_hold_sh = 32'd0,         npi_hold_act = 32'd0;
+  reg  [31:0] npi_commits = 32'd0;
+  // weight / status snapshot (0x19C write)
+  reg  [191:0] npi_w_lat   = 192'd0;
+  reg  [31:0]  npi_pow_lat = 32'd0, npi_st_lat = 32'd0;
+
+  always @(posedge s_axi_aclk) begin
+    if (s_axi_aresetn == 1'b0) begin
+      npi_cfg_sh  <= NPI_CFG_RESET;  npi_cfg_act  <= NPI_CFG_RESET;
+      npi_nrm_sh  <= NPI_NRM_RESET;  npi_nrm_act  <= NPI_NRM_RESET;
+      npi_thr_sh  <= 32'hFFFFFFFF;   npi_thr_act  <= 32'hFFFFFFFF;
+      npi_hold_sh <= 32'd0;          npi_hold_act <= 32'd0;
+      npi_commits <= 32'd0;
+      npi_w_lat   <= 192'd0;
+      npi_pow_lat <= 32'd0;
+      npi_st_lat  <= 32'd0;
+    end else if (reg_wr) begin
+      case (reg_waddr)
+        12'h062: npi_cfg_sh  <= s_axi_wdata;   // 0x188
+        12'h063: npi_nrm_sh  <= s_axi_wdata;   // 0x18C
+        12'h064: npi_thr_sh  <= s_axi_wdata;   // 0x190
+        12'h065: npi_hold_sh <= s_axi_wdata;   // 0x194
+        12'h060: begin                          // 0x180 commit
+          npi_cfg_act  <= npi_cfg_sh;
+          npi_nrm_act  <= npi_nrm_sh;
+          npi_thr_act  <= npi_thr_sh;
+          npi_hold_act <= npi_hold_sh;
+          npi_commits  <= npi_commits + 1'b1;
+        end
+        12'h067: begin                          // 0x19C snapshot
+          npi_w_lat   <= npi_wout;
+          npi_pow_lat <= npi_det_pow;
+          npi_st_lat  <= npi_st;
+        end
+        default: ;
+      endcase
+    end
+  end
+  assign npi_cfg      = npi_cfg_act;
+  assign npi_nrm      = npi_nrm_act;
+  assign npi_det_thr  = npi_thr_act;
+  assign npi_det_hold = npi_hold_act;
+  assign npi_gamma    = reg_npi_gamma;
+  assign npi_adapt_en = ~reg_control[6];
+
   // Status view, refreshed from the clk domain (see CDC section).
   wire [31:0] v_status, v_rx_cnt0, v_tx_cnt0, v_ovf_cnt, v_unf_cnt;
   wire [31:0] v_rx_snap0, v_tx_snap0, v_level, v_rx_cnt1, v_tx_cnt1, v_rx_snap1;
@@ -328,6 +442,8 @@ module gnss_passthrough #(
       12'h001: axi_rdata <= CORE_VERSION;
       12'h002: axi_rdata <= reg_scratch;
       12'h003: axi_rdata <= reg_control;
+      // STATUS[21:20]: the gain band comes live from pl_npi_0 (s_axi_aclk)
+      12'h004: axi_rdata <= {v_status[31:22], npi_st[3:2], v_status[19:0]};
       12'h004: axi_rdata <= v_status;
       12'h005: axi_rdata <= v_rx_cnt0;
       12'h006: axi_rdata <= v_tx_cnt0;
@@ -344,6 +460,22 @@ module gnss_passthrough #(
       12'h018, 12'h019, 12'h01A, 12'h01B,
       12'h01C, 12'h01D, 12'h01E, 12'h01F:
                axi_rdata <= crpa_coef[s_axi_araddr[5:2]];
+      12'h060: axi_rdata <= npi_commits;           // 0x180
+      12'h061: axi_rdata <= NPI_INFO;              // 0x184
+      12'h062: axi_rdata <= npi_cfg_sh;            // 0x188
+      12'h063: axi_rdata <= npi_nrm_sh;            // 0x18C
+      12'h064: axi_rdata <= npi_thr_sh;            // 0x190
+      12'h065: axi_rdata <= npi_hold_sh;           // 0x194
+      12'h066: axi_rdata <= npi_cfg_act;           // 0x198
+      12'h067: axi_rdata <= npi_st;                // 0x19C live status
+      12'h068: axi_rdata <= npi_w_lat[ 31:  0];    // 0x1A0 w2 re
+      12'h069: axi_rdata <= npi_w_lat[ 63: 32];    // 0x1A4 w2 im
+      12'h06A: axi_rdata <= npi_w_lat[ 95: 64];    // 0x1A8 c1 re
+      12'h06B: axi_rdata <= npi_w_lat[127: 96];    // 0x1AC c1 im
+      12'h06C: axi_rdata <= npi_w_lat[159:128];    // 0x1B0 c2 re
+      12'h06D: axi_rdata <= npi_w_lat[191:160];    // 0x1B4 c2 im
+      12'h06E: axi_rdata <= npi_pow_lat;           // 0x1B8
+      12'h06F: axi_rdata <= npi_st_lat;            // 0x1BC
       default: axi_rdata <= 32'd0;
     endcase
     end
@@ -368,19 +500,15 @@ module gnss_passthrough #(
   wire swap_iq   = ctrl_sync[2];
   wire ch1_copy  = ctrl_sync[3];
   wire npi_en    = ctrl_sync[5];
-  wire npi_freeze = ctrl_sync[6];
   wire cnt_clear = ctrl_sync[8];
 
-  // PL-NPI gamma. Quasi-static like the CONTROL bits, so bit-wise
-  // synchronisation is enough. The name keeps the "ctrl_meta" pattern so the
-  // existing false-path constraint covers it.
-  (* ASYNC_REG = "TRUE" *) reg [31:0] gamma_ctrl_meta = 32'd1;
-  (* ASYNC_REG = "TRUE" *) reg [31:0] gamma_ctrl_sync = 32'd1;
-
-  always @(posedge clk) begin
-    gamma_ctrl_meta <= reg_npi_gamma;
-    gamma_ctrl_sync <= gamma_ctrl_meta;
-  end
+  // CONTROL[5] edges: the ch0 buffer changes source (RX1 <-> core output,
+  // which arrives through two FIFOs and the core, a few hundred ns later).
+  // The buffer is flushed and re-primed on every edge, so it restarts half
+  // full of the NEW source instead of draining into an underflow.
+  reg  npi_en_d = 1'b0;
+  always @(posedge clk) npi_en_d <= npi_en;
+  wire npi_switch = npi_en ^ npi_en_d;
 
   // ==========================================================================
   //  Elastic buffer (one per channel)
@@ -411,6 +539,8 @@ module gnss_passthrough #(
     if (rst || !pass_en) begin
       primed0 <= 1'b0;
       primed1 <= 1'b0;
+    end else if (npi_switch) begin
+      primed0 <= 1'b0;
     end else begin
       if (level0 >= (1<<(AW-1))) primed0 <= 1'b1;
       if (level1 >= (1<<(AW-1))) primed1 <= 1'b1;
@@ -433,8 +563,9 @@ module gnss_passthrough #(
   //  npi_en = 1 : channel 0 carries the PL-NPI output (RX1 and RX2
   //               combined). Channel 1 is left as raw RX2.
   //
-  //  RESET. The core is held in reset whenever pass_en or npi_en is 0, so
-  //  re-enabling restarts adaptation from the quiescent weights [1, 0].
+  //  RESET. npi_rst_n holds the input FIFO in reset whenever pass_en or
+  //  npi_en is 0. The core itself runs on sys_cpu_clk with its own reset;
+  //  the firmware puts it in BYPASS (weights 0) through NPI_CFG.
   // ==========================================================================
   // --------------------------------------------------------------------------
   //  PL-NPI (pl_npi_0), a separate block-design IP. The PL-NPI core
@@ -449,11 +580,11 @@ module gnss_passthrough #(
   always @(posedge clk) npi_rst_n_r <= ~rst & npi_run;
   assign npi_rst_n = npi_rst_n_r;
 
-  // The HLS core accepts one sample pair every 2 clocks (II=2) and its
-  // TREADY may be low in the clock a pair arrives. The pair is therefore held
-  // in a one-entry register until accepted. Pairs arrive at most every 2nd
-  // clock, so one entry is enough; a pair that finds the register still
-  // occupied is dropped and flagged (STATUS[10]).
+  // The input FIFO's TREADY may be low in the clock a pair arrives (it is
+  // only low when full, which a 100 MS/s core behind it never lets happen).
+  // The pair is held in a one-entry register until accepted. Pairs arrive at
+  // most every 2nd clock, so one entry is enough; a pair that finds the
+  // register still occupied is dropped and flagged (STATUS[10]).
   wire npi_in_valid = npi_rst_n_r & adc_valid_i0 & adc_valid_i1 &
                       adc_enable_i0 & adc_enable_i1;
   reg  [63:0] npi_x_data  = 64'd0;
@@ -474,8 +605,6 @@ module gnss_passthrough #(
   assign m_axis_npi_tvalid = npi_x_valid;
   assign s_axis_npi_tready = 1'b1;        // the elastic buffer always accepts
   assign npi_out_valid     = s_axis_npi_tvalid;
-  assign npi_gamma         = gamma_ctrl_sync;
-  assign npi_adapt_en      = ~npi_freeze;
 
   function [15:0] sat12(input [15:0] v);
     begin
@@ -502,13 +631,17 @@ module gnss_passthrough #(
       wptr0 <= 0; rptr0 <= 0;
       wptr1 <= 0; rptr1 <= 0;
     end else begin
-      if (wr_en0 && !full0) begin
-        fifo0[wptr0[AW-1:0]] <= {proc_q0, proc_i0};
-        wptr0 <= wptr0 + 1'b1;
-      end
-      if (rd_en0 && !empty0) begin
-        rd_data0 <= fifo0[rptr0[AW-1:0]];
-        rptr0 <= rptr0 + 1'b1;
+      if (npi_switch) begin
+        rptr0 <= wptr0;                 // flush ch0; re-primed above
+      end else begin
+        if (wr_en0 && !full0) begin
+          fifo0[wptr0[AW-1:0]] <= {proc_q0, proc_i0};
+          wptr0 <= wptr0 + 1'b1;
+        end
+        if (rd_en0 && !empty0) begin
+          rd_data0 <= fifo0[rptr0[AW-1:0]];
+          rptr0 <= rptr0 + 1'b1;
+        end
       end
       if (wr_en1 && !full1) begin
         fifo1[wptr1[AW-1:0]] <= {proc_q1, proc_i1};
@@ -624,7 +757,7 @@ module gnss_passthrough #(
   end
 
   wire [31:0] status_w;
-  assign status_w = { 10'd0, npi_band, 1'b0, npi_en, 1'b0, pass_en,
+  assign status_w = { 10'd0, 2'd0,     1'b0, npi_en, 1'b0, pass_en,
                       5'd0, npi_drop_sticky, unf_sticky, ovf_sticky,
                       full1, empty1, full0, empty0,
                       dac_enable_q0, dac_enable_i0,

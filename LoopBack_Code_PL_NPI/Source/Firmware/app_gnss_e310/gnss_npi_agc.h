@@ -35,10 +35,14 @@
  *     otherwise the operator's attenuation is restored.
  *   - Automatic gamma: gamma = 2^17 * k * noise power per channel, with k
  *     itself automatic: 32 while no jammer is seen (satellites pass almost
- *     untouched), 1 as soon as one is (deepest null); see gnss_npi_agc.c.
+ *     untouched), 1/8 as soon as one is (deepest null); see gnss_npi_agc.c.
  *     The noise power is measured from the same snapshots, followed only
  *     while the input is within 3 dB of it (no jammer) and rescaled with each
  *     gain step, so a jammer never pulls gamma up.
+ *     v2.3, gated adaptation (the default): the core only adapts while a
+ *     jammer is present, so k is always the jammer value 1/8.
+ *   - v2.3: both channels are checked every 200 ms and put back to the same
+ *     manual gain if anything else (GUI, vendor commands) changed them.
  */
 #ifndef GNSS_NPI_AGC_H_
 #define GNSS_NPI_AGC_H_
@@ -53,6 +57,7 @@
 #define GNSS_RXG_PEAK_LOW      1000   /* both below this: room to go up     */
 #define GNSS_RXG_MAX_COMP_MDB 50000U  /* TX level hold limited to 50 dB     */
 #define GNSS_RXG_MIN_ATT_MDB  30000U  /* hold never below 30 dB attenuation */
+#define GNSS_RXG_REF_MIN_DB       64  /* clean reference never starts lower */
 
 void    gnss_rxg_set_mode(int mode);   /* starts/stops the loop             */
 int     gnss_rxg_mode(void);
@@ -63,5 +68,16 @@ void    gnss_rxg_print(void);
 void    gnss_npi_gamma_auto(int on);   /* 1 = automatic gamma (default)     */
 int     gnss_npi_gamma_is_auto(void);
 void    gnss_npi_gamma_k(uint32_t k);  /* 0 = automatic k (default), 1..64 fixed */
+void    gnss_npi_set_gated(int on);    /* 1 = core adapts only with a jammer:  */
+                                       /*     automatic k is then always 1/8  */
+
+/* For the anti-jam engine (gnss_npi_aj.c). */
+int32_t  gnss_rxg_gain(void);          /* present RX gain [dB]              */
+int32_t  gnss_rxg_ref(void);           /* clean reference gain [dB]         */
+uint32_t gnss_rxg_changes(void);       /* counts every gain step            */
+int      gnss_rxg_peak(void);          /* last ADC peak of both channels    */
+uint32_t gnss_rxg_att_base(void);      /* operator's TX1 attenuation [mdB]  */
+int      gnss_rxg_comp_db(void);       /* TX level hold in effect [dB]      */
+uint32_t gnss_npi_k_eighths(void);     /* k in use, in eighths (1 = 1/8)    */
 
 #endif

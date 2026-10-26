@@ -69,4 +69,12 @@ set_property  -dict {PACKAGE_PIN U18  IOSTANDARD LVDS_25 DIFF_TERM TRUE } [get_p
 
 # clocks
 
-create_clock -name rx_clk       -period  8 [get_ports rx_clk_in_p];
+# PL-NPI v2.3: 4 ns (245.76 MHz), the AD9361 LVDS maximum. In 2R2T mode the
+# AD9361 data clock is 4x the sample rate, so 8 ns (the vendor value) only
+# covers 30.72 MS/s. The default RF profile (gnss_band=1: 61.44 MS/s, the
+# only one that carries BeiDou B1I AND all of GLONASS) needs 4 ns. The PL-NPI
+# core itself is not on this clock (it runs on sys_cpu_clk), so what has to
+# meet 4 ns is the AD9361 interface, the ADI FIFOs and gnss_passthrough. If a
+# build ever misses timing here, 5 ns still covers 50 MS/s: change the 4 to 5
+# and use gnss_band=2 or 3.
+create_clock -name rx_clk       -period  4 [get_ports rx_clk_in_p];

@@ -21,8 +21,10 @@ If step 3 reports a clock above 10 ns: `SMI_PI_CLK_NS=8 ./03_smi.sh`
 
 Step 6 times the AD9361 interface at 4 ns (61.44 MS/s). If it reports
 `BUILD_TIMING: VIOLATED` with the failing paths on `rx_clk`, change the 4 to 5
-in `Source/XDC/system.xdc` (covers 50 MS/s, the default `gnss_band=1`) and run
-steps 5 and 6 again; then do not use `gnss_band=2`.
+in `Source/XDC/system.xdc` and run steps 5 and 6 again. 5 ns only covers
+50 MS/s, so the default `gnss_band=1` (61.44 MS/s) is then outside what was
+timed: type `gnss_band=2` (GPS, Galileo, GLONASS) or `gnss_band=3` (GPS,
+Galileo, BeiDou) after every boot (see `BUILD_STEPS.md`, step 6).
 
 If a step fails, run `tail -50 Build/Logs/<stage>.log`. After fixing it, run
 the same script again.

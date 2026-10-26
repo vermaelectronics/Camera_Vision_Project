@@ -14,7 +14,7 @@
 #
 #  WHY THESE CONSTRAINTS EXIST
 #    gnss_passthrough spans two asynchronous clocks:
-#      clk        - axi_ad9361/l_clk, sample domain   (rx_clk,     8 ns)
+#      clk        - axi_ad9361/l_clk, sample domain   (rx_clk,     4 ns)
 #      s_axi_aclk - sys_cpu_clk, register domain      (clk_fpga_0, 10 ns)
 #
 #    Vivado times the crossings between them as ordinary synchronous paths and
@@ -51,7 +51,10 @@
 #
 # set_max_delay -datapath_only rather than set_false_path: the transfer must
 # still finish before cap_* is reloaded, so a bound is wanted rather than a
-# licence to route arbitrarily. 8.000 ns is the shorter of the two periods.
+# licence to route arbitrarily. cap_* is held for 256 clk cycles (1 us at
+# 4 ns) and the toggle takes 2-3 s_axi_aclk cycles (30 ns) to arrive, so
+# 8.000 ns is a tight bound with a wide margin (it was "the shorter of the two
+# periods" when rx_clk was 8 ns).
 set_max_delay -datapath_only \
   -from [get_cells -quiet -hier -filter {NAME =~ *gnss_passthrough/inst/cap_*_reg*}] \
   -to   [get_cells -quiet -hier -filter {NAME =~ *gnss_passthrough/inst/h_*_reg*}] \
@@ -66,7 +69,9 @@ set_false_path \
 # --- 3. Control crossing into the sample domain -----------------------------
 # Quasi-static software settings through two-flop synchronisers: the CONTROL
 # bits (ctrl_meta) and the core parameters (mu_ctrl_meta in the PI-NLMS
-# design, gamma_/load_ctrl_meta in the PL-NPI / SMI-PI designs).
+# design). PL-NPI v2.3 needs none for its parameters: gamma, adapt_en and
+# NPI_* are in sys_cpu_clk, the core's own clock, and the sample streams cross
+# through the two axis_data_fifo IPs, which carry their own constraints.
 #
 # The pattern was "inst/ctrl_meta_reg*" until 2026-10-08, which matched only
 # the CONTROL synchroniser: the parameter synchronisers were timed as ordinary

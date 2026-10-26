@@ -76,5 +76,6 @@ set_property  -dict {PACKAGE_PIN U18  IOSTANDARD LVDS_25 DIFF_TERM TRUE } [get_p
 # anti-jam filter itself is not on this clock (it runs on sys_cpu_clk), so
 # what has to meet 4 ns is the AD9361 interface, the ADI FIFOs and
 # gnss_passthrough. If a build ever misses timing here, 5 ns still covers
-# 50 MS/s: change the 4 to 5 and limit gnss_band to profiles 0 and 1.
+# 50 MS/s: change the 4 to 5 and use gnss_band 0, 2 or 3 (v4.1: the default
+# profile 1 is 61.44 MS/s and needs 4 ns).
 create_clock -name rx_clk       -period  4 [get_ports rx_clk_in_p];

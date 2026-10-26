@@ -237,11 +237,20 @@ void set_gnss_tx(double* param, char param_no);
 /* Prints AD9361 and gnss_passthrough runtime state. */
 void get_gnss_status(double* param, char param_no);
 
-/* PL-NPI power inversion in the PL (bitstream v2.0+).
- * gnss_npi=1 puts the PL-NPI output of RX1+RX2 on TX1 (with gnss_tx=1),
- * gnss_npi=0 returns TX1 to plain RX1. gnss_npi_gamma= sets the
- * regulariser, gnss_npi_freeze= freezes the weights. */
+/* PL-NPI v2.3 power inversion in the PL (bitstream v2.3, gnss_npi_aj.c).
+ * gnss_npi=1/0 switches anti-jam on/off (on by default; gnss_tx=1 also
+ * switches it on), gnss_npi_freeze= freezes the weights, gnss_aj? prints the
+ * state, gnss_report? everything, gnss_aj_log= sets the periodic status
+ * line, gnss_aj_csv= a CSV line, gnss_aj_mode= gating/image taps,
+ * gnss_band= the RF profile. gnss_npi_gamma= / _auto= / _k= as before. */
 void get_gnss_npi(double* param, char param_no);
+void get_gnss_aj(double* param, char param_no);
+void get_gnss_report(double* param, char param_no);
+void set_gnss_aj_log(double* param, char param_no);
+void set_gnss_aj_csv(double* param, char param_no);
+void set_gnss_aj_mode(double* param, char param_no);
+void get_gnss_band(double* param, char param_no);
+void set_gnss_band(double* param, char param_no);
 void set_gnss_npi(double* param, char param_no);
 void set_gnss_npi_gamma(double* param, char param_no);
 void set_gnss_npi_freeze(double* param, char param_no);

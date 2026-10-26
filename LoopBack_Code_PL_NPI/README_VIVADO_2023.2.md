@@ -1,4 +1,16 @@
-# LoopBack_Code_PL_NPI: PL-NPI-only design, Vivado / Vitis 2023.2
+# LoopBack_Code_PL_NPI: PL-NPI-only design (PL-NPI v2.3), Vivado / Vitis 2023.2
+
+> **v2.3.0** (this version): gated adaptation in the FPGA (bypass until a
+> jammer), RX2 input normalisation, image taps for 50 dB jammers, output
+> make-up gain, the core moved to `sys_cpu_clk` at II=1, and a new default RF
+> profile that carries **BeiDou B1I and all of GLONASS** (1582.5 MHz,
+> 61.44 MS/s), FIRs kept off, a radio guard, faster TX start, `gnss_report?`
+> and CSV output.
+> **What changed and why: `README_PL_NPI_v2.3.md`.**
+> **Build commands to BOOT.BIN: `BUILD_STEPS.md`.**
+> **PuTTY tests and the report template: `TESTING_PUTTY.md`.**
+> The v2.2 notes below are kept for reference. Where they differ (clock, II,
+> band plan, commands, registers), the v2.3 files win.
 
 This project was first built with Vivado/Vitis 2026.1 and the Analog Devices
 `hdl_2026_r1` library. This version builds with **Vivado/Vitis 2023.2** on

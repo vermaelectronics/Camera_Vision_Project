@@ -158,7 +158,7 @@ static void info_hardware(struct ad9361_rf_phy *phy)
                   (long)rd(SLCR_FPGA1_CLK_CTRL));
     console_print("   FPGA2_CLK_CTRL           : 0x%08x   design: 200 MHz [cfg]\n",
                   (long)rd(SLCR_FPGA2_CLK_CTRL));
-    console_print("   l_clk (AD9361 interface) : 61.44 MHz at 30.72 MSPS   [cfg]\n");
+    console_print("   l_clk (AD9361 interface) : 4 x fs, 245.76 MHz at 61.44 MS/s [cfg]\n");
     console_print("     This is the clock the sample datapath and the custom\n");
     console_print("     block run in. It comes FROM the AD9361, not from the PS.\n");
     rule();
@@ -176,13 +176,15 @@ static void info_hardware(struct ad9361_rf_phy *phy)
     console_print("   base address    : 0x43C00000, 4 kB aperture\n");
     console_print("   ID register     : 0x%08x  (expect 0x47435031, ASCII 'GCP1')\n",
                   (long)gnss_pt_read(GNSS_PT_REG_ID));
-    console_print("   VERSION         : 0x%08x  (expect 0x00020001 = v2.1)\n",
+    console_print("   VERSION         : 0x%08x  (expect 0x00020003 = v2.3)\n",
                   (long)gnss_pt_read(GNSS_PT_REG_VERSION));
     console_print("     v1.0 is the original identity passthrough and transmits\n");
     console_print("     24 dB LOW. v1.1 adds the RX->TX sample alignment stage.\n");
     console_print("     v2.0 is the PL-NPI-only build: the PL-NPI power-inversion\n");
     console_print("     core (pl_npi_0) on TX1, no PI-NLMS. v2.1 makes pl_npi_0\n");
-    console_print("     the pipelined Vitis HLS core (II=2) that meets 8 ns timing.\n");
+    console_print("     the pipelined Vitis HLS core (II=2). v2.3 moves it to\n");
+    console_print("     sys_cpu_clk (II=1, 61.44 MS/s), adds RX2 normalisation,\n");
+    console_print("     image taps, gating (bypass until a jammer), make-up gain.\n");
     rule();
 
     console_print(" RF FRONT END                                            [cfg]\n");
@@ -393,15 +395,19 @@ static void info_pl(void)
     console_print("   axi_ad9361 -> AD9361 -> [TX1 SMA]\n");
     rule();
 
-    console_print("\n PL-NPI POWER INVERSION (v2.1)                          [cfg]\n");
+    console_print("\n PL-NPI POWER INVERSION (v2.3)                          [cfg]\n");
     rule();
-    console_print("   pl_npi_0 is a Vitis HLS IP next to gnss_passthrough, on the same\n");
-    console_print("   l_clk. It takes RX1 and RX2 at the raw ADC scale over one\n");
-    console_print("   AXI-Stream (s_axis_x) and returns the array output (m_axis_y).\n");
-    console_print("   CONTROL[5] puts it on TX1 instead of RX1, register 0x48\n");
-    console_print("   sets gamma, CONTROL[6] freezes the weights. It has no AXI-Lite\n");
-    console_print("   port: all control goes through gnss_passthrough. TX2 always\n");
-    console_print("   carries plain RX2.\n");
+    console_print("   pl_npi_0 is a Vitis HLS IP on sys_cpu_clk (100 MHz, one sample\n");
+    console_print("   per clock), fed from gnss_passthrough through an async FIFO and\n");
+    console_print("   returning through another. RX2 is first scaled to RX1's level\n");
+    console_print("   (g2), then y = x1 + w2 x2n + c1 conj(x1) + c2 conj(x2n): the\n");
+    console_print("   RX2 weight and two image taps adapt in the FPGA (variable-step\n");
+    console_print("   NLMS power inversion, RX1 weight fixed at 1). Its power detector\n");
+    console_print("   keeps it BYPASSED (TX1 = RX1, weights 0) until the input rises\n");
+    console_print("   6 dB above the noise; the ARM can also force it on (coherence).\n");
+    console_print("   CONTROL[5] puts it on TX1, 0x48 sets gamma, CONTROL[6] freezes\n");
+    console_print("   the weights, NPI_CFG/NORM/DET_* (0x188-0x194) the rest. TX2\n");
+    console_print("   always carries plain RX2.\n");
     rule();
 
     console_print("\n THE ONE MODIFICATION THAT MATTERS\n");
@@ -417,8 +423,9 @@ static void info_pl(void)
 
     console_print("\n CLOCK DOMAINS                                          [cfg]\n");
     rule();
-    console_print("   l_clk        61.44 MHz  AD9361 interface, the custom block\n");
-    console_print("                           core, wfifo din, rfifo dout\n");
+    console_print("   l_clk        4 x fs     AD9361 interface, gnss_passthrough,\n");
+    console_print("                           wfifo din, rfifo dout (timed 4 ns)\n");
+    console_print("   sys_cpu_clk  100 MHz    pl_npi_0 core (II=1)\n");
     console_print("   divclk       divided     cpack2, upack2, both DMA stream sides\n");
     console_print("   sys_cpu_clk  100 MHz     all AXI-Lite control\n");
     console_print("   The two FIFOs exist BECAUSE of that crossing. They are not\n");
@@ -506,12 +513,15 @@ static void info_about(void)
     console_print("   * NO absolute RF power was ever measured. Every dBm figure is\n");
     console_print("     computed from the AD9361 nominal output minus the commanded\n");
     console_print("     attenuation. Cable loss is uncharacterised.\n");
-    console_print("   * The fix is MULTI-CONSTELLATION, not GPS-only. Galileo E1\n");
-    console_print("     shares 1575.42 MHz and the 18 MHz retransmit bandwidth\n");
-    console_print("     carries GPS, Galileo and SBAS together.\n");
+    console_print("   * The fix is MULTI-CONSTELLATION. The default profile\n");
+    console_print("     (gnss_band=1: 1582.5 MHz, 61.44 MS/s, 56 MHz) carries GPS,\n");
+    console_print("     Galileo, QZSS, SBAS, BeiDou B1I/B1C and GLONASS G1. The\n");
+    console_print("     receiver must have each system switched on.\n");
     console_print("   * Position ACCURACY was never checked against a reference.\n");
-    console_print("   * PL-NPI power inversion has NOT yet been verified on hardware\n");
-    console_print("     against a jammer. Treat it as under test.\n");
+    console_print("   * PL-NPI v2.3 is verified in C simulation (CW to 50 dB with I/Q\n");
+    console_print("     imbalance, gating, weak RX2), NOT yet on this board. It has\n");
+    console_print("     ONE spatial weight: a wideband jammer through unequal RX1/RX2\n");
+    console_print("     paths is only partly nulled (SMI-PI v4.1 has 31 taps).\n");
     rule();
 
     console_print("\n SAFETY -- READ THIS\n");
@@ -534,7 +544,7 @@ static void info_registers(void)
     head("6  gnss_passthrough REGISTER MAP  (base 0x43C00000, 4 kB)");
 
     console_print("   0x00  ID              RO  0x47435031, ASCII 'GCP1'\n");
-    console_print("   0x04  VERSION         RO  0x00020001 = v2.1\n");
+    console_print("   0x04  VERSION         RO  0x00020003 = v2.3\n");
     console_print("   0x08  SCRATCH         RW  read/write test\n");
     console_print("   0x0C  CONTROL         RW  [0] pass_en  [1] mute\n");
     console_print("                             [2] swap_iq  [3] ch1_copy\n");
@@ -563,6 +573,17 @@ static void info_registers(void)
     console_print("   0x40  CRPA_COEF0..1   RW  stored but unused\n");
     console_print("   0x48  CRPA_COEF2      RW  PL-NPI regulariser gamma (0 acts as 1)\n");
     console_print("   0x4C  CRPA_COEF3..15  RW  0x4C-0x7C, stored but unused.\n");
+    console_print("   0x180 NPI_COMMIT      W/R write: NPI_CFG..DET_HOLD -> core\n");
+    console_print("   0x184 NPI_INFO        RO  0x03020801\n");
+    console_print("   0x188 NPI_CFG         RW  [1:0] 0 AUTO 1 BYPASS 2 ON 3 HOLD,\n");
+    console_print("                             [2] image taps, [10:8] make-up shift\n");
+    console_print("   0x18C NPI_NORM        RW  RX2 normalisation g2, Q3.13\n");
+    console_print("   0x190 NPI_DET_THR     RW  detector threshold [LSB^2]\n");
+    console_print("   0x194 NPI_DET_HOLD    RW  detector hold [samples]\n");
+    console_print("   0x198 NPI_CFG_ACTIVE  RO  NPI_CFG as committed\n");
+    console_print("   0x19C NPI_SNAP        W/R write: latch weights; read: live status\n");
+    console_print("   0x1A0 NPI_W0..5       RO  w2, c1, c2 (re, im), Q12.20\n");
+    console_print("   0x1B8 NPI_DET_POW     RO  latched detector power\n");
     rule();
     console_print(" STATUS BITS [2] AND [3] ARE THE IMPORTANT ONES.\n");
     console_print("   They are axi_ad9361's read-back of (dac_data_sel == 4'h2),\n");
@@ -753,14 +774,22 @@ static void info_quickstart(void)
     console_print("   gnss_ddr_tx=1 / =0          DDR round trip / stop\n");
     console_print("   tx1_attenuation=N           mdB. BIGGER = QUIETER.\n");
     console_print("   gnss_tx? / gnss_status?     state, read back from hardware\n");
-    console_print("   gnss_npi=1 / gnss_npi=0     PL-NPI power inversion on TX1 / off\n");
+    console_print("   gnss_npi=1 / gnss_npi=0     PL-NPI anti-jam on (default) / off\n");
+    console_print("   gnss_aj?                    bypass/filter, jammer, J/N, suppression\n");
+    console_print("   gnss_report?                EVERYTHING in one block, to copy\n");
+    console_print("   gnss_aj_log=N               status line every N s, 0 = events only\n");
+    console_print("   gnss_aj_csv=N               CSV line every N ms (100..), 0 = off\n");
+    console_print("   gnss_aj_mode=0/1/2/3        gated+image (default) / gated / always\n");
+    console_print("                               on + image / always on (v2.2)\n");
+    console_print("   gnss_band=1 / 0 / 2 / 3     RF profile (1 = ALL incl. BeiDou, default)\n");
+    console_print("   gnss_band?                  which GNSS signals the profile carries\n");
     console_print("   gnss_npi_gamma=N            fixed PL-NPI gamma (turns AUTO off)\n");
     console_print("   gnss_npi_auto=1 / =0        automatic gamma on (default) / off\n");
     console_print("   gnss_npi_k=0 / =N           k automatic (default) / fixed N\n");
     console_print("   gnss_rx_gain?               RX1/RX2 gain, mode, level hold, gamma\n");
     console_print("   gnss_rx_gain=<dB>           same gain on RX1+RX2 (auto reference)\n");
     console_print("   gnss_rx_agc=2 / =0 / =1     matched auto / manual / AD9361 AGC\n");
-    console_print("   gnss_npi?                   PL-NPI on/off, gamma, gain band\n");
+    console_print("   gnss_npi?                   anti-jam one-line state, gamma, band\n");
     console_print("   ?                           this menu\n");
     console_print("   help?                       every command (long)\n");
 }
@@ -782,7 +811,7 @@ void gnss_info_menu(void)
     console_print("===============================================================\n");
     console_print("  ANTSDR E310 V1  --  GNSS L1 CRPA loopback\n");
     console_print("  TX1 is %s\n",
-                  (char *)(transmitting ? "TRANSMITTING  (GPS L1, 1575.42 MHz)"
+                  (char *)(transmitting ? "TRANSMITTING  (GNSS 1559-1606 MHz, gnss_band?)"
                                         : "silent"));
     console_print("===============================================================\n");
     console_print("\n");
@@ -805,9 +834,12 @@ void gnss_info_menu(void)
     console_print("    gnss_tx=1 / gnss_tx=0       live retransmit / ABORT\n");
     console_print("    gnss_ddr_tx=1 / =0         DDR round trip / stop\n");
     console_print("    tx1_attenuation=N          mdB. BIGGER = QUIETER.\n");
-    console_print("                               89750 quietest, 70000 known good\n");
-    console_print("    gnss_npi=1 / gnss_npi=0    PL-NPI power inversion on TX1 / off\n");
-    console_print("    gnss_npi_auto=1            automatic gamma (default with gnss_npi=1)\n");
+    console_print("                               gnss_tx=1 starts at 70000 (known good)\n");
+    console_print("    gnss_npi=1 / gnss_npi=0    PL-NPI anti-jam on (default) / off\n");
+    console_print("    gnss_aj?   gnss_aj_log=N   anti-jam status / status line period\n");
+    console_print("    gnss_report?               everything in one block (copy it)\n");
+    console_print("    gnss_aj_csv=500            CSV line every 500 ms, =0 off\n");
+    console_print("    gnss_band=1 (default)      ALL: GPS, Galileo, BeiDou, GLONASS; gnss_band?\n");
     console_print("    gnss_rx_gain?              gain, level hold, gamma, jammer flag\n");
     console_print("    gnss_tx? gnss_ddr_tx? gnss_status? gnss_npi?   read back\n");
     console_print("\n");

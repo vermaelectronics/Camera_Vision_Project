@@ -104,6 +104,27 @@ void gnss_pt_set_npi(int enable)
     gnss_pt_write(GNSS_PT_REG_CONTROL, c);
 }
 
+void gnss_pt_npi_write(uint32_t cfg, int32_t g2_q13, uint32_t det_thr, uint32_t det_hold)
+{
+    gnss_pt_write(GNSS_PT_REG_NPI_CFG, cfg);
+    gnss_pt_write(GNSS_PT_REG_NPI_NORM, (uint32_t)(uint16_t)(int16_t)g2_q13);
+    gnss_pt_write(GNSS_PT_REG_NPI_DET_THR, det_thr);
+    gnss_pt_write(GNSS_PT_REG_NPI_DET_HOLD, det_hold);
+    gnss_pt_write(GNSS_PT_REG_NPI_COMMIT, 1U);
+}
+
+void gnss_pt_npi_snapshot(gnss_pt_npi_snap_t *s)
+{
+    uint32_t k;
+    if (!s) { return; }
+    gnss_pt_write(GNSS_PT_REG_NPI_SNAP, 1U);
+    for (k = 0; k < 6U; k++) {
+        s->w[k] = (int32_t)gnss_pt_read(GNSS_PT_REG_NPI_W(k));
+    }
+    s->pow = gnss_pt_read(GNSS_PT_REG_NPI_DET_POW);
+    s->st  = gnss_pt_read(GNSS_PT_REG_NPI_ST_LATCHED);
+}
+
 void gnss_pt_set_npi_gamma(uint32_t gamma)
 {
     gnss_pt_write(GNSS_PT_REG_NPI_GAMMA, gamma);
@@ -165,6 +186,20 @@ void gnss_pt_print_state(void)
            (s.control & GNSS_PT_CTRL_NPI_FREEZE) ? " (weights frozen)" : "",
            (unsigned long)gnss_pt_read(GNSS_PT_REG_NPI_GAMMA),
            (unsigned long)((s.status >> GNSS_PT_ST_NPI_BAND_SHIFT) & GNSS_PT_ST_NPI_BAND_MASK));
+    {
+        uint32_t cfg = gnss_pt_read(GNSS_PT_REG_NPI_CFG_ACTIVE);
+        uint32_t st  = gnss_pt_read(GNSS_PT_REG_NPI_SNAP);
+        static const char *modes[4] = {"AUTO (detector)", "BYPASS", "ON", "HOLD"};
+        printf("  pl-npi v2.3    : mode %s, image taps %s, make-up shift %lu, g2 0x%08lx,\n"
+               "                   detector %s (threshold %lu LSB^2), filter %s, %lu detector events\n",
+               modes[cfg & 3U], (cfg & GNSS_PT_NPI_CFG_IMAGE) ? "on" : "off",
+               (unsigned long)((cfg >> 8) & 7U),
+               (unsigned long)gnss_pt_read(GNSS_PT_REG_NPI_NORM),
+               (st & GNSS_PT_NPI_ST_DET) ? "ON" : "off",
+               (unsigned long)gnss_pt_read(GNSS_PT_REG_NPI_DET_THR),
+               (st & GNSS_PT_NPI_ST_ACTIVE) ? "IN" : "bypassed",
+               (unsigned long)GNSS_PT_NPI_ST_CNT(st));
+    }
     printf("  adc enable i/q : %d / %d\n",
            (s.status & GNSS_PT_ST_ADC_EN_I0) ? 1 : 0,
            (s.status & GNSS_PT_ST_ADC_EN_Q0) ? 1 : 0);
