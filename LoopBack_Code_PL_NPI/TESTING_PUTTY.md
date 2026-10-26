@@ -26,7 +26,8 @@ Every time you connect, a new time-stamped log file is created, so you never
 have to copy from the screen. To copy a block from the screen, select it with
 the mouse (that copies it) and paste it with Ctrl+V in your message.
 
-Type commands exactly as shown and press Enter. `?` shows the menu,
+Type commands exactly as shown and press Enter. The periodic status line
+(every 30 s) waits while you type, so it never runs through a command. `?` shows the menu,
 `help?` lists every command.
 
 ---
@@ -66,7 +67,7 @@ things: J/N is relative to the board's noise.
    ```
    gnss_pt: present at 0x43c00000, version 2.3
    SELFTEST: PASS ...
-   ANTI-JAM (PL-NPI 2.3.1): ON, bypassed until a jammer appears.
+   ANTI-JAM (PL-NPI 2.3.2): ON, bypassed until a jammer appears.
    ```
 2. Type `gnss_band?`. All five signals must show `OK` and both FIRs `off`.
 3. Type `gnss_report?` and keep the block.

@@ -1,7 +1,15 @@
 # SMI-PI v4.1: what I changed and why
 
-Version 4.1.0 of `LoopBack_Code_SMI_PI`. It builds on v4.0 (the space-time
+Version 4.1.1 of `LoopBack_Code_SMI_PI`. It builds on v4.0 (the space-time
 filter) and makes these changes to the FPGA, the firmware and the scripts.
+
+> **Console (firmware 4.1.1).** The periodic status line now comes every
+> **30 s** (was 5 s), and status and CSV lines are **held back while you
+> type** a command and for 20 s after the last key, so they no longer run
+> through your typing. JAMMER ON / NULLED / OFF events still print at once.
+> `gnss_aj_log=5` brings back the old period; `gnss_aj_log=0` prints events
+> only. If PuTTY sends whole lines (local line editing on), press Enter
+> once: that pauses the lines for 20 s, then type the command.
 
 - How to build it, step by step: **`BUILD_STEPS.md`**
 - How to test it on PuTTY and what to send back: **`TESTING_PUTTY.md`**

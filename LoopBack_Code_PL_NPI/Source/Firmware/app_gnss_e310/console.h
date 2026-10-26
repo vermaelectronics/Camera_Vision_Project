@@ -54,6 +54,9 @@
 char console_init(unsigned long baud_rate);
 /* Run hook() while waiting for console input (NULL = plain blocking read). */
 void console_set_idle_hook(void (*hook)(void));
+/* Keys received so far, and 1 while a command is half typed. */
+unsigned int console_key_count(void);
+int console_typing(void);
 
 /* Prints formatted data to console. */
 void console_print(char* str, ...);

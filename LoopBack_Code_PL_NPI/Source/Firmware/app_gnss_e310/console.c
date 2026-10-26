@@ -59,6 +59,14 @@ void console_set_idle_hook(void (*hook)(void))
 	console_idle_hook = hook;
 }
 
+/* Keys received, and whether a command is half typed: the anti-jam engine
+ * holds its periodic status lines back while the operator types. */
+static volatile unsigned int console_keys = 0;
+static volatile int          console_mid_line = 0;
+
+unsigned int console_key_count(void) { return console_keys; }
+int          console_typing(void)    { return console_mid_line; }
+
 /***************************************************************************//**
  * @brief Initializes the UART communication peripheral. If the value of the
  *          baud rate is not equal with the ipcore's baud rate the
@@ -106,10 +114,12 @@ void uart_read_char(char * data)
 		while(!XUartPs_IsReceiveData(STDIN_BASEADDRESS))
 			console_idle_hook();
 		*data = (char)XUartPs_RecvByte(STDIN_BASEADDRESS);
+		console_keys++;
 		return;
 	}
 #endif
 	*data = getchar();
+	console_keys++;
 }
 
 /***************************************************************************//**
@@ -323,7 +333,9 @@ void console_get_command(char* command)
 	{
 		uart_read_char(&received_char);
 		command[char_number++] = received_char;
+		console_mid_line = (received_char != '\n') && (received_char != '\r');
 	}
+	console_mid_line = 0;
 }
 
 /***************************************************************************//**

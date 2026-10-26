@@ -1201,7 +1201,7 @@ int main(void)
 	console_print("\nANTI-JAM (SMI-PI " GNSS_AJ_VERSION_STR "): ON, bypassed until a jammer appears.\n"
 		      "  Jammer events are printed as [AJ] lines with a time stamp. gnss_aj? = state,\n"
 		      "  gnss_report? = everything (copy it into a report), gnss_aj_csv=500 = CSV log,\n"
-		      "  gnss_aj_log=0 quiets the 5 s status line. Nothing to tune.\n"
+		      "  Status line every 30 s (gnss_aj_log=N, 0 = events only); it waits while you type.\n"
 		      "  Start retransmitting with gnss_tx=1 (goes straight to the working level).\n");
 #ifdef GNSS_DEPLOY_AUTO_TX
 	if((gnss_pt_read(GNSS_PT_REG_STATUS) & GNSS_PT_ST_PASS_EN_SYNCED) &&

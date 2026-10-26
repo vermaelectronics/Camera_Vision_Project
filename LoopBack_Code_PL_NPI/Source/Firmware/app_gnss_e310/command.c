@@ -139,7 +139,7 @@ command cmd_list[] = {
 	{"gnss_npi_k=", "0 = automatic k (default: 1/8 while gated; 32 clean / 1/8 jammed when always on), 1..64 = fixed k.", "gnss_npi_k=0", set_gnss_npi_k},
 	{"gnss_aj?", "Anti-jam status: bypass/filter, jammer type and frequency, J/N, suppression.", "", get_gnss_aj},
 	{"gnss_report?", "EVERYTHING in one block (radio, gains, g2, core, jammer, events) to copy into a report.", "", get_gnss_report},
-	{"gnss_aj_log=", "Status line every N s on the console (default 5), 0 = only JAMMER ON/OFF events.", "gnss_aj_log=5", set_gnss_aj_log},
+	{"gnss_aj_log=", "Status line every N s on the console (default 30; held back while you type), 0 = only JAMMER ON/OFF events.", "gnss_aj_log=30", set_gnss_aj_log},
 	{"gnss_aj_csv=", "CSV line (AJCSV,...) every N ms, 100 to 60000; 0 = off (default).", "gnss_aj_csv=0", set_gnss_aj_csv},
 	{"gnss_aj_mode=", "0 = gated + image taps (default), 1 = gated, no image, 2 = always on + image, 3 = always on, no image (v2.2).", "gnss_aj_mode=0", set_gnss_aj_mode},
 	{"gnss_band?", "RF profile and which GNSS signals it carries (GPS, Galileo, BeiDou, GLONASS).", "", get_gnss_band},
@@ -394,7 +394,7 @@ void set_gnss_aj_csv(double* param, char param_no)
 void set_gnss_aj_log(double* param, char param_no)
 {
 	if(param_no < 1 || param[0] < 0.0 || param[0] > 3600.0) {
-		console_print("gnss_aj_log= needs seconds, 0 to 3600 (0 = only JAMMER ON/OFF), e.g. gnss_aj_log=5\n");
+		console_print("gnss_aj_log= needs seconds, 0 to 3600 (0 = only JAMMER ON/OFF), e.g. gnss_aj_log=30\n");
 		return;
 	}
 	gnss_aj_set_log((int)param[0]);

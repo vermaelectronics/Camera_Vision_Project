@@ -1,6 +1,6 @@
 # PL-NPI v2.3: what I changed and why
 
-Version 2.3.1 of `LoopBack_Code_PL_NPI`. It brings the same changes SMI-PI
+Version 2.3.2 of `LoopBack_Code_PL_NPI`. It brings the same changes SMI-PI
 got in v4.1 to the PL-NPI design: gated adaptation, RX2 normalisation, image
 taps for 50 dB jammers, output make-up gain, the full GNSS band (BeiDou B1I
 and GLONASS), FIRs kept off, a radio guard, faster TX start and the same
@@ -24,6 +24,14 @@ the FPGA (NLMS power inversion). The ARM only supervises.
 > and with 8 extra delays). Nothing else changed: registers, IP version
 > (pl_npi 2.0), bitstream VERSION 2.3, firmware (only its version string,
 > PL-NPI 2.3.1).
+
+> **Console (firmware 2.3.2).** The periodic status line now comes every
+> **30 s** (was 5 s), and status and CSV lines are **held back while you
+> type** a command and for 20 s after the last key, so they no longer run
+> through your typing. JAMMER ON / NULLED / OFF events still print at once.
+> `gnss_aj_log=5` brings back the old period; `gnss_aj_log=0` prints events
+> only. If PuTTY sends whole lines (local line editing on), press Enter
+> once: that pauses the lines for 20 s, then type the command.
 
 - How to build it, step by step: **`BUILD_STEPS.md`**
 - How to test it on PuTTY and what to send back: **`TESTING_PUTTY.md`**

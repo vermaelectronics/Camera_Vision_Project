@@ -58,7 +58,12 @@ enum { EV_ON = 1, EV_NULLED, EV_OFF, EV_LEAK, EV_TX, EV_START, EV_BURST };
 
 /* ---- state --------------------------------------------------------------- */
 static int      aj_on, aj_user_off, aj_frozen, aj_mode = GNSS_AJ_MODE_GATED;
-static int      aj_log_s = 5, aj_csv_ms = 0, csv_hdr;
+static int      aj_log_s = 30, aj_csv_ms = 0, csv_hdr;
+/* Periodic lines (status, CSV) are held back while a command is being typed
+ * and for this long after the last key, so they never run through it. */
+#define AJ_KEY_QUIET_US   20000000U
+static unsigned int keys_seen;
+static XTime    t_key;
 static int      dma_busy;
 static XTime    dma_t0, next_start, t_rate, t_log, t_csv, t_warn, t_learn, t_boot;
 static uint32_t gain_mark;
@@ -667,6 +672,14 @@ void gnss_aj_poll(void)
 		cnt_cap = 0;
 		t_rate = now;
 	}
+	if(console_key_count() != keys_seen) {
+		keys_seen = console_key_count();
+		t_key = now;
+	}
+	if(console_typing() || now - t_key < us(AJ_KEY_QUIET_US)) {
+		t_log = now;                     /* no burst once typing is over */
+		t_csv = now;
+	}
 	if(aj_log_s > 0 && now - t_log >= us((uint32_t)aj_log_s * 1000000U)) {
 		t_log = now;
 		print_line(now);
@@ -683,6 +696,8 @@ void gnss_aj_init(void)
 	XTime now;
 	XTime_GetTime(&now);
 	t_boot = t_rate = t_log = t_csv = t_warn = t_learn = next_start = clear_t0 = now;
+	keys_seen = console_key_count();
+	t_key = now - us(AJ_KEY_QUIET_US);
 }
 
 void gnss_aj_command(int on)
