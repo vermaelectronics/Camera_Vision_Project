@@ -1,6 +1,6 @@
 # LoopBack_Code_SMI_PI: space-time SMI power inversion (SMI-PI v4.1), Vivado / Vitis 2023.2
 
-> **v4.1.1** (this version): gated adaptation (filter bypassed with no jammer),
+> **v4.1.2** (this version): gated adaptation (filter bypassed with no jammer),
 > RX2 input normalisation, image taps for 50 dB jammers, output make-up gain,
 > a new default RF profile that carries **BeiDou B1I and all of GLONASS**
 > (1582.5 MHz, 61.44 MS/s), FIRs kept off, a radio guard, faster TX start,
@@ -185,7 +185,7 @@ causes, all fixed here:
 | `gnss_aj?` | everything: jammer type and frequency, J/N, suppression, residual, noise, weights, gains, update rate, radio |
 | `gnss_smi?` | one line: on/off, jammer, J/N, suppression |
 | `gnss_smi=1` / `=0` | anti-jam on (default) / off (TX1 = RX1) |
-| `gnss_aj_log=30` | status line every 30 s (default since v4.1.1, held back while you type); `=0`: only JAMMER ON/OFF lines |
+| `gnss_aj_log=30` | status line every 30 s (held back while you type); `=0` (default since v4.1.2): only JAMMER ON/OFF lines |
 | `gnss_aj_mode=0/1/2` | 31 taps (default) / RX2 taps only / one weight (old v3, for an A/B test) |
 | `gnss_band=0/1/2` | 1575.42 MHz 30.72 MS/s / 1584.5 MHz 50 MS/s (default) / 1584.5 MHz 61.44 MS/s |
 | `gnss_smi_freeze=1/0` | keep / track the weights |

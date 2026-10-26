@@ -19,7 +19,7 @@
  *         [AJ   12.345 s] *** JAMMER ON *** ...
  *         [AJ   12.361 s] NULLED in 16 ms ...
  *         [AJ   45.678 s] jammer OFF after 33.3 s ...
- *    plus a status line every gnss_aj_log= seconds (default 30, held back while the operator types), a CSV line
+ *    plus a status line every gnss_aj_log= seconds (default 0 = off, held back while the operator types), a CSV line
  *    every gnss_aj_csv= ms (default off) and the full gnss_report? block.
  *
  *  Runs from the console idle hook (gnss_idle), like the matched RX gain loop.
@@ -35,7 +35,7 @@
 #define GNSS_AJ_BUF_ADDR   0x11000000U
 #endif
 
-#define GNSS_AJ_VERSION_STR  "4.1.1"
+#define GNSS_AJ_VERSION_STR  "4.1.2"
 
 /* RF profiles (gnss_band=). RX and TX are always set together, so the
  * retransmitted signal comes out on the frequency it came in on and the

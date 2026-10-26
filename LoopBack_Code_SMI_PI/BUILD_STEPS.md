@@ -30,7 +30,7 @@ ls /tools/Xilinx/Vivado/2023.2/settings64.sh /tools/Xilinx/Vitis/2023.2/settings
 ```bash
 mkdir -p ~/smi_pi_v41
 cd ~/smi_pi_v41
-unzip ~/Downloads/LoopBack_Code_SMI_PI_v4.1.1.zip
+unzip ~/Downloads/LoopBack_Code_SMI_PI_v4.1.2.zip
 cd LoopBack_Code_SMI_PI
 chmod +x Automation/Linux/*.sh Automation/Linux/steps/*.sh
 ```
@@ -205,7 +205,7 @@ Only the firmware changed (e.g. a different `--defines`)? Then:
 ```
 gnss_pt: present at 0x43c00000, version 4.1
 SELFTEST: PASS - ...
-ANTI-JAM (SMI-PI 4.1.1): ON, bypassed until a jammer appears.
+ANTI-JAM (SMI-PI 4.1.2): ON, bypassed until a jammer appears.
 ```
 
 If it says `version 4.0` or `Anti-jam NOT started`, the card has an old

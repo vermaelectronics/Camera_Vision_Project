@@ -1,6 +1,6 @@
 # PL-NPI v2.3: what I changed and why
 
-Version 2.3.2 of `LoopBack_Code_PL_NPI`. It brings the same changes SMI-PI
+Version 2.3.3 of `LoopBack_Code_PL_NPI`. It brings the same changes SMI-PI
 got in v4.1 to the PL-NPI design: gated adaptation, RX2 normalisation, image
 taps for 50 dB jammers, output make-up gain, the full GNSS band (BeiDou B1I
 and GLONASS), FIRs kept off, a radio guard, faster TX start and the same
@@ -25,13 +25,19 @@ the FPGA (NLMS power inversion). The ARM only supervises.
 > (pl_npi 2.0), bitstream VERSION 2.3, firmware (only its version string,
 > PL-NPI 2.3.1).
 
-> **Console (firmware 2.3.2).** The periodic status line now comes every
-> **30 s** (was 5 s), and status and CSV lines are **held back while you
-> type** a command and for 20 s after the last key, so they no longer run
-> through your typing. JAMMER ON / NULLED / OFF events still print at once.
-> `gnss_aj_log=5` brings back the old period; `gnss_aj_log=0` prints events
-> only. If PuTTY sends whole lines (local line editing on), press Enter
-> once: that pauses the lines for 20 s, then type the command.
+> **Console and detection (firmware 2.3.3).** The board now prints **only
+> jammer events** by default (JAMMER ON / NULLED / OFF); `gnss_aj_log=30`
+> adds a status line every 30 s, and it is held back while you type and for
+> 20 s after the last key. **Common background:** a signal that RX1 and RX2
+> both carry all the time at about the noise level (both ports fed from one
+> source: splitter, GNSS simulator, one antenna/LNA; or TX1 leaking back
+> into RX) made the coherence detector report a "jammer" at J/N ~0 dB for
+> ever. After 10 s of coherence-only detection with no rise in power and no
+> RX gain cut, the firmware prints `NOT A JAMMER`, treats it as background
+> (filter bypassed) and from then on needs 6 dB more coherence, +6 dB power
+> or a gain cut to call a jammer. `gnss_report?` shows it on a `background`
+> line. Limit: a real jammer that stays below +3 dB power J/N for 10 s is
+> treated as background too.
 
 - How to build it, step by step: **`BUILD_STEPS.md`**
 - How to test it on PuTTY and what to send back: **`TESTING_PUTTY.md`**

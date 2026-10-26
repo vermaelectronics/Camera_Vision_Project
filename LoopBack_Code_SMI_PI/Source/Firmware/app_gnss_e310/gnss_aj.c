@@ -46,11 +46,11 @@ extern struct axi_dmac *rx_dmac;
 #define AJ_NEV            16      /* event history for gnss_report?             */
 
 enum { ST_CLEAR = 0, ST_JAMMED = 1 };
-enum { EV_ON = 1, EV_NULLED, EV_OFF, EV_LEAK, EV_TX, EV_START };
+enum { EV_ON = 1, EV_NULLED, EV_OFF, EV_LEAK, EV_TX, EV_START, EV_BG };
 
 /* ---- state --------------------------------------------------------------- */
 static int      aj_on, aj_user_off, aj_frozen, aj_mode = AJ_MODE_STAP;
-static int      aj_log_s = 30, aj_csv_ms = 0, csv_hdr;
+static int      aj_log_s = 0, aj_csv_ms = 0, csv_hdr;
 /* Periodic lines (status, CSV) are held back while a command is being typed
  * and for this long after the last key, so they never run through it. */
 #define AJ_KEY_QUIET_US   20000000U
@@ -466,6 +466,73 @@ static void leave_jammed(XTime now)
 	if(null_ms >= 0.0) null_ms_last = null_ms;
 }
 
+/* ---- common background on RX1 and RX2 ---------------------------------------
+ * A signal BOTH channels carry all the time at about the noise level (one
+ * source through a splitter, a GNSS simulator, one active antenna, or TX1
+ * leaking back into RX) makes the coherence detector fire with no rise in
+ * power and no RX gain cut. After AJ_BG_US of exactly that it becomes the
+ * background: a jammer must then add AJ_BG_MARGIN_DB of coherence over it,
+ * or raise the power, or make the gain loop cut the gain. Forgotten once the
+ * coherence has stayed 6 dB below it for AJ_BG_CLEAR_US. */
+#define AJ_BG_US          10000000U
+#define AJ_BG_MARGIN_DB   6.0
+#define AJ_BG_CLEAR_US    30000000U
+static double coh_bg = -99.0, bg_max;
+static int    bg_cand;
+static XTime  bg_t0, bg_gone_t0;
+
+static double coh_on(void)    { double t = coh_bg + AJ_BG_MARGIN_DB; return t > AJ_ON_COH_DB ? t : AJ_ON_COH_DB; }
+static double coh_off(void)   { double t = coh_bg + 3.0; return t > AJ_OFF_COH_DB ? t : AJ_OFF_COH_DB; }
+static double coh_quiet(void) { double t = coh_bg + 3.0; return t > AJ_QUIET_COH_DB ? t : AJ_QUIET_COH_DB; }
+
+/* Every capture. jammed: held jammed by the firmware's detector. Returns 1
+ * when that state is only the background and must be released. */
+static int bg_track(XTime now, int jammed)
+{
+	int cand = jammed && nf0 > 0.0 && res.jn_coh_db >= coh_on() &&
+	           res.jn_db < AJ_OFF_DB && cut_db() == 0;
+	if(!cand) {
+		bg_cand = 0;
+	} else if(!bg_cand) {
+		bg_cand = 1;
+		bg_t0 = now;
+		bg_max = res.jn_coh_db;
+	} else {
+		if(res.jn_coh_db > bg_max) bg_max = res.jn_coh_db;
+		if(now - bg_t0 >= us(AJ_BG_US)) {
+			coh_bg = bg_max;
+			bg_cand = 0;
+			bg_gone_t0 = now;
+			console_print("\n");
+			stamp(now);
+			console_print("NOT A JAMMER: RX1 and RX2 have carried the same signal for %d s at the\n"
+				      "     noise level (coherence %s dB, power J/N %s dB, no RX gain cut).\n"
+				      "     Treated as background, filter bypassed. A jammer must now reach\n"
+				      "     coherence %s dB or power J/N %s dB, or cut the RX gain.\n"
+				      "     Usual causes: both RX ports fed from ONE source (splitter, GNSS\n"
+				      "     simulator, one antenna/LNA): then the satellites are common too and\n"
+				      "     no 2-antenna anti-jam can work; or TX1 leaking back into RX\n"
+				      "     (test: gnss_tx=0, the coherence should drop).\n",
+				      (long)(AJ_BG_US / 1000000U), f1(coh_bg), f1(res.jn_db),
+				      f1(coh_on()), f1(AJ_ON_DB));
+			add_event(now, EV_BG, coh_bg, res.jn_db, 0.0);
+			return 1;
+		}
+	}
+	if(coh_bg > -90.0) {
+		if(res.jn_coh_db >= coh_bg - 6.0) {
+			bg_gone_t0 = now;
+		} else if(now - bg_gone_t0 >= us(AJ_BG_CLEAR_US)) {
+			stamp(now);
+			console_print("background gone (coherence %s dB for %d s): normal detection again\n",
+				      f1(res.jn_coh_db), (long)(AJ_BG_CLEAR_US / 1000000U));
+			coh_bg = -99.0;
+			add_event(now, EV_BG, -99.0, res.jn_db, 0.0);
+		}
+	}
+	return 0;
+}
+
 /* CLEAR: detection only. Returns 1 when the jammer is confirmed. */
 static int detect_capture(XTime now)
 {
@@ -483,10 +550,11 @@ static int detect_capture(XTime now)
 	n_det++;
 	cnt_det++;
 
-	if(res.jn_coh_db >= AJ_ON_COH_DB)              why = 1;
+	bg_track(now, 0);
+	if(res.jn_coh_db >= coh_on())                  why = 1;
 	else if(nf0 > 0.0 && res.jn_db >= AJ_ON_DB)    why = 2;
 	else if(cut >= AJ_CUT_DB)                      why = 3;
-	quiet = !why && res.jn_coh_db < AJ_QUIET_COH_DB &&
+	quiet = !why && res.jn_coh_db < coh_quiet() &&
 	        (nf0 <= 0.0 || res.jn_db < AJ_OFF_DB) && cut == 0;
 	if(quiet && gnss_rxg_ref() == cur_gain())
 		learn(now);
@@ -519,7 +587,11 @@ static void jammed_state(XTime now)
 		announce(now);
 	if(jam_announced && res.jn_db > jam_peak) jam_peak = res.jn_db;
 
-	quiet = res.jn_coh_db < AJ_OFF_COH_DB && res.jn_db < AJ_OFF_DB && cut_db() == 0;
+	if(bg_track(now, 1)) {
+		leave_jammed(now);
+		return;
+	}
+	quiet = res.jn_coh_db < coh_off() && res.jn_db < AJ_OFF_DB && cut_db() == 0;
 	if(!quiet) {
 		quiet_t0 = now;
 	} else if(now - quiet_t0 >= us(AJ_OFF_US)) {
@@ -804,7 +876,7 @@ void gnss_aj_print(void)
 	} else {
 		console_print("  jammer      : none for %s s (coherence %s dB, ON above %s; power J/N %s, ON above %s)\n",
 			      f1u((double)ms_since(clear_t0, now) / 1000.0),
-			      f1(res.jn_coh_db < -30.0 ? -30.0 : res.jn_coh_db), f1(AJ_ON_COH_DB),
+			      f1(res.jn_coh_db < -30.0 ? -30.0 : res.jn_coh_db), f1(coh_on()),
 			      (char*)(nf0 > 0.0 ? f1(res.jn_db < -9.9 ? -9.9 : res.jn_db) : "(learning)"),
 			      f1u(AJ_ON_DB));
 	}
@@ -864,9 +936,11 @@ void gnss_aj_report(void)
 	if(res_valid) {
 		console_print("detection     : coherence %s at lag %d (%s dB; ON above %s), power J/N %s dB\n",
 			      f3u(res.coh), (long)res.coh_lag,
-			      f1(res.jn_coh_db < -30.0 ? -30.0 : res.jn_coh_db), f1(AJ_ON_COH_DB),
+			      f1(res.jn_coh_db < -30.0 ? -30.0 : res.jn_coh_db), f1(coh_on()),
 			      f1(res.jn_db < -99.0 ? -99.0 : res.jn_db));
 		console_print("powers        : RX1 %s, RX2 %s LSB^2 (raw)\n", f1u(res.p1), f1u(res.p2));
+		if(coh_bg > -90.0)
+			console_print("background    : RX1/RX2 common signal, coherence %s dB: not a jammer (splitter / one source / TX1 leak?)\n", f1(coh_bg));
 	}
 	if(state == ST_JAMMED && res_solved) {
 		console_print("jammer        : J/N %s dB (peak %s), ", f1(res.jn_db), f1(jam_peak));
@@ -894,8 +968,10 @@ void gnss_aj_report(void)
 		console_print("time to null  : - (no jammer nulled yet)\n");
 	console_print("engine        : %d solves/s, %d checks/s; %d solves, %d checks, %d skipped (gain step), %d DMA errors\n",
 		      (long)upd_rate, (long)det_rate, (long)n_upd, (long)n_det, (long)n_skip, (long)n_fail);
-	console_print("printing      : status every %d s (gnss_aj_log=), CSV every %d ms (gnss_aj_csv=)\n",
-		      (long)aj_log_s, (long)aj_csv_ms);
+	if(aj_log_s > 0) console_print("printing      : status every %d s (gnss_aj_log=)", (long)aj_log_s);
+	else             console_print("printing      : status line off (gnss_aj_log=30 to see it)");
+	if(aj_csv_ms > 0) console_print(", CSV every %d ms (gnss_aj_csv=)\n", (long)aj_csv_ms);
+	else              console_print(", CSV off (gnss_aj_csv=)\n");
 	console_print("events        : %d in total, the last %d:\n", (long)ev_n, (long)(ev_n < 8 ? ev_n : 8));
 	first = ev_n > 8 ? ev_n - 8 : 0;
 	for(i = first; i < ev_n; i++) {
@@ -909,6 +985,13 @@ void gnss_aj_report(void)
 		case EV_NULLED: console_print("NULLED      after %s ms, suppression %s dB, residual %s dB\n",
 					      fmt(e->v1, 0, 0), supp_txt(e->v2), f1u(res_disp(e->v3))); break;
 		case EV_OFF:    console_print("JAMMER OFF  after %s s, peak J/N %s dB\n", f1u(e->v1), f1(e->v2)); break;
+		case EV_BG:
+			if(e->v1 > -90.0)
+				console_print("BACKGROUND  RX1/RX2 common signal, coherence %s dB at power J/N %s dB: not a jammer\n",
+					      f1(e->v1), f1(e->v2));
+			else
+				console_print("BACKGROUND  gone, normal detection again\n");
+			break;
 		case EV_LEAK:   console_print("LEAKING     residual %s dB at J/N %s dB\n", f1(e->v1), f1(e->v2)); break;
 		default:        console_print("?\n"); break;
 		}

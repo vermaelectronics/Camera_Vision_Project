@@ -772,7 +772,7 @@ static void info_quickstart(void)
     console_print("   gnss_smi=1 / gnss_smi=0     anti-jam on (default) / off\n");
     console_print("   gnss_aj?                    bypass/filter, jammer, J/N, suppression\n");
     console_print("   gnss_report?                EVERYTHING in one block, to copy\n");
-    console_print("   gnss_aj_log=N               status line every N s (30), 0 = events only\n");
+    console_print("   gnss_aj_log=N               status line every N s, 0 = off (default)\n");
     console_print("   gnss_aj_csv=N               CSV line every N ms (100..), 0 = off\n");
     console_print("   gnss_aj_mode=0 / 1 / 2 / 3  31+2 taps (default) / RX2 / one / no image\n");
     console_print("   gnss_band=1 / 0 / 2 / 3     RF profile (1 = ALL incl. BeiDou, default)\n");

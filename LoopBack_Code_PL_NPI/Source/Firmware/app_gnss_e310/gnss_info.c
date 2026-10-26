@@ -777,7 +777,7 @@ static void info_quickstart(void)
     console_print("   gnss_npi=1 / gnss_npi=0     PL-NPI anti-jam on (default) / off\n");
     console_print("   gnss_aj?                    bypass/filter, jammer, J/N, suppression\n");
     console_print("   gnss_report?                EVERYTHING in one block, to copy\n");
-    console_print("   gnss_aj_log=N               status line every N s (30), 0 = events only\n");
+    console_print("   gnss_aj_log=N               status line every N s, 0 = off (default)\n");
     console_print("   gnss_aj_csv=N               CSV line every N ms (100..), 0 = off\n");
     console_print("   gnss_aj_mode=0/1/2/3        gated+image (default) / gated / always\n");
     console_print("                               on + image / always on (v2.2)\n");
