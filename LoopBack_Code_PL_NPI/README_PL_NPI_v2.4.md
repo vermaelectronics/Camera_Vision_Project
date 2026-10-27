@@ -136,10 +136,10 @@ untouched.
     stopped, radio being reprogrammed) or anti-jam is off.
 - **CW detector**: a 4096-point Hann FFT of RX1 and RX2 every 4th capture.
   Spectra are averaged and median-normalised. A peak counts only if it is
-  ≥ 12 dB in **both** antennas and is narrow (−10 dB within 3–4 bins). The
+  ≥ 18 dB (J/N ≈ −16 dB) in **both** antennas and is narrow (−10 dB within 3–4 bins). The
   DC ±3 bins and the band edges are excluded.
   - A candidate is **confirmed** after 3 hits in at least half of its
-    scans. It is kept down to 9 dB and dropped after 1 s unseen. The
+    scans. It is kept down to 14 dB and dropped after 1 s unseen. The
     strongest two (≥ 8 bins apart) are tracked.
   - Confirmed CWs tune notch 0/1 (frequency by parabolic interpolation),
     and the notch is re-programmed when the CW moves by more than 1 bin.
@@ -236,11 +236,12 @@ is bit-identical to the v2.3.5 datapath: C-sim 1–9 unchanged.)
 | 1 wideband 30 dB, on 3 s / off 3 s, twice | exactly 2 ON + 2 OFF. ON within the first captures after onset (< 10 ms); NULLED 7 ms after detection; OFF about 1.4 s after the jammer stops (rule: 1.0 s with every metric below the OFF thresholds) |
 | 2 coherent jammer wandering −8…+2 dB around the threshold, 20 s | 1 ON, 0 OFF (no alternation) |
 | 3 `gnss_report` twice back to back | identical, no register write, no snapshot, no commit, one status line |
-| 4 CW J/N −12 dB (J/S ≈ 20) | status ON 42 ms after onset; notch tuned within 0.3 kHz; PL-NPI stays in AUTO (not forced in); after the CW stops, notch off after ~1 s and status OFF after ~2 s |
+| 4 CW J/N −8 dB (J/S ≈ 24) | status ON 42 ms after onset; notch tuned within 0.3 kHz; PL-NPI stays in AUTO (not forced in); after the CW stops, notch off after ~1 s and status OFF after ~2 s |
 | 5 CW J/N −27 dB (J/S ≈ 5) | stays OFF |
+| 9 weak spur J/N −20 dB, flickering (field report: 1560.000 MHz) | no notch, no event, status OFF |
 | 6 +10 dB noise bursts, independent in RX1/RX2 | never ON |
 | 7 DMA stops for 2 s | UNKNOWN, then OFF |
-| 8 CW J/S 10 / 15 / 30 / 40 | 10: OFF (below detection, and no C/N0 loss in table 4.1); 15, 30, 40: ON with the notch, no alternation |
+| 8 CW J/S 10 / 15 / 30 / 40 | 10 and 15: OFF (J/N below −15 dB: listed, no C/N0 loss in table 4.1); 30, 40: ON with the notch, no alternation |
 
 **RTL sim** `gnss_passthrough.v`: PASS. VERSION, INFO and cfg reset are
 correct; notch registers shadow, commit, read back and reset; the datapath
@@ -331,8 +332,7 @@ send the logs.
 - **Wideband jammers:** PL-NPI still has one spatial weight. The
   wideband null depends on how well the RX1 and RX2 paths match
   (README_PL_NPI_v2.3.md §7). SMI-PI (31 taps) is the design for that case.
-- **CW below J/S ≈ 12 dB** is not detected (J/N < −20 dB). It also costs
-  no C/N0 in the simulation.
+- **A CW weaker than J/N −15 dB (J/S ≈ 17 dB) is not reported as a jammer** and is not notched. In the simulation it costs no C/N0. Such lines (e.g. clock spurs) appear only in the `cw scan` line of the report.
 - **More than 2 CWs:** only the 2 strongest are notched.
 - **Swept / chirp jammers** are not tracked by the notch. A scan runs every
   4th capture (about 10 ms at 400 captures/s), and a CW needs 3 hits to be

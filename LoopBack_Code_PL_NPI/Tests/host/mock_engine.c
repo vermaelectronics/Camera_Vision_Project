@@ -251,9 +251,9 @@ int main(int argc, char **argv) {
         break; }
     case 4: {   /* CW: detection, notch frequency, release */
         const double fs = 50e6, f = (1575.42e6 + 2e3 - 1570.25e6) / fs;
-        printf("scenario 4: CW at L1 + 2 kHz, J/N -12 dB (J/S ~20 dB), 4 s, then off\n");
+        printf("scenario 4: CW at L1 + 2 kHz, J/N -8 dB (J/S ~24 dB), 4 s, then off\n");
         reset_counts();
-        cw_f = f; cw_jn = -12;
+        cw_f = f; cw_jn = -8;
         double t_on = t_s(); int on_seen = 0; double t_det = -1;
         while (t_s() - t_on < 4.0) { run(0.01); if (!on_seen && gnss_aj_status() == 2) { on_seen = 1; t_det = t_s() - t_on; } }
         report_to(r1, sizeof r1);
@@ -302,9 +302,21 @@ int main(int argc, char **argv) {
             printf("  J/S %2.0f dB: status %s, notch %s, %d ON / %d OFF transitions\n", jss[i],
                    st == 2 ? "ON" : st == 1 ? "OFF" : "UNKNOWN", nt ? "on" : "off", n_on, n_off);
             ok &= check(n_on <= 1 && n_off == 0, "steady (no ON/OFF alternation)");
-            if (jss[i] >= 15) ok &= check(st == 2 && nt, "ON with the notch");
+            if (jss[i] >= 30) ok &= check(st == 2 && nt, "ON with the notch");
+            if (jss[i] <= 15) ok &= check(st == 1, "below J/N -15 dB: listed, not a jammer (costs no C/N0)");
             cw_jn = -99; run(3.0);
         }
+        break; }
+    case 9: {   /* weak clock spur (field report: 1560.000 MHz, in-bin ~14 dB, J/N -20) next to */
+        /* nothing else: no status change and no notch/event flapping */
+        printf("scenario 9: weak spur at J/N -20 dB, flickering around the scan edge, 30 s\n");
+        reset_counts();
+        double tend = t_s() + 30.0;
+        cw_f = 0.2;
+        while (t_s() < tend) { cw_jn = -20.0 + 1.5 * sin(2 * M_PI * t_s() / 3.7); run(0.05); }
+        cw_jn = -99;
+        ok &= check(n_on == 0 && gnss_aj_status() == 1, "status stays OFF");
+        ok &= check(!(cfg_a & GNSS_PT_NPI_CFG_NOTCH(0)) && !(cfg_a & GNSS_PT_NPI_CFG_NOTCH(1)), "no notch switched on for a harmless spur");
         break; }
     default: printf("unknown scenario\n"); ok = 0;
     }

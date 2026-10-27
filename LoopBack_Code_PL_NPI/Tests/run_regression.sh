@@ -58,7 +58,7 @@ if command -v gcc >/dev/null; then
     else res "firmware CW scan" FAIL; cat "$OUT/cw_build.log" "$OUT/cw_scan.log" | tail -12; fi
     if gcc $CF -DGNSS_AJ_BUF_ADDR='((uintptr_t)mock_buf)' Tests/host/mock_engine.c "$FW/gnss_npi_aj.c" "$FW/gnss_npi_det.c" \
            -lm -o "$OUT/mock_engine" > "$OUT/mock_build.log" 2>&1; then
-        for s in 1 2 3 4 5 6 7 8; do
+        for s in 1 2 3 4 5 6 7 8 9; do
             if "$OUT/mock_engine" $s > "$OUT/mock_$s.log" 2>&1 && grep -q "^MOCK: PASS" "$OUT/mock_$s.log"; then
                 res "firmware mock scenario $s" PASS
             else res "firmware mock scenario $s" FAIL; tail -8 "$OUT/mock_$s.log"; fi

@@ -73,8 +73,12 @@ enum { AJS_UNKNOWN = 0, AJS_OFF = 1, AJS_ON = 2 };
  * core (v2.4 bitstream) on its frequency. Dropped AJ_CW_LOST_US after it was
  * last seen. */
 #define AJ_CW_EVERY       4
-#define AJ_CW_DET_DB      12      /* a candidate counts a hit at this level ...  */
-#define AJ_CW_KEEP_DB     9       /* ... a confirmed CW is kept down to this one */
+#define AJ_CW_DET_DB      18      /* a candidate counts a hit at this level ...  */
+#define AJ_CW_KEEP_DB     14      /* ... a confirmed CW is kept down to this one */
+#define AJ_CW_ON_JN_DB    (-15.0) /* a CW counts as a JAMMER from this J/N over the band
+                                   * (~J/S 17 dB at C/N0 45). Weaker lines (clock
+                                   * spurs such as 1560.000 MHz) cost no C/N0 in the
+                                   * simulation: they are listed, not reported ON. */
 #define AJ_CW_HITS        3       /* confirmed: 3 hits, in >= half of its scans  */
 #define AJ_CW_TRIAL       20      /* a candidate below half after 20 scans goes  */
 #define AJ_CW_LOST_US     1000000U
@@ -923,7 +927,10 @@ static double cw_jn(double snr) { return snr - npi_db10((double)NPI_CW_N / 1.5);
 static int cw_confirmed(void)
 {
 	int k;
-	for(k = 0; k < NPI_CW_MAX; k++) if(cwt[k].used && cwt[k].conf) return 1;
+	for(k = 0; k < NPI_CW_MAX; k++) {
+		double s = cwt[k].snr1 < cwt[k].snr2 ? cwt[k].snr1 : cwt[k].snr2;
+		if(cwt[k].used && cwt[k].conf && cw_jn(s) >= AJ_CW_ON_JN_DB) return 1;
+	}
 	return 0;
 }
 
