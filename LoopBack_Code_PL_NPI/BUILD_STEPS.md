@@ -1,4 +1,9 @@
-# Build PL-NPI v2.3 step by step (zip → BOOT.BIN → SD card)
+# Build PL-NPI v2.4 step by step (zip → BOOT.BIN → SD card)
+
+v2.4 changes the HLS core (IP 2.1), the passthrough (VERSION 2.4) and the
+block design, so **every stage from 3 to 9 must run**. What changed and why:
+`README_PL_NPI_v2.4.md`. Host-only checks, without Xilinx tools:
+`Tests/run_regression.sh` (§7).
 
 Every command below is meant to be typed in a Linux terminal (Ubuntu 22.04 or
 20.04) on the PC that has the Xilinx tools. Wait for each step to pass before
@@ -28,15 +33,15 @@ ls /tools/Xilinx/Vivado/2023.2/settings64.sh /tools/Xilinx/Vitis/2023.2/settings
 ## 1. Unzip into a NEW folder
 
 ```bash
-mkdir -p ~/pl_npi_v23
-cd ~/pl_npi_v23
-unzip ~/Downloads/LoopBack_Code_PL_NPI_v2.3.6.zip
+mkdir -p ~/pl_npi_v24
+cd ~/pl_npi_v24
+unzip ~/Downloads/LoopBack_Code_PL_NPI_v2.4.0.zip
 cd LoopBack_Code_PL_NPI
 chmod +x Automation/Linux/*.sh Automation/Linux/steps/*.sh
 ```
 
-Do **not** unzip over the v2.2 folder: an old `Build/ip_repo/pl_npi` (version
-1.0) must not be reused. The block design refuses it anyway.
+Do **not** unzip over the v2.3 folder: an old `Build/ip_repo/pl_npi` (version
+2.0, no notch port) must not be reused. The block design refuses it anyway.
 
 ---
 
@@ -78,15 +83,20 @@ Check: `STEP 2 libip: PASS (11 library logs ...)`
 ```
 Check, all of these in the output:
 ```
-PL_NPI_CSIM: PASS (scenario 1)   ... 2 3 4 5 7 8 9 (8 lines)
+PL_NPI_CSIM: PASS (scenario 1)   ... 2 3 4 5 7 8 9 10 11 12 (11 lines)
 PL_NPI_HLS: estimated clock period X ns (target 10 ns), achieved II 1 (requested 1)
-PL_NPI_HLS: IP antsdr:gnss:pl_npi:2.0 -> .../Build/ip_repo/pl_npi
+PL_NPI_HLS: IP antsdr:gnss:pl_npi:2.1 -> .../Build/ip_repo/pl_npi
 PL_NPI_HLS: PASS
 ```
-**This is the step to watch in v2.3** (the NLMS loop runs at II=1 on a
-10 ns clock). v2.3.0 failed here (19.6 ns); v2.3.1 splits the loop into
-stages that each fit one clock. If it still fails on the clock estimate or
-on II, send me the `PL_NPI_HLS` lines and the critical path:
+**This is the step to watch in v2.4.** The two CW notches are new
+recursive loops at II=1 on a 10 ns clock, and they have **not** been
+synthesised yet. If the clock estimate is above 10 ns and the critical path
+names `ns_re`/`ns_im`/`nm_*` (the notch state), rebuild with one notch or
+none. Then continue with step 4 as usual:
+```bash
+PL_NPI_NOTCHES=1 ./Automation/Linux/steps/03_npi.sh     # or PL_NPI_NOTCHES=0
+```
+If it fails anywhere else, send me the `PL_NPI_HLS` lines and the critical path:
 ```bash
 grep -E "PL_NPI_HLS|Pipelining result|Estimated Fmax" Build/Logs/npi.log
 grep -A14 "HLS 200-1016" Build/Logs/npi.log
@@ -106,7 +116,7 @@ Check: `IP_PACKAGE_OK`
 ./Automation/Linux/steps/05_project.sh
 ```
 Check: `CREATE_RESULT: PASS`
-(`GNSS-CRPA: PL-NPI IP resolved in catalog: antsdr:gnss:pl_npi:2.0` is
+(`GNSS-CRPA: PL-NPI IP resolved in catalog: antsdr:gnss:pl_npi:2.1` is
 printed in `Build/Logs/project.log`.)
 
 ### Step 6: synthesis, implementation, bitstream (20–60 min)
@@ -122,11 +132,9 @@ Build/Output/system_top.bit   Build/Output/system.xsa   (listed)
 ```
 If it says `BUILD_TIMING: VIOLATED` with failing paths on `rx_clk`: open
 `Source/XDC/system.xdc` and change `-period  4` to `-period  5` on the
-`rx_clk` line. Then run steps 5 and 6 again. **But** at 5 ns the default
-profile (61.44 MS/s, the only one that carries BeiDou B1I AND all of
-GLONASS) is no longer covered: you must then type `gnss_band=2` (GPS,
-Galileo, GLONASS) or `gnss_band=3` (GPS, Galileo, BeiDou) after every boot.
-Try hard to meet 4 ns first.
+`rx_clk` line. Then run steps 5 and 6 again. The default profile
+(`gnss_band=4`, 50 MS/s) still works at 5 ns. `gnss_band=1` (61.44 MS/s,
+the only profile with GLONASS) does not.
 
 ### Step 7: the application ELF (2–5 min)
 
@@ -197,7 +205,7 @@ Only the firmware changed (e.g. a different `--defines`)? Then:
 
 1. Format the card as **FAT32**.
 2. Copy **`Build/Output/BOOT.BIN`** to the **root** of the card. Do not use
-   `SD_Image/BOOT.BIN`: that is an old image without PL-NPI v2.3.
+   `SD_Image/BOOT.BIN`: that is an old image without PL-NPI v2.4.
 3. Set the board's **BOOT switch to SD**, insert the card, connect RF:
 
 | Port | Connect |
@@ -209,16 +217,19 @@ Only the firmware changed (e.g. a different `--defines`)? Then:
 4. Power on. The console must show (among other lines):
 
 ```
-gnss_pt: present at 0x43c00000, version 2.3
+gnss_pt: present at 0x43c00000, version 2.4
 SELFTEST: PASS - ...
-ANTI-JAM (PL-NPI 2.3.6): ON, bypassed until a jammer appears.
+ANTI-JAM (PL-NPI 2.4.0): ON, bypassed until a jammer appears.
 ```
 
-If it says `version 2.1`/`2.2` or `NOT started`, the card has an old
-BOOT.BIN on it.
+If it says `version 2.3` or older, the card has an old BOOT.BIN (the
+anti-jam still runs, but without the DC blocker and the notches).
 
-Then type `gnss_band?`. All five lines (GPS, Galileo/B1C, BeiDou B1I,
-GLONASS k=-7, k=+6) must say `OK`, and the AD9361 FIRs must be `off`.
+Then type `gnss_band?`. It must show `4 = USER`, LO 1570.250 MHz, 50 MS/s,
+50 MHz, and the AD9361 FIRs `off`. GPS, Galileo/B1C and BeiDou B1I say
+`OK`; the two GLONASS lines say `OUTSIDE: not received` (use `gnss_band=1` for
+GLONASS). Then type `gnss_report`: the first line is `JAMMER STATUS: OFF`
+with no jammer connected.
 
 ---
 
@@ -234,3 +245,16 @@ deletes and recreates the Vivado project.
 
 Send me: the failing step, the last 50 lines of its log and the
 `10_report.sh` output.
+
+---
+
+## 7. Host regression (no Xilinx tools needed, about 2 min)
+
+```bash
+sudo apt install gcc g++ iverilog
+# ap_int headers: either source Vitis HLS settings64.sh (sets $XILINX_HLS), or
+git clone https://github.com/Xilinx/HLS_arbitrary_Precision_Types ~/hls_apt
+HLS_INCLUDE=~/hls_apt/include Tests/run_regression.sh --full
+```
+Check: `REGRESSION: PASS (0 skipped)`. `--full` also prints the GPS C/N0
+table for CW J/S 10/15/30/40 dB. Logs are in `Build/Tests/`.

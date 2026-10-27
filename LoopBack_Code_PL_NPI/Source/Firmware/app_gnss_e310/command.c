@@ -138,13 +138,15 @@ command cmd_list[] = {
 	{"gnss_npi_auto=", "1 = automatic gamma from the noise floor (default), 0 = fixed.", "gnss_npi_auto=1", set_gnss_npi_auto},
 	{"gnss_npi_k=", "0 = automatic k (default: 1/8 while gated; 32 clean / 1/8 jammed when always on), 1..64 = fixed k.", "gnss_npi_k=0", set_gnss_npi_k},
 	{"gnss_aj?", "Anti-jam status: bypass/filter, jammer type and frequency, J/N, suppression.", "", get_gnss_aj},
-	{"gnss_report?", "EVERYTHING in one block (radio, gains, g2, core, jammer, events) to copy into a report.", "", get_gnss_report},
+	{"gnss_report?", "JAMMER STATUS ON/OFF/UNKNOWN + everything in one block, from one snapshot (also: gnss_report).", "", get_gnss_report},
 	{"gnss_aj_log=", "Status line every N s on the console (default 0 = off: only JAMMER ON/OFF events; held back while you type).", "gnss_aj_log=30", set_gnss_aj_log},
+	{"gnss_aj_notch=", "1 = CW notches follow the CW scan (default), 0 = notches off (A/B test).", "gnss_aj_notch=0", set_gnss_aj_notch},
+	{"gnss_aj_dc=", "1 = the core's input DC blocker on (default), 0 = off (A/B test).", "gnss_aj_dc=0", set_gnss_aj_dc},
 	{"gnss_aj_events=", "1 = print JAMMER ON/NULLED/OFF events (default), 0 = console silent (gnss_report? still lists them).", "gnss_aj_events=0", set_gnss_aj_events},
 	{"gnss_aj_csv=", "CSV line (AJCSV,...) every N ms, 100 to 60000; 0 = off (default).", "gnss_aj_csv=0", set_gnss_aj_csv},
 	{"gnss_aj_mode=", "0 = gated + image taps (default), 1 = gated, no image, 2 = always on + image, 3 = always on, no image (v2.2).", "gnss_aj_mode=0", set_gnss_aj_mode},
 	{"gnss_band?", "RF profile and which GNSS signals it carries (GPS, Galileo, BeiDou, GLONASS).", "", get_gnss_band},
-	{"gnss_band=", "1 = ALL incl. BeiDou + GLONASS 1582.5 MHz/61.44 MS/s (default), 0 = L1 only, 2 = no BeiDou B1I, 3 = no GLONASS (2, 3: 50 MS/s).", "gnss_band=1", set_gnss_band},
+	{"gnss_band=", "4 = USER 1570.25 MHz/50 MS/s/50 MHz (default), 1 = ALL incl. GLONASS 1582.5 MHz/61.44 MS/s, 0 = L1 only, 2 = no BeiDou B1I, 3 = no GLONASS.", "gnss_band=4", set_gnss_band},
 	{"gnss_rx_gain?", "Gets RX1/RX2 gain, mode, TX level hold and gamma.", "", get_gnss_rx_gain},
 	{"gnss_rx_gain=", "Sets RX1 AND RX2 to the same gain [dB] (also the auto reference).", "gnss_rx_gain=40", set_gnss_rx_gain},
 	{"gnss_rx_agc=", "0 = manual locked, 1 = AD9361 AGC per channel, 2 = matched auto (PL-NPI).", "gnss_rx_agc=2", set_gnss_rx_agc},
@@ -390,6 +392,26 @@ void set_gnss_aj_csv(double* param, char param_no)
 		console_print("GNSS_AJ: CSV line every %d ms (at least 100). Log the PuTTY session to a file\n"
 			      "         and keep the lines starting with AJCSV, (columns in the first one).\n",
 			      (long)((int)param[0] < 100 ? 100 : (int)param[0]));
+}
+
+void set_gnss_aj_notch(double* param, char param_no)
+{
+	if(param_no < 1 || (param[0] != 0.0 && param[0] != 1.0)) {
+		console_print("gnss_aj_notch= needs 0 or 1\n");
+		return;
+	}
+	gnss_aj_set_notch((int)param[0]);
+	console_print("GNSS_AJ: CW notches %s\n", (char*)((int)param[0] ? "automatic" : "OFF"));
+}
+
+void set_gnss_aj_dc(double* param, char param_no)
+{
+	if(param_no < 1 || (param[0] != 0.0 && param[0] != 1.0)) {
+		console_print("gnss_aj_dc= needs 0 or 1\n");
+		return;
+	}
+	gnss_aj_set_dc((int)param[0]);
+	console_print("GNSS_AJ: DC blocker %s\n", (char*)((int)param[0] ? "ON" : "OFF"));
 }
 
 void set_gnss_aj_events(double* param, char param_no)

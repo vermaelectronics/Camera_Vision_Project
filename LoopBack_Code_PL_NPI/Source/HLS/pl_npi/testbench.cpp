@@ -1,5 +1,5 @@
 // ============================================================================
-//  testbench.cpp  --  C simulation of the pipelined PL-NPI core (v2.3)
+//  testbench.cpp  --  C simulation of the pipelined PL-NPI core (v2.4)
 //
 //  Two-element array at the E310 raw ADC scale (12-bit samples):
 //      RX1 = IQ1( J + n1 ),   RX2 = IQ2( a (h J + n2) )
@@ -27,6 +27,16 @@
 //    8  output make-up shift: x4 (+12 dB) while filtering, ignored in bypass
 //    9  wideband jammer 30 dB through a 0.15-sample path difference
 //       (informational: one spatial weight cannot null it deeply)
+//   10  v2.4 DC blocker: DC 185 / 22 LSB on RX1 / RX2 is removed (output
+//       DC < 1 LSB), the noise power is unchanged (+-0.2 dB), off = exact
+//   11  v2.4 CW notches: a CW 30 dB above the noise at +5.17 MHz is
+//       suppressed >= 35 dB, the noise elsewhere changes < 0.3 dB, a second
+//       notch works at the same time, switching both off restores bypass
+//   12  v2.4 GPS L1 C/A (C/N0 45 dB-Hz, fs 50 MS/s, LO 1570.25 MHz) with a
+//       CW jammer at L1 + 2 kHz, J/S 30 and 40 dB: C/N0 the receiver would
+//       measure, without and with the notch. Needs <= 1.5 dB loss with the
+//       notch. argv[2] = 1 runs the full table (J/S 10/15/30/40, raw RX1 /
+//       bypass / PL-NPI ON, notch off/on).
 //
 //  Writing the stimulus/response to files for a comparison against the
 //  original RTL core is enabled with the environment variable PL_NPI_DUMP
@@ -64,6 +74,7 @@ static int clip12(double v) {
 // ---- the core ------------------------------------------------------------------
 static unsigned g_gamma = 1, g_cfg = PL_NPI_MODE_ON, g_nrm = 1u << PL_NPI_GFRAC;
 static unsigned g_thr = 0xFFFFFFFFu, g_hold = 0;
+static ap_uint<192> g_ncoef = 0;
 static int g_adapt = 1;
 static hls::stream<ap_uint<64> > xs;
 static hls::stream<ap_uint<32> > ys;
@@ -85,7 +96,7 @@ static Out step(int x1r, int x1i, int x2r, int x2i) {
     xs.write(w);
     ap_uint<32> st = 0, pw = 0;
     ap_uint<192> wo = 0;
-    pl_npi(xs, ys, g_gamma, (ap_uint<1>)g_adapt, g_cfg, g_nrm, g_thr, g_hold, &st, &wo, &pw);
+    pl_npi(xs, ys, g_gamma, (ap_uint<1>)g_adapt, g_cfg, g_nrm, g_thr, g_hold, g_ncoef, &st, &wo, &pw);
     if (ys.empty()) { std::printf("core produced no output\n"); std::exit(2); }
     ap_uint<32> y = ys.read();
     Out o;
@@ -412,6 +423,195 @@ static int test_wideband() {
     return 1;
 }
 
+
+// ---- v2.4: notch coefficients as the firmware computes them -------------------------
+// q = e^{j 2 pi f / fs}, p = r q, p^2, signed Q1.14, packed {im, re}.
+static unsigned q14(double re, double im) {
+    int a = (int)std::floor(re * 16384.0 + 0.5), b = (int)std::floor(im * 16384.0 + 0.5);
+    if (a > 32767) a = 32767; if (a < -32768) a = -32768;
+    if (b > 32767) b = 32767; if (b < -32768) b = -32768;
+    return ((unsigned)(b & 0xFFFF) << 16) | (unsigned)(a & 0xFFFF);
+}
+static void set_notch(int k, double f, double fs, double r) {
+    cd q = std::polar(1.0, 2 * M_PI * f / fs), p = r * q, p2 = p * p;
+    g_ncoef(96 * k + 31, 96 * k) = q14(q.real(), q.imag());
+    g_ncoef(96 * k + 63, 96 * k + 32) = q14(p.real(), p.imag());
+    g_ncoef(96 * k + 95, 96 * k + 64) = q14(p2.real(), p2.imag());
+}
+static const double NR = 1.0 - 1.0 / 256.0;     // pole radius (firmware default)
+
+// power of a complex tone at f in a sample block (correlation)
+static double tone_pow(const std::vector<cd> &y, double f, double fs) {
+    cd acc = 0;
+    for (size_t n = 0; n < y.size(); n++) acc += y[n] * std::polar(1.0, -2 * M_PI * f * n / fs);
+    return std::norm(acc / (double)y.size());
+}
+
+// ---- scenario 10: DC blocker --------------------------------------------------------
+static int test_dc() {
+    const int N = 60000;
+    double dcp = 0, pn_on = 0, pn_off = 0, m_r = 0, m_i = 0;
+    int bad_off = 0;
+    for (int pass = 0; pass < 2; pass++) {
+        g_cfg = PL_NPI_MODE_BYPASS | (pass ? PL_NPI_CFG_DCBLK : 0u);
+        double sr = 0, si = 0, pp = 0; int cnt = 0;
+        for (int n = 0; n < N; n++) {
+            int a = clip12(160 + grand() * 20), b = clip12(-92 + grand() * 20);
+            int c = clip12(19 + grand() * 20), d = clip12(11 + grand() * 20);
+            Out o = step(a, b, c, d);
+            if (!pass && (o.yr != o.x1r || o.yi != o.x1i)) bad_off++;
+            if (n >= 20000) { sr += o.yr; si += o.yi; cnt++;
+                double er = o.yr - (pass ? 0.0 : 160.0), ei = o.yi - (pass ? 0.0 : -92.0);
+                pp += er * er + ei * ei; }
+        }
+        if (pass) { m_r = sr / cnt; m_i = si / cnt; pn_on = pp / cnt; } else pn_off = pp / cnt;
+    }
+    dcp = std::sqrt(m_r * m_r + m_i * m_i);
+    double dn = 10 * log10(pn_on / pn_off);
+    printf("DC blocker: DC 185 LSB in -> %.2f LSB out; noise power %+.2f dB; off: %d samples differ from RX1\n",
+           dcp, dn, bad_off);
+    g_cfg = PL_NPI_MODE_BYPASS;
+    return dcp < 1.0 && std::fabs(dn) < 0.2 && bad_off == 0;
+}
+
+// ---- scenario 11: CW notches ----------------------------------------------------------
+static int test_notch() {
+    const double fs = 50e6, f1 = 5.17e6, f2 = -9.15e6;
+#if PL_NPI_NOTCHES == 0
+    {   // core built without notches (timing fallback): the notch bits and
+        // coefficients must change nothing
+        g_ncoef = 0; set_notch(0, f1, fs, NR); set_notch(1, f2, fs, NR);
+        g_cfg = PL_NPI_MODE_BYPASS | (3u << PL_NPI_CFG_NOTCH_LSB);
+        int bad = 0;
+        for (int n = 0; n < 4000; n++) {
+            Out o = step(clip12(grand() * 300), clip12(grand() * 300), 0, 0);
+            if (n > 4 && (o.yr != o.x1r || o.yi != o.x1i)) bad++;
+        }
+        printf("CW notches: not in this build (PL_NPI_NOTCHES = 0); notch bits set: %d samples differ from RX1\n", bad);
+        return bad == 0;
+    }
+#endif
+    const int N = 120000;
+    double sup = 0, sup2 = 0, dn = 0;
+    int bad_after = 0;
+    std::vector<cd> yin, yout;
+    // pass 0: notch off (reference); pass 1: notch 0 on f1, notch 1 on f2
+    double pj_off = 0, pj_on = 0, pj2_off = 0, pj2_on = 0, pn_off = 0, pn_on = 0;
+    for (int pass = 0; pass < 2; pass++) {
+        g_ncoef = 0;
+        if (pass) { set_notch(0, f1, fs, NR); set_notch(1, f2, fs, NR); }
+        g_cfg = PL_NPI_MODE_BYPASS | (pass ? (3u << PL_NPI_CFG_NOTCH_LSB) : 0u);
+        std::vector<cd> y; y.reserve(N);
+        for (int n = 0; n < N; n++) {
+            double t = n / fs;
+            cd j = std::polar(632.0, 2 * M_PI * f1 * t) + std::polar(200.0, 2 * M_PI * f2 * t + 1.0);
+            cd x = j + cd(grand(), grand()) * 20.0;
+            Out o = step(clip12(x.real()), clip12(x.imag()), clip12(grand() * 20), clip12(grand() * 20));
+            if (n >= 20000) y.push_back(cd(o.yr, o.yi));
+        }
+        double pj = tone_pow(y, f1, fs), pj2 = tone_pow(y, f2, fs), pt = 0;
+        for (auto &v : y) pt += std::norm(v);
+        pt /= y.size();
+        double pn = pt - pj - pj2;
+        if (pass) { pj_on = pj; pj2_on = pj2; pn_on = pn; } else { pj_off = pj; pj2_off = pj2; pn_off = pn; }
+    }
+    sup = 10 * log10(pj_off / pj_on); sup2 = 10 * log10(pj2_off / pj2_on); dn = 10 * log10(pn_on / pn_off);
+    // both off again: exact bypass
+    g_cfg = PL_NPI_MODE_BYPASS;
+    for (int n = 0; n < 2000; n++) {
+        int a = clip12(grand() * 300), b = clip12(grand() * 300);
+        Out o = step(a, b, 0, 0);
+        if (n > 4 && (o.yr != o.x1r || o.yi != o.x1i)) bad_after++;
+    }
+    printf("CW notches: CW 30 dB at +5.17 MHz suppressed %.1f dB, CW at -9.15 MHz %.1f dB,\n"
+           "       noise power elsewhere %+.2f dB; both off: %d samples differ from RX1\n", sup, sup2, dn, bad_after);
+    return sup >= 35.0 && (PL_NPI_NOTCHES < 2 || sup2 >= 35.0) && std::fabs(dn) < 0.3 && bad_after == 0;
+}
+
+// ---- scenario 12: GPS L1 C/A with a CW jammer -------------------------------------------
+static void ca_code(int ta, int tb, int *code) {
+    int g1[10], g2[10];
+    for (int i = 0; i < 10; i++) g1[i] = g2[i] = 1;
+    for (int n = 0; n < 1023; n++) {
+        code[n] = (g1[9] ^ g2[ta - 1] ^ g2[tb - 1]) ? -1 : 1;
+        int f1 = g1[2] ^ g1[9], f2 = g2[1] ^ g2[2] ^ g2[5] ^ g2[7] ^ g2[8] ^ g2[9];
+        for (int i = 9; i > 0; i--) { g1[i] = g1[i - 1]; g2[i] = g2[i - 1]; }
+        g1[0] = f1; g2[0] = f2;
+    }
+}
+// mode 0: raw RX1 (no core), 1: core bypass, 2: core ON (PL-NPI). Returns
+// the C/N0 [dB-Hz] measured by correlating the output with the C/A replica.
+static double gps_cn0(double js, int mode, int notch, int meas_ms) {
+    static int code[1023]; static int init = 0;
+    if (!init) { ca_code(2, 6, code); init = 1; }                  // PRN 1
+    const double FS = 50e6, FL1 = 1575.42e6 - 1570.25e6, RC = 1.023e6, cwoff = 2000.0;
+    const double sig = 20.0, n0 = 2 * sig * sig / FS, C = n0 * pow(10, 4.5);
+    const double A = std::sqrt(C), AJ = (js > -90) ? std::sqrt(C * pow(10, js / 10)) : 0.0;
+    const cd hj(0.6, -0.5), hs = std::polar(1.0, 0.7);
+    const int NSET = (int)(0.003 * FS), NM = (int)(0.001 * meas_ms * FS), N = NSET + NM;
+    std::vector<cd> y(N);
+    g_gamma = (unsigned)(131072.0 / 8.0 * 2 * sig * sig);
+    g_ncoef = 0;
+    g_cfg = ((mode == 2) ? PL_NPI_MODE_ON : PL_NPI_MODE_BYPASS) | PL_NPI_CFG_DCBLK;
+    if (notch) { set_notch(0, FL1 + cwoff, FS, NR); g_cfg |= 1u << PL_NPI_CFG_NOTCH_LSB; }
+    // flush the previous run's state through bypass
+    { unsigned c = g_cfg; g_cfg = PL_NPI_MODE_BYPASS; for (int n = 0; n < 64; n++) step(0, 0, 0, 0); g_cfg = c; }
+    for (int n = 0; n < N; n++) {
+        double t = n / FS;
+        cd s = A * (double)code[(int)std::floor(std::fmod(t * RC, 1023.0))] * std::polar(1.0, 2 * M_PI * FL1 * t);
+        cd j = AJ * std::polar(1.0, 2 * M_PI * (FL1 + cwoff) * t + 0.3);
+        cd x1 = s + j + cd(grand(), grand()) * sig;
+        cd x2 = hs * s + hj * j + cd(grand(), grand()) * sig;
+        if (mode == 0) { y[n] = cd(clip12(x1.real()), clip12(x1.imag())); continue; }
+        Out o = step(clip12(x1.real()), clip12(x1.imag()), clip12(x2.real()), clip12(x2.imag()));
+        int k = n - PL_NPI_LATENCY;
+        if (k >= 0) y[k] = cd(o.yr, o.yi);
+    }
+    const int L = (int)(0.001 * FS), NB = NM / L;
+    double psig = 0, pnoise = 0;
+    for (int b = 0; b < NB; b++) {
+        int s0 = NSET + b * L;
+        cd r0 = 0, ro[24];
+        for (int k = 0; k < 24; k++) ro[k] = 0;
+        for (int n = s0; n < s0 + L; n++) {
+            double t = n / FS;
+            cd yl = y[n] * std::polar(1.0, -2 * M_PI * FL1 * t);
+            int cp = (int)std::floor(std::fmod(t * RC, 1023.0));
+            r0 += yl * (double)code[cp];
+            for (int k = 0; k < 24; k++) ro[k] += yl * (double)code[(cp + 20 + 40 * k) % 1023];
+        }
+        psig += std::norm(r0);
+        for (int k = 0; k < 24; k++) pnoise += std::norm(ro[k]) / 24.0;
+    }
+    return 10 * log10((psig - pnoise) / pnoise) + 30.0;
+}
+
+static int test_gps(int full) {
+    const double ref = gps_cn0(-99, 0, 0, 20);
+    const int has_notch = PL_NPI_NOTCHES > 0;    // 0: notch columns only for information
+    printf("GPS L1 C/A, C/N0 45 dB-Hz in, CW jammer at L1 + 2 kHz; C/N0 at the core output [dB-Hz]:\n");
+    printf("  no jammer, raw RX1: %.1f\n", ref);
+    int ok = 1;
+    if (full) {
+        printf("  J/S [dB]   raw RX1   bypass   bypass+notch   PL-NPI ON   PL-NPI ON+notch\n");
+        const double jss[4] = {10, 15, 30, 40};
+        for (int i = 0; i < 4; i++) {
+            double r = gps_cn0(jss[i], 0, 0, 10), b = gps_cn0(jss[i], 1, 0, 10), bn = gps_cn0(jss[i], 1, 1, 10);
+            double o = gps_cn0(jss[i], 2, 0, 10), on = gps_cn0(jss[i], 2, 1, 10);
+            printf("  %5.0f      %5.1f     %5.1f     %5.1f          %5.1f       %5.1f\n", jss[i], r, b, bn, o, on);
+            if (has_notch && (ref - bn > 1.5 || ref - on > 1.5)) ok = 0;
+        }
+    } else {
+        const double jss[2] = {30, 40};
+        for (int i = 0; i < 2; i++) {
+            double b = gps_cn0(jss[i], 1, 0, 6), bn = gps_cn0(jss[i], 1, 1, 6);
+            printf("  J/S %2.0f dB: bypass %.1f, bypass + notch %.1f\n", jss[i], b, bn);
+            if (has_notch && ref - bn > 1.5) ok = 0;
+        }
+    }
+    return ok;
+}
+
 int main(int argc, char **argv) {
     int scen = (argc > 1) ? atoi(argv[1]) : 1, ok;
     switch (scen) {
@@ -423,6 +623,9 @@ int main(int argc, char **argv) {
     case 7: ok = test_image(); break;
     case 8: ok = test_shift(); break;
     case 9: ok = test_wideband(); break;
+    case 10: ok = test_dc(); break;
+    case 11: ok = test_notch(); break;
+    case 12: ok = test_gps(argc > 2 && atoi(argv[2]) == 1); break;
     default: printf("unknown scenario %d\n", scen); ok = 0;
     }
     printf(ok ? "PL_NPI_CSIM: PASS (scenario %d)\n" : "PL_NPI_CSIM: FAIL (scenario %d)\n", scen);

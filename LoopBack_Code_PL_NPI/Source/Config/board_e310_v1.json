@@ -41,7 +41,7 @@
     "rx_clk_constraint_source": "Source/XDC/system.xdc: create_clock -name rx_clk -period 4 (PL-NPI v2.3: 2R2T DATA_CLK = 4 x fs, 61.44 MS/s default profile; vendor value 8 ns only covers 30.72 MS/s)",
     "spi_control": "PS7 SPI0 routed over EMIO to the AD9361 (spi_csn/spi_clk/spi_mosi/spi_miso)",
     "note_on_sample_rate": "Sample rate, bandwidth, LO and gain are NOT fixed by the FPGA design. They are set at runtime by software over SPI. See Source/Firmware.",
-    "default_rf_profile": "gnss_band=1: RX and TX LO 1582.5 MHz, 61.44 MS/s, RF bandwidth 56 MHz, AD9361 FIRs off. Carries GPS L1 C/A, Galileo E1, QZSS, SBAS, BeiDou B1I + B1C and GLONASS G1 (k=-7..+6). Set by firmware (gnss_npi_aj.c), kept by its radio guard."
+    "default_rf_profile": "gnss_band=4 (USER, default from PL-NPI v2.4): RX and TX LO 1570.25 MHz, 50 MS/s, RX and TX RF bandwidth 50 MHz (the AD9361 driver tunes the TX analog baseband filter to at most 20 MHz, i.e. 40 MHz RF, which still covers B1I at -9.2 MHz and L1/E1 at +5.2 MHz from the LO), AD9361 FIRs off, RX gain AD9361 slow-attack AGC (gc mode 2) starting from 40 dB on both channels. Carries GPS L1 C/A, Galileo E1, QZSS, SBAS, BeiDou B1I + B1C; NOT GLONASS G1 (use gnss_band=1: 1582.5 MHz, 61.44 MS/s, 56 MHz). Set by firmware (gnss_npi_aj.c), kept by its radio guard. TX attenuation: vendor init 10 dB with TX idle; gnss_tx=1 (or GNSS_DEPLOY_AUTO_TX) drives it to 89.75 dB first, then to GNSS_TX_START_ATTEN_MDB = 70 dB."
   },
   "processing_system": {
     "_source": "Vendor/MicroPhase_E310_V1/hdl/projects/antsdre310/system_bd.tcl",
@@ -175,7 +175,7 @@
       "TX attenuation value and the resulting power at the GNSS receiver input have not been calculated yet.",
       "These must be decided and recorded here before any RF test is run."
     ],
-    "phase2_processing": "PL-NPI v2.3 power inversion (Vitis HLS core Source/HLS/pl_npi, block pl_npi_0 v2.0, II=1 on sys_cpu_clk behind two asynchronous AXI-Stream FIFOs) on channel 0 when CONTROL[5] = 1: TX1 = x1 + w2*g2*x2 + c1*conj(x1) + c2*conj(g2*x2), scaled by 2^shift. Gated: BYPASS (TX1 = RX1) until the core's power detector or the firmware sees a jammer. This build has no PI-NLMS core."
+    "phase2_processing": "PL-NPI v2.4 power inversion (Vitis HLS core Source/HLS/pl_npi, block pl_npi_0 v2.1, II=1 on sys_cpu_clk behind two asynchronous AXI-Stream FIFOs) on channel 0 when CONTROL[5] = 1: TX1 = x1 + w2*g2*x2 + c1*conj(x1) + c2*conj(g2*x2), scaled by 2^shift. Gated: BYPASS (TX1 = RX1) until the core's power detector or the firmware sees a jammer. v2.4: DC blocker (NPI_CFG[3]) on both inputs and two firmware-tuned CW notches (NPI_CFG[13:12], NPI_NCOEF 0x1C0-0x1D4) on the output. This build has no PI-NLMS core."
   },
   "custom_ip_register_map": {
     "_comment": "Mirrors the header comment in Source/HDL/gnss_passthrough.v. Offsets are from the base address in address_map.project_assigned.gnss_passthrough.",
@@ -193,8 +193,8 @@
         "offset": "0x04",
         "name": "VERSION",
         "access": "RO",
-        "reset": "0x00020003",
-        "note": "1.0 = Phase-1 identity passthrough. 1.1 = adds the RX->TX sample alignment stage; a board reporting 1.0 transmits 24 dB low. 1.2 = adds the PI-NLMS null-steering core (CONTROL[4]). 1.3 = PI-NLMS is a separate block-design IP (pi_nlms_0), same registers. 2.0 = PL-NPI-only build (pl_npi_0, CONTROL[5], gamma in 0x48), no PI-NLMS. 2.1 = pl_npi_0 is the pipelined Vitis HLS core (II=2), STATUS[10] = npi_drop_sticky. 2.2 = strong-jammer upgrade. 2.3 = gated PL-NPI (pl_npi_0 v2.0, II=1 on sys_cpu_clk): power detector, modes AUTO/BYPASS/ON/HOLD, RX2 normalisation, image taps, make-up shift, weight read-back (0x180-0x1BC); STATUS[21:20] = gain band from the core status."
+        "reset": "0x00020004",
+        "note": "1.0 = Phase-1 identity passthrough. 1.1 = adds the RX->TX sample alignment stage; a board reporting 1.0 transmits 24 dB low. 1.2 = adds the PI-NLMS null-steering core (CONTROL[4]). 1.3 = PI-NLMS is a separate block-design IP (pi_nlms_0), same registers. 2.0 = PL-NPI-only build (pl_npi_0, CONTROL[5], gamma in 0x48), no PI-NLMS. 2.1 = pl_npi_0 is the pipelined Vitis HLS core (II=2), STATUS[10] = npi_drop_sticky. 2.2 = strong-jammer upgrade. 2.3 = gated PL-NPI (pl_npi_0 v2.0, II=1 on sys_cpu_clk): power detector, modes AUTO/BYPASS/ON/HOLD, RX2 normalisation, image taps, make-up shift, weight read-back (0x180-0x1BC); STATUS[21:20] = gain band from the core status. 2.4 = pl_npi_0 v2.1: DC blocker, two CW notches (NPI_NCOEF 0x1C0-0x1D4), NPI_INFO 0x03020802, NPI_CFG reset 0x0D."
       },
       {
         "offset": "0x08",
@@ -306,15 +306,15 @@
         "offset": "0x184",
         "name": "NPI_INFO",
         "access": "RO",
-        "reset": "0x03020801",
+        "reset": "0x03020802",
         "note": "{8'd adaptive weights, 8'd step shift, 8'd extra loop delay, 8'd layout}"
       },
       {
         "offset": "0x188",
         "name": "NPI_CFG",
         "access": "RW",
-        "reset": "0x00000005",
-        "note": "Shadow. [1:0] mode 0 AUTO (core power detector gates filter and adaptation), 1 BYPASS (TX1 = RX1, weights 0), 2 ON, 3 HOLD (filter in, weights frozen). [2] image taps on. [10:8] output make-up shift 0..4 (6 dB each, filter only)."
+        "reset": "0x0000000D",
+        "note": "Shadow. [1:0] mode 0 AUTO (core power detector gates filter and adaptation), 1 BYPASS (TX1 = RX1, weights 0), 2 ON, 3 HOLD (filter in, weights frozen). [2] image taps on. [3] DC blocker on both inputs (v2.4, also in bypass). [10:8] output make-up shift 0..4 (6 dB each, filter only). [13:12] CW notch 0/1 on (v2.4, also in bypass)."
       },
       {
         "offset": "0x18C",
@@ -365,7 +365,14 @@
         "offset": "0x1BC",
         "name": "NPI_ST_LATCHED",
         "access": "RO",
-        "note": "Latched core status (layout as NPI_SNAP read)."
+        "note": "Latched core status (layout as NPI_SNAP read). v2.4: [7:5] number of notches in the core, [8] DC blocker active."
+      },
+      {
+        "offset": "0x1C0",
+        "name": "NPI_NCOEF0..5",
+        "access": "RW",
+        "reset": "0x00000000",
+        "note": "Shadow (v2.4). Notch k (0, 1) at 0x1C0 + 12k: q, p, p^2, each {imag[31:16], real[15:0]} signed Q1.14. H(z) = (1 - q z^-1) / (1 - p z^-1), q = exp(j 2 pi f / fs), p = r q, r = 1 - 2^-8. Copied to the core by NPI_COMMIT; reads return the shadow."
       }
     ]
   }

@@ -76,13 +76,13 @@ if {[llength $gnss_ipdef] == 0} {
          Automation/Linux/build_all.sh --from ip."
 }
 # The PL-NPI core is a separate Vitis HLS IP in the same repository
-# (Source/HLS/pl_npi/build_hls.tcl, build_all.sh stage "npi"). v2.3 needs
-# version 2.0 of it (cfg/nrm/detector ports, status and weight outputs); a 1.0
+# (Source/HLS/pl_npi/build_hls.tcl, build_all.sh stage "npi"). v2.4 needs
+# version 2.1 of it (v2.4: ncoef port for the CW notches); a 2.0 or 1.0
 # left over from an older build is refused here.
 set npi_ipdef [get_ipdefs -all -quiet -filter \
-  {VLNV =~ *:pl_npi:2.0 && design_tool_contexts =~ *IPI* && UPGRADE_VERSIONS == ""}]
+  {VLNV =~ *:pl_npi:2.1 && design_tool_contexts =~ *IPI* && UPGRADE_VERSIONS == ""}]
 if {[llength $npi_ipdef] == 0} {
-  error "ERROR: pl_npi 2.0 was not found in the IP catalog at $gnss_ip_repo.\
+  error "ERROR: pl_npi 2.1 was not found in the IP catalog at $gnss_ip_repo.\
          Build it with Source/HLS/pl_npi/build_hls.tcl (vitis_hls), or run\
          Automation/Linux/build_all.sh --from npi."
 }
@@ -505,7 +505,8 @@ ad_connect gnss_passthrough/dac_data_q0 axi_ad9361/dac_data_q0
 ad_connect gnss_passthrough/dac_data_i1 axi_ad9361/dac_data_i1
 ad_connect gnss_passthrough/dac_data_q1 axi_ad9361/dac_data_q1
 
-# PL-NPI v2.3 power-inversion core (Vitis HLS IP pl_npi 2.0, II=1).
+# PL-NPI v2.4 power-inversion core (Vitis HLS IP pl_npi 2.1, II=1; v2.4 adds
+# the input DC blocker and two CW notches, coefficients through npi_ncoef).
 #   It runs on sys_cpu_clk (100 MHz), NOT on axi_ad9361/l_clk: l_clk follows the
 #   sample rate (4x it in 2R2T, 245.76 MHz at 61.44 MS/s, the rate that carries
 #   BeiDou B1I and GLONASS), while sys_cpu_clk is fixed, so the core's timing
@@ -537,6 +538,7 @@ ad_connect gnss_passthrough/npi_cfg      pl_npi_0/cfg
 ad_connect gnss_passthrough/npi_nrm      pl_npi_0/nrm
 ad_connect gnss_passthrough/npi_det_thr  pl_npi_0/det_thr
 ad_connect gnss_passthrough/npi_det_hold pl_npi_0/det_hold
+ad_connect gnss_passthrough/npi_ncoef    pl_npi_0/ncoef
 ad_connect pl_npi_0/npi_st               gnss_passthrough/npi_st
 ad_connect pl_npi_0/wout                 gnss_passthrough/npi_wout
 ad_connect pl_npi_0/det_pow              gnss_passthrough/npi_det_pow

@@ -28,7 +28,7 @@ DEEP=0
 
 # ---- which design is this? --------------------------------------------------
 if   [[ -d "$ROOT/Source/HLS/smi_pi"  ]]; then CORE=smi_pi;  CELL=smi_pi_0;  STAGE=smi;  MARK="SMI_PI_HLS";  NAME="SMI-PI (power inversion)"
-elif [[ -d "$ROOT/Source/HLS/pl_npi"  ]]; then CORE=pl_npi;  CELL=pl_npi_0;  STAGE=npi;  MARK="PL_NPI_HLS";  NAME="PL-NPI v2.3 (gated NLMS power inversion, RX2 normalisation + image taps)"
+elif [[ -d "$ROOT/Source/HLS/pl_npi"  ]]; then CORE=pl_npi;  CELL=pl_npi_0;  STAGE=npi;  MARK="PL_NPI_HLS";  NAME="PL-NPI v2.4 (gated NLMS power inversion, RX2 normalisation + image taps, DC blocker + CW notches)"
 elif [[ -d "$ROOT/Source/HLS/pi_nlms" ]]; then CORE=pi_nlms; CELL=pi_nlms_0; STAGE=nlms; MARK="PI_NLMS_RTL"; NAME="PI-NLMS"
 else CORE=""; CELL="__none__"; STAGE=""; MARK=""; NAME="unknown"; fi
 
@@ -165,7 +165,7 @@ else
   fi
   if [[ "$setup_bad" == 0 ]]; then
     echo " Setup timing MET (WNS >= 0): every path finishes inside its clock period"
-    echo " (PL-NPI v2.3: rx_clk 4 ns, sys_cpu_clk 10 ns). The FPGA behaves exactly"
+    echo " (PL-NPI v2.4: rx_clk 4 ns, sys_cpu_clk 10 ns). The FPGA behaves exactly"
     echo " like the simulation."
   else
     echo " Setup timing NOT met. The worst path of each clock group:"

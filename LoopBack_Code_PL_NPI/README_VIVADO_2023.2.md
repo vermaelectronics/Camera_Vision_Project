@@ -1,6 +1,15 @@
-# LoopBack_Code_PL_NPI: PL-NPI-only design (PL-NPI v2.3), Vivado / Vitis 2023.2
+# LoopBack_Code_PL_NPI: PL-NPI-only design (PL-NPI v2.4), Vivado / Vitis 2023.2
 
-> **v2.3.6** (this version): gated adaptation in the FPGA (bypass until a
+> **v2.4.0** (this version): consistent `JAMMER STATUS: ON/OFF/UNKNOWN` in
+> `gnss_report` (status separate from the filter, with hysteresis), an FPGA
+> DC blocker and two firmware-tuned CW notches (HLS IP `pl_npi` 2.1,
+> bitstream 2.4), a CW scan in the firmware, a new default RF profile
+> `gnss_band=4` (1570.25 MHz, 50 MS/s, 50 MHz) with AD9361 slow-attack AGC
+> from 40 dB, and host regression tests (`Tests/run_regression.sh`).
+> **Root causes, changes, results and limits: `README_PL_NPI_v2.4.md`.**
+> Simulation only; no hardware or synthesis results yet.
+>
+> **v2.3.6:** gated adaptation in the FPGA (bypass until a
 > jammer), RX2 input normalisation, image taps for 50 dB jammers, output
 > make-up gain, the core moved to `sys_cpu_clk` at II=1, and a new default RF
 > profile that carries **BeiDou B1I and all of GLONASS** (1582.5 MHz,

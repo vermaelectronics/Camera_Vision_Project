@@ -4,6 +4,7 @@ Build/ip_repo/
 Build/Output/
 Build/ELF/
 Build/Logs/
+Build/Tests/
 Build/FsblWorkspace/
 Vivado/Project/*
 !Vivado/Project/.gitkeep

@@ -113,6 +113,14 @@ void gnss_pt_npi_write(uint32_t cfg, int32_t g2_q13, uint32_t det_thr, uint32_t 
     gnss_pt_write(GNSS_PT_REG_NPI_COMMIT, 1U);
 }
 
+void gnss_pt_npi_write_ncoef(const uint32_t w[6])
+{
+    uint32_t k;
+    for (k = 0; k < 6U; k++) {
+        gnss_pt_write(GNSS_PT_REG_NPI_NCOEF(k), w[k]);
+    }
+}
+
 void gnss_pt_npi_snapshot(gnss_pt_npi_snap_t *s)
 {
     uint32_t k;
@@ -190,7 +198,7 @@ void gnss_pt_print_state(void)
         uint32_t cfg = gnss_pt_read(GNSS_PT_REG_NPI_CFG_ACTIVE);
         uint32_t st  = gnss_pt_read(GNSS_PT_REG_NPI_SNAP);
         static const char *modes[4] = {"AUTO (detector)", "BYPASS", "ON", "HOLD"};
-        printf("  pl-npi v2.3    : mode %s, image taps %s, make-up shift %lu, g2 0x%08lx,\n"
+        printf("  pl-npi v2.4    : mode %s, image taps %s, make-up shift %lu, g2 0x%08lx,\n"
                "                   detector %s (threshold %lu LSB^2), filter %s, %lu detector events\n",
                modes[cfg & 3U], (cfg & GNSS_PT_NPI_CFG_IMAGE) ? "on" : "off",
                (unsigned long)((cfg >> 8) & 7U),

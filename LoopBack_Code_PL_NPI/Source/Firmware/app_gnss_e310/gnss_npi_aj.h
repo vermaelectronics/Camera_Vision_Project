@@ -38,7 +38,7 @@
 #define GNSS_AJ_BUF_ADDR   0x11000000U
 #endif
 
-#define GNSS_AJ_VERSION_STR  "PL-NPI 2.3.6"
+#define GNSS_AJ_VERSION_STR  "PL-NPI 2.4.0"
 
 /* RF profiles (gnss_band=). RX and TX are always set together, so the
  * retransmitted signal comes out on the frequency it came in on and the
@@ -48,8 +48,12 @@
                                   /*   QZSS, SBAS, BeiDou B1I+B1C, GLONASS G1      */
 #define GNSS_BAND_NO_BDS      2   /* 1589.5 MHz, 50 MS/s: GPS, Galileo, GLONASS    */
 #define GNSS_BAND_NO_GLO      3   /* 1568.25 MHz, 50 MS/s: GPS, Galileo, BeiDou    */
-#define GNSS_BAND_COUNT       4
-#define GNSS_BAND_DEFAULT     GNSS_BAND_ALL
+#define GNSS_BAND_USER        4   /* v2.4: 1570.25 MHz, 50 MS/s, 50 MHz (the       */
+                                  /*   deployment's configuration), no GLONASS     */
+#define GNSS_BAND_COUNT       5
+#ifndef GNSS_BAND_DEFAULT
+#define GNSS_BAND_DEFAULT     GNSS_BAND_USER
+#endif
 
 /* gnss_aj_mode= */
 #define GNSS_AJ_MODE_GATED      0   /* gated by the detectors, image taps (default) */
@@ -68,6 +72,10 @@ void gnss_aj_set_mode(int mode);    /* GNSS_AJ_MODE_*                        */
 void gnss_aj_set_log(int seconds);  /* periodic status line, 0 = events only */
 void gnss_aj_set_events(int on);  /* 0 = no event lines (gnss_report? keeps them) */
 void gnss_aj_set_csv(int ms);       /* CSV line period, 0 = off              */
+void gnss_aj_set_notch(int on);     /* v2.4: automatic CW notches on/off     */
+void gnss_aj_set_dc(int on);        /* v2.4: the core's DC blocker on/off    */
+/* v2.4 JAMMER STATUS: 0 UNKNOWN, 1 OFF, 2 ON (as gnss_report prints it)    */
+int  gnss_aj_status(void);
 int  gnss_aj_jammer_on(void);       /* the core is filtering a jammer        */
 void gnss_aj_poll(void);
 void gnss_aj_print(void);           /* gnss_aj? / gnss_npi?                  */

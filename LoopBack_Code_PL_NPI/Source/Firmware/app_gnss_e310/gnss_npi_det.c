@@ -274,3 +274,170 @@ int npi_measure(const uint32_t *buf, int nsamp, const int32_t *w, npi_det_t *r)
 	if(r->supp_db < 0.0) r->supp_db = 0.0;
 	return 0;
 }
+
+/* ---- v2.4: narrowband (CW) scan ------------------------------------------------
+ * 4096-point FFT of RX1 and RX2 (the capture of the last npi_detect, DC
+ * removed), Hann window, power spectra averaged over scans (each new scan
+ * weighs 1/2). A CW concentrates in ~1.5 bins, the noise spreads over 4096:
+ * a CW 34 dB below the total noise is still 0 dB in its bin. A peak counts
+ * only if it stands above the median bin in BOTH antennas (an external
+ * transmitter reaches both; a spur of one receiver does not) and is narrow
+ * (3 bins away it is 10 dB down). No libm. */
+static double CWR[NPI_CW_N], CWI[NPI_CW_N], TWR[NPI_CW_N / 2], TWI[NPI_CW_N / 2];
+static double WIN[NPI_CW_N], AV1[NPI_CW_N], AV2[NPI_CW_N], TMP[NPI_CW_N];
+static int    cw_init, cw_avg;
+
+void npi_sincos(double x, double *s, double *c)
+{
+	/* x to [-pi, pi], then to [-pi/4, pi/4] with the octant symmetries */
+	double k = x / (2.0 * NPI_PI), t, t2, sn, cs;
+	int q;
+	k = (k >= 0.0) ? (double)(long)(k + 0.5) : -(double)(long)(-k + 0.5);
+	x -= k * 2.0 * NPI_PI;
+	q = (x >= 0.0) ? (int)(x / (NPI_PI / 2.0) + 0.5) : -(int)(-x / (NPI_PI / 2.0) + 0.5);
+	t = x - (double)q * (NPI_PI / 2.0);
+	t2 = t * t;
+	sn = t * (1.0 - t2 / 6.0 * (1.0 - t2 / 20.0 * (1.0 - t2 / 42.0 * (1.0 - t2 / 72.0 * (1.0 - t2 / 110.0 * (1.0 - t2 / 156.0))))));
+	cs = 1.0 - t2 / 2.0 * (1.0 - t2 / 12.0 * (1.0 - t2 / 30.0 * (1.0 - t2 / 56.0 * (1.0 - t2 / 90.0 * (1.0 - t2 / 132.0)))));
+	switch(q & 3) {
+	case 0:  *s = sn;  *c = cs;  break;
+	case 1:  *s = cs;  *c = -sn; break;
+	case 2:  *s = -sn; *c = -cs; break;
+	default: *s = -cs; *c = sn;  break;
+	}
+}
+
+static void cw_setup(void)
+{
+	int i;
+	for(i = 0; i < NPI_CW_N / 2; i++) {
+		double s, c;
+		npi_sincos(-2.0 * NPI_PI * (double)i / (double)NPI_CW_N, &s, &c);
+		TWR[i] = c; TWI[i] = s;
+	}
+	for(i = 0; i < NPI_CW_N; i++) {
+		double s, c;
+		npi_sincos(2.0 * NPI_PI * (double)i / (double)NPI_CW_N, &s, &c);
+		WIN[i] = 0.5 - 0.5 * c;
+	}
+	cw_init = 1;
+}
+
+static void fft(double *re, double *im)
+{
+	int n = NPI_CW_N, i, j, len, k;
+	for(i = 1, j = 0; i < n; i++) {           /* bit reversal */
+		int bit = n >> 1;
+		for(; j & bit; bit >>= 1) j ^= bit;
+		j ^= bit;
+		if(i < j) {
+			double t = re[i]; re[i] = re[j]; re[j] = t;
+			t = im[i]; im[i] = im[j]; im[j] = t;
+		}
+	}
+	for(len = 2; len <= n; len <<= 1) {
+		int step = n / len, half = len >> 1;
+		for(i = 0; i < n; i += len) {
+			for(k = 0; k < half; k++) {
+				double wr = TWR[k * step], wi = TWI[k * step];
+				double xr = re[i + k + half], xi = im[i + k + half];
+				double tr = xr * wr - xi * wi, ti = xr * wi + xi * wr;
+				re[i + k + half] = re[i + k] - tr; im[i + k + half] = im[i + k] - ti;
+				re[i + k] += tr;                  im[i + k] += ti;
+			}
+		}
+	}
+}
+
+/* k-th smallest of a[0..n-1] (a is reordered) */
+static double kth(double *a, int n, int k)
+{
+	int lo = 0, hi = n - 1;
+	while(lo < hi) {
+		double p = a[(lo + hi) >> 1];
+		int i = lo, j = hi;
+		while(i <= j) {
+			while(a[i] < p) i++;
+			while(a[j] > p) j--;
+			if(i <= j) { double t = a[i]; a[i] = a[j]; a[j] = t; i++; j--; }
+		}
+		if(k <= j) hi = j; else if(k >= i) lo = i; else break;
+	}
+	return a[k];
+}
+
+static void spectrum(const int16_t *xr, const int16_t *xi, double *av)
+{
+	int t;
+	for(t = 0; t < NPI_CW_N; t++) { CWR[t] = WIN[t] * xr[t]; CWI[t] = WIN[t] * xi[t]; }
+	fft(CWR, CWI);
+	for(t = 0; t < NPI_CW_N; t++) {
+		double p = CWR[t] * CWR[t] + CWI[t] * CWI[t];
+		av[t] = (cw_avg == 0) ? p : 0.5 * av[t] + 0.5 * p;
+	}
+}
+
+void npi_cw_reset(void) { cw_avg = 0; }
+
+int npi_cw_scan(double det_db, npi_cw_t *o)
+{
+	const int n = NPI_CW_N, edge = (int)(0.45 * NPI_CW_N);
+	double med1, med2, thr = 1.0, best[NPI_CW_MAX];
+	int i, k, pk[NPI_CW_MAX];
+
+	if(!o) return -1;
+	o->n = 0;
+	if(!cw_init) cw_setup();
+	spectrum(X1R, X1I, AV1);
+	spectrum(X2R, X2I, AV2);
+	cw_avg++;
+	for(i = 0; i < n; i++) TMP[i] = AV1[i];
+	med1 = kth(TMP, n, n / 2);
+	for(i = 0; i < n; i++) TMP[i] = AV2[i];
+	med2 = kth(TMP, n, n / 2);
+	o->floor1 = med1; o->floor2 = med2;
+	if(med1 <= 0.0 || med2 <= 0.0) return 0;
+	for(i = 0; i < det_db; i++) thr *= 1.2589254117941673;    /* 10^(det_db/10) */
+	for(k = 0; k < NPI_CW_MAX; k++) { best[k] = 0.0; pk[k] = -1; }
+	for(i = 0; i < n; i++) {
+		int ks = (i < n / 2) ? i : i - n, j, narrow = 1;
+		double m1, m2, m;
+		if(ks > -4 && ks < 4) continue;                 /* DC region */
+		if(ks > edge || ks < -edge) continue;           /* outside the flat band */
+		m1 = AV1[i] / med1; m2 = AV2[i] / med2;
+		m = (m1 < m2) ? m1 : m2;
+		if(m < thr) continue;
+		if(AV1[i] < AV1[(i + 1) % n] || AV1[i] < AV1[(i + n - 1) % n]) continue;   /* local max */
+		for(j = 3; j <= 4; j++)
+			if(AV1[(i + j) % n] > 0.1 * AV1[i] || AV1[(i + n - j) % n] > 0.1 * AV1[i]) narrow = 0;
+		if(!narrow) continue;
+		/* keep the two strongest, at least 8 bins apart */
+		for(k = 0; k < NPI_CW_MAX; k++) {
+			if(pk[k] >= 0) {
+				int d = i - pk[k];
+				if(d < 0) d = -d;
+				if(d > n / 2) d = n - d;
+				if(d < 8) { if(m > best[k]) { best[k] = m; pk[k] = i; } goto next; }
+			}
+		}
+		if(m > best[0]) { best[1] = best[0]; pk[1] = pk[0]; best[0] = m; pk[0] = i; }
+		else if(m > best[1]) { best[1] = m; pk[1] = i; }
+	next: ;
+	}
+	for(k = 0; k < NPI_CW_MAX; k++) {
+		double a, b, c, d = 0.0, den;
+		int i0 = pk[k], ks;
+		if(i0 < 0) continue;
+		ks = (i0 < n / 2) ? i0 : i0 - n;
+		a = npi_db10(AV1[(i0 + n - 1) % n]); b = npi_db10(AV1[i0]); c = npi_db10(AV1[(i0 + 1) % n]);
+		den = a - 2.0 * b + c;
+		if(den < -1e-9) d = 0.5 * (a - c) / den;
+		if(d > 0.5) d = 0.5;
+		if(d < -0.5) d = -0.5;
+		o->f[o->n] = ((double)ks + d) / (double)n;
+		o->snr1[o->n] = npi_db10(AV1[i0] / med1);
+		o->snr2[o->n] = npi_db10(AV2[i0] / med2);
+		o->n++;
+	}
+	return 0;
+}

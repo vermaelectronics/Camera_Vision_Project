@@ -24,13 +24,25 @@
 #define PL_NPI_MODE_ON     2u  //         2: filter in and adapting, always
 #define PL_NPI_MODE_HOLD   3u  //         3: filter in, weights frozen
 #define PL_NPI_CFG_IMAGE   0x4u // [2] image taps c1, c2 on
+#define PL_NPI_CFG_DCBLK   0x8u // [3] input DC blocker on (v2.4)
 #define PL_NPI_CFG_SH_LSB  8   // [10:8] output make-up shift, 0..4
+#define PL_NPI_CFG_NOTCH_LSB 12 // [13:12] CW notch k on (v2.4)
+
+// v2.4: CW notch filters on the output (after PL-NPI / bypass). Number
+// compiled in (0..2); the core reports it in npi_st[7:5].
+#ifndef PL_NPI_NOTCHES
+#define PL_NPI_NOTCHES     2
+#endif
+#define PL_NPI_NFRAC      14    // notch coefficients, signed Q1.14
+#define PL_NPI_DC_SHIFT   14    // DC blocker: corner fs * 2^-14 / (2 pi)
 
 // npi_st bits
 #define PL_NPI_ST_DET      0x1u  // [0] power detector on
 #define PL_NPI_ST_ACTIVE   0x2u  // [1] filter in the path (not bypassed)
 #define PL_NPI_ST_BAND_LSB 2     // [3:2] Eq. 11 gain band of the latest sample
 #define PL_NPI_ST_ADAPT    0x10u // [4] weights adapting
+#define PL_NPI_ST_NOTCH_LSB 5    // [7:5] notch filters compiled in (v2.4)
+#define PL_NPI_ST_DCBLK    0x100u // [8] DC blocker on (v2.4)
 #define PL_NPI_ST_CNT_LSB  16    // [31:16] detector switch-on count
 
 // s_axis_x : {rx2_q, rx2_i, rx1_q, rx1_i}, each a signed 16-bit sample at the
@@ -45,6 +57,9 @@
 // det_thr  : detector threshold on the averaged |x1|^2 + |x2|^2 [LSB^2]:
 //            on above it, off det_hold samples after it falls below half.
 // det_hold : see det_thr.
+// ncoef    : v2.4, notch k (0, 1) in words 3k..3k+2 (32 bits each,
+//            {imag[31:16], real[15:0]}, signed Q1.14): q = e^{j w0}, p = r q,
+//            p^2. Notch H(z) = (1 - q z^-1) / (1 - p z^-1), r <= 1 - 2^-8.
 // npi_st   : status (bits above).
 // wout     : the three weights, Q12.20, word k at [64k+63 : 64k] =
 //            {imag[63:32], real[31:0]}: k = 0 w2, 1 c1, 2 c2.
@@ -57,6 +72,7 @@ void pl_npi(hls::stream<ap_uint<64> > &s_axis_x,
             ap_uint<32>  nrm,
             ap_uint<32>  det_thr,
             ap_uint<32>  det_hold,
+            ap_uint<192> ncoef,
             ap_uint<32>  *npi_st,
             ap_uint<192> *wout,
             ap_uint<32>  *det_pow);

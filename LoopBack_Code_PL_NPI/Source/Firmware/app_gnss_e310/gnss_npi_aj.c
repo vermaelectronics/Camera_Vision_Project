@@ -55,7 +55,35 @@ extern struct axi_dmac *rx_dmac;
                                   /* when the gain loop has absorbed the jammer  */
 #define AJ_NEV            16      /* event history for gnss_report?             */
 
-enum { EV_ON = 1, EV_NULLED, EV_OFF, EV_LEAK, EV_TX, EV_START, EV_BURST, EV_BG, EV_FLOOR };
+/* v2.4: JAMMER STATUS, the classification gnss_report prints. Separate from
+ * the filter (the FPGA detector and the firmware's forcing switch the
+ * filter; they do not decide the status). ON needs evidence in AJ_ST_ON_N
+ * consecutive captures (~10 ms); OFF needs every metric quiet, with lower
+ * thresholds than ON (hysteresis), for AJ_ST_OFF_US; in between the status
+ * holds. UNKNOWN when there is no valid capture for AJ_ST_STALE_US or the
+ * anti-jam is off. */
+#define AJ_ST_ON_N        4
+#define AJ_ST_OFF_US      1000000U
+#define AJ_ST_STALE_US    500000U
+enum { AJS_UNKNOWN = 0, AJS_OFF = 1, AJS_ON = 2 };
+
+/* v2.4: CW (narrowband) jammers: FFT scan of every AJ_CW_EVERY-th capture;
+ * a peak AJ_CW_DET_DB above the median bin in both antennas, seen in
+ * AJ_CW_HITS scans, is a confirmed CW: jammer evidence, and a notch in the
+ * core (v2.4 bitstream) on its frequency. Dropped AJ_CW_LOST_US after it was
+ * last seen. */
+#define AJ_CW_EVERY       4
+#define AJ_CW_DET_DB      12      /* a candidate counts a hit at this level ...  */
+#define AJ_CW_KEEP_DB     9       /* ... a confirmed CW is kept down to this one */
+#define AJ_CW_HITS        3       /* confirmed: 3 hits, in >= half of its scans  */
+#define AJ_CW_TRIAL       20      /* a candidate below half after 20 scans goes  */
+#define AJ_CW_LOST_US     1000000U
+#define AJ_CW_SAME        (3.0 / NPI_CW_N)   /* same CW within 3 bins       */
+#define AJ_CW_RETUNE      (1.0 / NPI_CW_N)   /* re-program the notch beyond 1 bin */
+#define AJ_CW_WB_DB       6.0     /* wideband J/N below this + a confirmed CW: report the CW */
+#define AJ_NOTCH_R        (1.0 - 1.0 / 256.0) /* pole radius: 62 kHz at 50 MS/s */
+
+enum { EV_ON = 1, EV_NULLED, EV_OFF, EV_LEAK, EV_TX, EV_START, EV_BURST, EV_BG, EV_FLOOR, EV_CW };
 
 /* ---- state --------------------------------------------------------------- */
 static int      aj_on, aj_user_off, aj_frozen, aj_mode = GNSS_AJ_MODE_GATED;
@@ -67,7 +95,6 @@ static unsigned int keys_seen;
 static XTime    t_key;
 static int      dma_busy;
 static XTime    dma_t0, next_start, t_rate, t_log, t_csv, t_warn, t_learn, t_boot;
-static uint32_t gain_mark;
 static npi_det_t res;
 static gnss_pt_npi_snap_t snap;
 static int      res_valid, res_meas, core_active;
@@ -98,8 +125,19 @@ static int32_t  g2_w = 8192;
 
 static int      band = GNSS_BAND_DEFAULT;
 
+/* v2.4 state */
+static int      ajs = AJS_UNKNOWN, ajs_on_n, ajs_why;   /* JAMMER STATUS     */
+static XTime    ajs_t0, ajs_quiet_t0, last_valid;
+static int      core_v24, core_notches, dc_on = 1, notch_auto = 1, gain_init;
+struct cw_track { int used, hits, scans, conf; double f, snr1, snr2; XTime seen, t0; };
+static struct cw_track cwt[NPI_CW_MAX];
+static uint32_t ncoef_w[6], ncoef_cur[6];
+static int      ncoef_valid, cw_scan_n;
+static uint32_t gsig_mark;                               /* gain signature    */
+
 static void print_band_cover(void);       /* RF profiles section, below */
 static void commit_core(int force);
+static uint32_t gain_signature(void);
 static int  hw_veto;      /* FPGA detector fired on an incoherent noise rise */
 
 struct aj_event { uint32_t ms; int type; double v1, v2, v3; };
@@ -251,7 +289,9 @@ static uint32_t det_thr_now(void)
 	 * keep that half above the clean level noise + DC, or it never would.
 	 * With no DC this is the 6 dB threshold above. */
 	if(res_valid) {
-		double clean = n1 * (1.0 + 1.0 / ratio12) + res.dc1 * res.dc1 + res.dc2 * res.dc2;
+		double clean = n1 * (1.0 + 1.0 / ratio12);
+		if(!(core_v24 && dc_on))        /* v2.4: the core removes the DC first */
+			clean += res.dc1 * res.dc1 + res.dc2 * res.dc2;
 		if(t < 2.5 * clean) t = 2.5 * clean;
 	}
 	if(t > 4.0e9) t = 4.0e9;
@@ -278,6 +318,12 @@ static void commit_core(int force)
 	else        mode = GNSS_PT_NPI_MODE_ON;
 	cfg  = mode | (image_on() ? GNSS_PT_NPI_CFG_IMAGE : 0U) |
 	       GNSS_PT_NPI_CFG_SHIFT(jam ? shift : 0);
+	if(core_v24) {
+		int k;
+		if(dc_on) cfg |= GNSS_PT_NPI_CFG_DCBLK;
+		for(k = 0; k < NPI_CW_MAX && k < core_notches; k++)
+			if(notch_auto && cwt[k].used && cwt[k].conf) cfg |= GNSS_PT_NPI_CFG_NOTCH(k);
+	}
 	thr  = det_thr_now();
 	hold = det_hold_now();
 	/* g2 only changes while the core is bypassed: a change while it filters
@@ -288,6 +334,16 @@ static void commit_core(int force)
 	if(!force && gq != g2_w && (gq > g2_w ? gq - g2_w : g2_w - gq) <= g2_w / 128)
 		gq = g2_w;
 	/* 64-bit: thr_w + thr_w/8 overflows for the "never" threshold */
+	{
+		int k, nc = 0;
+		for(k = 0; k < 6; k++) if(ncoef_cur[k] != ncoef_w[k]) nc = 1;
+		if(nc || !ncoef_valid) {
+			gnss_pt_npi_write_ncoef(ncoef_cur);
+			for(k = 0; k < 6; k++) ncoef_w[k] = ncoef_cur[k];
+			ncoef_valid = 1;
+			force = 1;
+		}
+	}
 	if(!force && cfg == cfg_w && gq == g2_w && hold == hold_w &&
 	   (uint64_t)thr <= (uint64_t)thr_w + thr_w / 8U && thr >= thr_w - thr_w / 8U)
 		return;
@@ -326,7 +382,7 @@ static void dma_start(void)
 	axi_dmac_write(rx_dmac, AXI_DMAC_REG_TRANSFER_SUBMIT, AXI_DMAC_TRANSFER_SUBMIT);
 	dma_busy = 1;
 	XTime_GetTime(&dma_t0);
-	gain_mark = gnss_rxg_changes();
+	gsig_mark = gain_signature();
 }
 
 static int dma_done(void)
@@ -362,10 +418,22 @@ static void print_type(void)
 {
 	uint32_t fs; uint64_t lo;
 	double bw_mhz, f_mhz, rf_mhz;
+	int k, n = 0;
 	radio(&fs, &lo);
 	bw_mhz = res.bw * (double)fs / 1e6;
 	f_mhz  = res.foff * (double)fs / 1e6;
 	rf_mhz = (double)lo / 1e6 + f_mhz;
+	/* A CW below the wideband noise: the lag-1 bandwidth estimate only sees
+	 * the noise, so name the tones the FFT scan confirmed instead. */
+	if(res.jn_db < AJ_CW_WB_DB) {
+		for(k = 0; k < NPI_CW_MAX; k++) {
+			if(!cwt[k].used || !cwt[k].conf) continue;
+			console_print("%s%s MHz", (char*)(n ? " + " : "CW tone at RF "),
+				      f3u(((double)lo + cwt[k].f * (double)fs) / 1e6));
+			n++;
+		}
+		if(n) { console_print(" (CW scan, below the wideband noise)"); return; }
+	}
 	if(bw_mhz < 0.2)
 		console_print("CW tone at %s MHz (RF %s MHz)", f1(f_mhz), f1u(rf_mhz));
 	else if(res.bw > 0.75)
@@ -385,7 +453,8 @@ static const char *why_txt(int why)
 	case 1:  return "RX1/RX2 coherence (both antennas see the same signal)";
 	case 2:  return "RX power above the learned noise floor";
 	case 3:  return "the RX gain loop (it had to cut the gain)";
-	case 4:  return "the FPGA power detector (input 6 dB above the noise)";
+	case 4:  return "the FPGA power detector (input 6 dB above the noise, RX1/RX2 coherent)";
+	case 5:  return "the CW scan (narrowband peak in both antennas)";
 	default: return "?";
 	}
 }
@@ -666,7 +735,7 @@ static void leave_jammed(XTime now)
 	if(!jam_silent && ev_print(now)) {
 		console_print("\n");
 		stamp(now);
-		console_print("jammer OFF after %s s (peak J/N %s dB) -> filter bypassed, TX1 = RX1\n",
+		console_print("jammer OFF after %s s (peak J/N %s dB): JAMMER STATUS OFF\n",
 			      f1u((double)ms / 1000.0), f1(jam_peak));
 	}
 	last_off_t = now;
@@ -761,8 +830,6 @@ static void fw_detect(XTime now)
 	quiet = res.jn_coh_db < coh_off() && (nf0 <= 0.0 || res.jn_db < AJ_OFF_DB) && cut == 0;
 	if(!fw_jam) {
 		on_cnt = why ? on_cnt + 1 : 0;
-		if(on_cnt == 1) trig_t0 = now;
-		if(why) on_why = why;
 		if(on_cnt >= AJ_ON_COUNT) { fw_jam = 1; quiet_t0 = now; g2_from_jammer(); }
 	} else {
 		if(!quiet) quiet_t0 = now;
@@ -815,15 +882,243 @@ static void jammed_state(XTime now)
 	}
 }
 
+/* ---- v2.4: CW tracks and the notches ---------------------------------------- */
+#define AJ_PI 3.14159265358979323846
+static double dabs(double x) { return x < 0.0 ? -x : x; }
+
+static uint32_t q14w(double re, double im)
+{
+	long a = (long)(re * 16384.0 + (re >= 0.0 ? 0.5 : -0.5));
+	long b = (long)(im * 16384.0 + (im >= 0.0 ? 0.5 : -0.5));
+	if(a > 32767) a = 32767;
+	if(a < -32768) a = -32768;
+	if(b > 32767) b = 32767;
+	if(b < -32768) b = -32768;
+	return ((uint32_t)(b & 0xFFFF) << 16) | (uint32_t)(a & 0xFFFF);
+}
+
+/* notch k on f (fraction of fs): q = e^{j 2 pi f}, p = r q, p^2 */
+static double notch_f[NPI_CW_MAX];
+static void notch_set(int k, double f)
+{
+	double s1, c1, s2, c2, r = AJ_NOTCH_R;
+	npi_sincos(2.0 * AJ_PI * f, &s1, &c1);
+	npi_sincos(4.0 * AJ_PI * f, &s2, &c2);
+	ncoef_cur[3 * k]     = q14w(c1, s1);
+	ncoef_cur[3 * k + 1] = q14w(r * c1, r * s1);
+	ncoef_cur[3 * k + 2] = q14w(r * r * c2, r * r * s2);
+	notch_f[k] = f;
+}
+
+static double rf_mhz(double f)
+{
+	uint32_t fs; uint64_t lo;
+	radio(&fs, &lo);
+	return ((double)lo + f * (double)fs) / 1e6;
+}
+
+/* in-bin SNR of a CW -> its J/N over the whole band (Hann ENBW 1.5 bins) */
+static double cw_jn(double snr) { return snr - npi_db10((double)NPI_CW_N / 1.5); }
+
+static int cw_confirmed(void)
+{
+	int k;
+	for(k = 0; k < NPI_CW_MAX; k++) if(cwt[k].used && cwt[k].conf) return 1;
+	return 0;
+}
+
+static void cw_update(XTime now)
+{
+	npi_cw_t o;
+	int i, k;
+	if(++cw_scan_n < AJ_CW_EVERY) return;
+	cw_scan_n = 0;
+	if(npi_cw_scan(AJ_CW_KEEP_DB, &o) != 0) return;
+	for(k = 0; k < NPI_CW_MAX; k++) if(cwt[k].used) cwt[k].scans++;
+	for(i = 0; i < o.n; i++) {
+		double snr = (o.snr1[i] < o.snr2[i]) ? o.snr1[i] : o.snr2[i];
+		int m = -1;
+		for(k = 0; k < NPI_CW_MAX; k++)
+			if(cwt[k].used && dabs(cwt[k].f - o.f[i]) <= AJ_CW_SAME) m = k;
+		if(m < 0 && snr >= AJ_CW_DET_DB)
+			for(k = 0; k < NPI_CW_MAX; k++)
+				if(!cwt[k].used) {
+					cwt[k].used = 1; cwt[k].hits = 0; cwt[k].scans = 1; cwt[k].conf = 0;
+					cwt[k].f = o.f[i]; cwt[k].t0 = now;
+					m = k;
+					break;
+				}
+		if(m < 0) continue;                       /* weak, or two CWs tracked */
+		if(!cwt[m].conf && snr < AJ_CW_DET_DB) continue;   /* hysteresis */
+		cwt[m].hits++;
+		cwt[m].seen = now;
+		cwt[m].f = 0.75 * cwt[m].f + 0.25 * o.f[i];
+		cwt[m].snr1 = o.snr1[i];
+		cwt[m].snr2 = o.snr2[i];
+		if(!cwt[m].conf && cwt[m].hits >= AJ_CW_HITS && 2 * cwt[m].hits >= cwt[m].scans) {
+			cwt[m].conf = 1;
+			notch_set(m, cwt[m].f);
+			add_event(now, EV_CW, rf_mhz(cwt[m].f), cwt[m].snr1, 1.0);
+			if(ev_print(now)) {
+				stamp(now);
+				console_print("CW at %s MHz, +%s dB in its FFT bin (J/N %s dB over the band): ",
+					      f3u(rf_mhz(cwt[m].f)), f1u(cwt[m].snr1), f1(cw_jn(cwt[m].snr1)));
+				if(core_v24 && m < core_notches && notch_auto)
+					console_print("notch %d ON\n", (long)m);
+				else
+					console_print("%s\n", (char*)(!notch_auto ? "notch off (gnss_aj_notch=0)" :
+						"no notch in this bitstream (needs v2.4)"));
+			}
+		} else if(cwt[m].conf && dabs(cwt[m].f - notch_f[m]) > AJ_CW_RETUNE) {
+			notch_set(m, cwt[m].f);               /* the CW drifted: follow it */
+		}
+	}
+	for(k = 0; k < NPI_CW_MAX; k++) {
+		if(!cwt[k].used) continue;
+		if(!cwt[k].conf && cwt[k].scans >= AJ_CW_TRIAL && 2 * cwt[k].hits < cwt[k].scans) {
+			cwt[k].used = 0;                      /* a fluke, not a CW */
+			continue;
+		}
+		if(now - cwt[k].seen < us(AJ_CW_LOST_US)) continue;
+		if(cwt[k].conf) {
+			add_event(now, EV_CW, rf_mhz(cwt[k].f), cwt[k].snr1, 0.0);
+			if(ev_print(now)) {
+				stamp(now);
+				console_print("CW at %s MHz gone: notch %d off\n", f3u(rf_mhz(cwt[k].f)), (long)k);
+			}
+		}
+		cwt[k].used = 0;
+		cwt[k].conf = 0;
+	}
+}
+
+/* ---- v2.4: JAMMER STATUS ------------------------------------------------------- */
+static const char *ajs_txt(int st)
+{
+	return st == AJS_ON ? "ON" : st == AJS_OFF ? "OFF" : "UNKNOWN";
+}
+
+static void status_update(XTime now, int hw_coh)
+{
+	int cut = cut_db(), why = 0, quiet;
+	if(res.jn_coh_db >= coh_on())                                    why = 1;
+	else if(nf0 > 0.0 && res.jn_db >= AJ_ON_DB &&
+	        res.jn_coh_db >= AJ_PWR_COH_DB)                          why = 2;
+	else if(cut >= AJ_CUT_DB && now - t_boot >= us(AJ_SETTLE_US))   why = 3;
+	else if(hw_coh)                                                  why = 4;
+	else if(cw_confirmed())                                          why = 5;
+	quiet = !why && res.jn_coh_db < coh_off() && (nf0 <= 0.0 || res.jn_db < AJ_OFF_DB) && cut == 0;
+	if(ajs != AJS_ON) {
+		if(ajs == AJS_UNKNOWN) { ajs = AJS_OFF; ajs_t0 = now; ajs_on_n = 0; }
+		ajs_on_n = why ? ajs_on_n + 1 : 0;
+		if(ajs_on_n == 1) { trig_t0 = now; ajs_why = why; }
+		if(ajs_on_n >= AJ_ST_ON_N) {
+			ajs = AJS_ON;
+			ajs_t0 = trig_t0;
+			ajs_quiet_t0 = now;
+			on_why = ajs_why;
+			enter_jammed(now, ajs_why == 4);
+		}
+	} else {
+		if(why) ajs_why = why;
+		if(!quiet) ajs_quiet_t0 = now;
+		else if(now - ajs_quiet_t0 >= us(AJ_ST_OFF_US)) {
+			ajs = AJS_OFF;
+			ajs_t0 = now;
+			ajs_on_n = 0;
+			leave_jammed(now);
+		}
+	}
+}
+
+/* No valid capture for AJ_ST_STALE_US (DMA errors, TX DDR replay, anti-jam
+ * off): the status is not known. */
+static void status_stale(XTime now)
+{
+	if(ajs == AJS_UNKNOWN) return;
+	if(ajs == AJS_ON) {
+		uint32_t ms = ms_since(jam_t0, now);
+		jam = 0;
+		shift = 0;
+		add_event(now, EV_OFF, (double)ms / 1000.0, jam_peak, 1.0);
+		if(ev_print(now)) {
+			stamp(now);
+			console_print("no measurement for %d ms: JAMMER STATUS UNKNOWN\n",
+				      (long)(AJ_ST_STALE_US / 1000U));
+		}
+	}
+	ajs = AJS_UNKNOWN;
+	ajs_t0 = now;
+	ajs_on_n = 0;
+}
+
+/* ---- v2.4: the snapshot gnss_report / gnss_aj? print ------------------------------
+ * Filled at the end of every processed capture. The commands print it and the
+ * engine statics; they read no register and run no detector, so one report is
+ * one coherent moment, and asking for it changes nothing. */
+static struct {
+	int      valid;
+	XTime    t;
+	uint32_t ver, cfg_act, gamma, st, stat_reg, pow;
+	int32_t  g0, g1;
+	double   txatt;
+	int      txon, hw_coh;
+} vw;
+static uint64_t vw_lo;
+static uint32_t vw_fs, vw_rbw, vw_tbw;
+
+static void view_radio(void)
+{
+	if(!ad9361_phy) return;
+	ad9361_get_rx_lo_freq(ad9361_phy, &vw_lo);
+	ad9361_get_rx_sampling_freq(ad9361_phy, &vw_fs);
+	ad9361_get_rx_rf_bandwidth(ad9361_phy, &vw_rbw);
+	ad9361_get_tx_rf_bandwidth(ad9361_phy, &vw_tbw);
+}
+
+static void view_take(XTime now, int hw_coh)
+{
+	vw.t        = now;
+	vw.ver      = gnss_pt_read(GNSS_PT_REG_VERSION);
+	vw.cfg_act  = gnss_pt_read(GNSS_PT_REG_NPI_CFG_ACTIVE);
+	vw.gamma    = gnss_pt_read(GNSS_PT_REG_NPI_GAMMA);
+	vw.stat_reg = gnss_pt_read(GNSS_PT_REG_STATUS);
+	vw.st       = snap.st;
+	vw.pow      = snap.pow;
+	vw.g0 = vw.g1 = 0;
+	if(ad9361_phy) {
+		ad9361_get_rx_rf_gain(ad9361_phy, 0, &vw.g0);
+		ad9361_get_rx_rf_gain(ad9361_phy, 1, &vw.g1);
+	}
+	vw.txatt  = tx_att_db();
+	vw.txon   = transmitting();
+	vw.hw_coh = hw_coh;
+	if(vw_fs == 0U) view_radio();
+	vw.valid  = 1;
+}
+
+/* the RX gain, both channels: a capture that spans a change is not used */
+static uint32_t gain_signature(void)
+{
+	if(gnss_rxg_mode() == GNSS_RXG_AD9361 && ad9361_phy) {
+		int32_t a = 0, b = 0;
+		ad9361_get_rx_rf_gain(ad9361_phy, 0, &a);
+		ad9361_get_rx_rf_gain(ad9361_phy, 1, &b);
+		return 0x80000000U | ((uint32_t)(a & 0xFF) << 8) | (uint32_t)(b & 0xFF);
+	}
+	return gnss_rxg_changes();
+}
+
 void gnss_aj_poll(void)
 {
 	XTime now;
-	int new_jam, by_hw = 0;
+	int by_hw = 0, hw_coh;
 	uint32_t cnt;
 
 	if(!aj_on || !rx_dmac || !ad9361_phy) return;
-	if(gnss_txdma_is_running()) return;       /* the DDR replay owns the DMA */
 	XTime_GetTime(&now);
+	if(now - last_valid > us(AJ_ST_STALE_US)) status_stale(now);
+	if(gnss_txdma_is_running()) return;       /* the DDR replay owns the DMA */
 
 	if(!dma_busy) {
 		if(now >= next_start) dma_start();
@@ -840,7 +1135,7 @@ void gnss_aj_poll(void)
 	}
 	dma_busy = 0;
 	next_start = dma_t0 + us(AJ_MIN_PERIOD_US);
-	if(gnss_rxg_changes() != gain_mark) {
+	if(gain_signature() != gsig_mark) {
 		/* the RX gain stepped during the capture: the block mixes two gains */
 		n_skip++;
 		return;
@@ -859,10 +1154,13 @@ void gnss_aj_poll(void)
 	res_valid = 1;
 	n_cap++;
 	cnt_cap++;
+	last_valid = now;
+	cw_update(now);                    /* v2.4: on this capture's spectrum */
 
 	/* what the core is doing, and what its weights do to this capture */
 	gnss_pt_npi_snapshot(&snap);
 	core_active = (snap.st & GNSS_PT_NPI_ST_ACTIVE) ? 1 : 0;
+	if(core_v24) core_notches = (int)GNSS_PT_NPI_ST_NOTCHES(snap.st);
 	res_meas = 0;
 	if(core_active) {
 		npi_measure((const uint32_t *)GNSS_AJ_BUF_ADDR, NPI_NSAMP, snap.w, &res);
@@ -906,14 +1204,17 @@ void gnss_aj_poll(void)
 	else if(fw_jam || res.jn_coh_db >= AJ_PWR_COH_DB || cut_db() > 0 ||
 	        !(snap.st & GNSS_PT_NPI_ST_DET))   /* the FPGA detector is off again */
 		hw_veto = 0;
-	new_jam = gated() ? (core_active && !hw_veto) : fw_jam;
-	if(new_jam && !jam)
-		enter_jammed(now, by_hw && !fw_jam);
-	else if(!new_jam && jam)
-		leave_jammed(now);
+	(void)by_hw;
+	/* v2.4: the JAMMER STATUS has its own detector and hysteresis; the filter
+	 * (core_active) is switched by the FPGA detector and fw_jam, separately */
+	hw_coh = gated() && core_active && (snap.st & GNSS_PT_NPI_ST_DET) && !hw_veto;
+	status_update(now, hw_coh);
 	if(jam)
 		jammed_state(now);
 	commit_core(0);
+	if(gnss_rxg_mode() != GNSS_RXG_MATCHED && nf0 > 0.0)
+		gnss_npi_gamma_noise(noise_now(), jam || core_active);
+	view_take(now, hw_coh);
 
 	XTime_GetTime(&now);
 	if(now - t_rate >= us(1000000U)) {
@@ -962,6 +1263,7 @@ void gnss_aj_enable(int on)
 	XTime_GetTime(&now);
 	if(on) {
 		uint32_t ver = gnss_pt_read(GNSS_PT_REG_VERSION);
+		core_v24 = (ver >= 0x00020004U);
 		if(ver < 0x00020003U) {
 			console_print("gnss_aj: the FPGA reports gnss_passthrough %d.%d; PL-NPI v2.3 needs 2.3\n"
 				      "         (core on sys_cpu_clk, gating, normalisation, image taps). Anti-jam\n"
@@ -969,14 +1271,18 @@ void gnss_aj_enable(int on)
 				      (long)(ver >> 16), (long)(ver & 0xFFFFU));
 			return;
 		}
-		/* The core needs the same gain on both channels at all times and a
-		 * gamma that matches the noise floor: the matched automatic loop
-		 * (gnss_npi_agc.c). A manual gain the operator locked is kept. */
-		if(gnss_rxg_mode() == GNSS_RXG_AD9361)
-			gnss_rxg_set_mode(GNSS_RXG_MATCHED);
+		/* v2.4: the RX gain policy of the deployment (GNSS_RXG_DEFAULT_MODE,
+		 * gnss_npi_agc.h: the AD9361 slow-attack AGC on both channels from
+		 * 40 dB), once; gnss_rxg_mode= changes it. The engine follows the
+		 * gain in every mode (noise floor, gamma, captures across a step). */
+		if(!gain_init) {
+			gnss_rxg_set_mode(GNSS_RXG_DEFAULT_MODE);
+			gain_init = 1;
+		}
 		gnss_npi_set_gated(gated());
 		if(!aj_on) {
 			jam = 0; fw_jam = 0; on_cnt = 0; core_active = 0; hw_veto = 0;
+			ajs = AJS_UNKNOWN; ajs_t0 = now; ajs_on_n = 0; last_valid = now;
 			clear_t0 = now;
 			add_event(now, EV_START, 0.0, 0.0, 0.0);
 		}
@@ -993,6 +1299,7 @@ void gnss_aj_enable(int on)
 			console_print("[AJ] anti-jam switched off (jammer state no longer monitored)\n");
 		aj_on = 0;
 		jam = 0; fw_jam = 0; shift = 0;
+		ajs = AJS_UNKNOWN; ajs_t0 = now;
 	}
 	/* The enable crosses into the sample domain and back; wait (<= ~1 ms)
 	 * until STATUS confirms it, so a status print straight after is right. */
@@ -1007,7 +1314,7 @@ void gnss_aj_enable(int on)
 
 int  gnss_aj_enabled(void)   { return aj_on; }
 int  gnss_aj_user_off(void)  { return aj_user_off; }
-int  gnss_aj_jammer_on(void) { return jam; }
+int  gnss_aj_jammer_on(void) { return jam || core_active; }
 
 void gnss_aj_freeze(int on)
 {
@@ -1024,6 +1331,20 @@ void gnss_aj_set_mode(int mode)
 	gnss_npi_set_gated(gated());
 	commit_core(1);
 }
+
+void gnss_aj_set_notch(int on)
+{
+	notch_auto = on ? 1 : 0;
+	commit_core(1);
+}
+
+void gnss_aj_set_dc(int on)
+{
+	dc_on = on ? 1 : 0;
+	commit_core(1);
+}
+
+int gnss_aj_status(void) { return aj_on ? ajs : AJS_UNKNOWN; }
 
 void gnss_aj_set_events(int on)
 {
@@ -1074,119 +1395,134 @@ static const char *g2_src_txt(void)
 	       g2_src == 2 ? "from the jammer (no clean period yet)" : "default, not learned yet";
 }
 
+static const char *filter_why(void)
+{
+	if(!aj_on)                        return "anti-jam off";
+	if(!(vw.st & GNSS_PT_NPI_ST_ACTIVE)) return "BYPASSED (TX1 = RX1)";
+	if(!gated())                      return "IN (always-on mode, gnss_aj_mode=2/3)";
+	if(fw_jam)                        return "IN (forced by the firmware's detector)";
+	if(vw.st & GNSS_PT_NPI_ST_DET)    return "IN (FPGA power detector)";
+	return "IN (FPGA detector hold time)";
+}
+
 void gnss_aj_print_short(void)
 {
-	console_print("GNSS_NPI: anti-jam %s, %s%s, jammer %s",
-		      (char*)(aj_on ? "ON" : "off"),
-		      (char*)(core_active ? "FILTER IN" : "bypass"),
-		      (char*)(aj_frozen ? ", weights FROZEN" : ""),
-		      (char*)(!aj_on ? "not monitored" : jam ? "ON" : "none"));
-	if(aj_on && res_valid && res_meas)
-		console_print(", J/N %s dB, suppression %s dB, residual %s dB", f1(res.jn_db),
+	console_print("JAMMER STATUS: %s | PL-NPI filter %s%s",
+		      (char*)ajs_txt(aj_on ? ajs : AJS_UNKNOWN), (char*)filter_why(),
+		      (char*)(aj_frozen ? ", weights FROZEN" : ""));
+	if(aj_on && res_valid && res_meas && (vw.st & GNSS_PT_NPI_ST_ACTIVE))
+		console_print(" | J/N %s dB, suppression %s dB, residual %s dB", f1(res.jn_db),
 			      supp_txt(res.supp_db), f1u(res_disp(res.res_db)));
-	if(gnss_pt_read(GNSS_PT_REG_STATUS) & GNSS_PT_ST_NPI_DROP)
-		console_print(", SAMPLES DROPPED (STATUS[10])");
+	if(vw.stat_reg & GNSS_PT_ST_NPI_DROP)
+		console_print(" | SAMPLES DROPPED (STATUS[10])");
 	console_print("\n");
 }
 
 void gnss_aj_print(void)
 {
-	XTime now;
 	gnss_aj_print_short();
 	console_print("  mode        : %s\n", (char*)mode_name(aj_mode));
-	if(!res_valid) {
+	if(!res_valid || !vw.valid) {
 		console_print("  (no capture processed yet%s)\n", (char*)(aj_on ? "" : ": gnss_npi=1 starts it"));
 		return;
 	}
-	XTime_GetTime(&now);
-	if(jam) {
-		console_print("  jammer      : ON for %s s, J/N %s dB (peak %s), ",
-			      f1u((double)ms_since(jam_t0, now) / 1000.0), f1(res.jn_db), f1(jam_peak));
-		print_type();
-		console_print("\n");
-		if(res_meas)
-			console_print("  suppression : %s dB, residual %s dB above the output noise (0 = fully nulled)%s\n",
-				      supp_txt(res.supp_db), f1u(res_disp(res.res_db)),
-				      (char*)(res.res_db > AJ_WARN_RES_DB ? "  <-- jammer leaking" : ""));
-	} else {
-		console_print("  jammer      : none for %s s (coherence %s dB, ON above %s; power J/N %s, ON above %s)\n",
-			      f1u((double)ms_since(clear_t0, now) / 1000.0),
-			      f1(res.jn_coh_db < -30.0 ? -30.0 : res.jn_coh_db), f1(coh_on()),
-			      (char*)(nf0 > 0.0 ? f1(res.jn_db < -9.9 ? -9.9 : res.jn_db) : "(learning)"),
-			      f1u(AJ_ON_DB));
-	}
-	console_print("  more        : gnss_report? prints everything (paste it into a report)\n");
+	console_print("  status      : %s for %s s; coherence %s dB (ON >= %s), power J/N %s (ON >= %s)\n",
+		      (char*)ajs_txt(ajs), f1u((double)ms_since(ajs_t0, vw.t) / 1000.0),
+		      f1(res.jn_coh_db < -30.0 ? -30.0 : res.jn_coh_db), f1(coh_on()),
+		      (char*)(nf0 > 0.0 ? f1(res.jn_db < -9.9 ? -9.9 : res.jn_db) : "(learning)"), f1u(AJ_ON_DB));
+	console_print("  more        : gnss_report prints everything (paste it into a report)\n");
 }
 
 void gnss_aj_report(void)
 {
-	uint32_t fs, bw = 0, cfg, ver, gam, live;
-	uint64_t lo;
 	XTime now;
-	int i, first;
+	int i, first, k;
+	uint32_t cfg = vw.cfg_act, live = vw.st;
 	static const char *cmodes[4] = {"AUTO (detector)", "BYPASS", "ON (forced)", "HOLD"};
+	int st = aj_on ? ajs : AJS_UNKNOWN;
 
 	XTime_GetTime(&now);
-	ver  = gnss_pt_read(GNSS_PT_REG_VERSION);
-	cfg  = gnss_pt_read(GNSS_PT_REG_NPI_CFG_ACTIVE);
-	gam  = gnss_pt_read(GNSS_PT_REG_NPI_GAMMA);
-	live = gnss_pt_read(GNSS_PT_REG_NPI_SNAP);
-	radio(&fs, &lo);
-	if(ad9361_phy) ad9361_get_rx_rf_bandwidth(ad9361_phy, &bw);
+	/* a snapshot older than the stale limit is not a measurement any more */
+	if(aj_on && (!vw.valid || now - vw.t > us(AJ_ST_STALE_US))) st = AJS_UNKNOWN;
 
 	console_print("\n===== GNSS-AJ REPORT (copy from here) =====\n");
-	console_print("firmware      : %s, bitstream %d.%d, uptime %s s\n",
-		      (char*)GNSS_AJ_VERSION_STR, (long)(ver >> 16), (long)(ver & 0xFFFFU),
-		      f1u((double)ms_since(t_boot, now) / 1000.0));
-	console_print("radio         : LO %s MHz, %s MS/s, RF bandwidth %s MHz (gnss_band=%d)\n",
-		      f3u((double)lo / 1e6), f2u((double)fs / 1e6), f1u((double)bw / 1e6), (long)band);
-	console_print("band          : ");
-	print_band_cover();
-	console_print("\n");
-	console_print("tx            : %s, TX1 attenuation %s dB (operator %s dB, level hold +%d dB)",
-		      (char*)(transmitting() ? "TRANSMITTING" : "silent"), f2u(tx_att_db()),
-		      f2u((double)gnss_rxg_att_base() / 1000.0), (long)gnss_rxg_comp_db());
-	if(tx_noted == 1)
-		console_print(", on for %s s", f1u((double)ms_since(tx_t0, now) / 1000.0));
-	console_print("\n");
-	console_print("rx gain       : %d dB both channels (clean reference %d), ADC peak %d of 2047\n",
-		      (long)cur_gain(), (long)gnss_rxg_ref(), (long)gnss_rxg_peak());
-	console_print("normalisation : g2 = %s (%s dB) %s; RX2 noise after it = %s x RX1\n",
-		      f3u(g2_core()), f1(npi_db10(g2_core() * g2_core())), (char*)g2_src_txt(), f2u(rx2n));
-	if(nf0 > 0.0)
-		console_print("noise floor   : RX1 %s LSB^2 at the present gain (learned)\n", f1u(noise_now()));
-	else
-		console_print("noise floor   : not learned yet (needs a moment with no jammer)\n");
-	console_print("anti-jam      : %s, %s%s\n", (char*)(aj_on ? "ON" : "OFF"),
-		      (char*)mode_name(aj_mode), (char*)(aj_frozen ? ", weights FROZEN" : ""));
-	console_print("core          : mode %s, filter %s, image taps %s, make-up shift %d (+%d dB),\n"
-		      "                gamma %s (k = %s), detector %s: threshold %s, power %s LSB^2, %d events\n",
-		      (char*)cmodes[cfg & 3U], (char*)((live & GNSS_PT_NPI_ST_ACTIVE) ? "IN" : "BYPASSED (TX1 = RX1)"),
-		      (char*)((cfg & GNSS_PT_NPI_CFG_IMAGE) ? "on" : "off"),
-		      (long)((cfg >> 8) & 7U), (long)(6 * ((cfg >> 8) & 7U)),
-		      fmt((double)gam, 0, 0),
+	console_print("JAMMER STATUS: %s\n", (char*)ajs_txt(st));
+	if(st == AJS_UNKNOWN) {
+		if(!aj_on)
+			console_print("  why          : anti-jam off (gnss_npi=1 starts it)\n");
+		else if(!vw.valid)
+			console_print("  why          : no capture processed yet\n");
+		else
+			console_print("  why          : no valid capture for %s ms (DMA errors %d, TX DDR replay %s)\n",
+				      fmt((double)ms_since(vw.t, now), 0, 0), (long)n_fail,
+				      (char*)(gnss_txdma_is_running() ? "RUNNING" : "off"));
+	} else {
+		console_print("  since        : t = %s s (%s s); %s\n",
+			      f3u((double)ms_since(t_boot, ajs_t0) / 1000.0),
+			      f1u((double)ms_since(ajs_t0, vw.t) / 1000.0),
+			      (char*)(st == AJS_ON ? why_txt(ajs_why) : "every metric below its OFF threshold"));
+		console_print("  rule         : ON after %d consecutive captures with evidence; OFF after %s s\n"
+			      "                 with all metrics below the (lower) OFF thresholds\n",
+			      (long)AJ_ST_ON_N, f1u((double)AJ_ST_OFF_US / 1e6));
+	}
+	if(!vw.valid) {
+		console_print("===== END REPORT =====\n");
+		return;
+	}
+	console_print("snapshot      : capture %d at t = %s s (%s ms old), %d captures/s; this report\n"
+		      "                reads no register and runs no detector\n",
+		      (long)n_cap, f3u((double)ms_since(t_boot, vw.t) / 1000.0),
+		      fmt((double)ms_since(vw.t, now), 0, 0), (long)cap_rate);
+	console_print("detection     : coherence %s at lag %d = %s dB (ON >= %s, quiet < %s)\n",
+		      f3u(res.coh), (long)res.coh_lag, f1(res.jn_coh_db < -30.0 ? -30.0 : res.jn_coh_db),
+		      f1(coh_on()), f1(coh_off()));
+	console_print("                power J/N %s dB (ON >= %s with coherence >= %s, quiet < %s)\n",
+		      (char*)(nf0 > 0.0 ? f1(res.jn_db < -99.0 ? -99.0 : res.jn_db) : "(no floor yet)"),
+		      f1u(AJ_ON_DB), f1(AJ_PWR_COH_DB), f1u(AJ_OFF_DB));
+	console_print("                RX gain cut %d dB (matched gain mode only), FPGA detector %s%s\n",
+		      (long)cut_db(), (char*)((live & GNSS_PT_NPI_ST_DET) ? "ON" : "off"),
+		      (char*)(hw_veto ? " (vetoed: not coherent)" : vw.hw_coh ? " (coherent)" : ""));
+	console_print("                CW scan: ");
+	{
+		int any = 0;
+		for(k = 0; k < NPI_CW_MAX; k++) {
+			if(!cwt[k].used) continue;
+			console_print("%s%s MHz +%s dB in bin (J/N %s dB), %s", (char*)(any ? "; " : ""),
+				      f3u(rf_mhz(cwt[k].f)), f1u(cwt[k].snr1), f1(cw_jn(cwt[k].snr1)),
+				      (char*)(cwt[k].conf ? "CONFIRMED" : "candidate"));
+			any = 1;
+		}
+		if(!any) console_print("no narrowband peak >= %d dB in both antennas", (long)AJ_CW_DET_DB);
+		console_print("\n");
+	}
+	console_print("powers        : RX1 %s, RX2 %s LSB^2 (DC removed); DC RX1 %s, RX2 %s LSB%s\n",
+		      f1u(res.p1), f1u(res.p2), f1u(res.dc1), f1u(res.dc2),
+		      (char*)((nf0 > 0.0 && res.dc1 * res.dc1 > noise_now()) ? " (LARGE)" : ""));
+	if(coh_bg > -90.0)
+		console_print("background    : RX1/RX2 common signal, coherence %s dB: not a jammer (splitter / one source / TX1 leak?)\n", f1(coh_bg));
+	console_print("filter        : PL-NPI %s%s\n", (char*)filter_why(), (char*)(aj_frozen ? ", weights FROZEN" : ""));
+	console_print("core          : mode %s, image taps %s, make-up shift %d (+%d dB), gamma %s (k = %s),\n"
+		      "                detector threshold %s, power %s LSB^2, %d detector events\n",
+		      (char*)cmodes[cfg & 3U], (char*)((cfg & GNSS_PT_NPI_CFG_IMAGE) ? "on" : "off"),
+		      (long)((cfg >> 8) & 7U), (long)(6 * ((cfg >> 8) & 7U)), fmt((double)vw.gamma, 0, 0),
 		      (char*)(gnss_npi_k_eighths() % 8U ? fmt((double)gnss_npi_k_eighths() / 8.0, 3, 0)
 		                                        : fmt((double)(gnss_npi_k_eighths() / 8U), 0, 0)),
-		      (char*)((live & GNSS_PT_NPI_ST_DET) ? "ON" : "off"),
 		      (char*)(thr_w == 0xFFFFFFFFU ? "not armed" : fmt((double)thr_w, 0, 0)),
-		      fmt((double)snap.pow, 0, 0), (long)GNSS_PT_NPI_ST_CNT(live));
-	if(jam)
-		console_print("state         : JAMMED for %s s (since t = %s s)\n",
-			      f1u((double)ms_since(jam_t0, now) / 1000.0),
-			      f3u((double)ms_since(t_boot, jam_t0) / 1000.0));
-	else
-		console_print("state         : CLEAR for %s s\n", f1u((double)ms_since(clear_t0, now) / 1000.0));
-	if(res_valid) {
-		console_print("detection     : coherence %s at lag %d (%s dB; ON above %s), power J/N %s dB\n",
-			      f3u(res.coh), (long)res.coh_lag,
-			      f1(res.jn_coh_db < -30.0 ? -30.0 : res.jn_coh_db), f1(coh_on()),
-			      f1(res.jn_db < -99.0 ? -99.0 : res.jn_db));
-		console_print("powers        : RX1 %s, RX2 %s LSB^2 (DC removed)\n", f1u(res.p1), f1u(res.p2));
-		console_print("dc offset     : RX1 %s LSB, RX2 %s LSB (removed before detection)%s\n", f1u(res.dc1), f1u(res.dc2),
-			      (char*)((nf0 > 0.0 && res.dc1 * res.dc1 > noise_now()) ?
-				      "\n                LARGE: above the noise; AD9361 DC calibration/tracking not removing it" : ""));
-		if(coh_bg > -90.0)
-			console_print("background    : RX1/RX2 common signal, coherence %s dB: not a jammer (splitter / one source / TX1 leak?)\n", f1(coh_bg));
+		      fmt((double)vw.pow, 0, 0), (long)GNSS_PT_NPI_ST_CNT(live));
+	if(core_v24) {
+		console_print("dc blocker    : %s (gnss_aj_dc=)\n", (char*)((cfg & GNSS_PT_NPI_CFG_DCBLK) ? "ON" : "off"));
+		console_print("cw notches    : %d in the core, auto %s (gnss_aj_notch=):", (long)core_notches,
+			      (char*)(notch_auto ? "on" : "off"));
+		for(k = 0; k < core_notches && k < NPI_CW_MAX; k++) {
+			if(cfg & GNSS_PT_NPI_CFG_NOTCH(k))
+				console_print(" [%d] %s MHz ON", (long)k, f3u(rf_mhz(notch_f[k])));
+			else
+				console_print(" [%d] off", (long)k);
+		}
+		console_print("\n");
+	} else {
+		console_print("dc blocker    : not in this bitstream (%d.%d; v2.4 has it)\n", (long)(vw.ver >> 16), (long)(vw.ver & 0xFFFFU));
+		console_print("cw notches    : not in this bitstream (v2.4 has them)\n");
 	}
 	if(jam && res_meas) {
 		console_print("jammer        : J/N %s dB (peak %s), ", f1(res.jn_db), f1(jam_peak));
@@ -1199,20 +1535,49 @@ void gnss_aj_report(void)
 			      f3u(npi_sqrt(res.w[0] * res.w[0] + res.w[1] * res.w[1])), f3u(g2_core()),
 			      f3u(npi_sqrt(res.w[2] * res.w[2] + res.w[3] * res.w[3])),
 			      f3u(npi_sqrt(res.w[4] * res.w[4] + res.w[5] * res.w[5])));
+	} else if(jam) {
+		console_print("jammer        : J/N %s dB; the PL-NPI filter is bypassed (narrowband only:\n"
+			      "                the notch handles it, power inversion cannot null a CW below the noise)\n",
+			      f1(res.jn_db));
 	}
-	if(jam && null_ms >= 0.0)
-		console_print("time to null  : %s ms after detection (this jammer; the FPGA adapts in microseconds,\n"
-			      "                this is the first capture that saw it nulled)\n", fmt(null_ms, 0, 0));
+	if(null_ms >= 0.0 && jam)
+		console_print("time to null  : %s ms after detection (this jammer)\n", fmt(null_ms, 0, 0));
 	else if(null_ms_last >= 0.0)
 		console_print("time to null  : %s ms after detection (last jammer)\n", fmt(null_ms_last, 0, 0));
+	console_print("gnss tracking : not available to the board (the receiver's tracking state does not\n"
+		      "                reach the E310); read satellites, C/N0 and fix in the receiver\n");
+	console_print("firmware      : %s, bitstream %d.%d, uptime %s s\n",
+		      (char*)GNSS_AJ_VERSION_STR, (long)(vw.ver >> 16), (long)(vw.ver & 0xFFFFU),
+		      f1u((double)ms_since(t_boot, now) / 1000.0));
+	console_print("radio         : LO %s MHz, %s MS/s, RF bandwidth RX %s / TX %s MHz (gnss_band=%d)\n",
+		      f3u((double)vw_lo / 1e6), f2u((double)vw_fs / 1e6), f1u((double)vw_rbw / 1e6),
+		      f1u((double)vw_tbw / 1e6), (long)band);
+	console_print("band          : ");
+	print_band_cover();
+	console_print("\n");
+	console_print("tx            : %s, TX1 attenuation %s dB (operator %s dB, level hold +%d dB)",
+		      (char*)(vw.txon ? "TRANSMITTING" : "silent"), f2u(vw.txatt),
+		      f2u((double)gnss_rxg_att_base() / 1000.0), (long)gnss_rxg_comp_db());
+	if(tx_noted == 1)
+		console_print(", on for %s s", f1u((double)ms_since(tx_t0, vw.t) / 1000.0));
+	console_print("\n");
+	console_print("rx gain       : RX1 %d dB, RX2 %d dB, %s (reference %d), ADC peak %d of 2047\n",
+		      (long)vw.g0, (long)vw.g1, (char*)gnss_rxg_mode_txt(), (long)gnss_rxg_ref(), (long)gnss_rxg_peak());
+	console_print("normalisation : g2 = %s (%s dB) %s; RX2 noise after it = %s x RX1\n",
+		      f3u(g2_core()), f1(npi_db10(g2_core() * g2_core())), (char*)g2_src_txt(), f2u(rx2n));
+	if(nf0 > 0.0)
+		console_print("noise floor   : RX1 %s LSB^2 at the present gain (learned)\n", f1u(noise_now()));
 	else
-		console_print("time to null  : - (no jammer nulled yet)\n");
-	console_print("engine        : %d captures/s; %d captures, %d skipped (gain step), %d DMA errors, %d short bursts\n",
-		      (long)cap_rate, (long)n_cap, (long)n_skip, (long)n_fail, (long)n_burst);
+		console_print("noise floor   : not learned yet (needs a moment with no jammer)\n");
+	console_print("anti-jam      : %s, %s\n", (char*)(aj_on ? "ON" : "OFF"), (char*)mode_name(aj_mode));
+	console_print("engine        : %d captures, %d skipped (gain step), %d DMA errors, %d short bursts,\n"
+		      "                %d events held while you typed\n",
+		      (long)n_cap, (long)n_skip, (long)n_fail, (long)n_burst, (long)n_held);
 	if(aj_log_s > 0) console_print("printing      : status every %d s (gnss_aj_log=)", (long)aj_log_s);
 	else             console_print("printing      : status line off (gnss_aj_log=30 to see it)");
-	if(aj_csv_ms > 0) console_print(", CSV every %d ms (gnss_aj_csv=)\n", (long)aj_csv_ms);
-	else              console_print(", CSV off (gnss_aj_csv=)\n");
+	if(aj_csv_ms > 0) console_print(", CSV every %d ms (gnss_aj_csv=)", (long)aj_csv_ms);
+	else              console_print(", CSV off");
+	console_print(", events %s\n", (char*)(aj_events ? "printed" : "silent (gnss_aj_events=1)"));
 	console_print("events        : %d in total, the last %d:\n", (long)ev_n, (long)(ev_n < 8 ? ev_n : 8));
 	first = ev_n > 8 ? ev_n - 8 : 0;
 	for(i = first; i < ev_n; i++) {
@@ -1225,9 +1590,12 @@ void gnss_aj_report(void)
 					      f1(e->v1), f2u(e->v2), (char*)why_txt((int)e->v3)); break;
 		case EV_NULLED: console_print("NULLED      %s ms after detection, suppression %s dB, residual %s dB\n",
 					      fmt(e->v1, 0, 0), supp_txt(e->v2), f1u(res_disp(e->v3))); break;
-		case EV_OFF:    console_print("JAMMER OFF  after %s s, peak J/N %s dB\n", f1u(e->v1), f1(e->v2)); break;
+		case EV_OFF:    console_print("JAMMER %s after %s s, peak J/N %s dB\n",
+					      (char*)(e->v3 > 0.5 ? "UNKNOWN (no measurement)" : "OFF "), f1u(e->v1), f1(e->v2)); break;
 		case EV_LEAK:   console_print("LEAKING     residual %s dB at J/N %s dB\n", f1(e->v1), f1(e->v2)); break;
-		case EV_FLOOR:   console_print("FLOOR       noise rose %s dB with no RX1/RX2 coherence: floor re-learned, not a jammer\n", f1(e->v1)); break;
+		case EV_FLOOR:  console_print("FLOOR       noise rose %s dB with no RX1/RX2 coherence: floor re-learned, not a jammer\n", f1(e->v1)); break;
+		case EV_CW:     console_print("CW %s   %s MHz, +%s dB in its FFT bin\n", (char*)(e->v3 > 0.5 ? "ON " : "OFF"),
+					      f3u(e->v1), f1u(e->v2)); break;
 		case EV_BG:
 			if(e->v1 > -90.0)
 				console_print("BACKGROUND  RX1/RX2 common signal, coherence %s dB at power J/N %s dB: not a jammer\n",
@@ -1258,6 +1626,12 @@ static const struct band_cfg bands[GNSS_BAND_COUNT] = {
 	{1582500000ULL, 61440000U, 56000000U, "ALL: GPS, Galileo, QZSS, SBAS, BeiDou B1I + B1C, GLONASS G1"},
 	{1589500000ULL, 50000000U, 40000000U, "GPS, Galileo, GLONASS G1 at 50 MS/s (no BeiDou B1I)"},
 	{1568250000ULL, 50000000U, 40000000U, "GPS, Galileo, BeiDou B1I + B1C at 50 MS/s (no GLONASS)"},
+	/* v2.4 default: the deployment's own configuration (LO 1570.25 MHz,
+	 * 50 MS/s, 50 MHz RX and TX). Flat +-20 MHz: BeiDou B1I -9.15 MHz, GPS /
+	 * Galileo / B1C +5.17 MHz; GLONASS (+27.8 MHz and up) is outside. The
+	 * AD9361 TX analog filter tops out at 20 MHz baseband (40 MHz RF): the
+	 * driver clamps it, the report shows the readback. */
+	{1570250000ULL, 50000000U, 50000000U, "USER: GPS, Galileo, QZSS, SBAS, BeiDou B1I + B1C (no GLONASS)"},
 };
 static int band_applied;
 
@@ -1342,6 +1716,12 @@ int gnss_band_set(int b)
 		r |= (ad9361_do_calib_run(ad9361_phy, TX_QUAD_CAL, -1) < 0) ? 1 : 0;
 	band = b;
 	band_applied = 1;
+	view_radio();
+	npi_cw_reset();
+	{
+		int k;
+		for(k = 0; k < NPI_CW_MAX; k++) { cwt[k].used = 0; cwt[k].conf = 0; }
+	}
 	/* noise power at the ADC depends on the bandwidth: learn it again; the
 	 * detector hold time depends on the rate: recommit the core settings */
 	nf0 = -1.0;
@@ -1413,8 +1793,10 @@ static void radio_guard(void)
 	d1 = (int64_t)rlo - (int64_t)c->lo;  d2 = (int64_t)tlo - (int64_t)c->lo;
 	d3 = (int64_t)rfs - (int64_t)c->fs;  d4 = (int64_t)tfs - (int64_t)c->fs;
 	if(!rf && !tf && d1 > -1000 && d1 < 1000 && d2 > -1000 && d2 < 1000 &&
-	   d3 > -1000 && d3 < 1000 && d4 > -1000 && d4 < 1000)
+	   d3 > -1000 && d3 < 1000 && d4 > -1000 && d4 < 1000) {
+		view_radio();
 		return;
+	}
 	stamp(now);
 	console_print("radio changed outside gnss_band= (LO RX %s TX %s MHz, RX %s TX %s MS/s,\n"
 		      "     FIR RX %s TX %s) -> profile %d restored. Use gnss_band= to change the band.\n",

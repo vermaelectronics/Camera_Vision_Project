@@ -268,6 +268,10 @@ void gnss_rxg_set_mode(int mode)
 		gnss_rxg_stop_tx_hold();
 
 	if(mode == GNSS_RXG_AD9361) {
+		/* v2.4: both channels from the same start gain, then the AGC */
+		manual_both();
+		ad9361_set_rx_rf_gain(ad9361_phy, 0, GNSS_RXG_AGC_START_DB);
+		ad9361_set_rx_rf_gain(ad9361_phy, 1, GNSS_RXG_AGC_START_DB);
 		ad9361_set_rx_gain_control_mode(ad9361_phy, 0, RF_GAIN_SLOWATTACK_AGC);
 		ad9361_set_rx_gain_control_mode(ad9361_phy, 1, RF_GAIN_SLOWATTACK_AGC);
 	} else if(mode == GNSS_RXG_MANUAL) {
@@ -282,6 +286,22 @@ void gnss_rxg_set_mode(int mode)
 }
 
 int gnss_rxg_mode(void) { return rxg_mode; }
+
+const char *gnss_rxg_mode_txt(void)
+{
+	return rxg_mode == GNSS_RXG_MATCHED ? "matched loop (gnss_rx_agc=2)" :
+	       rxg_mode == GNSS_RXG_AD9361  ? "AD9361 slow-attack AGC per channel (gnss_rx_agc=1)" :
+	                                      "manual (gnss_rx_agc=0)";
+}
+
+void gnss_npi_gamma_noise(double n1, int jammed)
+{
+	if(rxg_mode == GNSS_RXG_MATCHED || n1 <= 0.0) return;
+	nfloor = n1;
+	if(jam_on != (jammed ? 1 : 0)) gam_written = 0U;
+	jam_on = jammed ? 1 : 0;
+	write_gamma();
+}
 
 int32_t gnss_rxg_gain(void)
 {

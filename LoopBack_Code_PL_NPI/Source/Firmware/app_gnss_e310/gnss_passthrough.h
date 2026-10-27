@@ -78,7 +78,7 @@
  * into NPI_W/NPI_DET_POW/NPI_ST_LATCHED; a read of NPI_SNAP is the live
  * status. */
 #define GNSS_PT_REG_NPI_COMMIT      0x180U  /* W: commit, R: count            */
-#define GNSS_PT_REG_NPI_INFO        0x184U  /* RO 0x03020801                  */
+#define GNSS_PT_REG_NPI_INFO        0x184U  /* RO 0x03020802                  */
 #define GNSS_PT_REG_NPI_CFG         0x188U  /* RW [1:0] mode, [2] image, [10:8] shift */
 #define GNSS_PT_REG_NPI_NORM        0x18CU  /* RW g2, Q3.13 {im, re}          */
 #define GNSS_PT_REG_NPI_DET_THR     0x190U  /* RW detector threshold [LSB^2]  */
@@ -88,7 +88,9 @@
 #define GNSS_PT_REG_NPI_W(k)        (0x1A0U + ((k) * 4U)) /* RO k = 0..5, Q12.20 */
 #define GNSS_PT_REG_NPI_DET_POW     0x1B8U  /* RO latched detector power      */
 #define GNSS_PT_REG_NPI_ST_LATCHED  0x1BCU  /* RO latched core status         */
-#define GNSS_PT_NPI_INFO_EXPECTED   0x03020801U
+#define GNSS_PT_REG_NPI_NCOEF(k)    (0x1C0U + ((k) * 4U)) /* RW k = 0..5, v2.4: notch
+                                                      * k/3, q/p/p^2, {im,re} Q1.14 */
+#define GNSS_PT_NPI_INFO_EXPECTED   0x03020802U
 /* NPI_CFG */
 #define GNSS_PT_NPI_MODE_AUTO       0x0U    /* power detector switches it     */
 #define GNSS_PT_NPI_MODE_BYPASS     0x1U    /* TX1 = RX1, weights 0           */
@@ -96,11 +98,16 @@
 #define GNSS_PT_NPI_MODE_HOLD       0x3U    /* filter in, weights frozen      */
 #define GNSS_PT_NPI_CFG_IMAGE       0x4U    /* image taps on                  */
 #define GNSS_PT_NPI_CFG_SHIFT(s)    ((uint32_t)((s) & 7) << 8)
+#define GNSS_PT_NPI_CFG_DCBLK       0x8U    /* v2.4: input DC blocker on      */
+#define GNSS_PT_NPI_CFG_NOTCH(k)    (1U << (12 + (k)))  /* v2.4: CW notch k on */
+#define GNSS_PT_NPI_NOTCH_NFRAC     14      /* notch coefficients Q1.14       */
 /* core status (NPI_SNAP / NPI_ST_LATCHED) */
 #define GNSS_PT_NPI_ST_DET          0x1U    /* power detector on              */
 #define GNSS_PT_NPI_ST_ACTIVE       0x2U    /* filter in the path             */
 #define GNSS_PT_NPI_ST_ADAPT        0x10U   /* weights adapting               */
 #define GNSS_PT_NPI_ST_CNT(st)      ((uint32_t)(st) >> 16)  /* detector events */
+#define GNSS_PT_NPI_ST_NOTCHES(st)  (((uint32_t)(st) >> 5) & 7U) /* v2.4: notches in core */
+#define GNSS_PT_NPI_ST_DCBLK        0x100U  /* v2.4: DC blocker on            */
 
 /* ---- expected identity --------------------------------------------------- */
 #define GNSS_PT_EXPECTED_ID         0x47435031U
@@ -115,7 +122,7 @@
  * 2.3 = pl_npi_0 v2.0 on sys_cpu_clk (II=1) behind async FIFOs (61.44 MS/s),
  *       RX2 normalisation, image taps, gated adaptation, make-up gain:
  *       NPI_CFG/NORM/DET_* + NPI_COMMIT, NPI_SNAP/NPI_W read-back. */
-#define GNSS_PT_EXPECTED_VERSION    0x00020003U
+#define GNSS_PT_EXPECTED_VERSION    0x00020004U
 
 /* ---- CONTROL bits -------------------------------------------------------- */
 #define GNSS_PT_CTRL_PASS_EN        (1U << 0)  /* 1 = RX->TX passthrough      */
@@ -173,6 +180,9 @@ void     gnss_pt_set_npi(int enable);
 /* v2.3: writes NPI_CFG, NPI_NORM (g2 Q3.13, real), NPI_DET_THR and
  * NPI_DET_HOLD and commits them in one go. */
 void     gnss_pt_npi_write(uint32_t cfg, int32_t g2_q13, uint32_t det_thr, uint32_t det_hold);
+/* v2.4: the six notch coefficient words (shadow; committed by the next
+ * gnss_pt_npi_write). */
+void     gnss_pt_npi_write_ncoef(const uint32_t w[6]);
 /* v2.3: latches and reads the core's weights (Q12.20: w2 re, w2 im, c1 re,
  * c1 im, c2 re, c2 im), detector power and status as one coherent set. */
 typedef struct { uint32_t st, pow; int32_t w[6]; } gnss_pt_npi_snap_t;

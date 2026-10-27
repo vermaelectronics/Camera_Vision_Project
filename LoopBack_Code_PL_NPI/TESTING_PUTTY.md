@@ -1,10 +1,17 @@
-# Testing PL-NPI v2.3 on PuTTY, and what to send back
+# Testing PL-NPI v2.4 on PuTTY, and what to send back
 
 This guide sets PuTTY up so every line the board prints is saved to a file.
 Then come the tests. Each one says what to type, what you should see, and
 what to write down. At the end there is a **report template**: fill it in and
-paste it into your next message, together with the `gnss_report?` blocks.
-That gives me exactly what I need for the next improvement.
+paste it into your next message, together with the `gnss_report` blocks.
+
+> **Jammer and TX1 safety.** Run the jammer tests only on a **conducted**
+> path (coax, attenuators, splitter/combiner, DC blocks where needed), in a
+> **shielded enclosure**, or under a test authorisation that covers it.
+> Never connect a jammer or the TX1 output to an antenna. Before you
+> connect or disconnect anything on TX1, type `gnss_tx=0`. Keep enough
+> fixed attenuation in front of the GNSS receiver: the AD9361 can deliver
+> up to about +7 dBm with 0 dB attenuation.
 
 ---
 
@@ -22,171 +29,218 @@ console shows up as a "USB Serial Port (COMx)".
 | Session → Logging | **All session output**; Log file name `C:\AJlogs\e310_&Y&M&D_&T.log`; tick **Flush log file frequently**. (Create the folder `C:\AJlogs` first.) |
 | Session | Saved Sessions: type `E310`, press **Save** |
 
-Every time you connect, a new time-stamped log file is created, so you never
-have to copy from the screen. To copy a block from the screen, select it with
-the mouse (that copies it) and paste it with Ctrl+V in your message.
-
-Type commands exactly as shown and press Enter. By default the board prints
-only jammer events; `gnss_aj_log=30` adds a status line every 30 s, which
-waits while you type, so it never runs through a command.
-Jammer events also wait while you type; `gnss_aj_events=0` silences the
-console completely (`gnss_report?` still lists every event). `?` shows the menu,
-`help?` lists every command.
+Type commands exactly as shown and press Enter. `gnss_report` and
+`gnss_report?` are the same command. By default the board prints only
+jammer events, and they wait while you type. `gnss_aj_log=30` adds a status
+line every 30 s. `gnss_aj_events=0` silences the console completely
+(`gnss_report` still lists every event).
 
 ---
 
 ## 2. The lines to read
 
-| Line / field | Meaning | Good value |
-|---|---|---|
-| `[AJ 12.345 s]` | time since the anti-jam engine started | – |
-| `TX1 ON: the receiver's time to fix counts from here` | the moment the receiver starts getting a signal | start your stopwatch here |
-| `*** JAMMER ON ***  J/N +30.2 dB, WIDEBAND ...` | jammer detected. J/N = how far it is above the board's noise floor | – |
-| `detected by ...` | the FPGA power detector, RX1/RX2 coherence (weak jammers), power, or the RX gain cut | FPGA detector for strong, coherence for weak jammers |
-| `NULLED 2 ms after detection` | first capture that saw the jammer removed (the FPGA itself needs microseconds) | < 20 ms |
-| `suppression 45.0 dB` | how much the jammer was reduced (capped at 60) | ≥ J/N |
-| `residual 0.3 dB` | output power above the plain noise; **0 = jammer completely removed** | < 1 dB (warning above 3) |
-| `make-up +24 dB` | digital gain that restores the level after the RX gain cut | – |
-| `RX 43/70 dB` | RX gain now / clean reference | – |
-| `jammer OFF after 4.5 s ... filter bypassed, TX1 = RX1` | jammer gone, output is the plain RX1 signal again | – |
-| `clear ... coherence -15.0 dB` | no jammer; coherence about −15 dB is pure noise | below −9 dB |
-| `g2 +1.0 dB` | how much RX2 is boosted to match RX1 | within ±6 dB (more = check RX2 cable/antenna) |
-| `captures/s` | how often the ARM checks and measures | a few hundred |
-| `w2`, `c1`, `c2` (`gnss_report?` weights line) | the weights the FPGA is really using; c1/c2 are the image taps | w2 near 1 when RX1/RX2 are matched; c1/c2 small (0.001–0.05) |
-| `gnss_band?` → `received?` | which GNSS systems the RF profile carries | all `OK` |
+### `gnss_report`
+
+The first line is always one of:
+
+| First line | Meaning |
+|---|---|
+| `JAMMER STATUS: ON` | A jammer is present. Confirmed by 4 captures in a row (wideband) or by the CW scan (narrowband). It stays ON until every metric has been below the lower OFF thresholds for 1 s. |
+| `JAMMER STATUS: OFF` | No jammer. Measurements are valid. |
+| `JAMMER STATUS: UNKNOWN` | No valid measurement: no capture for > 0.5 s (DMA stopped, radio being changed), or anti-jam off (`gnss_npi=0`). |
+
+Each `gnss_report` prints one snapshot from the last capture. It changes
+nothing and measures nothing itself. Typing it twice in a row gives the
+same block, apart from the `ms old` figure.
+
+| Field | Meaning |
+|---|---|
+| `since`, `rule` | when the status last changed, which evidence did it, and the ON/OFF rules |
+| `detection` | every metric next to its ON and OFF threshold: coherence, power J/N, RX gain cut, FPGA detector, CW scan |
+| `cw scan` | each narrowband peak: RF frequency, level in both antennas, `CONFIRMED` or candidate |
+| `filter` | whether PL-NPI is **in the TX1 path** and why. This is **separate** from the jammer status: a CW below the noise is notched while the PL-NPI filter stays bypassed. |
+| `dc blocker`, `cw notches` | FPGA DC blocker on/off; notch frequencies in use (`[0] 1575.422 MHz ON`) |
+| `suppression`, `residual` | how much the jammer is reduced; residual 0 dB = fully removed |
+| `gnss tracking` | the board cannot see the receiver's tracking state; read it in the receiver |
+| `radio` | LO, sample rate, RX/TX RF bandwidth, `gnss_band=` |
+| `rx gain` | RX1 and RX2 gain and the gain mode (AD9361 slow-attack AGC by default) |
+
+### Events
+
+| Line | Meaning |
+|---|---|
+| `[AJ 12.345 s]` | time since the anti-jam engine started (use it for latencies) |
+| `TX1 ON` | the receiver starts getting a signal: start the stopwatch here |
+| `CW at 1575.422 MHz, +22.2 dB in its FFT bin ...: notch 0 ON` | a CW was confirmed and notched |
+| `*** JAMMER ON ***  J/N ..., WIDEBAND ...` or `... CW tone at RF ...` | status went ON. `detected by` says which evidence did it. |
+| `NULLED 7 ms after detection` | first capture that saw the jammer removed |
+| `jammer OFF after 4.5 s ...: JAMMER STATUS OFF` | status went OFF |
 
 ---
 
 ## 3. Tests
 
-Use the **same receiver, antennas, cables and GNSS viewer** in every test.
-Write down the jammer generator's setting in **dBm** (and frequency /
-bandwidth) as well as the J/N the board prints. The two are different
-things: J/N is relative to the board's noise.
+Use the **same receiver, antennas or simulator, cables and GNSS viewer** in
+every test.
 
 ### T0. Boot check (every new BOOT.BIN)
 
 1. Power on with PuTTY connected. Look for:
    ```
-   gnss_pt: present at 0x43c00000, version 2.3
-   SELFTEST: PASS ...
-   ANTI-JAM (PL-NPI 2.3.6): ON, bypassed until a jammer appears.
+   gnss_pt: present at 0x43c00000, version 2.4
+   ANTI-JAM (PL-NPI 2.4.0): ON, bypassed until a jammer appears.
    ```
-2. Type `gnss_band?`. All five signals must show `OK` and both FIRs `off`.
-3. Type `gnss_report?` and keep the block.
+2. Type `gnss_band?`. Check that it shows `4 = USER`, LO RX/TX 1570.250 MHz,
+   50.00 MS/s, RF bandwidth 50.0 MHz, both FIRs `off`. GPS, Galileo/B1C and
+   BeiDou B1I should be `OK`, and GLONASS `OUTSIDE`.
+3. Type `gnss_report` **twice**. The first line of both must be
+   `JAMMER STATUS: OFF` (no jammer connected), and the blocks must be the
+   same. In `rx gain`, check `AD9361 slow-attack AGC`. In `dc blocker`, check
+   `ON`; in `cw notches`, check `2 in the core`. Keep the blocks.
 
-### T1. Constellations, no jammer (fixes "no BeiDou / fewer satellites")
+### T1. RF parameters check
 
-1. In the receiver, switch on GPS, Galileo, GLONASS **and BeiDou**. Check its
-   manual: some track only 3 systems at once.
-2. Type `gnss_tx=1`. Note the `[AJ ...] TX1 ON` time.
-3. After 2 minutes write down, per system: number of satellites **seen** and
-   **used**, and the C/N0 of the 3 strongest.
-4. For comparison, connect the antenna directly to the receiver (no AntSDR)
-   and write down the same numbers. Through the AntSDR they should be within
-   ~1–3 dB C/N0 and the same satellites.
-5. Optional: try `tx1_attenuation=65000` and `75000`. Keep the one with the
-   highest C/N0 (then `tx1_attenuation=70000` to go back).
+Compare `gnss_report` → `radio`, `rx gain`, `tx` with your intended setup:
+1570.25 MHz, 50/50, RX gain mode 2 starting at 40 dB, and TX attenuation
+70 dB after `gnss_tx=1`. If something differs, paste the block. The radio
+guard puts the profile back within 1 s if a vendor command changes the LO,
+rate or FIRs. To change the profile, use `gnss_band=`.
 
-### T2. Time to fix (lock time)
+### T2. Time measurements, no jammer
 
-For each receiver start type (hot, warm, cold, using the viewer's buttons),
-three times:
+For each start type (cold, warm, hot, using the viewer's buttons), do three
+runs **through the AntSDR** and three with the **antenna/simulator directly
+on the receiver**:
 
 1. `gnss_tx=0`, issue the start command in the viewer, then `gnss_tx=1`.
-2. Write down the seconds from `TX1 ON` to **3D fix**.
+2. From the `TX1 ON` time, write down:
+   - **acquisition**: first satellite tracked;
+   - **first fix**: first 3D navigation solution;
+   - the number of satellites used and the average C/N0 after 2 min.
 
-Do the same once with the antenna directly on the receiver, to see the
-receiver's own times. Hot start should be a few seconds. A cold start can
-never be much faster than ~30 s (README_PL_NPI_v2.3.md §6).
+If the AntSDR's times are within a few seconds of the direct ones, the board
+adds nothing. A cold start cannot be much under 26–35 s on any receiver
+(README_PL_NPI_v2.4.md §6). For < 25 s, use warm/hot start or assistance.
 
-### T3. Jammer level steps
+### T3. Calibrated CW jammer: J/S 10, 15, 30, 40 dB
 
-Jammer: CW, then wideband (~55 MHz), centred near 1575 MHz. At each level
-(10, 20, 30, 40, 50 dB J/N as printed, or your generator steps):
+Setup: GNSS simulator (known level, e.g. −130 dBm) and CW generator,
+combined in a splitter/combiner, conducted into RX1 and RX2 (a 2-way splitter
+after the combiner, equal cables).
 
-1. Switch the jammer on and wait 30 s.
-2. Copy the `JAMMER ON`, `NULLED` and the next `JAMMED` status line.
-3. Type `gnss_report?` and keep the block.
-4. Write down satellites seen/used per system, average C/N0 and fix yes/no.
-5. Switch the jammer off and check that `jammer OFF ... filter bypassed`
-   appears.
+1. **Calibrate:** J/S = P_jammer − P_GNSS at the same point (dB). Use the
+   simulator's stated level. Take the combiner and cable losses into
+   account; measure them with a spectrum analyser if possible. Write down
+   the generator settings.
+2. CW at L1 + a few kHz (e.g. 1575.422 MHz). For each J/S of 10, 15, 30
+   and 40 dB, and each of `gnss_aj_notch=1` and `gnss_aj_notch=0`:
+   1. Switch the jammer on. Note the PuTTY time of `CW at ...` and of
+      `JAMMER ON`, which gives the **detection latency**.
+   2. After 60 s: `gnss_report`, then satellites used, average C/N0 and
+      fix (y/n) in the receiver.
+   3. Switch the jammer off. Note the time of `JAMMER STATUS OFF`.
+3. The board prints J/N, not J/S. For C/N0 45 dB-Hz in 50 MHz, J/N ≈ J/S −
+   32 dB. Use this only as a cross-check; your calibration is the
+   reference. At J/S 10 dB (J/N ≈ −22 dB) the CW is below what the scan
+   detects, so `JAMMER STATUS: OFF` is expected there. In simulation it
+   also costs no C/N0.
 
-### T4. Jammer on/off cycles
+Expected from simulation (not yet measured): with the notch, C/N0 within
+about 1.5 dB of the no-jammer value up to J/S 40 dB. Without it, about
+−6 dB at J/S 30 and −13 dB at J/S 40.
 
-`gnss_aj_csv=500`, then jammer 30 s on / 30 s off, three times, at 30 dB and
-at 50 dB. Afterwards `gnss_aj_csv=0`. Note whether the receiver kept its fix
-through the switches. The `AJCSV,` lines in the log open in Excel (Data →
-From Text/CSV, comma-separated; keep only the lines starting with `AJCSV`).
+### T4. Wideband jammer steps
 
-### T5. Jammer already on at power-on
+Noise jammer (bandwidth ≥ 20 MHz, centred near 1575 MHz) at J/N 10, 20, 30,
+40 dB as printed. At each step, write down: the `JAMMER ON` time,
+`NULLED in`, suppression, residual, satellites, C/N0 and fix.
 
-Jammer on (30 dB), then power the board on. Look for `JAMMER ON` within the
-first second after the banner and `g2 ... from the jammer` in
-`gnss_report?` (with no clean period yet the FPGA detector is not armed, so
-this jammer is found by coherence). Then `gnss_tx=1` and time to fix.
+### T5. On/off cycles (tracking continuity and status stability)
+
+`gnss_aj_csv=500`, then the jammer 30 s on / 30 s off, five times (CW at J/S
+30 dB, then wideband at J/N 30 dB). Then `gnss_aj_csv=0`. Count in the log:
+
+- **status changes**: `JAMMER ON` and `JAMMER STATUS OFF` lines. Expect
+  exactly 5 + 5, with no alternation;
+- **tracking continuity**: in the receiver, how many satellites lost lock,
+  and whether the fix was kept through each switch.
+
+Also type `gnss_report` several times during an ON phase. Every one must say
+`JAMMER STATUS: ON`.
 
 ### T6. A/B comparisons (at the strongest jammer that still gives a fix)
 
 | Type | Compares |
 |---|---|
-| `gnss_aj_mode=1` then `gnss_aj_mode=0` | gated without / with the image taps |
-| `gnss_aj_mode=3` then `gnss_aj_mode=0` | always adapting, no image taps (closest to v2.2) / v2.3 |
-| `gnss_npi=0` then `gnss_npi=1` | no anti-jam at all (expect satellites lost with a strong jammer) |
+| `gnss_aj_notch=0` then `=1` | without / with the CW notches |
+| `gnss_aj_dc=0` then `=1` | without / with the FPGA DC blocker (watch the `DC` figures in `powers`) |
+| `gnss_rx_agc=2` then `=1` | firmware matched gain (v2.3 default) / AD9361 slow-attack AGC (v2.4 default) |
+| `gnss_band=1` then `=4` | v2.3 profile (1582.5 MHz, 61.44 MS/s, with GLONASS) / USER 1570.25 MHz |
+| `gnss_npi=0` then `=1` | no anti-jam at all / anti-jam |
 
-Also once with a **wideband** jammer: PL-NPI has one weight per antenna, so
-the wideband residual shows how well the RX1/RX2 paths match (README §7).
-Note the residual with equal-length cables on RX1 and RX2.
+After each change, wait 30 s, then `gnss_report` + satellites/C/N0.
 
-After each change, wait 20 s, then `gnss_report?` + satellites/C/N0.
+### T7. Jammer already on at power-on
+
+Jammer on (CW J/S 30 dB), then power the board on. `JAMMER ON` and the notch
+should appear within the first second after the banner. Then `gnss_tx=1`
+and measure time to fix.
 
 ---
 
 ## 4. Report template (copy, fill in, paste into your next message)
 
 ```
-=== PL-NPI v2.3 TEST REPORT ===
+=== PL-NPI v2.4 TEST REPORT ===
 Date:
-Build: BOOT.BIN sha256 (Build/Logs/boot.log):           built with --defines:
-Step 3 HLS: clock estimate ___ ns, II ___ (fallback used? y/n)      Step 6: BUILD_TIMING MET / VIOLATED
+Build: BOOT.BIN sha256 (Build/Logs/boot.log):           --defines:
+Step 3 HLS: clock estimate ___ ns, II ___, PL_NPI_NOTCHES = 2 / 1 / 0     Step 6: BUILD_TIMING MET / VIOLATED
 Receiver model / firmware:                      GNSS viewer:
-Constellations enabled in the receiver: GPS / Galileo / GLONASS / BeiDou (B1I? B1C?)
-Antennas (type, active/passive, LNA, cable lengths RX1 / RX2):
-Signal source (sky / simulator, level):
-Jammer generator (model), type (CW / wideband), centre frequency, bandwidth:
+Signal source (sky / simulator model, level dBm):
+Jammer generator, combiner/splitter, losses measured? y/n:
+Test path: conducted / shielded enclosure
 
-T0  gnss_band? all OK?  yes / no (paste if no)
+T0  version 2.4? y/n   gnss_band=4 OK? y/n   two gnss_report identical? y/n   first line:
+T1  radio/rx gain/tx as intended? y/n (paste if no)
 
-T1  no jammer, TX att ____ dB
-            seen / used    strongest C/N0 (3)
-    GPS      __ / __        __ __ __
-    Galileo  __ / __        __ __ __
-    GLONASS  __ / __        __ __ __
-    BeiDou   __ / __        __ __ __
-    (antenna directly on the receiver: GPS __/__ GAL __/__ GLO __/__ BDS __/__)
+T2                   acquisition [s]       first fix [s]        sats / avg C/N0
+    AntSDR  cold     __ __ __              __ __ __             __ / __
+            warm     __ __ __              __ __ __             __ / __
+            hot      __ __ __              __ __ __             __ / __
+    direct  cold     __ __ __              __ __ __             __ / __
+            warm     __ __ __              __ __ __             __ / __
+            hot      __ __ __              __ __ __             __ / __
 
-T2  time to fix from "TX1 ON" [s]     run1   run2   run3   (direct, no AntSDR)
-    hot                               ____   ____   ____   ____
-    warm                              ____   ____   ____   ____
-    cold                              ____   ____   ____   ____
+T3  CW, J/S calibrated: P_GNSS ____ dBm at ________
+    J/S  notch  printed J/N  CW-detect latency  STATUS ON latency  sats  avg C/N0  fix  STATUS OFF after
+    10   on     ____         ____ ms            ____ ms            __    ____      y/n  ____ s
+    10   off    ____         ____               ____               __    ____      y/n  ____
+    15   on     ____         ____               ____               __    ____      y/n  ____
+    15   off    ____         ____               ____               __    ____      y/n  ____
+    30   on     ____         ____               ____               __    ____      y/n  ____
+    30   off    ____         ____               ____               __    ____      y/n  ____
+    40   on     ____         ____               ____               __    ____      y/n  ____
+    40   off    ____         ____               ____               __    ____      y/n  ____
 
-T3  generator  printed J/N  suppression  residual  NULLED in  sats used (G/E/R/C)  avg C/N0  fix
-    CW  ___ dBm   ____        ____         ____      ____ ms    __/__/__/__          ____      y/n
-    CW  ___ dBm   ____        ____         ____      ____ ms    __/__/__/__          ____      y/n
-    WB  ___ dBm   ____        ____         ____      ____ ms    __/__/__/__          ____      y/n
-    WB  ___ dBm   ____        ____         ____      ____ ms    __/__/__/__          ____      y/n
+T4  WB J/N  JAMMER ON latency  NULLED in  suppression  residual  sats  avg C/N0  fix
+    10      ____ ms            ____ ms    ____         ____      __    ____      y/n
+    20      ____               ____       ____         ____      __    ____      y/n
+    30      ____               ____       ____         ____      __    ____      y/n
+    40      ____               ____       ____         ____      __    ____      y/n
 
-T4  kept fix through on/off?  30 dB: y/n   50 dB: y/n
-T5  detected at boot? y/n, NULLED in ___ ms, time to fix ___ s
-T6  mode 1 vs 0: residual ___ vs ___ dB; mode 3 vs 0: residual ___ vs ___ dB; npi=0: sats ___
-    wideband residual: ___ dB (cables equal length? y/n)
+T5  CW 30: ON lines __ OFF lines __, sats lost per switch __, fix kept y/n
+    WB 30: ON lines __ OFF lines __, sats lost per switch __, fix kept y/n
+    gnss_report during ON always "ON"? y/n
+T6  notch 0/1: C/N0 __ / __   dc 0/1: C/N0 __ / __   agc 2/1: C/N0 __ / __, residual __ / __
+    band 1/4: sats __ / __    npi 0/1: sats __ / __
+T7  detected at boot? y/n, time to fix ___ s
 
-Anything strange (WARNING lines, "radio changed", DMA errors, resets):
+Anything strange (WARNING lines, "radio changed", DMA errors, UNKNOWN status, resets):
 
-Paste below: the gnss_report? block of the worst case, and the
-JAMMER ON / NULLED / OFF lines.
+Paste below: two gnss_report blocks (one jammer OFF, one worst case ON) and
+the JAMMER ON / NULLED / OFF and CW lines.
 === END ===
 ```
 
 The PuTTY log files in `C:\AJlogs\` contain everything. If a test goes
-wrong, send the whole log of that session (or the part around the problem).
+wrong, send the whole log of that session.

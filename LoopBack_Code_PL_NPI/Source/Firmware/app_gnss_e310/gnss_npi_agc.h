@@ -53,6 +53,18 @@
 #define GNSS_RXG_AD9361   1   /* AD9361 slow AGC per channel (old default) */
 #define GNSS_RXG_MATCHED  2   /* matched loop + TX level hold             */
 
+/* v2.4: the gain policy gnss_aj_enable applies at start-up (once), the
+ * deployment's configuration: the AD9361 slow-attack AGC (gc mode 2) on both
+ * channels, starting from 40 dB. gnss_rx_agc=2 switches to the matched loop
+ * (equal gains, TX level hold, gain-cut detection). Both overridable with
+ * build_all.sh --defines. */
+#ifndef GNSS_RXG_DEFAULT_MODE
+#define GNSS_RXG_DEFAULT_MODE  GNSS_RXG_AD9361
+#endif
+#ifndef GNSS_RXG_AGC_START_DB
+#define GNSS_RXG_AGC_START_DB  40
+#endif
+
 #define GNSS_RXG_PEAK_HIGH     1850   /* of 2047: back off before clipping  */
 #define GNSS_RXG_PEAK_LOW      1000   /* both below this: room to go up     */
 #define GNSS_RXG_MAX_COMP_MDB 50000U  /* TX level hold limited to 50 dB     */
@@ -79,5 +91,9 @@ int      gnss_rxg_peak(void);          /* last ADC peak of both channels    */
 uint32_t gnss_rxg_att_base(void);      /* operator's TX1 attenuation [mdB]  */
 int      gnss_rxg_comp_db(void);       /* TX level hold in effect [dB]      */
 uint32_t gnss_npi_k_eighths(void);     /* k in use, in eighths (1 = 1/8)    */
+/* v2.4: gamma from the engine's noise floor n1 [LSB^2, RX1, present gain]
+ * in the modes without the matched loop (which measures its own). */
+void     gnss_npi_gamma_noise(double n1, int jammed);
+const char *gnss_rxg_mode_txt(void);
 
 #endif

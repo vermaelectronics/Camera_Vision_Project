@@ -1271,6 +1271,25 @@ int main(void)
 			}
 		}
 
+		/* PL-NPI v2.4: a bare command name ("gnss_report", "gnss_aj") is read
+		 * as its query ("gnss_report?"): a line with no '?', '=' or '!' gets
+		 * a '?' before its line end. Lines that still match nothing get the
+		 * usual message. */
+		{
+			int e = 0, has = 0;
+			while(e < (int)sizeof(received_cmd) - 2 &&
+			      received_cmd[e] != '\r' && received_cmd[e] != '\n') {
+				if(received_cmd[e] == '?' || received_cmd[e] == '=' || received_cmd[e] == '!')
+					has = 1;
+				e++;
+			}
+			if(!has && e > 0 && e < (int)sizeof(received_cmd) - 2 &&
+			   (received_cmd[e] == '\r' || received_cmd[e] == '\n')) {
+				received_cmd[e + 1] = received_cmd[e];
+				received_cmd[e] = '?';
+			}
+		}
+
 		invalid_cmd = 0;
 		for(cmd = 0; cmd < cmd_no; cmd++)
 		{

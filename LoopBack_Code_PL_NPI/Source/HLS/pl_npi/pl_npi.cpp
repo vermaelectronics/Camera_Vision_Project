@@ -41,6 +41,18 @@
 //       the delayed update stable. Output latency: PL_NPI_LATENCY = 2
 //       samples, the same for filter and bypass.
 //
+//  v2.4 (this version) -- added around the unchanged PL-NPI pipeline
+//    6. DC BLOCKER on both inputs (cfg[3]): removes the AD9361 DC offset /
+//       LO leakage before everything else, so it is neither retransmitted
+//       (a carrier on the LO frequency into the GNSS receiver) nor seen as a
+//       signal common to RX1 and RX2.
+//    7. CW NOTCHES (PL_NPI_NOTCHES = 2, cfg[13:12], coefficients ncoef from
+//       the firmware's FFT detector) on the output. A CW jammer at or below
+//       the wideband noise -- J/S 30-40 dB against GPS C/A -- costs the
+//       receiver 6-13 dB of C/N0 (C simulation, testbench scenario 12), and
+//       spatial power inversion cannot null it (it minimises the TOTAL
+//       power, which such a CW hardly raises). A 62 kHz notch removes it.
+//
 //  v2.2.0 and earlier: as described below.
 //  ALGORITHM (from the original RTL; v2.2.0 adds the w1 = 1 constraint, see
 //  "CONSTRAINED POWER INVERSION" below)
@@ -247,6 +259,7 @@ void pl_npi(hls::stream<ap_uint<64> > &s_axis_x,
             ap_uint<32>  nrm,
             ap_uint<32>  det_thr,
             ap_uint<32>  det_hold,
+            ap_uint<192> ncoef,
             ap_uint<32>  *npi_st,
             ap_uint<192> *wout,
             ap_uint<32>  *det_pow)
@@ -259,6 +272,7 @@ void pl_npi(hls::stream<ap_uint<64> > &s_axis_x,
 #pragma HLS INTERFACE ap_none port=nrm
 #pragma HLS INTERFACE ap_none port=det_thr
 #pragma HLS INTERFACE ap_none port=det_hold
+#pragma HLS INTERFACE ap_none port=ncoef
 #pragma HLS INTERFACE ap_none port=npi_st
 #pragma HLS INTERFACE ap_none port=wout
 #pragma HLS INTERFACE ap_none port=det_pow
@@ -437,6 +451,8 @@ void pl_npi(hls::stream<ap_uint<64> > &s_axis_x,
         st[1] = active;
         st(3, 2) = bandB;
         st[4] = adapt;
+        st(7, 5) = PL_NPI_NOTCHES;
+        st[8] = cfg[3];
         st(31, 16) = det_cnt;
         *npi_st = st;
         ap_uint<192> wo = 0;
@@ -452,8 +468,34 @@ void pl_npi(hls::stream<ap_uint<64> > &s_axis_x,
     if (s_axis_x.empty()) return;
     ap_uint<64> in = s_axis_x.read();
 
-    smp_t x1r = (smp_t)in(15, 0),  x1i = (smp_t)in(31, 16);
-    smp_t x2r = (smp_t)in(47, 32), x2i = (smp_t)in(63, 48);
+    smp_t r1r = (smp_t)in(15, 0),  r1i = (smp_t)in(31, 16);
+    smp_t r2r = (smp_t)in(47, 32), r2i = (smp_t)in(63, 48);
+
+    // ---- 0. DC blocker (v2.4): x - DC, DC from a first-order average,
+    //      corner fs * 2^-14 / (2 pi) (490 Hz at 50 MS/s). Removes the
+    //      AD9361's DC offset / LO leakage, which would otherwise be
+    //      retransmitted as a carrier on the LO frequency and look like a
+    //      signal common to RX1 and RX2. Always tracking; applied with cfg[3].
+    //      Each accumulator is its own one-add-one-subtract loop.
+    static ap_int<32> dacc[4] = {0, 0, 0, 0};
+#pragma HLS ARRAY_PARTITION variable=dacc complete
+#pragma HLS RESET variable=dacc
+    smp_t x1r, x1i, x2r, x2i;
+    {
+        const bool dcb = cfg[3];
+        smp_t raw[4] = {r1r, r1i, r2r, r2i};
+        smp_t cor[4];
+#pragma HLS ARRAY_PARTITION variable=raw complete
+#pragma HLS ARRAY_PARTITION variable=cor complete
+        for (int k = 0; k < 4; k++) {
+#pragma HLS UNROLL
+            ap_int<18> d = (ap_int<18>)raw[k] - (ap_int<18>)(dacc[k] >> PL_NPI_DC_SHIFT);
+            dacc[k] = dacc[k] + d;
+            ap_int<18> v = dcb ? d : (ap_int<18>)raw[k];
+            cor[k] = (v > 32767) ? smp_t(32767) : (v < -32768) ? smp_t(-32768) : (smp_t)v;
+        }
+        x1r = cor[0]; x1i = cor[1]; x2r = cor[2]; x2i = cor[3];
+    }
 
     // ---- 1. input normalisation: x2n = g2 x2 (Q13 x Q0 -> Q2) ---------------
     // |g2r x2r - g2i x2i| <= 2 * 32768 * 32768 = 2^31 for full-scale 16-bit
@@ -627,6 +669,81 @@ void pl_npi(hls::stream<ap_uint<64> > &s_axis_x,
         out(15, 0)  = (ap_uint<16>)x1S_re;
         out(31, 16) = (ap_uint<16>)x1S_im;
     }
+
+#if PL_NPI_NOTCHES > 0
+    // ---- CW notches (v2.4), in cascade on the output -------------------------
+    //   H(z) = (1 - q z^-1) / (1 - p z^-1), p = r q, q = e^{j w0}: a zero ON
+    //   the unit circle at the CW frequency, a pole just inside it (3 dB width
+    //   ~ fs (1 - r) / pi; 62 kHz at 50 MS/s with r = 1 - 2^-8). Look-ahead
+    //   form, so the feedback spans two registers and each fits one clock:
+    //     u[n] = x[n] + p x[n-1]
+    //     s[n] = u[n] + p^2 s[n-2]       (nm holds p^2 s[n-2], ns s[n-1])
+    //     y[n] = s[n] - q s[n-1]
+    //   s, nm and ns carry ONE fraction bit (x 2): the rounding noise of the
+    //   recursion is amplified by its gain ~ 1/(1 - r^2), and in whole LSBs it
+    //   raised the output noise 0.2 dB per notch (C sim). 2|s| <= 2|x| / (1 -
+    //   r) < 2^24 for r <= 1 - 2^-8 (the firmware's limit): 25 bits, one
+    //   DSP48 per product; saturated anyway. A notch that is off passes its
+    //   input and clears its state.
+    {
+        static ap_int<25> ns_re[PL_NPI_NOTCHES], ns_im[PL_NPI_NOTCHES];
+        static ap_int<25> nm_re[PL_NPI_NOTCHES], nm_im[PL_NPI_NOTCHES];
+        static ap_int<17> nx_re[PL_NPI_NOTCHES], nx_im[PL_NPI_NOTCHES];
+#pragma HLS ARRAY_PARTITION variable=ns_re complete
+#pragma HLS ARRAY_PARTITION variable=ns_im complete
+#pragma HLS ARRAY_PARTITION variable=nm_re complete
+#pragma HLS ARRAY_PARTITION variable=nm_im complete
+#pragma HLS ARRAY_PARTITION variable=nx_re complete
+#pragma HLS ARRAY_PARTITION variable=nx_im complete
+#pragma HLS RESET variable=ns_re
+#pragma HLS RESET variable=ns_im
+#pragma HLS RESET variable=nm_re
+#pragma HLS RESET variable=nm_im
+#pragma HLS RESET variable=nx_re
+#pragma HLS RESET variable=nx_im
+        const ap_int<42> nhalf = ap_int<42>(1) << (PL_NPI_NFRAC - 1);
+        ap_int<17> xr = (ap_int<16>)out(15, 0), xi = (ap_int<16>)out(31, 16);
+        for (int k = 0; k < PL_NPI_NOTCHES; k++) {
+#pragma HLS UNROLL
+            const bool en = cfg[PL_NPI_CFG_NOTCH_LSB + k];
+            ap_int<16> qr = (ap_int<16>)ncoef(96 * k + 15, 96 * k),      qi = (ap_int<16>)ncoef(96 * k + 31, 96 * k + 16);
+            ap_int<16> pr = (ap_int<16>)ncoef(96 * k + 47, 96 * k + 32), pi = (ap_int<16>)ncoef(96 * k + 63, 96 * k + 48);
+            ap_int<16> p2r = (ap_int<16>)ncoef(96 * k + 79, 96 * k + 64), p2i = (ap_int<16>)ncoef(96 * k + 95, 96 * k + 80);
+            // u = x + p x[n-1]
+            const ap_int<42> uhalf = ap_int<42>(1) << (PL_NPI_NFRAC - 2);
+            ap_int<42> upr = (ap_int<42>)(pr * nx_re[k]) - (ap_int<42>)(pi * nx_im[k]) + uhalf;
+            ap_int<42> upi = (ap_int<42>)(pr * nx_im[k]) + (ap_int<42>)(pi * nx_re[k]) + uhalf;
+            ap_int<28> ur = ((ap_int<28>)xr << 1) + (ap_int<28>)(upr >> (PL_NPI_NFRAC - 1));
+            ap_int<28> ui = ((ap_int<28>)xi << 1) + (ap_int<28>)(upi >> (PL_NPI_NFRAC - 1));
+            // s = u + p^2 s[n-2], saturated to 25 bits
+            ap_int<29> sr = (ap_int<29>)ur + nm_re[k], si = (ap_int<29>)ui + nm_im[k];
+            const ap_int<29> smax = (ap_int<29>(1) << 24) - 1, smin = -(ap_int<29>(1) << 24);
+            ap_int<25> s25r = (sr > smax) ? (ap_int<25>)smax : (sr < smin) ? (ap_int<25>)smin : (ap_int<25>)sr;
+            ap_int<25> s25i = (si > smax) ? (ap_int<25>)smax : (si < smin) ? (ap_int<25>)smin : (ap_int<25>)si;
+            // y = s - q s[n-1]
+            ap_int<42> yqr = (ap_int<42>)(qr * ns_re[k]) - (ap_int<42>)(qi * ns_im[k]) + nhalf;
+            ap_int<42> yqi = (ap_int<42>)(qr * ns_im[k]) + (ap_int<42>)(qi * ns_re[k]) + nhalf;
+            ap_int<28> y2r = (ap_int<28>)s25r - (ap_int<28>)(yqr >> PL_NPI_NFRAC);   // x 2
+            ap_int<28> y2i = (ap_int<28>)s25i - (ap_int<28>)(yqi >> PL_NPI_NFRAC);
+            ap_int<28> yr = (y2r + 1) >> 1, yi = (y2i + 1) >> 1;
+            // next p^2 s[n-1] from the OLD s[n-1]: |p^2 s| <= |s|, no saturation
+            ap_int<42> mr = (ap_int<42>)(p2r * ns_re[k]) - (ap_int<42>)(p2i * ns_im[k]) + nhalf;
+            ap_int<42> mi = (ap_int<42>)(p2r * ns_im[k]) + (ap_int<42>)(p2i * ns_re[k]) + nhalf;
+            nm_re[k] = en ? (ap_int<25>)(mr >> PL_NPI_NFRAC) : ap_int<25>(0);
+            nm_im[k] = en ? (ap_int<25>)(mi >> PL_NPI_NFRAC) : ap_int<25>(0);
+            ns_re[k] = en ? s25r : ap_int<25>(0);
+            ns_im[k] = en ? s25i : ap_int<25>(0);
+            nx_re[k] = en ? xr : ap_int<17>(0);
+            nx_im[k] = en ? xi : ap_int<17>(0);
+            if (en) {
+                xr = (yr > 32767) ? ap_int<17>(32767) : (yr < -32768) ? ap_int<17>(-32768) : (ap_int<17>)yr;
+                xi = (yi > 32767) ? ap_int<17>(32767) : (yi < -32768) ? ap_int<17>(-32768) : (ap_int<17>)yi;
+            }
+        }
+        out(15, 0)  = (ap_uint<16>)(ap_int<16>)xr;
+        out(31, 16) = (ap_uint<16>)(ap_int<16>)xi;
+    }
+#endif
     m_axis_y.write(out);
 
     // ---- A2: two partial sums of s = x1 + sum u * w ------------------------

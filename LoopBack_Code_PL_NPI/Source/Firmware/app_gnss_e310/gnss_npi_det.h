@@ -66,6 +66,21 @@ int npi_detect(const uint32_t *buf, int nsamp, npi_det_t *r);
  * Call after npi_detect() on the same buffer (uses p1 and noise). */
 int npi_measure(const uint32_t *buf, int nsamp, const int32_t *w, npi_det_t *r);
 
+/* ---- v2.4: narrowband (CW) scan on the capture of the last npi_detect ---- */
+#define NPI_CW_N     4096   /* FFT length (= NPI_NSAMP)                       */
+#define NPI_CW_MAX   2      /* peaks reported (= notches in the core)         */
+typedef struct {
+    int    n;                           /* peaks found, strongest first   */
+    double f[NPI_CW_MAX];               /* frequency, fraction of fs      */
+    double snr1[NPI_CW_MAX], snr2[NPI_CW_MAX];  /* bin over median [dB]  */
+    double floor1, floor2;              /* median bin power               */
+} npi_cw_t;
+/* Peaks det_db (integer dB) or more above the median bin in BOTH channels,
+ * narrow (10 dB down 3 bins away), outside +-3 bins of DC and +-0.45 fs. */
+int  npi_cw_scan(double det_db, npi_cw_t *o);
+void npi_cw_reset(void);                /* restart the spectrum average   */
+void npi_sincos(double x, double *s, double *c);
+
 double npi_sqrt(double x);
 double npi_db10(double x);              /* 10*log10(x), -200 for x <= 0   */
 
