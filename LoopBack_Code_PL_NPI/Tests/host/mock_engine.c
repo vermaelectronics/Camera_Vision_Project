@@ -100,7 +100,8 @@ uint32_t gnss_pt_read(uint32_t off) {
     if (off == GNSS_PT_REG_NPI_SNAP) return core_st();
     return 0;
 }
-void gnss_pt_write(uint32_t off, uint32_t v) { if (off == GNSS_PT_REG_CONTROL) ctrl = v; }
+static int mutes;
+void gnss_pt_write(uint32_t off, uint32_t v) { if (off == GNSS_PT_REG_CONTROL) { if ((v & GNSS_PT_CTRL_MUTE) && !(ctrl & GNSS_PT_CTRL_MUTE)) mutes++; ctrl = v; } }
 void gnss_pt_set_npi(int en) { if (en) ctrl |= GNSS_PT_CTRL_NPI_EN; else ctrl &= ~GNSS_PT_CTRL_NPI_EN; }
 void gnss_pt_set_npi_freeze(int f) { if (f) ctrl |= GNSS_PT_CTRL_NPI_FREEZE; else ctrl &= ~GNSS_PT_CTRL_NPI_FREEZE; }
 void gnss_pt_npi_write(uint32_t cfg, int32_t g2, uint32_t thr, uint32_t hold) {
@@ -150,10 +151,10 @@ static unsigned long long rs = 88172645463325252ULL;
 static double ur(void) { rs ^= rs << 13; rs ^= rs >> 7; rs ^= rs << 17; return ((rs >> 11) + 0.5) / 9007199254740992.0; }
 static double gr(void) { return sqrt(-2 * log(ur())) * cos(2 * M_PI * ur()); }
 static double jam_db = 30, nmul = 1.0, cw_jn = -99, cw_f = 0.1034, dc1 = 0, dc2 = 0;
-static int jam_on = 0; static long nsamp_abs; static int dma_dead;
+static int jam_on = 0; static long nsamp_abs; static int dma_dead; static int cw_leak;   /* cw_leak: the CW is TX1 feedback, gone when TX1 is muted */
 static void fill(void) {
     const double nrms = 20.0 * nmul, ja = 20.0 * sqrt(pow(10, jam_db / 10));
-    const double cwa = (cw_jn > -90) ? sqrt(2 * 400.0 * pow(10, cw_jn / 10)) : 0.0;
+    const double cwa = (cw_jn > -90 && !(cw_leak && (ctrl & GNSS_PT_CTRL_MUTE))) ? sqrt(2 * 400.0 * pow(10, cw_jn / 10)) : 0.0;
     const double complex h = 0.62 * cexp(I * 0.7);
     double pw = 0;
     h21 = jam_on ? h : 0;
@@ -259,7 +260,8 @@ int main(int argc, char **argv) {
         report_to(r1, sizeof r1);
         double ang = coef_angle(ncoef_a[0]), ferr = (ang / (2 * M_PI) - f) * fs;
         printf("  detected after %.0f ms; notch q angle -> %.0f Hz from the CW\n", t_det * 1000, ferr);
-        ok &= check(on_seen && t_det < 0.3, "JAMMER STATUS ON within 300 ms");
+        ok &= check(on_seen && t_det < 1.5, "JAMMER STATUS ON within 1.5 s (incl. the 0.7 s TX1 mute test)");
+        ok &= check(mutes == 1 && !(ctrl & GNSS_PT_CTRL_MUTE), "TX1 muted once for the test, then unmuted");
         ok &= check(fabs(ferr) < 3000.0, "notch 0 within 3 kHz of the CW");
         ok &= check((cfg_a & GNSS_PT_NPI_CFG_NOTCH(0)) != 0, "notch 0 enabled in the core");
         ok &= check((cfg_a & 3) == 0, "PL-NPI filter not forced on by a CW below the noise (mode AUTO)");
@@ -317,6 +319,39 @@ int main(int argc, char **argv) {
         cw_jn = -99;
         ok &= check(n_on == 0 && gnss_aj_status() == 1, "status stays OFF");
         ok &= check(!(cfg_a & GNSS_PT_NPI_CFG_NOTCH(0)) && !(cfg_a & GNSS_PT_NPI_CFG_NOTCH(1)), "no notch switched on for a harmless spur");
+        break; }
+    case 10: {  /* strong drifting tone that is TX1 feedback: NOT a jammer, TX1 never left muted */
+        printf("scenario 10: strong CW (J/N +10 dB) that vanishes when TX1 is muted (feedback), 40 s, drifting\n");
+        reset_counts(); mutes = 0;
+        cw_leak = 1; cw_jn = 10;
+        double tend = t_s() + 40.0;
+        while (t_s() < tend) { cw_f = 0.12 + 0.002 * sin(2 * M_PI * t_s() / 9.0); run(0.05); }
+        report_to(r1, sizeof r1);
+        ok &= check(n_on == 0 && gnss_aj_status() == 1, "status stays OFF");
+        ok &= check(mutes >= 1 && mutes <= 2, "TX1 muted only for the test(s), not repeatedly");
+        ok &= check(!(ctrl & GNSS_PT_CTRL_MUTE), "TX1 not left muted");
+        ok &= check(has(r1, "TX1 FEEDBACK"), "report names TX1 feedback");
+        cw_leak = 0; cw_jn = -99; run(3.0);
+        break; }
+    case 11: {  /* an outside CW with TX1 on: tested once, stays a jammer */
+        printf("scenario 11: strong CW that stays with TX1 muted (outside jammer), 8 s\n");
+        reset_counts(); mutes = 0;
+        cw_leak = 0; cw_f = 0.1034; cw_jn = 10;
+        run(8.0);
+        report_to(r1, sizeof r1);
+        ok &= check(gnss_aj_status() == 2 && n_on == 1, "status ON");
+        ok &= check(mutes == 1 && !(ctrl & GNSS_PT_CTRL_MUTE), "one 0.7 s mute, TX1 unmuted");
+        ok &= check(has(r1, "OUTSIDE source"), "report: outside source");
+        cw_jn = -99; run(4.0);
+        break; }
+    case 12: {  /* DMA dies in the middle of the TX1 test: TX1 must not stay muted */
+        printf("scenario 12: DMA stops during the TX1 mute test\n");
+        reset_counts(); mutes = 0;
+        cw_leak = 1; cw_f = 0.1034; cw_jn = 10;
+        while (mutes == 0) run(0.02);
+        dma_dead = 1; run(1.5); dma_dead = 0;
+        ok &= check(!(ctrl & GNSS_PT_CTRL_MUTE), "TX1 released when captures stop");
+        cw_leak = 0; cw_jn = -99; run(3.0);
         break; }
     default: printf("unknown scenario\n"); ok = 0;
     }

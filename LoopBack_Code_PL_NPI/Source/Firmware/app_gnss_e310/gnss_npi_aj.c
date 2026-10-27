@@ -934,11 +934,100 @@ static int cw_confirmed(void)
 	return 0;
 }
 
+/* ---- is a strong CW an outside jammer, or TX1 feeding back into RX? ---------------
+ * The board retransmits RX1 on TX1. If part of that leaks back into the RX
+ * antennas/cables (RX gain 70 dB, TX attenuation 10 dB), a loop makes a drifting
+ * tone that the CW scan sees in both antennas, exactly like a jammer. The only
+ * way to tell: mute TX1 for AJ_TXL_TEST_US and look again. Gone = feedback (not a
+ * jammer, status stays OFF); still there = external (JAMMER ON). One test, then
+ * the verdict is kept (leak: AJ_TXL_LEAK_US, external: until the CW is gone). */
+#define AJ_TXL_TEST_US    700000U
+#define AJ_TXL_SETTLE_US  300000U    /* the loop needs this long to die after the mute */
+#define AJ_TXL_LEAK_US    300000000U
+#define AJ_TXL_EXT_GONE_US 2000000U
+static int   txl_state;              /* 1 = TX1 muted by this test */
+static int   txl_verdict;            /* 0 none, 1 external, 2 TX1 feedback */
+static XTime txl_t0, txl_vt, txl_gone_t0;
+static double txl_f;                 /* RF MHz of the tested CW */
+
+static int cw_present_since(XTime t)
+{
+	int k;
+	for(k = 0; k < NPI_CW_MAX; k++) {
+		double s = cwt[k].snr1 < cwt[k].snr2 ? cwt[k].snr1 : cwt[k].snr2;
+		if(cwt[k].used && cwt[k].conf && cw_jn(s) >= AJ_CW_ON_JN_DB && cwt[k].seen > t) return 1;
+	}
+	return 0;
+}
+
+static int cw_busy(void)
+{
+	int k;
+	for(k = 0; k < NPI_CW_MAX; k++) if(cwt[k].used) return 1;
+	return 0;
+}
+
+static void txl_abort(void)
+{
+	if(txl_state) {
+		uint32_t c = gnss_pt_read(GNSS_PT_REG_CONTROL);
+		if(tx_noted == 1 && (c & GNSS_PT_CTRL_MUTE)) gnss_pt_write(GNSS_PT_REG_CONTROL, c & ~GNSS_PT_CTRL_MUTE);
+	}
+	txl_state = 0;
+}
+
+/* 1 = a strong CW that is an outside jammer (or cannot be TX1 feedback) */
+static int cw_jammer(XTime now)
+{
+	int strong = cw_confirmed();
+	if(txl_state) {
+		if(tx_noted != 1) { txl_state = 0; return 0; }      /* the user stopped TX1 */
+		if(now - txl_t0 < us(AJ_TXL_TEST_US)) return 0;
+		{
+			int still = cw_present_since(txl_t0 + us(AJ_TXL_SETTLE_US));
+			txl_abort();
+			txl_verdict = still ? 1 : 2;
+			txl_vt = now;
+			add_event(now, EV_CW, txl_f, (double)txl_verdict, 2.0);
+			if(ev_print(now)) {
+				stamp(now);
+				if(still)
+					console_print("CW at %s MHz is still there with TX1 muted: an OUTSIDE source, JAMMER\n", f3u(txl_f));
+				else
+					console_print("CW at %s MHz vanished when TX1 was muted: it is TX1 FEEDBACK into RX, NOT a jammer.\n"
+						      "     Raise the TX attenuation (tx1_attenuation=70000), lower the RX gain,\n"
+						      "     or separate the TX1 cable from the RX antennas/cables.\n", f3u(txl_f));
+			}
+		}
+		return txl_verdict == 1;
+	}
+	if(!strong) {
+		if(txl_verdict == 1 && now - txl_gone_t0 >= us(AJ_TXL_EXT_GONE_US)) txl_verdict = 0;
+		if(txl_verdict != 1) txl_gone_t0 = now;
+		return 0;
+	}
+	txl_gone_t0 = now;
+	if(tx_noted != 1) return 1;                                   /* no TX1: cannot be a loop */
+	if(txl_verdict == 2 && now - txl_vt >= us(AJ_TXL_LEAK_US)) txl_verdict = 0;
+	if(txl_verdict) return txl_verdict == 1;
+	{
+		uint32_t c = gnss_pt_read(GNSS_PT_REG_CONTROL);
+		int k, best = 0;
+		if(c & GNSS_PT_CTRL_MUTE) return 1;                       /* muted by the operator: leave it */
+		for(k = 0; k < NPI_CW_MAX; k++)
+			if(cwt[k].used && cwt[k].conf && cwt[k].snr1 >= cwt[best].snr1) best = k;
+		txl_f = rf_mhz(cwt[best].f);
+		gnss_pt_write(GNSS_PT_REG_CONTROL, c | GNSS_PT_CTRL_MUTE);
+		txl_state = 1; txl_t0 = now;
+	}
+	return 0;
+}
+
 static void cw_update(XTime now)
 {
 	npi_cw_t o;
 	int i, k;
-	if(++cw_scan_n < AJ_CW_EVERY) return;
+	if(++cw_scan_n < AJ_CW_EVERY && ajs_on_n == 0) return;   /* scan every capture while evidence builds */
 	cw_scan_n = 0;
 	if(npi_cw_scan(AJ_CW_KEEP_DB, &o) != 0) return;
 	for(k = 0; k < NPI_CW_MAX; k++) if(cwt[k].used) cwt[k].scans++;
@@ -1008,12 +1097,17 @@ static const char *ajs_txt(int st)
 static void status_update(XTime now, int hw_coh)
 {
 	int cut = cut_db(), why = 0, quiet;
-	if(res.jn_coh_db >= coh_on())                                    why = 1;
-	else if(nf0 > 0.0 && res.jn_db >= AJ_ON_DB &&
+	int cwj = cw_jammer(now);        /* every capture: it times the TX1 mute test */
+	/* A strong CW is in both antennas, so it also looks like coherence / power.
+	 * While it is being tested, or was found to be TX1 feedback, that evidence
+	 * is the same tone: ignore it (an outside CW counts through the CW rule). */
+	int ign = tx_noted == 1 && txl_verdict != 1 && cw_busy();
+	if(!ign && res.jn_coh_db >= coh_on())                            why = 1;
+	else if(!ign && nf0 > 0.0 && res.jn_db >= AJ_ON_DB &&
 	        res.jn_coh_db >= AJ_PWR_COH_DB)                          why = 2;
 	else if(cut >= AJ_CUT_DB && now - t_boot >= us(AJ_SETTLE_US))   why = 3;
-	else if(hw_coh)                                                  why = 4;
-	else if(cw_confirmed())                                          why = 5;
+	else if(!ign && hw_coh)                                          why = 4;
+	else if(cwj)                                                     why = 5;
 	quiet = !why && res.jn_coh_db < coh_off() && (nf0 <= 0.0 || res.jn_db < AJ_OFF_DB) && cut == 0;
 	if(ajs != AJS_ON) {
 		if(ajs == AJS_UNKNOWN) { ajs = AJS_OFF; ajs_t0 = now; ajs_on_n = 0; }
@@ -1042,6 +1136,7 @@ static void status_update(XTime now, int hw_coh)
  * off): the status is not known. */
 static void status_stale(XTime now)
 {
+	txl_abort();                     /* never leave TX1 muted by the test */
 	if(ajs == AJS_UNKNOWN) return;
 	if(ajs == AJS_ON) {
 		uint32_t ms = ms_since(jam_t0, now);
@@ -1307,6 +1402,7 @@ void gnss_aj_enable(int on)
 		aj_on = 0;
 		jam = 0; fw_jam = 0; shift = 0;
 		ajs = AJS_UNKNOWN; ajs_t0 = now;
+		txl_abort();
 	}
 	/* The enable crosses into the sample domain and back; wait (<= ~1 ms)
 	 * until STATUS confirms it, so a status print straight after is right. */
@@ -1527,6 +1623,13 @@ void gnss_aj_report(void)
 				console_print(" [%d] off", (long)k);
 		}
 		console_print("\n");
+		if(cw_confirmed() || txl_verdict)
+			console_print("cw source     : %s\n",
+				      (char*)(txl_state ? "testing now: TX1 muted for 0.7 s to see if the CW survives" :
+				      txl_verdict == 2 ? "TX1 FEEDBACK into RX (the CW vanished with TX1 muted): NOT a jammer;\n"
+				                         "                raise tx1_attenuation, lower the RX gain, separate the TX1 cable" :
+				      txl_verdict == 1 ? "OUTSIDE source (the CW stayed with TX1 muted): a jammer" :
+				                         "not tested (TX1 off): counted as a jammer"));
 	} else {
 		console_print("dc blocker    : not in this bitstream (%d.%d; v2.4 has it)\n", (long)(vw.ver >> 16), (long)(vw.ver & 0xFFFFU));
 		console_print("cw notches    : not in this bitstream (v2.4 has them)\n");
@@ -1601,8 +1704,15 @@ void gnss_aj_report(void)
 					      (char*)(e->v3 > 0.5 ? "UNKNOWN (no measurement)" : "OFF "), f1u(e->v1), f1(e->v2)); break;
 		case EV_LEAK:   console_print("LEAKING     residual %s dB at J/N %s dB\n", f1(e->v1), f1(e->v2)); break;
 		case EV_FLOOR:  console_print("FLOOR       noise rose %s dB with no RX1/RX2 coherence: floor re-learned, not a jammer\n", f1(e->v1)); break;
-		case EV_CW:     console_print("CW %s   %s MHz, +%s dB in its FFT bin\n", (char*)(e->v3 > 0.5 ? "ON " : "OFF"),
-					      f3u(e->v1), f1u(e->v2)); break;
+		case EV_CW:
+			if(e->v3 > 1.5)
+				console_print("CW SOURCE   %s MHz: %s\n", f3u(e->v1),
+					      (char*)(e->v2 < 1.5 ? "outside source (still there with TX1 muted): JAMMER"
+					                            : "TX1 FEEDBACK into RX (gone with TX1 muted): not a jammer"));
+			else
+				console_print("CW %s   %s MHz, +%s dB in its FFT bin\n", (char*)(e->v3 > 0.5 ? "ON " : "OFF"),
+					      f3u(e->v1), f1u(e->v2));
+			break;
 		case EV_BG:
 			if(e->v1 > -90.0)
 				console_print("BACKGROUND  RX1/RX2 common signal, coherence %s dB at power J/N %s dB: not a jammer\n",

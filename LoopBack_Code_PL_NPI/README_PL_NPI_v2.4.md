@@ -209,6 +209,31 @@ BeiDou B1I (−9.2 MHz). GLONASS G1 (+27.8 to +35.1 MHz from 1570.25) is
 
 ---
 
+### 3.5 Strong CW that is TX1 feedback (firmware 2.4.2)
+
+First hardware log (v2.4.0): `JAMMER STATUS: ON` with no jammer connected.
+The cause was a strong tone (J/N +6 to +21 dB, frequency drifting by 100 kHz
+over minutes) in both antennas. The board retransmits RX1 on TX1; with TX
+attenuation 10 dB (set by the PC GUI, not by the firmware) and RX gain 70 dB,
+TX1 leaks back into RX and makes a drifting tone, which the CW scan reports
+correctly as a narrowband signal in both antennas. A weaker line at exactly
+1560.000 MHz (39 x 40 MHz, a clock spur) also toggled the notch every second.
+
+- Weak lines: a CW needs 18 dB in its FFT bin to be tracked (14 dB to be
+  kept) and J/N >= -15 dB to count as a jammer.
+- Strong CW with TX1 on: the firmware mutes TX1 once for 0.7 s. **Gone** = TX1
+  feedback, status stays OFF (event and `cw source` line say so). **Still
+  there** = outside source, JAMMER ON. The verdict is kept (feedback: 5 min;
+  outside: until the CW is gone for 2 s), so TX1 is not muted repeatedly. TX1
+  is released if captures stop or anti-jam is switched off.
+- While a CW is being tested or is TX1 feedback, the coherence and power
+  evidence (which the same tone causes) is ignored. A wideband jammer that
+  arrives together with a feedback tone is therefore not reported until the
+  tone is gone: fix the loop (TX attenuation 70 dB, lower RX gain).
+- Mock scenarios 9-12 cover this (simulation only; 12 firmware mock scenarios in total).
+
+---
+
 ## 4. Results
 
 ### 4.1 Simulated (this repository, `Tests/run_regression.sh --full`)
