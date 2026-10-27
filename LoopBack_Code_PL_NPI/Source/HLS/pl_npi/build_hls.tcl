@@ -102,7 +102,12 @@ set_clock_uncertainty $clk_uncertainty
 
 # ---- 1 C simulation -------------------------------------------------------------
 if {![info exists ::env(PL_NPI_SKIP_CSIM)] || $::env(PL_NPI_SKIP_CSIM) eq "0"} {
-  foreach scen {1 2 3 4 5 7 8 9 10 11 12} {
+  # scenario 12 (GPS C/N0) takes 15+ min in the unoptimised HLS debug binary and
+  # only measures the notch benefit; Tests/run_regression.sh runs it in seconds.
+  # PL_NPI_CSIM_GPS=1 adds it here.
+  set scens {1 2 3 4 5 7 8 9 10 11}
+  if {[info exists ::env(PL_NPI_CSIM_GPS)] && $::env(PL_NPI_CSIM_GPS) eq "1"} { lappend scens 12 }
+  foreach scen $scens {
     puts "PL_NPI_HLS: csim scenario $scen"
     if {[catch {csim_design -argv $scen} err]} {
       puts "PL_NPI_HLS: FAIL - C simulation scenario $scen: $err"

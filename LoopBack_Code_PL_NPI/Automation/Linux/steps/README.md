@@ -8,7 +8,7 @@ the check passes. Each script can be run from any folder.
 |---|---|---|
 | `01_vendor.sh`  | copy ADI HDL library | `STEP 1 vendor: PASS` |
 | `02_libip.sh`   | ADI library IP | `STEP 2 libip: PASS` |
-| `03_npi.sh`     | Vitis HLS PL-NPI core (C-sim scenarios 1 2 3 4 5 7 8 9 10 11 12; `PL_NPI_NOTCHES=1` or `0` if the notch misses timing) | 11 x `PL_NPI_CSIM: PASS`, `PL_NPI_HLS: PASS`, clock <= 10 ns, II 1 |
+| `03_npi.sh`     | Vitis HLS PL-NPI core (C-sim scenarios 1 2 3 4 5 7 8 9 10 11; `PL_NPI_NOTCHES=1` or `0` if the notch misses timing) | 10 x `PL_NPI_CSIM: PASS`, `PL_NPI_HLS: PASS`, clock <= 10 ns, II 1 |
 | `04_ip.sh`      | gnss_passthrough IP | `IP_PACKAGE_OK` |
 | `05_project.sh` | Vivado project | `CREATE_RESULT: PASS` |
 | `06_build.sh`   | bitstream + XSA | `BUILD_TIMING: MET`, `BUILD_RESULT: PASS` |

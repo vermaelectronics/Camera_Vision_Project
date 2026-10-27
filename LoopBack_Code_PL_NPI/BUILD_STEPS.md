@@ -83,7 +83,7 @@ Check: `STEP 2 libip: PASS (11 library logs ...)`
 ```
 Check, all of these in the output:
 ```
-PL_NPI_CSIM: PASS (scenario 1)   ... 2 3 4 5 7 8 9 10 11 12 (11 lines)
+PL_NPI_CSIM: PASS (scenario 1)   ... 2 3 4 5 7 8 9 10 11 (10 lines; scenario 12 is optional: PL_NPI_CSIM_GPS=1, slow)
 PL_NPI_HLS: estimated clock period X ns (target 10 ns), achieved II 1 (requested 1)
 PL_NPI_HLS: IP antsdr:gnss:pl_npi:2.1 -> .../Build/ip_repo/pl_npi
 PL_NPI_HLS: PASS
