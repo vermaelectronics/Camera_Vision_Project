@@ -1413,6 +1413,17 @@ void gnss_aj_enable(int on)
 			if((gnss_pt_read(GNSS_PT_REG_STATUS) & GNSS_PT_ST_NPI_EN_SYNCED) == want)
 				break;
 	}
+	/* Switched on: the status is UNKNOWN until the first capture has been
+	 * measured (~10 ms). Wait for it (<= 0.5 s), so the line printed straight
+	 * after gnss_npi=1 already says ON or OFF and not UNKNOWN. */
+	if(on && aj_on && ajs == AJS_UNKNOWN && !gnss_txdma_is_running()) {
+		XTime t0, t;
+		XTime_GetTime(&t0);
+		do {
+			gnss_aj_poll();
+			XTime_GetTime(&t);
+		} while(ajs == AJS_UNKNOWN && t - t0 < us(500000U));
+	}
 }
 
 int  gnss_aj_enabled(void)   { return aj_on; }

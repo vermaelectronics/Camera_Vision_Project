@@ -353,6 +353,19 @@ int main(int argc, char **argv) {
         ok &= check(!(ctrl & GNSS_PT_CTRL_MUTE), "TX1 released when captures stop");
         cw_leak = 0; cw_jn = -99; run(3.0);
         break; }
+    case 13: {  /* gnss_npi=0 then =1: UNKNOWN only while off, ON/OFF at once after =1 */
+        printf("scenario 13: gnss_npi=0 / gnss_npi=1 toggling, status right after each command\n");
+        for (int k = 0; k < 3; k++) {
+            gnss_aj_enable(0);
+            ok &= check(gnss_aj_status() == 0, "UNKNOWN while anti-jam is off");
+            gnss_aj_enable(1);
+            ok &= check(gnss_aj_status() == 1, "OFF (not UNKNOWN) right after gnss_npi=1");
+            run(1.0);
+        }
+        jam_on = 1; run(1.0); gnss_aj_enable(0); gnss_aj_enable(1); run(0.3);
+        ok &= check(gnss_aj_status() == 2, "ON again after toggling with the jammer present");
+        jam_on = 0; run(3.0);
+        break; }
     default: printf("unknown scenario\n"); ok = 0;
     }
     printf(ok ? "MOCK: PASS (scenario %d)\n" : "MOCK: FAIL (scenario %d)\n", scen);
