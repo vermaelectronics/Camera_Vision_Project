@@ -155,7 +155,17 @@
 //    [7:5] notches compiled into the core, [8] DC blocker on.
 //    0x1C0.. NPI_NCOEF[0..5] RW      SHADOW, committed with NPI_COMMIT. Notch k
 //    0x1D4                           in words 3k..3k+2: q, p, p^2, each
-//                                    {imag[31:16], real[15:0]} signed Q1.14.
+//                                    {imag[31:16], real[15:0]}; q signed
+//                                    Q1.15 (v2.5; Q1.14 before), p, p^2 Q1.14.
+//    -------- PL-NPI v2.5 (pl_npi_0 v2.2) ---------------------------------
+//    In pl_npi_0 v2.2 the CW notches sit in FRONT of the adaptive loop, on
+//    both RX channels (NPI_NCOEF unchanged), followed by a 3-tap RX2
+//    equaliser. NPI_CFG [14] equaliser on (identity when off); status [9]
+//    equaliser on, [10] notches in front of the loop. Output latency 8.
+//    0x1D8.. NPI_EQCOEF[0..2] RW     SHADOW, committed with NPI_COMMIT. Tap k
+//    0x1E0                           (0 newest sample, offset +1; 1 centre;
+//                                    2 oldest, offset -1), {imag[31:16],
+//                                    real[15:0]} signed Q2.14, 1.0 = 16384.
 //
 //  PL-NPI v2.3 CLOCKING
 //    pl_npi_0 runs on sys_cpu_clk (= s_axi_aclk), not on clk: the block design
@@ -222,7 +232,7 @@ module gnss_passthrough #(
   //    s_axi_aclk domain (= pl_npi_0's clock):
   //    npi_gamma     -> pl_npi_0/gamma     (register 0x48)
   //    npi_adapt_en  -> pl_npi_0/adapt_en  (~CONTROL[6])
-  //    npi_cfg, npi_nrm, npi_det_thr, npi_det_hold, npi_ncoef -> pl_npi_0 (committed)
+  //    npi_cfg, npi_nrm, npi_det_thr, npi_det_hold, npi_ncoef, npi_eqcoef -> pl_npi_0 (committed)
   //    pl_npi_0/npi_st, wout, det_pow -> npi_st, npi_wout, npi_det_pow
   output     [63:0]   m_axis_npi_tdata,
   output              m_axis_npi_tvalid,
@@ -238,6 +248,7 @@ module gnss_passthrough #(
   output     [31:0]   npi_det_thr,
   output     [31:0]   npi_det_hold,
   output     [191:0]  npi_ncoef,
+  output     [95:0]   npi_eqcoef,
   input      [31:0]   npi_st,
   input      [191:0]  npi_wout,
   input      [31:0]   npi_det_pow,
@@ -284,8 +295,11 @@ module gnss_passthrough #(
   //         CONTROL[5] changes.
   // v2.4 -- pl_npi_0 v2.1: input DC blocker (NPI_CFG[3]) and two CW notch
   //         filters (NPI_CFG[13:12], coefficients NPI_NCOEF 0x1C0-0x1D4).
-  localparam [31:0] CORE_VERSION = 32'h00020004;   // v2.4
-  localparam [31:0] NPI_INFO     = 32'h03020802;   // layout 2: notches
+  // v2.5 -- pl_npi_0 v2.2: the notches move in front of the loop (both RX
+  //         channels) and a 3-tap RX2 equaliser (NPI_CFG[14], NPI_EQCOEF
+  //         0x1D8-0x1E0) absorbs cable / filter mismatch for wideband jammers.
+  localparam [31:0] CORE_VERSION = 32'h00020005;   // v2.5
+  localparam [31:0] NPI_INFO     = 32'h03020803;   // layout 3: notches + RX2 equaliser
   localparam [31:0] NPI_CFG_RESET = 32'h0000000D;  // BYPASS, image taps, DC blocker
   localparam [31:0] NPI_NRM_RESET = 32'h00002000;  // g2 = 1.0
   localparam        AW           = FIFO_ADDR_WIDTH;
@@ -388,6 +402,7 @@ module gnss_passthrough #(
   reg  [31:0] npi_hold_sh = 32'd0,         npi_hold_act = 32'd0;
   reg  [31:0] npi_commits = 32'd0;
   reg  [191:0] npi_nc_sh  = 192'd0, npi_nc_act = 192'd0;
+  reg  [95:0]  npi_eq_sh  = 96'd0,  npi_eq_act = 96'd0;     // v2.5 RX2 equaliser taps
   // weight / status snapshot (0x19C write)
   reg  [191:0] npi_w_lat   = 192'd0;
   reg  [31:0]  npi_pow_lat = 32'd0, npi_st_lat = 32'd0;
@@ -400,6 +415,7 @@ module gnss_passthrough #(
       npi_hold_sh <= 32'd0;          npi_hold_act <= 32'd0;
       npi_commits <= 32'd0;
       npi_nc_sh   <= 192'd0;         npi_nc_act   <= 192'd0;
+      npi_eq_sh   <= 96'd0;          npi_eq_act   <= 96'd0;
       npi_w_lat   <= 192'd0;
       npi_pow_lat <= 32'd0;
       npi_st_lat  <= 32'd0;
@@ -415,12 +431,16 @@ module gnss_passthrough #(
         12'h073: npi_nc_sh[127: 96] <= s_axi_wdata;   // 0x1CC notch 1 q
         12'h074: npi_nc_sh[159:128] <= s_axi_wdata;   // 0x1D0 notch 1 p
         12'h075: npi_nc_sh[191:160] <= s_axi_wdata;   // 0x1D4 notch 1 p^2
+        12'h076: npi_eq_sh[ 31:  0] <= s_axi_wdata;   // 0x1D8 equaliser tap 0 (offset +1)
+        12'h077: npi_eq_sh[ 63: 32] <= s_axi_wdata;   // 0x1DC equaliser tap 1 (centre)
+        12'h078: npi_eq_sh[ 95: 64] <= s_axi_wdata;   // 0x1E0 equaliser tap 2 (offset -1)
         12'h060: begin                          // 0x180 commit
           npi_cfg_act  <= npi_cfg_sh;
           npi_nrm_act  <= npi_nrm_sh;
           npi_thr_act  <= npi_thr_sh;
           npi_hold_act <= npi_hold_sh;
           npi_nc_act   <= npi_nc_sh;
+          npi_eq_act   <= npi_eq_sh;
           npi_commits  <= npi_commits + 1'b1;
         end
         12'h067: begin                          // 0x19C snapshot
@@ -437,6 +457,7 @@ module gnss_passthrough #(
   assign npi_det_thr  = npi_thr_act;
   assign npi_det_hold = npi_hold_act;
   assign npi_ncoef    = npi_nc_act;
+  assign npi_eqcoef   = npi_eq_act;
   assign npi_gamma    = reg_npi_gamma;
   assign npi_adapt_en = ~reg_control[6];
 
@@ -501,6 +522,9 @@ module gnss_passthrough #(
       12'h073: axi_rdata <= npi_nc_sh[127: 96];    // 0x1CC
       12'h074: axi_rdata <= npi_nc_sh[159:128];    // 0x1D0
       12'h075: axi_rdata <= npi_nc_sh[191:160];    // 0x1D4
+      12'h076: axi_rdata <= npi_eq_sh[ 31:  0];    // 0x1D8
+      12'h077: axi_rdata <= npi_eq_sh[ 63: 32];    // 0x1DC
+      12'h078: axi_rdata <= npi_eq_sh[ 95: 64];    // 0x1E0
       default: axi_rdata <= 32'd0;
     endcase
     end

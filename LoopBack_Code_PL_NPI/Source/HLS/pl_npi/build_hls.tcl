@@ -1,9 +1,10 @@
 # ============================================================================
 #  build_hls.tcl  --  Vitis HLS 2023.2: pl_npi.cpp -> block-design IP pl_npi
 #
-#  Builds the pipelined PL-NPI core v2.4 (see pl_npi.cpp: RX2 normalisation,
+#  Builds the pipelined PL-NPI core v2.5 (see pl_npi.cpp: RX2 normalisation,
 #  image taps, gated adaptation with a power detector, bypass, make-up gain;
-#  v2.4: input DC blocker and two CW notch filters on the output)
+#  v2.4: input DC blocker and two CW notch filters; v2.5: notches in front of
+#  the loop on both channels and a 3-tap RX2 equaliser)
 #  and packages it as a Vivado IP that Source/BlockDesign/system_bd.tcl
 #  instantiates as pl_npi_0, on sys_cpu_clk (100 MHz) between two async
 #  AXI-Stream FIFOs.
@@ -40,9 +41,15 @@
 #                            (1 or 0 = fallback if the notch misses 10 ns;
 #                            the firmware reads the number from the core
 #                            status and leaves missing notches off)
+#    PL_NPI_EQ=<0|1>         RX2 equaliser (3 taps), default 1
+#    PL_NPI_NOTCH_IN=<0|1>   CW notches in front of the loop on both channels
+#                            (default 1; 0 = on the output, as v2.4)
+#    PL_NPI_V25=0            the whole v2.5 pre-processing pipeline off: the
+#                            v2.4 datapath (notches on the output, no
+#                            equaliser, latency 2) -- the timing fallback
 #
 #  OUTPUT
-#    $GNSS_CRPA_IP_REPO/pl_npi/component.xml, VLNV antsdr:gnss:pl_npi:2.1
+#    $GNSS_CRPA_IP_REPO/pl_npi/component.xml, VLNV antsdr:gnss:pl_npi:2.2
 #    $GNSS_CRPA_IP_REPO/pl_npi/pl_npi_csynth.rpt
 #
 #  SUCCESS MARKER
@@ -89,7 +96,7 @@ cd $work
 open_project -reset pl_npi_hls
 set_top pl_npi
 set defs ""
-foreach v {PL_NPI_EXTRA_DELAY PL_NPI_STEP_SHIFT PL_NPI_IMG_SHIFT PL_NPI_NOTCHES} {
+foreach v {PL_NPI_EXTRA_DELAY PL_NPI_STEP_SHIFT PL_NPI_IMG_SHIFT PL_NPI_NOTCHES PL_NPI_V25 PL_NPI_EQ PL_NPI_NOTCH_IN} {
   if {[info exists ::env($v)]} { append defs " -D$v=$::env($v)" }
 }
 if {$defs ne ""} { puts "PL_NPI_HLS: defines$defs" }
@@ -105,7 +112,7 @@ if {![info exists ::env(PL_NPI_SKIP_CSIM)] || $::env(PL_NPI_SKIP_CSIM) eq "0"} {
   # scenario 12 (GPS C/N0) takes 15+ min in the unoptimised HLS debug binary and
   # only measures the notch benefit; Tests/run_regression.sh runs it in seconds.
   # PL_NPI_CSIM_GPS=1 adds it here.
-  set scens {1 2 3 4 5 7 8 9 10 11}
+  set scens {1 2 3 4 5 7 8 9 10 11 13}
   if {[info exists ::env(PL_NPI_CSIM_GPS)] && $::env(PL_NPI_CSIM_GPS) eq "1"} { lappend scens 12 }
   foreach scen $scens {
     puts "PL_NPI_HLS: csim scenario $scen"
@@ -148,9 +155,9 @@ if {$ii eq "" || $ii > $pipeline_ii} {
 
 # ---- 4 package as a Vivado IP ------------------------------------------------------
 export_design -format ip_catalog -rtl verilog \
-  -vendor antsdr -library gnss -version 2.1 -ipname pl_npi \
+  -vendor antsdr -library gnss -version 2.2 -ipname pl_npi \
   -display_name "PL-NPI power inversion" \
-  -description "Two-element PL-NPI anti-jam core v2.4 (pipelined NLMS power inversion, Vitis HLS): RX2 normalised to RX1, RX2 weight + 2 image taps adapted in hardware, gated by a power detector (bypass with no jammer), output make-up gain, DC blocker and 2 CW notches on the output. s_axis_x = RX1 and RX2 IQ, m_axis_y = array output IQ."
+  -description "Two-element PL-NPI anti-jam core v2.5 (pipelined NLMS power inversion, Vitis HLS): RX2 normalised to RX1, RX2 weight + 2 image taps adapted in hardware, gated by a power detector (bypass with no jammer), output make-up gain, DC blocker, 2 CW notches in front of the loop and a 3-tap RX2 equaliser. s_axis_x = RX1 and RX2 IQ, m_axis_y = array output IQ."
 
 set impl_dir [file join $work pl_npi_hls sol impl]
 set ip_src   [file join $impl_dir ip]
@@ -175,6 +182,6 @@ file delete -force $out_ip
 file copy -force $ip_src $out_ip
 if {[file exists $rpt_txt]} { file copy -force $rpt_txt $out_ip }
 
-puts "PL_NPI_HLS: IP antsdr:gnss:pl_npi:2.1 -> $out_ip"
+puts "PL_NPI_HLS: IP antsdr:gnss:pl_npi:2.2 -> $out_ip"
 puts "PL_NPI_HLS: PASS"
 exit 0

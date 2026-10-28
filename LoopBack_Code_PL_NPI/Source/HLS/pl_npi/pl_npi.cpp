@@ -251,6 +251,57 @@ static ap_uint<7> msb_index(ap_uint<W> v) {
     return p;
 }
 
+#ifdef PL_NPI_DEBUG
+int pl_npi_dbg[4];
+#endif
+#if PL_NPI_NOTCHES > 0
+// One CW notch (see "CW notches" below). c = {p^2, p, q} words, 3 x 32 bits.
+// The state lives in the caller's registers; en = 0 passes x and clears them.
+static inline void notch_step(bool en, ap_uint<96> c,
+                              ap_int<17> &xr, ap_int<17> &xi,
+                              ap_int<25> &ns_re, ap_int<25> &ns_im,
+                              ap_int<25> &nm_re, ap_int<25> &nm_im,
+                              ap_int<17> &nx_re, ap_int<17> &nx_im)
+{
+#pragma HLS INLINE
+    const ap_int<42> nhalf = ap_int<42>(1) << (PL_NPI_NFRAC - 1);
+    const ap_int<42> qhalf = ap_int<42>(1) << (PL_NPI_QFRAC - 1);
+    ap_int<16> qr = (ap_int<16>)c(15, 0),  qi = (ap_int<16>)c(31, 16);
+    ap_int<16> pr = (ap_int<16>)c(47, 32), pi = (ap_int<16>)c(63, 48);
+    ap_int<16> p2r = (ap_int<16>)c(79, 64), p2i = (ap_int<16>)c(95, 80);
+    // u = x + p x[n-1]
+    const ap_int<42> uhalf = ap_int<42>(1) << (PL_NPI_NFRAC - 2);
+    ap_int<42> upr = (ap_int<42>)(pr * nx_re) - (ap_int<42>)(pi * nx_im) + uhalf;
+    ap_int<42> upi = (ap_int<42>)(pr * nx_im) + (ap_int<42>)(pi * nx_re) + uhalf;
+    ap_int<28> ur = ((ap_int<28>)xr << 1) + (ap_int<28>)(upr >> (PL_NPI_NFRAC - 1));
+    ap_int<28> ui = ((ap_int<28>)xi << 1) + (ap_int<28>)(upi >> (PL_NPI_NFRAC - 1));
+    // s = u + p^2 s[n-2], saturated to 25 bits
+    ap_int<29> sr = (ap_int<29>)ur + nm_re, si = (ap_int<29>)ui + nm_im;
+    const ap_int<29> smax = (ap_int<29>(1) << 24) - 1, smin = -(ap_int<29>(1) << 24);
+    ap_int<25> s25r = (sr > smax) ? (ap_int<25>)smax : (sr < smin) ? (ap_int<25>)smin : (ap_int<25>)sr;
+    ap_int<25> s25i = (si > smax) ? (ap_int<25>)smax : (si < smin) ? (ap_int<25>)smin : (ap_int<25>)si;
+    // y = s - q s[n-1]
+    ap_int<42> yqr = (ap_int<42>)(qr * ns_re) - (ap_int<42>)(qi * ns_im) + qhalf;
+    ap_int<42> yqi = (ap_int<42>)(qr * ns_im) + (ap_int<42>)(qi * ns_re) + qhalf;
+    ap_int<28> y2r = (ap_int<28>)s25r - (ap_int<28>)(yqr >> PL_NPI_QFRAC);   // x 2
+    ap_int<28> y2i = (ap_int<28>)s25i - (ap_int<28>)(yqi >> PL_NPI_QFRAC);
+    ap_int<28> yr = (y2r + 1) >> 1, yi = (y2i + 1) >> 1;
+    // next p^2 s[n-1] from the OLD s[n-1]: |p^2 s| <= |s|, no saturation
+    ap_int<42> mr = (ap_int<42>)(p2r * ns_re) - (ap_int<42>)(p2i * ns_im) + nhalf;
+    ap_int<42> mi = (ap_int<42>)(p2r * ns_im) + (ap_int<42>)(p2i * ns_re) + nhalf;
+    nm_re = en ? (ap_int<25>)(mr >> PL_NPI_NFRAC) : ap_int<25>(0);
+    nm_im = en ? (ap_int<25>)(mi >> PL_NPI_NFRAC) : ap_int<25>(0);
+    ns_re = en ? s25r : ap_int<25>(0);
+    ns_im = en ? s25i : ap_int<25>(0);
+    nx_re = en ? xr : ap_int<17>(0);
+    nx_im = en ? xi : ap_int<17>(0);
+    if (en) {
+        xr = (yr > 32767) ? ap_int<17>(32767) : (yr < -32768) ? ap_int<17>(-32768) : (ap_int<17>)yr;
+        xi = (yi > 32767) ? ap_int<17>(32767) : (yi < -32768) ? ap_int<17>(-32768) : (ap_int<17>)yi;
+    }
+}
+#endif
+
 void pl_npi(hls::stream<ap_uint<64> > &s_axis_x,
             hls::stream<ap_uint<32> > &m_axis_y,
             ap_uint<32>  gamma,
@@ -260,6 +311,7 @@ void pl_npi(hls::stream<ap_uint<64> > &s_axis_x,
             ap_uint<32>  det_thr,
             ap_uint<32>  det_hold,
             ap_uint<192> ncoef,
+            ap_uint<96>  eqcoef,
             ap_uint<32>  *npi_st,
             ap_uint<192> *wout,
             ap_uint<32>  *det_pow)
@@ -273,6 +325,7 @@ void pl_npi(hls::stream<ap_uint<64> > &s_axis_x,
 #pragma HLS INTERFACE ap_none port=det_thr
 #pragma HLS INTERFACE ap_none port=det_hold
 #pragma HLS INTERFACE ap_none port=ncoef
+#pragma HLS INTERFACE ap_none port=eqcoef
 #pragma HLS INTERFACE ap_none port=npi_st
 #pragma HLS INTERFACE ap_none port=wout
 #pragma HLS INTERFACE ap_none port=det_pow
@@ -453,6 +506,8 @@ void pl_npi(hls::stream<ap_uint<64> > &s_axis_x,
         st[4] = adapt;
         st(7, 5) = PL_NPI_NOTCHES;
         st[8] = cfg[3];
+        st[9] = (PL_NPI_V25 && PL_NPI_EQ) ? (bool)cfg[14] : false;
+        st[10] = (PL_NPI_V25 && PL_NPI_NOTCH_IN && PL_NPI_NOTCHES > 0);
         st(31, 16) = det_cnt;
         *npi_st = st;
         ap_uint<192> wo = 0;
@@ -481,6 +536,7 @@ void pl_npi(hls::stream<ap_uint<64> > &s_axis_x,
 #pragma HLS ARRAY_PARTITION variable=dacc complete
 #pragma HLS RESET variable=dacc
     smp_t x1r, x1i, x2r, x2i;
+    smp_t dcn_re[2], dcn_im[2];            // DC-blocked RX1, RX2
     {
         const bool dcb = cfg[3];
         smp_t raw[4] = {r1r, r1i, r2r, r2i};
@@ -494,8 +550,167 @@ void pl_npi(hls::stream<ap_uint<64> > &s_axis_x,
             ap_int<18> v = dcb ? d : (ap_int<18>)raw[k];
             cor[k] = (v > 32767) ? smp_t(32767) : (v < -32768) ? smp_t(-32768) : (smp_t)v;
         }
-        x1r = cor[0]; x1i = cor[1]; x2r = cor[2]; x2i = cor[3];
+        dcn_re[0] = cor[0]; dcn_im[0] = cor[1]; dcn_re[1] = cor[2]; dcn_im[1] = cor[3];
     }
+
+#if PL_NPI_V25
+    // ---- 0b. v2.5 pre-processing pipeline (the PL-NPI loop below is unchanged) --
+    //   DC -> R1 -> CW notches on both channels -> R2 -> RX2 equaliser (centre
+    //   tap, R3 products, R4 sums, R5 round + saturate). Every register is one
+    //   sample, so every stage is a short path; RX1 is delayed to match RX2:
+    //   both leave PL_NPI_PRE_LAT = 6 samples after their input (checked with
+    //   an impulse, C simulation: the centre tap lines up with RX1), which is
+    //   the extra output latency.
+    //   The notches are in FRONT of the adaptive loop: a CW (even 30 dB above
+    //   the noise) never reaches the weights, so it neither costs the NLMS its
+    //   spatial degree of freedom nor modulates noise around itself, and a CW
+    //   plus a wideband jammer can both be removed.
+    //   The equaliser maps RX2 onto RX1 for the jammer (a few ns of cable or
+    //   filter mismatch, which one complex weight cannot absorb: a 40 MHz
+    //   jammer through 0.5 sample of mismatch is nulled only ~11 dB, C/N0 -18
+    //   dB at J/N 30); the firmware estimates the taps and sets cfg[14].
+    static smp_t dcR_re[2], dcR_im[2], ntR_re[2], ntR_im[2];
+    static smp_t xd_re[4], xd_im[4], eh_re[2], eh_im[2];
+    static ap_int<32> ep_rr[3], ep_ii[3], ep_ri[3], ep_ir[3];
+    static ap_int<35> es_re = 0, es_im = 0;
+    static smp_t eo_re = 0, eo_im = 0;
+#pragma HLS ARRAY_PARTITION variable=dcR_re complete
+#pragma HLS ARRAY_PARTITION variable=dcR_im complete
+#pragma HLS ARRAY_PARTITION variable=ntR_re complete
+#pragma HLS ARRAY_PARTITION variable=ntR_im complete
+#pragma HLS ARRAY_PARTITION variable=xd_re complete
+#pragma HLS ARRAY_PARTITION variable=xd_im complete
+#pragma HLS ARRAY_PARTITION variable=eh_re complete
+#pragma HLS ARRAY_PARTITION variable=eh_im complete
+#pragma HLS ARRAY_PARTITION variable=ep_rr complete
+#pragma HLS ARRAY_PARTITION variable=ep_ii complete
+#pragma HLS ARRAY_PARTITION variable=ep_ri complete
+#pragma HLS ARRAY_PARTITION variable=ep_ir complete
+#pragma HLS RESET variable=dcR_re
+#pragma HLS RESET variable=dcR_im
+#pragma HLS RESET variable=ntR_re
+#pragma HLS RESET variable=ntR_im
+#pragma HLS RESET variable=xd_re
+#pragma HLS RESET variable=xd_im
+#pragma HLS RESET variable=eh_re
+#pragma HLS RESET variable=eh_im
+#pragma HLS RESET variable=ep_rr
+#pragma HLS RESET variable=ep_ii
+#pragma HLS RESET variable=ep_ri
+#pragma HLS RESET variable=ep_ir
+#pragma HLS RESET variable=es_re
+#pragma HLS RESET variable=es_im
+#pragma HLS RESET variable=eo_re
+#pragma HLS RESET variable=eo_im
+    smp_t nt_re[2], nt_im[2];                      // notch outputs -> R2
+#pragma HLS ARRAY_PARTITION variable=nt_re complete
+#pragma HLS ARRAY_PARTITION variable=nt_im complete
+#if PL_NPI_NOTCH_IN && PL_NPI_NOTCHES > 0
+    static ap_int<25> pns_re[2 * PL_NPI_NOTCHES], pns_im[2 * PL_NPI_NOTCHES];
+    static ap_int<25> pnm_re[2 * PL_NPI_NOTCHES], pnm_im[2 * PL_NPI_NOTCHES];
+    static ap_int<17> pnx_re[2 * PL_NPI_NOTCHES], pnx_im[2 * PL_NPI_NOTCHES];
+#pragma HLS ARRAY_PARTITION variable=pns_re complete
+#pragma HLS ARRAY_PARTITION variable=pns_im complete
+#pragma HLS ARRAY_PARTITION variable=pnm_re complete
+#pragma HLS ARRAY_PARTITION variable=pnm_im complete
+#pragma HLS ARRAY_PARTITION variable=pnx_re complete
+#pragma HLS ARRAY_PARTITION variable=pnx_im complete
+#pragma HLS RESET variable=pns_re
+#pragma HLS RESET variable=pns_im
+#pragma HLS RESET variable=pnm_re
+#pragma HLS RESET variable=pnm_im
+#pragma HLS RESET variable=pnx_re
+#pragma HLS RESET variable=pnx_im
+    for (int ch = 0; ch < 2; ch++) {
+#pragma HLS UNROLL
+        ap_int<17> xr = dcR_re[ch], xi = dcR_im[ch];
+        for (int k = 0; k < PL_NPI_NOTCHES; k++) {
+#pragma HLS UNROLL
+            const int i = ch * PL_NPI_NOTCHES + k;
+            notch_step(cfg[PL_NPI_CFG_NOTCH_LSB + k], ncoef(96 * k + 95, 96 * k), xr, xi,
+                       pns_re[i], pns_im[i], pnm_re[i], pnm_im[i], pnx_re[i], pnx_im[i]);
+        }
+        nt_re[ch] = (smp_t)xr;
+        nt_im[ch] = (smp_t)xi;
+    }
+#else
+    for (int ch = 0; ch < 2; ch++) {
+#pragma HLS UNROLL
+        nt_re[ch] = dcR_re[ch];
+        nt_im[ch] = dcR_im[ch];
+    }
+#endif
+
+    // equaliser: e = f0 h0 + f1 h1 + f2 h2, h0 = newest R2 sample of RX2
+    ap_int<16> fc_re[3], fc_im[3];
+#pragma HLS ARRAY_PARTITION variable=fc_re complete
+#pragma HLS ARRAY_PARTITION variable=fc_im complete
+    const bool eqon = (PL_NPI_EQ != 0) && cfg[14];
+    for (int k = 0; k < 3; k++) {
+#pragma HLS UNROLL
+        fc_re[k] = eqon ? (ap_int<16>)eqcoef(32 * k + 15, 32 * k)      : ap_int<16>(k == 1 ? (1 << PL_NPI_EQFRAC) : 0);
+        fc_im[k] = eqon ? (ap_int<16>)eqcoef(32 * k + 31, 32 * k + 16) : ap_int<16>(0);
+    }
+    smp_t h_re[3], h_im[3];
+#pragma HLS ARRAY_PARTITION variable=h_re complete
+#pragma HLS ARRAY_PARTITION variable=h_im complete
+    h_re[0] = ntR_re[1]; h_im[0] = ntR_im[1];
+    h_re[1] = eh_re[0];  h_im[1] = eh_im[0];
+    h_re[2] = eh_re[1];  h_im[2] = eh_im[1];
+    // R3: the four real products per tap
+    ap_int<32> nep_rr[3], nep_ii[3], nep_ri[3], nep_ir[3];
+#pragma HLS ARRAY_PARTITION variable=nep_rr complete
+#pragma HLS ARRAY_PARTITION variable=nep_ii complete
+#pragma HLS ARRAY_PARTITION variable=nep_ri complete
+#pragma HLS ARRAY_PARTITION variable=nep_ir complete
+    for (int k = 0; k < 3; k++) {
+#pragma HLS UNROLL
+        nep_rr[k] = fc_re[k] * h_re[k];
+        nep_ii[k] = fc_im[k] * h_im[k];
+        nep_ri[k] = fc_re[k] * h_im[k];
+        nep_ir[k] = fc_im[k] * h_re[k];
+    }
+    // R4: sums of the previous sample's products
+    ap_int<35> nes_re = ((ap_int<35>)ep_rr[0] - ep_ii[0]) + ((ap_int<35>)ep_rr[1] - ep_ii[1]) + ((ap_int<35>)ep_rr[2] - ep_ii[2]);
+    ap_int<35> nes_im = ((ap_int<35>)ep_ri[0] + ep_ir[0]) + ((ap_int<35>)ep_ri[1] + ep_ir[1]) + ((ap_int<35>)ep_ri[2] + ep_ir[2]);
+    // R5: round, saturate to 16 bits
+    const ap_int<35> ehalf = ap_int<35>(1) << (PL_NPI_EQFRAC - 1);
+    ap_int<22> er = (ap_int<22>)((es_re + ehalf) >> PL_NPI_EQFRAC);
+    ap_int<22> ei = (ap_int<22>)((es_im + ehalf) >> PL_NPI_EQFRAC);
+    smp_t neo_re = (er > 32767) ? smp_t(32767) : (er < -32768) ? smp_t(-32768) : (smp_t)er;
+    smp_t neo_im = (ei > 32767) ? smp_t(32767) : (ei < -32768) ? smp_t(-32768) : (smp_t)ei;
+
+    // the aligned pair the loop sees
+    x1r = xd_re[3]; x1i = xd_im[3];
+    x2r = eo_re;    x2i = eo_im;
+#ifdef PL_NPI_DEBUG
+    pl_npi_dbg[0] = (int)x1r; pl_npi_dbg[1] = (int)x2r;     // C simulation only: alignment check
+#endif
+
+    // commit the pre-processing registers (the delay lines take the OLD R2
+    // values, so they are shifted before R2 is overwritten)
+    for (int j = 3; j > 0; j--) {
+#pragma HLS UNROLL
+        xd_re[j] = xd_re[j - 1];  xd_im[j] = xd_im[j - 1];
+    }
+    xd_re[0] = ntR_re[0];  xd_im[0] = ntR_im[0];
+    eh_re[1] = eh_re[0];   eh_im[1] = eh_im[0];
+    eh_re[0] = ntR_re[1];  eh_im[0] = ntR_im[1];
+    for (int ch = 0; ch < 2; ch++) {
+#pragma HLS UNROLL
+        dcR_re[ch] = dcn_re[ch];  dcR_im[ch] = dcn_im[ch];
+        ntR_re[ch] = nt_re[ch];   ntR_im[ch] = nt_im[ch];
+    }
+    for (int k = 0; k < 3; k++) {
+#pragma HLS UNROLL
+        ep_rr[k] = nep_rr[k];  ep_ii[k] = nep_ii[k];
+        ep_ri[k] = nep_ri[k];  ep_ir[k] = nep_ir[k];
+    }
+    es_re = nes_re;  es_im = nes_im;
+    eo_re = neo_re;  eo_im = neo_im;
+#else
+    x1r = dcn_re[0]; x1i = dcn_im[0]; x2r = dcn_re[1]; x2i = dcn_im[1];
+#endif
 
     // ---- 1. input normalisation: x2n = g2 x2 (Q13 x Q0 -> Q2) ---------------
     // |g2r x2r - g2i x2i| <= 2 * 32768 * 32768 = 2^31 for full-scale 16-bit
@@ -670,21 +885,9 @@ void pl_npi(hls::stream<ap_uint<64> > &s_axis_x,
         out(31, 16) = (ap_uint<16>)x1S_im;
     }
 
-#if PL_NPI_NOTCHES > 0
-    // ---- CW notches (v2.4), in cascade on the output -------------------------
-    //   H(z) = (1 - q z^-1) / (1 - p z^-1), p = r q, q = e^{j w0}: a zero ON
-    //   the unit circle at the CW frequency, a pole just inside it (3 dB width
-    //   ~ fs (1 - r) / pi; 62 kHz at 50 MS/s with r = 1 - 2^-8). Look-ahead
-    //   form, so the feedback spans two registers and each fits one clock:
-    //     u[n] = x[n] + p x[n-1]
-    //     s[n] = u[n] + p^2 s[n-2]       (nm holds p^2 s[n-2], ns s[n-1])
-    //     y[n] = s[n] - q s[n-1]
-    //   s, nm and ns carry ONE fraction bit (x 2): the rounding noise of the
-    //   recursion is amplified by its gain ~ 1/(1 - r^2), and in whole LSBs it
-    //   raised the output noise 0.2 dB per notch (C sim). 2|s| <= 2|x| / (1 -
-    //   r) < 2^24 for r <= 1 - 2^-8 (the firmware's limit): 25 bits, one
-    //   DSP48 per product; saturated anyway. A notch that is off passes its
-    //   input and clears its state.
+#if PL_NPI_NOTCHES > 0 && !(PL_NPI_V25 && PL_NPI_NOTCH_IN)
+    // ---- CW notches, in cascade on the OUTPUT (v2.4 placement; PL_NPI_NOTCH_IN = 0)
+    //   Same notch as in front of the loop: see notch_step() above.
     {
         static ap_int<25> ns_re[PL_NPI_NOTCHES], ns_im[PL_NPI_NOTCHES];
         static ap_int<25> nm_re[PL_NPI_NOTCHES], nm_im[PL_NPI_NOTCHES];
@@ -701,44 +904,11 @@ void pl_npi(hls::stream<ap_uint<64> > &s_axis_x,
 #pragma HLS RESET variable=nm_im
 #pragma HLS RESET variable=nx_re
 #pragma HLS RESET variable=nx_im
-        const ap_int<42> nhalf = ap_int<42>(1) << (PL_NPI_NFRAC - 1);
         ap_int<17> xr = (ap_int<16>)out(15, 0), xi = (ap_int<16>)out(31, 16);
         for (int k = 0; k < PL_NPI_NOTCHES; k++) {
 #pragma HLS UNROLL
-            const bool en = cfg[PL_NPI_CFG_NOTCH_LSB + k];
-            ap_int<16> qr = (ap_int<16>)ncoef(96 * k + 15, 96 * k),      qi = (ap_int<16>)ncoef(96 * k + 31, 96 * k + 16);
-            ap_int<16> pr = (ap_int<16>)ncoef(96 * k + 47, 96 * k + 32), pi = (ap_int<16>)ncoef(96 * k + 63, 96 * k + 48);
-            ap_int<16> p2r = (ap_int<16>)ncoef(96 * k + 79, 96 * k + 64), p2i = (ap_int<16>)ncoef(96 * k + 95, 96 * k + 80);
-            // u = x + p x[n-1]
-            const ap_int<42> uhalf = ap_int<42>(1) << (PL_NPI_NFRAC - 2);
-            ap_int<42> upr = (ap_int<42>)(pr * nx_re[k]) - (ap_int<42>)(pi * nx_im[k]) + uhalf;
-            ap_int<42> upi = (ap_int<42>)(pr * nx_im[k]) + (ap_int<42>)(pi * nx_re[k]) + uhalf;
-            ap_int<28> ur = ((ap_int<28>)xr << 1) + (ap_int<28>)(upr >> (PL_NPI_NFRAC - 1));
-            ap_int<28> ui = ((ap_int<28>)xi << 1) + (ap_int<28>)(upi >> (PL_NPI_NFRAC - 1));
-            // s = u + p^2 s[n-2], saturated to 25 bits
-            ap_int<29> sr = (ap_int<29>)ur + nm_re[k], si = (ap_int<29>)ui + nm_im[k];
-            const ap_int<29> smax = (ap_int<29>(1) << 24) - 1, smin = -(ap_int<29>(1) << 24);
-            ap_int<25> s25r = (sr > smax) ? (ap_int<25>)smax : (sr < smin) ? (ap_int<25>)smin : (ap_int<25>)sr;
-            ap_int<25> s25i = (si > smax) ? (ap_int<25>)smax : (si < smin) ? (ap_int<25>)smin : (ap_int<25>)si;
-            // y = s - q s[n-1]
-            ap_int<42> yqr = (ap_int<42>)(qr * ns_re[k]) - (ap_int<42>)(qi * ns_im[k]) + nhalf;
-            ap_int<42> yqi = (ap_int<42>)(qr * ns_im[k]) + (ap_int<42>)(qi * ns_re[k]) + nhalf;
-            ap_int<28> y2r = (ap_int<28>)s25r - (ap_int<28>)(yqr >> PL_NPI_NFRAC);   // x 2
-            ap_int<28> y2i = (ap_int<28>)s25i - (ap_int<28>)(yqi >> PL_NPI_NFRAC);
-            ap_int<28> yr = (y2r + 1) >> 1, yi = (y2i + 1) >> 1;
-            // next p^2 s[n-1] from the OLD s[n-1]: |p^2 s| <= |s|, no saturation
-            ap_int<42> mr = (ap_int<42>)(p2r * ns_re[k]) - (ap_int<42>)(p2i * ns_im[k]) + nhalf;
-            ap_int<42> mi = (ap_int<42>)(p2r * ns_im[k]) + (ap_int<42>)(p2i * ns_re[k]) + nhalf;
-            nm_re[k] = en ? (ap_int<25>)(mr >> PL_NPI_NFRAC) : ap_int<25>(0);
-            nm_im[k] = en ? (ap_int<25>)(mi >> PL_NPI_NFRAC) : ap_int<25>(0);
-            ns_re[k] = en ? s25r : ap_int<25>(0);
-            ns_im[k] = en ? s25i : ap_int<25>(0);
-            nx_re[k] = en ? xr : ap_int<17>(0);
-            nx_im[k] = en ? xi : ap_int<17>(0);
-            if (en) {
-                xr = (yr > 32767) ? ap_int<17>(32767) : (yr < -32768) ? ap_int<17>(-32768) : (ap_int<17>)yr;
-                xi = (yi > 32767) ? ap_int<17>(32767) : (yi < -32768) ? ap_int<17>(-32768) : (ap_int<17>)yi;
-            }
+            notch_step(cfg[PL_NPI_CFG_NOTCH_LSB + k], ncoef(96 * k + 95, 96 * k), xr, xi,
+                       ns_re[k], ns_im[k], nm_re[k], nm_im[k], nx_re[k], nx_im[k]);
         }
         out(15, 0)  = (ap_uint<16>)(ap_int<16>)xr;
         out(31, 16) = (ap_uint<16>)(ap_int<16>)xi;

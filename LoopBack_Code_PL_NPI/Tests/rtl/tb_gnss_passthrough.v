@@ -22,7 +22,7 @@ module tb;
 
   wire [63:0] m_tdata; wire m_tvalid; reg m_tready = 1;
   wire [31:0] s_tdata; wire s_tvalid; wire s_tready;
-  wire npi_rst_n; wire [31:0] npi_gamma, npi_cfg, npi_nrm, npi_thr, npi_hold; wire npi_adapt_en; wire [191:0] npi_ncoef;
+  wire npi_rst_n; wire [31:0] npi_gamma, npi_cfg, npi_nrm, npi_thr, npi_hold; wire npi_adapt_en; wire [191:0] npi_ncoef; wire [95:0] npi_eqcoef;
   reg [31:0] npi_st = 32'h00070006; reg [191:0] npi_wout = {32'h66666666,32'h55555555,32'h44444444,32'h33333333,32'h22222222,32'h11111111}; reg [31:0] npi_pow = 32'h00001234;
   wire [15:0] di0, dq0, di1, dq1;
 
@@ -44,7 +44,7 @@ module tb;
     .m_axis_npi_tdata(m_tdata), .m_axis_npi_tvalid(m_tvalid), .m_axis_npi_tready(m_tready),
     .s_axis_npi_tdata(s_tdata), .s_axis_npi_tvalid(s_tvalid), .s_axis_npi_tready(s_tready),
     .npi_gamma(npi_gamma), .npi_adapt_en(npi_adapt_en), .npi_rst_n(npi_rst_n), .npi_cfg(npi_cfg), .npi_nrm(npi_nrm),
-    .npi_det_thr(npi_thr), .npi_det_hold(npi_hold), .npi_ncoef(npi_ncoef), .npi_st(npi_st), .npi_wout(npi_wout), .npi_det_pow(npi_pow),
+    .npi_det_thr(npi_thr), .npi_det_hold(npi_hold), .npi_ncoef(npi_ncoef), .npi_eqcoef(npi_eqcoef), .npi_st(npi_st), .npi_wout(npi_wout), .npi_det_pow(npi_pow),
     .s_axi_aclk(aclk), .s_axi_aresetn(aresetn),
     .s_axi_awvalid(awvalid), .s_axi_awaddr(awaddr), .s_axi_awprot(3'd0), .s_axi_awready(awready),
     .s_axi_wvalid(wvalid), .s_axi_wdata(wdata), .s_axi_wstrb(4'hF), .s_axi_wready(wready),
@@ -99,8 +99,8 @@ module tb;
   initial begin
     #100 rst = 0; aresetn = 1;
     #100;
-    axi_read(16'h0004, r); if (r !== 32'h00020004) begin $display("VERSION %h", r); errors = errors + 1; end
-    axi_read(16'h0184, r); if (r !== 32'h03020802) begin $display("NPI_INFO %h", r); errors = errors + 1; end
+    axi_read(16'h0004, r); if (r !== 32'h00020005) begin $display("VERSION %h", r); errors = errors + 1; end
+    axi_read(16'h0184, r); if (r !== 32'h03020803) begin $display("NPI_INFO %h", r); errors = errors + 1; end
     if (npi_cfg !== 32'hD || npi_nrm !== 32'h2000 || npi_thr !== 32'hFFFFFFFF || npi_hold !== 32'd0) begin $display("reset cfg %h nrm %h thr %h hold %h", npi_cfg, npi_nrm, npi_thr, npi_hold); errors = errors + 1; end
     if (npi_gamma !== 32'd1 || npi_adapt_en !== 1'b1) begin $display("reset gamma %h adapt %b", npi_gamma, npi_adapt_en); errors = errors + 1; end
     axi_write(16'h0048, 32'd123456789);
@@ -116,11 +116,16 @@ module tb;
     axi_read(16'h0188, r); if (r !== 32'h204) begin $display("CFG shadow %h", r); errors = errors + 1; end
     axi_read(16'h0198, r); if (r !== 32'hD) begin $display("CFG_ACTIVE before commit %h", r); errors = errors + 1; end
     if (npi_ncoef !== 192'd0) begin $display("ncoef reset %h", npi_ncoef); errors = errors + 1; end
+    if (npi_eqcoef !== 96'd0) begin $display("eqcoef reset %h", npi_eqcoef); errors = errors + 1; end
+    axi_write(16'h01D8, 32'h1111_0A0A); axi_write(16'h01DC, 32'h2222_0B0B); axi_write(16'h01E0, 32'h3333_0C0C);
+    if (npi_eqcoef !== 96'd0) begin $display("eqcoef changed before commit"); errors = errors + 1; end
+    axi_read(16'h01DC, r); if (r !== 32'h2222_0B0B) begin $display("EQCOEF1 shadow %h", r); errors = errors + 1; end
     axi_write(16'h01C0, 32'hA0A0_0101); axi_write(16'h01C4, 32'hB1B1_0202); axi_write(16'h01C8, 32'hC2C2_0303);
     axi_write(16'h01CC, 32'hD3D3_0404); axi_write(16'h01D0, 32'hE4E4_0505); axi_write(16'h01D4, 32'hF5F5_0606);
     if (npi_ncoef !== 192'd0) begin $display("ncoef changed before commit"); errors = errors + 1; end
     axi_read(16'h01CC, r); if (r !== 32'hD3D3_0404) begin $display("NCOEF3 shadow %h", r); errors = errors + 1; end
     axi_write(16'h0180, 32'd1);
+    if (npi_eqcoef !== {32'h3333_0C0C, 32'h2222_0B0B, 32'h1111_0A0A}) begin $display("eqcoef after commit %h", npi_eqcoef); errors = errors + 1; end
     if (npi_ncoef !== {32'hF5F5_0606, 32'hE4E4_0505, 32'hD3D3_0404, 32'hC2C2_0303, 32'hB1B1_0202, 32'hA0A0_0101}) begin $display("ncoef after commit %h", npi_ncoef); errors = errors + 1; end
     if (npi_cfg !== 32'h204 || npi_nrm !== 32'h7FFF || npi_thr !== 32'd6400 || npi_hold !== 32'd30720000) begin $display("commit: cfg %h nrm %h thr %h hold %h", npi_cfg, npi_nrm, npi_thr, npi_hold); errors = errors + 1; end
     axi_read(16'h0180, r); if (r !== 32'd1) begin $display("commit count %h", r); errors = errors + 1; end
@@ -135,7 +140,7 @@ module tb;
     axi_read(16'h01BC, r); if (r !== 32'h00070006) begin $display("ST latched %h", r); errors = errors + 1; end
     axi_read(16'h019C, r); if (r !== 32'h0) begin $display("live status after change %h", r); errors = errors + 1; end
     @(posedge aclk) aresetn = 0; repeat (3) @(posedge aclk); aresetn = 1;
-    if (npi_cfg !== 32'hD || npi_nrm !== 32'h2000 || npi_thr !== 32'hFFFFFFFF || npi_gamma !== 32'd1 || npi_ncoef !== 192'd0) begin $display("reset did not restore"); errors = errors + 1; end
+    if (npi_cfg !== 32'hD || npi_nrm !== 32'h2000 || npi_thr !== 32'hFFFFFFFF || npi_gamma !== 32'd1 || npi_ncoef !== 192'd0 || npi_eqcoef !== 96'd0) begin $display("reset did not restore"); errors = errors + 1; end
     // datapath: passthrough on, then switch the core in and out
     axi_write(16'h000C, 32'h1);           // pass_en
     #20000; checking = 1;

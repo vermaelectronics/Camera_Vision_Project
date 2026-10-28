@@ -75,6 +75,7 @@ static int clip12(double v) {
 static unsigned g_gamma = 1, g_cfg = PL_NPI_MODE_ON, g_nrm = 1u << PL_NPI_GFRAC;
 static unsigned g_thr = 0xFFFFFFFFu, g_hold = 0;
 static ap_uint<192> g_ncoef = 0;
+static ap_uint<96> g_eqcoef = 0;    // v2.5 RX2 equaliser taps (used with cfg[14])
 static int g_adapt = 1;
 static hls::stream<ap_uint<64> > xs;
 static hls::stream<ap_uint<32> > ys;
@@ -96,7 +97,7 @@ static Out step(int x1r, int x1i, int x2r, int x2i) {
     xs.write(w);
     ap_uint<32> st = 0, pw = 0;
     ap_uint<192> wo = 0;
-    pl_npi(xs, ys, g_gamma, (ap_uint<1>)g_adapt, g_cfg, g_nrm, g_thr, g_hold, g_ncoef, &st, &wo, &pw);
+    pl_npi(xs, ys, g_gamma, (ap_uint<1>)g_adapt, g_cfg, g_nrm, g_thr, g_hold, g_ncoef, g_eqcoef, &st, &wo, &pw);
     if (ys.empty()) { std::printf("core produced no output\n"); std::exit(2); }
     ap_uint<32> y = ys.read();
     Out o;
@@ -425,16 +426,16 @@ static int test_wideband() {
 
 
 // ---- v2.4: notch coefficients as the firmware computes them -------------------------
-// q = e^{j 2 pi f / fs}, p = r q, p^2, signed Q1.14, packed {im, re}.
-static unsigned q14(double re, double im) {
-    int a = (int)std::floor(re * 16384.0 + 0.5), b = (int)std::floor(im * 16384.0 + 0.5);
+// q = e^{j 2 pi f / fs} (Q1.15), p = r q, p^2 (Q1.14), packed {im, re}.
+static unsigned q14(double re, double im, double scale = 16384.0) {
+    int a = (int)std::floor(re * scale + 0.5), b = (int)std::floor(im * scale + 0.5);
     if (a > 32767) a = 32767; if (a < -32768) a = -32768;
     if (b > 32767) b = 32767; if (b < -32768) b = -32768;
     return ((unsigned)(b & 0xFFFF) << 16) | (unsigned)(a & 0xFFFF);
 }
 static void set_notch(int k, double f, double fs, double r) {
     cd q = std::polar(1.0, 2 * M_PI * f / fs), p = r * q, p2 = p * p;
-    g_ncoef(96 * k + 31, 96 * k) = q14(q.real(), q.imag());
+    g_ncoef(96 * k + 31, 96 * k) = q14(q.real(), q.imag(), 32768.0);   // q: Q1.15
     g_ncoef(96 * k + 63, 96 * k + 32) = q14(p.real(), p.imag());
     g_ncoef(96 * k + 95, 96 * k + 64) = q14(p2.real(), p2.imag());
 }
@@ -485,7 +486,7 @@ static int test_notch() {
         int bad = 0;
         for (int n = 0; n < 4000; n++) {
             Out o = step(clip12(grand() * 300), clip12(grand() * 300), 0, 0);
-            if (n > 4 && (o.yr != o.x1r || o.yi != o.x1i)) bad++;
+            if (n > PL_NPI_LATENCY + 2 && (o.yr != o.x1r || o.yi != o.x1i)) bad++;
         }
         printf("CW notches: not in this build (PL_NPI_NOTCHES = 0); notch bits set: %d samples differ from RX1\n", bad);
         return bad == 0;
@@ -521,11 +522,105 @@ static int test_notch() {
     for (int n = 0; n < 2000; n++) {
         int a = clip12(grand() * 300), b = clip12(grand() * 300);
         Out o = step(a, b, 0, 0);
-        if (n > 4 && (o.yr != o.x1r || o.yi != o.x1i)) bad_after++;
+        if (n > PL_NPI_LATENCY + 2 && (o.yr != o.x1r || o.yi != o.x1i)) bad_after++;
     }
     printf("CW notches: CW 30 dB at +5.17 MHz suppressed %.1f dB, CW at -9.15 MHz %.1f dB,\n"
            "       noise power elsewhere %+.2f dB; both off: %d samples differ from RX1\n", sup, sup2, dn, bad_after);
     return sup >= 35.0 && (PL_NPI_NOTCHES < 2 || sup2 >= 35.0) && std::fabs(dn) < 0.3 && bad_after == 0;
+}
+
+
+// ---- scenario 13 (v2.5): RX2 equaliser against cable mismatch --------------------------
+// 40 MHz wideband jammer through RX2 with a path difference of `tau` samples. The taps are
+// estimated like the firmware does it: 3-tap least squares, x1[n] ~ sum_k f_k x2[n+1-k], from
+// the first 8192 samples.
+static void estimate_eq(const std::vector<cd> &x1, const std::vector<cd> &x2, cd f[3]) {
+    cd R[3][3] = {}, rv[3] = {};
+    for (int n = 8; n < 8192; n++) {
+        cd u[3] = {x2[n + 1], x2[n], x2[n - 1]};
+        for (int a = 0; a < 3; a++) { rv[a] += std::conj(u[a]) * x1[n]; for (int b = 0; b < 3; b++) R[a][b] += std::conj(u[a]) * u[b]; }
+    }
+    double tr = R[0][0].real() + R[1][1].real() + R[2][2].real();
+    for (int a = 0; a < 3; a++) R[a][a] += 1e-3 * tr / 3;
+    cd M[3][4];
+    for (int a = 0; a < 3; a++) { for (int b = 0; b < 3; b++) M[a][b] = R[a][b]; M[a][3] = rv[a]; }
+    for (int i = 0; i < 3; i++) {
+        cd d = M[i][i]; for (int c = i; c < 4; c++) M[i][c] /= d;
+        for (int a = 0; a < 3; a++) if (a != i) { cd m = M[a][i]; for (int c = i; c < 4; c++) M[a][c] -= m * M[i][c]; }
+    }
+    for (int a = 0; a < 3; a++) f[a] = M[a][3];
+}
+static double wb_residual(double tau, double jn_db, bool eq, double *rx2gain) {
+    const int N = 120000;
+    std::vector<cd> J(N), L(N), D(N), x1(N), x2(N);
+    for (auto &v : J) v = cd(grand(), grand());
+    for (int i = 0; i < N; i++) {
+        cd a = 0;
+        for (int k = -20; k <= 20; k++) {
+            int j = i - k; if (j < 0 || j >= N) continue;
+            double w = 0.54 + 0.46 * cos(M_PI * k / 20.0);
+            a += J[j] * (k == 0 ? 0.84 : sin(2 * M_PI * 0.42 * k) / (M_PI * k)) * w;
+        }
+        L[i] = a;
+    }
+    for (int i = 0; i < N; i++) {
+        cd b = 0;
+        for (int k = -10; k <= 10; k++) {
+            int j = i - k; if (j < 0 || j >= N) continue;
+            double t = k - tau, w = 0.54 + 0.46 * cos(M_PI * k / 10.0);
+            b += L[j] * ((t == 0) ? 1.0 : sin(M_PI * t) / (M_PI * t)) * w;
+        }
+        D[i] = b;
+    }
+    double pj = 0; for (auto &v : L) pj += std::norm(v); pj /= N;
+    const double n1 = 2 * 20.0 * 20.0, js = std::sqrt(n1 * std::pow(10.0, jn_db / 10) / pj);
+    const cd h(0.6, -0.5);
+    for (int n = 0; n < N; n++) {
+        cd a = L[n] * js + cd(grand(), grand()) * 20.0, b = h * D[n] * js + cd(grand(), grand()) * 20.0;
+        x1[n] = cd(clip12(a.real()), clip12(a.imag())); x2[n] = cd(clip12(b.real()), clip12(b.imag()));
+    }
+    g_gamma = (unsigned)(131072.0 / 8.0 * n1);
+    g_cfg = PL_NPI_MODE_ON;
+    g_eqcoef = 0;
+    double r2 = 1.0;
+    if (eq) {
+        cd f[3]; estimate_eq(x1, x2, f);
+        r2 = 0;
+        for (int k = 0; k < 3; k++) {
+            int re = (int)std::floor(f[k].real() * 16384.0 + 0.5), im = (int)std::floor(f[k].imag() * 16384.0 + 0.5);
+            ap_uint<32> v; v(15, 0) = (ap_uint<16>)(ap_int<16>)re; v(31, 16) = (ap_uint<16>)(ap_int<16>)im;
+            g_eqcoef(32 * k + 31, 32 * k) = v;
+            r2 += std::norm(f[k]);
+        }
+        g_cfg |= PL_NPI_CFG_EQ;
+    }
+    if (rx2gain) *rx2gain = r2;
+    // flush the previous scenario's state through bypass
+    { unsigned c = g_cfg; g_cfg = PL_NPI_MODE_BYPASS; for (int n = 0; n < 64; n++) step(0, 0, 0, 0); g_cfg = c; }
+    double pt = 0, nt = 0;
+    for (int n = 0; n < N; n++) {
+        Out o = step((int)x1[n].real(), (int)x1[n].imag(), (int)x2[n].real(), (int)x2[n].imag());
+        if (n >= N / 2) { pt += (double)o.yr * o.yr + (double)o.yi * o.yi; nt += nout(o, n1, r2); }
+    }
+    return 10 * log10(pt / nt);
+}
+static int test_eq() {
+#if !(PL_NPI_V25 && PL_NPI_EQ)
+    std::printf("RX2 equaliser: not in this build (PL_NPI_V25 / PL_NPI_EQ = 0)\n");
+    return 1;
+#else
+    const double taus[3] = {0.15, 0.5, 1.0};
+    int ok = 1;
+    std::printf("wideband jammer J/N 30 dB, 40 MHz, residual above the output noise [dB] (0 = fully nulled)\n");
+    std::printf("  RX2 path difference [samples]   one weight (v2.4)   with equaliser\n");
+    for (int i = 0; i < 3; i++) {
+        double a = wb_residual(taus[i], 30.0, false, nullptr), b = wb_residual(taus[i], 30.0, true, nullptr);
+        std::printf("  %5.2f                           %6.1f              %6.1f\n", taus[i], a, b);
+        if (taus[i] >= 0.5 && (b > a - 8.0 || b > 14.0)) ok = 0;    // >= 8 dB better (3 taps cannot do a half sample deeper)
+        if (b > a + 1.0) ok = 0;                                    // never worse
+    }
+    return ok;
+#endif
 }
 
 // ---- scenario 12: GPS L1 C/A with a CW jammer -------------------------------------------
@@ -626,6 +721,7 @@ int main(int argc, char **argv) {
     case 10: ok = test_dc(); break;
     case 11: ok = test_notch(); break;
     case 12: ok = test_gps(argc > 2 && atoi(argv[2]) == 1); break;
+    case 13: ok = test_eq(); break;
     default: printf("unknown scenario %d\n", scen); ok = 0;
     }
     printf(ok ? "PL_NPI_CSIM: PASS (scenario %d)\n" : "PL_NPI_CSIM: FAIL (scenario %d)\n", scen);
