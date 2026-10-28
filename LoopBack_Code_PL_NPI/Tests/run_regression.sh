@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# PL-NPI v2.4 regression without Vivado/Vitis (host tools only):
-#   1. HLS C-simulation of the PL-NPI core, scenarios 1-12 (g++, Xilinx
+# PL-NPI v2.5 regression without Vivado/Vitis (host tools only):
+#   1. HLS C-simulation of the PL-NPI core, scenarios 1-13 (g++, Xilinx
 #      ap_int headers + a minimal hls::stream shim).  The GPS C/N0 table
-#      (J/S 10/15/30/40, scenario 12 full) runs with --full.
+#      (J/S 10/15/30/40, scenario 12 full) and the v2.4-against-v2.5 C/N0 table
+#      (Tests/run_cn0_table.sh) run with --full.
 #   2. RTL simulation of gnss_passthrough.v (register map, notch registers,
 #      commit, datapath) with Icarus Verilog.
 #   3. Firmware CW scan unit test (gnss_npi_det.c).
-#   4. Firmware engine mock (gnss_npi_aj.c + gnss_npi_det.c, scenarios 1-8:
+#   4. Firmware engine mock (gnss_npi_aj.c + gnss_npi_det.c, scenarios 1-15:
 #      JAMMER STATUS hysteresis, report snapshot, CW notch, DMA loss, J/S).
 # Needs: gcc, g++, iverilog/vvp, and the ap_int headers from either
 #   $XILINX_HLS/include (Vitis HLS install) or HLS_INCLUDE=<dir with ap_int.h>
@@ -30,12 +31,13 @@ if [ -n "$INC" ] && [ -f "$INC/ap_int.h" ] && command -v g++ >/dev/null; then
     # the shim stands in for hls_stream.h only; ap_int comes from $INC
     if g++ -O2 -w -I"$INC" -I"$ROOT/Tests/hls/shim" -I"$HLS" "$HLS/testbench.cpp" "$HLS/pl_npi.cpp" \
            -o "$OUT/pl_npi_csim" > "$OUT/csim_build.log" 2>&1; then
-        for s in 1 2 3 4 5 7 8 9 10 11 12; do
+        for s in 1 2 3 4 5 7 8 9 10 11 12 13; do
             if "$OUT/pl_npi_csim" $s > "$OUT/csim_$s.log" 2>&1; then res "HLS csim scenario $s" PASS
             else res "HLS csim scenario $s" FAIL; tail -5 "$OUT/csim_$s.log"; fi
         done
         if [ $FULL = 1 ]; then
             "$OUT/pl_npi_csim" 12 1 > "$OUT/csim_gps_table.log" 2>&1; cat "$OUT/csim_gps_table.log"
+            "$ROOT/Tests/run_cn0_table.sh"          # v2.4 against v2.5, ~3 min
         fi
     else res "HLS csim build" FAIL; tail -20 "$OUT/csim_build.log"; fi
 else
@@ -58,7 +60,7 @@ if command -v gcc >/dev/null; then
     else res "firmware CW scan" FAIL; cat "$OUT/cw_build.log" "$OUT/cw_scan.log" | tail -12; fi
     if gcc $CF -DGNSS_AJ_BUF_ADDR='((uintptr_t)mock_buf)' Tests/host/mock_engine.c "$FW/gnss_npi_aj.c" "$FW/gnss_npi_det.c" \
            -lm -o "$OUT/mock_engine" > "$OUT/mock_build.log" 2>&1; then
-        for s in 1 2 3 4 5 6 7 8 9 10 11 12 13; do
+        for s in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
             if "$OUT/mock_engine" $s > "$OUT/mock_$s.log" 2>&1 && grep -q "^MOCK: PASS" "$OUT/mock_$s.log"; then
                 res "firmware mock scenario $s" PASS
             else res "firmware mock scenario $s" FAIL; tail -8 "$OUT/mock_$s.log"; fi

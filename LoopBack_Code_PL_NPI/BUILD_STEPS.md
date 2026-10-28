@@ -1,8 +1,8 @@
-# Build PL-NPI v2.4 step by step (zip → BOOT.BIN → SD card)
+# Build PL-NPI v2.5 step by step (zip → BOOT.BIN → SD card)
 
-v2.4 changes the HLS core (IP 2.1), the passthrough (VERSION 2.4) and the
+v2.5 changes the HLS core (IP 2.2), the passthrough (VERSION 2.5) and the
 block design, so **every stage from 3 to 9 must run**. What changed and why:
-`README_PL_NPI_v2.4.md`. Host-only checks, without Xilinx tools:
+`README_PL_NPI_v2.5.md` (and `README_PL_NPI_v2.4.md`). Host-only checks, without Xilinx tools:
 `Tests/run_regression.sh` (§7).
 
 Every command below is meant to be typed in a Linux terminal (Ubuntu 22.04 or
@@ -33,9 +33,9 @@ ls /tools/Xilinx/Vivado/2023.2/settings64.sh /tools/Xilinx/Vitis/2023.2/settings
 ## 1. Unzip into a NEW folder
 
 ```bash
-mkdir -p ~/pl_npi_v24
-cd ~/pl_npi_v24
-unzip ~/Downloads/LoopBack_Code_PL_NPI_v2.4.0.zip
+mkdir -p ~/pl_npi_v25
+cd ~/pl_npi_v25
+unzip ~/Downloads/LoopBack_Code_PL_NPI_v2.5.0.zip
 cd LoopBack_Code_PL_NPI
 chmod +x Automation/Linux/*.sh Automation/Linux/steps/*.sh
 ```
@@ -83,18 +83,21 @@ Check: `STEP 2 libip: PASS (11 library logs ...)`
 ```
 Check, all of these in the output:
 ```
-PL_NPI_CSIM: PASS (scenario 1)   ... 2 3 4 5 7 8 9 10 11 (10 lines; scenario 12 is optional: PL_NPI_CSIM_GPS=1, slow)
+PL_NPI_CSIM: PASS (scenario 1)   ... 2 3 4 5 7 8 9 10 11 13 (11 lines; scenario 12 is optional: PL_NPI_CSIM_GPS=1, slow)
 PL_NPI_HLS: estimated clock period X ns (target 10 ns), achieved II 1 (requested 1)
-PL_NPI_HLS: IP antsdr:gnss:pl_npi:2.1 -> .../Build/ip_repo/pl_npi
+PL_NPI_HLS: IP antsdr:gnss:pl_npi:2.2 -> .../Build/ip_repo/pl_npi
 PL_NPI_HLS: PASS
 ```
-**This is the step to watch in v2.4.** The two CW notches are new
-recursive loops at II=1 on a 10 ns clock, and they have **not** been
-synthesised yet. If the clock estimate is above 10 ns and the critical path
-names `ns_re`/`ns_im`/`nm_*` (the notch state), rebuild with one notch or
-none. Then continue with step 4 as usual:
+**This is the step to watch in v2.5.** v2.5 puts the two CW notches in
+front of the loop on **both** channels (4 notch units) and adds the 3-tap RX2
+equaliser; both are registered, short paths, but they have **not** been
+synthesised yet (v2.4's notches did close at 10 ns on your PC). If the clock
+estimate is above 10 ns, look at the critical path and rebuild with one of
+these fallbacks, then continue with step 4 as usual:
 ```bash
-PL_NPI_NOTCHES=1 ./Automation/Linux/steps/03_npi.sh     # or PL_NPI_NOTCHES=0
+PL_NPI_NOTCHES=1 ./Automation/Linux/steps/03_npi.sh     # one notch per channel
+PL_NPI_NOTCH_IN=0 ./Automation/Linux/steps/03_npi.sh    # notches on the output as v2.4 (equaliser kept)
+PL_NPI_V25=0 ./Automation/Linux/steps/03_npi.sh         # the v2.4 datapath (no equaliser)
 ```
 If it fails anywhere else, send me the `PL_NPI_HLS` lines and the critical path:
 ```bash
@@ -116,7 +119,7 @@ Check: `IP_PACKAGE_OK`
 ./Automation/Linux/steps/05_project.sh
 ```
 Check: `CREATE_RESULT: PASS`
-(`GNSS-CRPA: PL-NPI IP resolved in catalog: antsdr:gnss:pl_npi:2.1` is
+(`GNSS-CRPA: PL-NPI IP resolved in catalog: antsdr:gnss:pl_npi:2.2` is
 printed in `Build/Logs/project.log`.)
 
 ### Step 6: synthesis, implementation, bitstream (20–60 min)
@@ -205,7 +208,7 @@ Only the firmware changed (e.g. a different `--defines`)? Then:
 
 1. Format the card as **FAT32**.
 2. Copy **`Build/Output/BOOT.BIN`** to the **root** of the card. Do not use
-   `SD_Image/BOOT.BIN`: that is an old image without PL-NPI v2.4.
+   `SD_Image/BOOT.BIN`: that is an old image without PL-NPI v2.5.
 3. Set the board's **BOOT switch to SD**, insert the card, connect RF:
 
 | Port | Connect |
@@ -217,13 +220,13 @@ Only the firmware changed (e.g. a different `--defines`)? Then:
 4. Power on. The console must show (among other lines):
 
 ```
-gnss_pt: present at 0x43c00000, version 2.4
+gnss_pt: present at 0x43c00000, version 2.5
 SELFTEST: PASS - ...
-ANTI-JAM (PL-NPI 2.4.0): ON, bypassed until a jammer appears.
+ANTI-JAM (PL-NPI 2.5.0): ON, bypassed until a jammer appears.
 ```
 
-If it says `version 2.3` or older, the card has an old BOOT.BIN (the
-anti-jam still runs, but without the DC blocker and the notches).
+If it says `version 2.4` or older, the card has an old BOOT.BIN (the
+anti-jam still runs, but without the RX2 equaliser; notches on the output).
 
 Then type `gnss_band?`. It must show `4 = USER`, LO 1570.250 MHz, 50 MS/s,
 50 MHz, and the AD9361 FIRs `off`. GPS, Galileo/B1C and BeiDou B1I say

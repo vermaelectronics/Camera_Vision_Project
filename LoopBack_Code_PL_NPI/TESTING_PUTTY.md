@@ -1,4 +1,4 @@
-# Testing PL-NPI v2.4 on PuTTY, and what to send back
+# Testing PL-NPI v2.5 on PuTTY, and what to send back
 
 This guide sets PuTTY up so every line the board prints is saved to a file.
 Then come the tests. Each one says what to type, what you should see, and
@@ -59,7 +59,9 @@ same block, apart from the `ms old` figure.
 | `detection` | every metric next to its ON and OFF threshold: coherence, power J/N, RX gain cut, FPGA detector, CW scan |
 | `cw scan` | each narrowband peak: RF frequency, level in both antennas, `CONFIRMED` or candidate |
 | `filter` | whether PL-NPI is **in the TX1 path** and why. This is **separate** from the jammer status: a CW below the noise is notched while the PL-NPI filter stays bypassed. |
-| `dc blocker`, `cw notches` | FPGA DC blocker on/off; notch frequencies in use (`[0] 1575.422 MHz ON`) |
+| `dc blocker`, `cw notches` | FPGA DC blocker on/off; notch frequencies in use (`[0] 1575.422 MHz ON`). With one CW both notches show the same frequency. |
+| `rx2 equaliser` | `ON` with its 3 taps and how much deeper than one weight they null the jammer, or `off` (matched paths, a CW alone, or no jammer). It comes on by itself 0.5-1 s after a wideband jammer with unequal RX1/RX2 paths appears and goes off when the jammer is gone. |
+| `notch placement` | confirms the notches are in front of the loop (bitstream 2.5) |
 | `suppression`, `residual` | how much the jammer is reduced; residual 0 dB = fully removed |
 | `gnss tracking` | the board cannot see the receiver's tracking state; read it in the receiver |
 | `radio` | LO, sample rate, RX/TX RF bandwidth, `gnss_band=` |
@@ -87,8 +89,8 @@ every test.
 
 1. Power on with PuTTY connected. Look for:
    ```
-   gnss_pt: present at 0x43c00000, version 2.4
-   ANTI-JAM (PL-NPI 2.4.0): ON, bypassed until a jammer appears.
+   gnss_pt: present at 0x43c00000, version 2.5
+   ANTI-JAM (PL-NPI 2.5.0): ON, bypassed until a jammer appears.
    ```
 2. Type `gnss_band?`. Check that it shows `4 = USER`, LO RX/TX 1570.250 MHz,
    50.00 MS/s, RF bandwidth 50.0 MHz, both FIRs `off`. GPS, Galileo/B1C and
@@ -186,12 +188,42 @@ Jammer on (CW J/S 30 dB), then power the board on. `JAMMER ON` and the notch
 should appear within the first second after the banner. Then `gnss_tx=1`
 and measure time to fix.
 
+### T8. Do the two RX ports really see different signals? (do this first)
+
+A 2-antenna array can only null a jammer that arrives differently at the two
+ports than the satellites do. If both ports see the same signal (one antenna
+split in two, or a simulator and the jammer combined before a splitter) the
+filter cancels the satellites too, and no spatial algorithm can lock.
+
+1. Jammer **off**, TX1 on, receiver locked and showing C/N0 per satellite.
+2. Type `gnss_aj_mode=3` (the filter always in and adapting). Wait 60 s.
+3. Look at the satellites. With two separate antennas nothing changes (the
+   weights stay near 0). If the C/N0 drops sharply or the satellites vanish,
+   the ports are common: change the rig (two real antennas, or the jammer fed
+   to the two ports through a splitter while the satellites come from the two
+   antennas).
+4. Type `gnss_aj_mode=0` to go back.
+
+### T9. Cable mismatch and the RX2 equaliser (wideband jammer)
+
+Wideband (noise) jammer at J/N 10, 20, 30 dB (the J/N the board prints), then
+once with a deliberate extra 1-2 m of cable on RX2 (about 5 ns per metre).
+For each, with `gnss_aj_eq=1` (default) and then `gnss_aj_eq=0`:
+
+1. Wait 20 s after the jammer is on. `gnss_report`: note `rx2 equaliser`
+   (ON or off), `suppression`, `residual`.
+2. The receiver's C/N0 per satellite and whether it holds its fix.
+3. `gnss_report` again with the jammer off after 10 s: `rx2 equaliser : off`.
+
+Expected from simulation (not measured): with the extra cable the equaliser
+switches on and the residual is clearly lower than with `gnss_aj_eq=0`.
+
 ---
 
 ## 4. Report template (copy, fill in, paste into your next message)
 
 ```
-=== PL-NPI v2.4 TEST REPORT ===
+=== PL-NPI v2.5 TEST REPORT ===
 Date:
 Build: BOOT.BIN sha256 (Build/Logs/boot.log):           --defines:
 Step 3 HLS: clock estimate ___ ns, II ___, PL_NPI_NOTCHES = 2 / 1 / 0     Step 6: BUILD_TIMING MET / VIOLATED
@@ -200,7 +232,7 @@ Signal source (sky / simulator model, level dBm):
 Jammer generator, combiner/splitter, losses measured? y/n:
 Test path: conducted / shielded enclosure
 
-T0  version 2.4? y/n   gnss_band=4 OK? y/n   two gnss_report identical? y/n   first line:
+T0  version 2.5? y/n   gnss_band=4 OK? y/n   two gnss_report identical? y/n   first line:
 T1  radio/rx gain/tx as intended? y/n (paste if no)
 
 T2                   acquisition [s]       first fix [s]        sats / avg C/N0
@@ -234,6 +266,10 @@ T5  CW 30: ON lines __ OFF lines __, sats lost per switch __, fix kept y/n
 T6  notch 0/1: C/N0 __ / __   dc 0/1: C/N0 __ / __   agc 2/1: C/N0 __ / __, residual __ / __
     band 1/4: sats __ / __    npi 0/1: sats __ / __
 T7  detected at boot? y/n, time to fix ___ s
+T8  gnss_aj_mode=3 with no jammer: satellites unchanged? y/n  (n = ports are common)
+T9  wideband, extra RX2 cable ___ m:  J/N  eq on/off  residual  C/N0 avg  fix
+      eq=1     10/20/30   ___       ____      ____      y/n
+      eq=0     10/20/30   ___       ____      ____      y/n
 
 Anything strange (WARNING lines, "radio changed", DMA errors, UNKNOWN status, resets):
 

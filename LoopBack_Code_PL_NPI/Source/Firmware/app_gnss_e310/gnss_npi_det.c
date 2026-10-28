@@ -134,6 +134,146 @@ static void lag_sum(const int16_t *ar, const int16_t *ai,
 	*sr = re; *si = im;
 }
 
+/* ---- v2.5: RX2 equaliser, applied to the capture and fitted on request ---------- */
+#define NPI_EQ_R 0.99609375            /* notch pole radius = 1 - 2^-8 (as the FPGA's) */
+static double EQF[3][2];
+static int    EQON;
+static double EA1R[NPI_NSAMP], EA1I[NPI_NSAMP], EA2R[NPI_NSAMP], EA2I[NPI_NSAMP];
+
+void npi_eq_set(const double f[3][2], int on)
+{
+	int k;
+	for(k = 0; k < 3; k++) { EQF[k][0] = f[k][0]; EQF[k][1] = f[k][1]; }
+	EQON = on ? 1 : 0;
+}
+
+/* first-order complex notch y[n] = x[n] - q x[n-1] + r q y[n-1], q = e^{j 2 pi f} */
+static void eq_notch(double *xr, double *xi, double f, int n)
+{
+	double s, c, qr, qi, pr, pi_, xpr = 0.0, xpi = 0.0, ypr = 0.0, ypi = 0.0;
+	int t;
+	npi_sincos(2.0 * NPI_PI * f, &s, &c);
+	qr = c; qi = s; pr = NPI_EQ_R * c; pi_ = NPI_EQ_R * s;
+	for(t = 0; t < n; t++) {
+		double ar = xr[t], ai = xi[t];
+		double yr = ar - (qr * xpr - qi * xpi) + (pr * ypr - pi_ * ypi);
+		double yi = ai - (qr * xpi + qi * xpr) + (pr * ypi + pi_ * ypr);
+		xpr = ar; xpi = ai; ypr = yr; ypi = yi;
+		xr[t] = yr; xi[t] = yi;
+	}
+}
+
+/* power of x1 - sum_l f_l u_l from the moments:  r11 - 2 Re(sum f_l conj(v_l)) + f^H R f */
+static double eq_resid(const double fr[3], const double fi[3], const double Rr[3][3], const double Ri[3][3],
+                       const double vr[3], const double vi[3], double r11)
+{
+	double p = r11;
+	int k, l;
+	for(l = 0; l < 3; l++) p -= 2.0 * (fr[l] * vr[l] + fi[l] * vi[l]);
+	for(k = 0; k < 3; k++)
+		for(l = 0; l < 3; l++) {
+			double tr = fr[k] * fr[l] + fi[k] * fi[l], ti = fr[k] * fi[l] - fi[k] * fr[l];
+			p += tr * Rr[k][l] - ti * Ri[k][l];
+		}
+	return p;
+}
+
+static void eq_fit(npi_det_t *r)
+{
+	const int n = NPI_NSAMP, b = NPI_NSAMP - 9;
+	int a = 8;                       /* skip the notch start-up (pole time constant 256 samples) when notching */
+	double Rr[3][3] = {{0}}, Ri[3][3] = {{0}}, vr[3] = {0}, vi[3] = {0}, r11 = 0.0;
+	double Qr[3][3], Qi[3][3], Mr[3][4], Mi[3][4], fr[3], fi[3], f1r[3] = {0}, f1i[3] = {0};
+	double cnt = (double)(b - a + 1), tr = 0.0, p_fit, p_one, p_cur, noise;
+	int t, j, k, l, c;
+
+	r->eq_ok = 0;
+	for(t = 0; t < n; t++) { EA1R[t] = X1R[t]; EA1I[t] = X1I[t]; EA2R[t] = X2R[t]; EA2I[t] = X2I[t]; }
+	for(j = 0; j < r->eq_ncw && j < 2; j++) {
+		eq_notch(EA1R, EA1I, r->eq_cwf[j], n);
+		eq_notch(EA2R, EA2I, r->eq_cwf[j], n);
+		a = 1100;
+	}
+	for(t = a; t <= b; t++) {
+		double ur[3], ui[3], xr = EA1R[t], xi = EA1I[t];
+		ur[0] = EA2R[t + 1]; ui[0] = EA2I[t + 1];
+		ur[1] = EA2R[t];     ui[1] = EA2I[t];
+		ur[2] = EA2R[t - 1]; ui[2] = EA2I[t - 1];
+		r11 += xr * xr + xi * xi;
+		for(k = 0; k < 3; k++) {
+			vr[k] += ur[k] * xr + ui[k] * xi;
+			vi[k] += ur[k] * xi - ui[k] * xr;
+			for(l = 0; l < 3; l++) {
+				Rr[k][l] += ur[k] * ur[l] + ui[k] * ui[l];
+				Ri[k][l] += ur[k] * ui[l] - ui[k] * ur[l];
+			}
+		}
+	}
+	r11 /= cnt;
+	for(k = 0; k < 3; k++) {
+		vr[k] /= cnt; vi[k] /= cnt;
+		for(l = 0; l < 3; l++) { Rr[k][l] /= cnt; Ri[k][l] /= cnt; }
+	}
+	noise = r->noise_ref;
+	if(noise > 0.0 && noise < NPI_QFLOOR) noise = NPI_QFLOOR;
+	r->eq_jn_db = (noise > 0.0 && r11 > noise) ? npi_db10((r11 - noise) / noise) : -99.0;
+	if(r11 <= 0.0 || Rr[1][1] <= 0.0) return;
+	for(k = 0; k < 3; k++) for(l = 0; l < 3; l++) { Qr[k][l] = Rr[k][l]; Qi[k][l] = Ri[k][l]; }
+	for(k = 0; k < 3; k++) tr += Rr[k][k];
+	for(k = 0; k < 3; k++) {                      /* ridge: 1e-3 of the mean power */
+		for(l = 0; l < 3; l++) { Mr[k][l] = Rr[k][l]; Mi[k][l] = Ri[k][l]; }
+		Mr[k][k] += 1e-3 * tr / 3.0;
+		Mr[k][3] = vr[k]; Mi[k][3] = vi[k];
+	}
+	for(k = 0; k < 3; k++) {                      /* Gauss-Jordan, R is Hermitian positive definite */
+		double dr = Mr[k][k], di = Mi[k][k], dd = dr * dr + di * di, ir, ii;
+		if(dd <= 0.0) return;
+		ir = dr / dd; ii = -di / dd;
+		for(c = k; c < 4; c++) { double xr = Mr[k][c], xi = Mi[k][c]; Mr[k][c] = xr * ir - xi * ii; Mi[k][c] = xr * ii + xi * ir; }
+		for(j = 0; j < 3; j++) {
+			double mr, mi;
+			if(j == k) continue;
+			mr = Mr[j][k]; mi = Mi[j][k];
+			for(c = k; c < 4; c++) {
+				Mr[j][c] -= mr * Mr[k][c] - mi * Mi[k][c];
+				Mi[j][c] -= mr * Mi[k][c] + mi * Mr[k][c];
+			}
+		}
+	}
+	for(k = 0; k < 3; k++) { fr[k] = Mr[k][3]; fi[k] = Mi[k][3]; }
+	f1r[1] = vr[1] / Rr[1][1]; f1i[1] = vi[1] / Rr[1][1];        /* one complex weight (what PL-NPI has) */
+	p_fit = eq_resid(fr, fi, Qr, Qi, vr, vi, r11);
+	p_one = eq_resid(f1r, f1i, Qr, Qi, vr, vi, r11);
+	if(EQON) {
+		double cr[3], ci[3];
+		for(k = 0; k < 3; k++) { cr[k] = EQF[k][0]; ci[k] = EQF[k][1]; }
+		p_cur = eq_resid(cr, ci, Qr, Qi, vr, vi, r11);
+	} else {
+		p_cur = p_one;
+	}
+	if(p_fit <= 1e-9) p_fit = 1e-9;
+	for(k = 0; k < 3; k++) { r->eq_f[k][0] = fr[k]; r->eq_f[k][1] = fi[k]; }
+	r->eq_gain_db = npi_db10(p_one / p_fit);
+	r->eq_cur_db  = npi_db10((p_cur > 1e-9 ? p_cur : 1e-9) / p_fit);
+	r->eq_ok = 1;
+}
+
+/* the taps on RX2 of the capture (centre sample t, neighbours t+1 and t-1); 12-bit clip */
+static void eq_apply(void)
+{
+	int t;
+	double pr = X2R[0], pi_ = X2I[0];
+	for(t = 1; t < NPI_NSAMP - 1; t++) {
+		double cr = X2R[t], ci = X2I[t], nr = X2R[t + 1], ni = X2I[t + 1];
+		double er = EQF[0][0] * nr - EQF[0][1] * ni + EQF[1][0] * cr - EQF[1][1] * ci + EQF[2][0] * pr - EQF[2][1] * pi_;
+		double ei = EQF[0][0] * ni + EQF[0][1] * nr + EQF[1][0] * ci + EQF[1][1] * cr + EQF[2][0] * pi_ + EQF[2][1] * pr;
+		int32_t ir = (int32_t)(er + (er >= 0.0 ? 0.5 : -0.5)), ii = (int32_t)(ei + (ei >= 0.0 ? 0.5 : -0.5));
+		pr = cr; pi_ = ci;
+		X2R[t] = (int16_t)(ir > 2047 ? 2047 : ir < -2048 ? -2048 : ir);
+		X2I[t] = (int16_t)(ii > 2047 ? 2047 : ii < -2048 ? -2048 : ii);
+	}
+}
+
 int npi_detect(const uint32_t *buf, int nsamp, npi_det_t *r)
 {
 	const int st = 2 * NPI_NLAG, en = nsamp - NPI_NLAG;
@@ -167,6 +307,10 @@ int npi_detect(const uint32_t *buf, int nsamp, npi_det_t *r)
 			X1R[t] -= m1r; X1I[t] -= m1i; X2R[t] -= m2r; X2I[t] -= m2i;
 		}
 	}
+	/* v2.5: fit the equaliser on the raw capture if asked, then show the
+	 * loop what the FPGA's equaliser gives it */
+	if(r->eq_req) eq_fit(r); else r->eq_ok = 0;
+	if(EQON) eq_apply();
 	lag_sum(X1R, X1I, X1R, X1I, 0, st, en, &S11r[0], &S11i[0]);
 	lag_sum(X1R, X1I, X1R, X1I, 1, st, en, &S11r[1], &S11i[1]);
 	lag_sum(X1R, X1I, X1R, X1I, NPI_NLAG - 1, st, en, &S11r[NPI_NLAG - 1], &S11i[NPI_NLAG - 1]);

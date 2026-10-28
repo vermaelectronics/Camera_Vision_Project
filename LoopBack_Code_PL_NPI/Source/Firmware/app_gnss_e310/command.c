@@ -142,6 +142,7 @@ command cmd_list[] = {
 	{"gnss_aj_log=", "Status line every N s on the console (default 0 = off: only JAMMER ON/OFF events; held back while you type).", "gnss_aj_log=30", set_gnss_aj_log},
 	{"gnss_aj_notch=", "1 = CW notches follow the CW scan (default), 0 = notches off (A/B test).", "gnss_aj_notch=0", set_gnss_aj_notch},
 	{"gnss_aj_dc=", "1 = the core's input DC blocker on (default), 0 = off (A/B test).", "gnss_aj_dc=0", set_gnss_aj_dc},
+	{"gnss_aj_eq=", "1 = RX2 equaliser fitted automatically while a jammer is there (default), 0 = off (A/B test).", "gnss_aj_eq=0", set_gnss_aj_eq},
 	{"gnss_aj_events=", "1 = print JAMMER ON/NULLED/OFF events (default), 0 = console silent (gnss_report? still lists them).", "gnss_aj_events=0", set_gnss_aj_events},
 	{"gnss_aj_csv=", "CSV line (AJCSV,...) every N ms, 100 to 60000; 0 = off (default).", "gnss_aj_csv=0", set_gnss_aj_csv},
 	{"gnss_aj_mode=", "0 = gated + image taps (default), 1 = gated, no image, 2 = always on + image, 3 = always on, no image (v2.2).", "gnss_aj_mode=0", set_gnss_aj_mode},
@@ -402,6 +403,16 @@ void set_gnss_aj_notch(double* param, char param_no)
 	}
 	gnss_aj_set_notch((int)param[0]);
 	console_print("GNSS_AJ: CW notches %s\n", (char*)((int)param[0] ? "automatic" : "OFF"));
+}
+
+void set_gnss_aj_eq(double* param, char param_no)
+{
+	if(param_no < 1 || (param[0] != 0.0 && param[0] != 1.0)) {
+		console_print("gnss_aj_eq= needs 0 or 1\n");
+		return;
+	}
+	gnss_aj_set_eq((int)param[0]);
+	console_print("GNSS_AJ: RX2 equaliser auto-fit %s\n", (char*)((int)param[0] ? "ON" : "OFF"));
 }
 
 void set_gnss_aj_dc(double* param, char param_no)

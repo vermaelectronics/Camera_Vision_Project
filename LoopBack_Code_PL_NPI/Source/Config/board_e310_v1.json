@@ -175,7 +175,7 @@
       "TX attenuation value and the resulting power at the GNSS receiver input have not been calculated yet.",
       "These must be decided and recorded here before any RF test is run."
     ],
-    "phase2_processing": "PL-NPI v2.4 power inversion (Vitis HLS core Source/HLS/pl_npi, block pl_npi_0 v2.1, II=1 on sys_cpu_clk behind two asynchronous AXI-Stream FIFOs) on channel 0 when CONTROL[5] = 1: TX1 = x1 + w2*g2*x2 + c1*conj(x1) + c2*conj(g2*x2), scaled by 2^shift. Gated: BYPASS (TX1 = RX1) until the core's power detector or the firmware sees a jammer. v2.4: DC blocker (NPI_CFG[3]) on both inputs and two firmware-tuned CW notches (NPI_CFG[13:12], NPI_NCOEF 0x1C0-0x1D4) on the output. This build has no PI-NLMS core."
+    "phase2_processing": "PL-NPI v2.5 power inversion (Vitis HLS core Source/HLS/pl_npi, block pl_npi_0 v2.2, II=1 on sys_cpu_clk behind two asynchronous AXI-Stream FIFOs) on channel 0 when CONTROL[5] = 1: TX1 = x1 + w2*g2*x2 + c1*conj(x1) + c2*conj(g2*x2), scaled by 2^shift. Gated: BYPASS (TX1 = RX1) until the core's power detector or the firmware sees a jammer. v2.4: DC blocker (NPI_CFG[3]) on both inputs and two firmware-tuned CW notches (NPI_CFG[13:12], NPI_NCOEF 0x1C0-0x1D4). v2.5: the notches sit in front of the loop on both channels (zero in Q1.15) and a 3-tap RX2 equaliser (NPI_CFG[14], NPI_EQCOEF 0x1D8-0x1E0) matches RX2 to RX1 for wideband jammers. This build has no PI-NLMS core."
   },
   "custom_ip_register_map": {
     "_comment": "Mirrors the header comment in Source/HDL/gnss_passthrough.v. Offsets are from the base address in address_map.project_assigned.gnss_passthrough.",
@@ -193,8 +193,8 @@
         "offset": "0x04",
         "name": "VERSION",
         "access": "RO",
-        "reset": "0x00020004",
-        "note": "1.0 = Phase-1 identity passthrough. 1.1 = adds the RX->TX sample alignment stage; a board reporting 1.0 transmits 24 dB low. 1.2 = adds the PI-NLMS null-steering core (CONTROL[4]). 1.3 = PI-NLMS is a separate block-design IP (pi_nlms_0), same registers. 2.0 = PL-NPI-only build (pl_npi_0, CONTROL[5], gamma in 0x48), no PI-NLMS. 2.1 = pl_npi_0 is the pipelined Vitis HLS core (II=2), STATUS[10] = npi_drop_sticky. 2.2 = strong-jammer upgrade. 2.3 = gated PL-NPI (pl_npi_0 v2.0, II=1 on sys_cpu_clk): power detector, modes AUTO/BYPASS/ON/HOLD, RX2 normalisation, image taps, make-up shift, weight read-back (0x180-0x1BC); STATUS[21:20] = gain band from the core status. 2.4 = pl_npi_0 v2.1: DC blocker, two CW notches (NPI_NCOEF 0x1C0-0x1D4), NPI_INFO 0x03020802, NPI_CFG reset 0x0D."
+        "reset": "0x00020005",
+        "note": "1.0 = Phase-1 identity passthrough. 1.1 = adds the RX->TX sample alignment stage; a board reporting 1.0 transmits 24 dB low. 1.2 = adds the PI-NLMS null-steering core (CONTROL[4]). 1.3 = PI-NLMS is a separate block-design IP (pi_nlms_0), same registers. 2.0 = PL-NPI-only build (pl_npi_0, CONTROL[5], gamma in 0x48), no PI-NLMS. 2.1 = pl_npi_0 is the pipelined Vitis HLS core (II=2), STATUS[10] = npi_drop_sticky. 2.2 = strong-jammer upgrade. 2.3 = gated PL-NPI (pl_npi_0 v2.0, II=1 on sys_cpu_clk): power detector, modes AUTO/BYPASS/ON/HOLD, RX2 normalisation, image taps, make-up shift, weight read-back (0x180-0x1BC); STATUS[21:20] = gain band from the core status. 2.4 = pl_npi_0 v2.1: DC blocker, two CW notches (NPI_NCOEF 0x1C0-0x1D4), NPI_INFO 0x03020802, NPI_CFG reset 0x0D. 2.5 = pl_npi_0 v2.2: notches in front of the loop on both channels, 3-tap RX2 equaliser (NPI_EQCOEF 0x1D8-0x1E0, NPI_CFG[14]), NPI_INFO 0x03020803, output latency 8 samples."
       },
       {
         "offset": "0x08",
@@ -306,7 +306,7 @@
         "offset": "0x184",
         "name": "NPI_INFO",
         "access": "RO",
-        "reset": "0x03020802",
+        "reset": "0x03020803",
         "note": "{8'd adaptive weights, 8'd step shift, 8'd extra loop delay, 8'd layout}"
       },
       {
@@ -314,7 +314,7 @@
         "name": "NPI_CFG",
         "access": "RW",
         "reset": "0x0000000D",
-        "note": "Shadow. [1:0] mode 0 AUTO (core power detector gates filter and adaptation), 1 BYPASS (TX1 = RX1, weights 0), 2 ON, 3 HOLD (filter in, weights frozen). [2] image taps on. [3] DC blocker on both inputs (v2.4, also in bypass). [10:8] output make-up shift 0..4 (6 dB each, filter only). [13:12] CW notch 0/1 on (v2.4, also in bypass)."
+        "note": "Shadow. [1:0] mode 0 AUTO (core power detector gates filter and adaptation), 1 BYPASS (TX1 = RX1, weights 0), 2 ON, 3 HOLD (filter in, weights frozen). [2] image taps on. [3] DC blocker on both inputs (v2.4, also in bypass). [10:8] output make-up shift 0..4 (6 dB each, filter only). [13:12] CW notch 0/1 on (v2.4, also in bypass). [14] RX2 equaliser on (v2.5; identity when off)."
       },
       {
         "offset": "0x18C",
@@ -365,14 +365,21 @@
         "offset": "0x1BC",
         "name": "NPI_ST_LATCHED",
         "access": "RO",
-        "note": "Latched core status (layout as NPI_SNAP read). v2.4: [7:5] number of notches in the core, [8] DC blocker active."
+        "note": "Latched core status (layout as NPI_SNAP read). v2.4: [7:5] number of notches in the core, [8] DC blocker active. v2.5: [9] equaliser on, [10] notches in front of the loop."
       },
       {
         "offset": "0x1C0",
         "name": "NPI_NCOEF0..5",
         "access": "RW",
         "reset": "0x00000000",
-        "note": "Shadow (v2.4). Notch k (0, 1) at 0x1C0 + 12k: q, p, p^2, each {imag[31:16], real[15:0]} signed Q1.14. H(z) = (1 - q z^-1) / (1 - p z^-1), q = exp(j 2 pi f / fs), p = r q, r = 1 - 2^-8. Copied to the core by NPI_COMMIT; reads return the shadow."
+        "note": "Shadow (v2.4). Notch k (0, 1) at 0x1C0 + 12k: q, p, p^2, each {imag[31:16], real[15:0]} signed Q1.14. H(z) = (1 - q z^-1) / (1 - p z^-1), q = exp(j 2 pi f / fs), p = r q, r = 1 - 2^-8. q is signed Q1.15 from v2.5 (Q1.14 before), p and p^2 Q1.14. Copied to the core by NPI_COMMIT; reads return the shadow."
+      },
+      {
+        "offset": "0x1D8",
+        "name": "NPI_EQCOEF0..2",
+        "access": "RW",
+        "reset": "0x00000000",
+        "note": "Shadow (v2.5). RX2 equaliser taps e[n] = f0 x2[n+1] + f1 x2[n] + f2 x2[n-1], word k at 0x1D8 + 4k = {imag[31:16], real[15:0]} signed Q2.14 (1.0 = 16384); used while NPI_CFG[14] is set (identity otherwise). Copied to the core by NPI_COMMIT."
       }
     ]
   }

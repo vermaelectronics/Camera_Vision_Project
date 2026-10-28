@@ -84,10 +84,16 @@ enum { AJS_UNKNOWN = 0, AJS_OFF = 1, AJS_ON = 2 };
 #define AJ_CW_LOST_US     1000000U
 #define AJ_CW_SAME        (3.0 / NPI_CW_N)   /* same CW within 3 bins       */
 #define AJ_CW_RETUNE      (1.0 / NPI_CW_N)   /* re-program the notch beyond 1 bin */
+/* v2.5 RX2 equaliser (3 taps, fitted on the capture, see gnss_npi_det.c) */
+#define AJ_EQ_EVERY       100     /* captures between two fits while a jammer is there (~0.5 s) */
+#define AJ_EQ_MIN_JN_DB   3.0     /* the jammer left after the notches must be this far over the noise */
+#define AJ_EQ_ON_GAIN_DB  1.5     /* switch it on if 3 taps beat the one complex weight by this much */
+#define AJ_EQ_UPD_DB      1.5     /* replace taps in use if the fit beats them by this much */
+#define AJ_EQ_MAX_TAP     1.9     /* Q2.14 holds < 2 */
 #define AJ_CW_WB_DB       6.0     /* wideband J/N below this + a confirmed CW: report the CW */
 #define AJ_NOTCH_R        (1.0 - 1.0 / 256.0) /* pole radius: 62 kHz at 50 MS/s */
 
-enum { EV_ON = 1, EV_NULLED, EV_OFF, EV_LEAK, EV_TX, EV_START, EV_BURST, EV_BG, EV_FLOOR, EV_CW };
+enum { EV_ON = 1, EV_NULLED, EV_OFF, EV_LEAK, EV_TX, EV_START, EV_BURST, EV_BG, EV_FLOOR, EV_CW, EV_EQ };
 
 /* ---- state --------------------------------------------------------------- */
 static int      aj_on, aj_user_off, aj_frozen, aj_mode = GNSS_AJ_MODE_GATED;
@@ -132,7 +138,13 @@ static int      band = GNSS_BAND_DEFAULT;
 /* v2.4 state */
 static int      ajs = AJS_UNKNOWN, ajs_on_n, ajs_why;   /* JAMMER STATUS     */
 static XTime    ajs_t0, ajs_quiet_t0, last_valid;
-static int      core_v24, core_notches, dc_on = 1, notch_auto = 1, gain_init;
+static int      core_v24, core_v25, core_notches, dc_on = 1, notch_auto = 1, gain_init;
+static int      eq_auto = 1, eq_on, eq_cnt, eq_nfit;          /* v2.5 RX2 equaliser */
+static double   eq_c[3][2], eq_gain_db, eq_jn_db, eq_cur_db;
+static uint32_t eq_w[3], eq_wcur[3];
+static int      eq_valid;
+static double   notch_f[NPI_CW_MAX];            /* RF-baseband frequency programmed in notch k */
+static void     eq_reset(void);
 struct cw_track { int used, hits, scans, conf; double f, snr1, snr2; XTime seen, t0; };
 static struct cw_track cwt[NPI_CW_MAX];
 static uint32_t ncoef_w[6], ncoef_cur[6];
@@ -208,6 +220,7 @@ static char *fmt(double v, int dec, int plus)
 #define f1u(v)  fmt((v), 1, 0)
 #define f2u(v)  fmt((v), 2, 0)
 #define f3u(v)  fmt((v), 3, 0)
+#define f3(v)   fmt((v), 3, 1)
 
 /* residual for display: below 0 dB just means "at the noise", show 0.0 */
 static double res_disp(double r) { return (r < 0.0) ? 0.0 : r; }
@@ -327,6 +340,7 @@ static void commit_core(int force)
 		if(dc_on) cfg |= GNSS_PT_NPI_CFG_DCBLK;
 		for(k = 0; k < NPI_CW_MAX && k < core_notches; k++)
 			if(notch_auto && cwt[k].used && cwt[k].conf) cfg |= GNSS_PT_NPI_CFG_NOTCH(k);
+		if(core_v25 && eq_on) cfg |= GNSS_PT_NPI_CFG_EQ;
 	}
 	thr  = det_thr_now();
 	hold = det_hold_now();
@@ -340,12 +354,36 @@ static void commit_core(int force)
 	/* 64-bit: thr_w + thr_w/8 overflows for the "never" threshold */
 	{
 		int k, nc = 0;
-		for(k = 0; k < 6; k++) if(ncoef_cur[k] != ncoef_w[k]) nc = 1;
+		uint32_t nce[6];
+		for(k = 0; k < 6; k++) nce[k] = ncoef_cur[k];
+		/* ONE confirmed CW and two notches: both notches on it. The depth on the
+		 * CW is then squared (the zero's rounding residual, ~-48 dB, is what
+		 * costs C/N0 against a strong CW) for no extra hardware. */
+		if(core_v24 && notch_auto && core_notches >= 2) {
+			int nconf = 0, first = -1;
+			for(k = 0; k < NPI_CW_MAX; k++)
+				if(cwt[k].used && cwt[k].conf) { nconf++; if(first < 0) first = k; }
+			if(nconf == 1) {
+				for(k = 0; k < 3; k++) { nce[k] = ncoef_cur[3 * first + k]; nce[3 + k] = nce[k]; }
+				cfg |= GNSS_PT_NPI_CFG_NOTCH(0) | GNSS_PT_NPI_CFG_NOTCH(1);
+				notch_f[0] = notch_f[1] = notch_f[first];
+			}
+		}
+		for(k = 0; k < 6; k++) if(nce[k] != ncoef_w[k]) nc = 1;
 		if(nc || !ncoef_valid) {
-			gnss_pt_npi_write_ncoef(ncoef_cur);
-			for(k = 0; k < 6; k++) ncoef_w[k] = ncoef_cur[k];
+			gnss_pt_npi_write_ncoef(nce);
+			for(k = 0; k < 6; k++) ncoef_w[k] = nce[k];
 			ncoef_valid = 1;
 			force = 1;
+		}
+		if(core_v25) {
+			int ec = 0;
+			for(k = 0; k < 3; k++) if(eq_wcur[k] != eq_w[k]) ec = 1;
+			if(ec) {
+				gnss_pt_npi_write_eq(eq_wcur);
+				for(k = 0; k < 3; k++) eq_w[k] = eq_wcur[k];
+				force = 1;
+			}
 		}
 	}
 	if(!force && cfg == cfg_w && gq == g2_w && hold == hold_w &&
@@ -744,6 +782,7 @@ static void leave_jammed(XTime now)
 	}
 	last_off_t = now;
 	have_off = 1;
+	if(!core_active) eq_reset();                 /* v2.5: the taps are for THIS jammer */
 	if(flap_mode && jam_peak > flap_peak) flap_peak = jam_peak;
 	add_event(now, EV_OFF, (double)ms / 1000.0, jam_peak, 0.0);
 	if(null_ms >= 0.0) null_ms_last = null_ms;
@@ -890,6 +929,17 @@ static void jammed_state(XTime now)
 #define AJ_PI 3.14159265358979323846
 static double dabs(double x) { return x < 0.0 ? -x : x; }
 
+static uint32_t qxw(double re, double im, double scale)
+{
+	long a = (long)(re * scale + (re >= 0.0 ? 0.5 : -0.5));
+	long b = (long)(im * scale + (im >= 0.0 ? 0.5 : -0.5));
+	if(a > 32767) a = 32767;
+	if(a < -32768) a = -32768;
+	if(b > 32767) b = 32767;
+	if(b < -32768) b = -32768;
+	return ((uint32_t)(b & 0xFFFF) << 16) | (uint32_t)(a & 0xFFFF);
+}
+
 static uint32_t q14w(double re, double im)
 {
 	long a = (long)(re * 16384.0 + (re >= 0.0 ? 0.5 : -0.5));
@@ -902,13 +952,13 @@ static uint32_t q14w(double re, double im)
 }
 
 /* notch k on f (fraction of fs): q = e^{j 2 pi f}, p = r q, p^2 */
-static double notch_f[NPI_CW_MAX];
 static void notch_set(int k, double f)
 {
 	double s1, c1, s2, c2, r = AJ_NOTCH_R;
 	npi_sincos(2.0 * AJ_PI * f, &s1, &c1);
 	npi_sincos(4.0 * AJ_PI * f, &s2, &c2);
-	ncoef_cur[3 * k]     = q14w(c1, s1);
+	/* the zero q sets the depth on a strong CW: Q1.15 in v2.5 (Q1.14 before) */
+	ncoef_cur[3 * k]     = core_v25 ? qxw(c1, s1, 32768.0) : q14w(c1, s1);
 	ncoef_cur[3 * k + 1] = q14w(r * c1, r * s1);
 	ncoef_cur[3 * k + 2] = q14w(r * r * c2, r * r * s2);
 	notch_f[k] = f;
@@ -1088,6 +1138,71 @@ static void cw_update(XTime now)
 	}
 }
 
+/* ---- v2.5: RX2 equaliser ---------------------------------------------------------
+ * A wideband jammer reaches RX1 and RX2 through slightly different paths (cable
+ * length, filters). One complex weight matches them at one frequency only, so a
+ * 40 MHz jammer through 0.5 sample (2 m of cable) is nulled just ~11 dB (C/N0
+ * down 18 dB at J/N 30). 3 taps on RX2 map it onto RX1 across the band. The taps
+ * are fitted by least squares on the raw capture (notching known CWs first) while
+ * a jammer is there, switched on if they beat the single weight, kept while they
+ * are the better fit, and dropped when the jammer is gone. */
+static void eq_apply_words(void)
+{
+	int k;
+	for(k = 0; k < 3; k++) {
+		double fr = eq_on ? eq_c[k][0] : (k == 1 ? 1.0 : 0.0), fi = eq_on ? eq_c[k][1] : 0.0;
+		eq_wcur[k] = qxw(fr, fi, 16384.0);
+	}
+	npi_eq_set((const double (*)[2])eq_c, eq_on);
+}
+
+static void eq_reset(void)
+{
+	if(!eq_on && !eq_valid) return;
+	eq_on = 0; eq_valid = 0; eq_cnt = 0;
+	eq_apply_words();
+	commit_core(1);
+}
+
+/* before npi_detect: ask for a fit on this capture when it is due */
+static void eq_request(void)
+{
+	int k, n = 0;
+	res.eq_req = 0;
+	if(!core_v25 || !eq_auto || !(jam || core_active)) return;
+	if(++eq_cnt < AJ_EQ_EVERY) return;
+	eq_cnt = 0;
+	for(k = 0; k < NPI_CW_MAX && n < 2; k++)
+		if(cwt[k].used && cwt[k].conf) res.eq_cwf[n++] = cwt[k].f;
+	res.eq_ncw = n;
+	res.eq_req = 1;
+}
+
+/* after npi_detect */
+static void eq_update(XTime now)
+{
+	int k, apply = 0, big = 0;
+	if(!res.eq_req || !res.eq_ok) return;
+	eq_jn_db = res.eq_jn_db; eq_gain_db = res.eq_gain_db; eq_cur_db = res.eq_cur_db;
+	for(k = 0; k < 3; k++)
+		if(res.eq_f[k][0] > AJ_EQ_MAX_TAP || res.eq_f[k][0] < -AJ_EQ_MAX_TAP ||
+		   res.eq_f[k][1] > AJ_EQ_MAX_TAP || res.eq_f[k][1] < -AJ_EQ_MAX_TAP) big = 1;
+	if(big || res.eq_jn_db < AJ_EQ_MIN_JN_DB) return;       /* too weak a jammer to fit, or taps out of range */
+	if(!eq_on) apply = res.eq_gain_db >= AJ_EQ_ON_GAIN_DB;
+	else       apply = res.eq_cur_db >= AJ_EQ_UPD_DB;
+	if(!apply) return;
+	for(k = 0; k < 3; k++) { eq_c[k][0] = res.eq_f[k][0]; eq_c[k][1] = res.eq_f[k][1]; }
+	eq_on = 1; eq_valid = 1; eq_nfit++;
+	eq_apply_words();
+	commit_core(1);
+	add_event(now, EV_EQ, res.eq_gain_db, res.eq_jn_db, (double)res.eq_ncw);
+	if(ev_print(now)) {
+		stamp(now);
+		console_print("RX2 equaliser %s: the jammer (%s dB over the noise) is %s dB deeper than one weight can null it\n",
+			      (char*)(eq_nfit == 1 ? "ON" : "updated"), f1(res.eq_jn_db), f1(res.eq_gain_db));
+	}
+}
+
 /* ---- v2.4: JAMMER STATUS ------------------------------------------------------- */
 static const char *ajs_txt(int st)
 {
@@ -1249,6 +1364,7 @@ void gnss_aj_poll(void)
 	res.rho_noise_im = rho_n_im;
 	res.g2 = g2_core();
 	res.rx2_noise = rx2n;
+	eq_request();
 	if(npi_detect((const uint32_t *)GNSS_AJ_BUF_ADDR, NPI_NSAMP, &res) != 0 || !res.ok) {
 		n_fail++;
 		return;
@@ -1258,6 +1374,7 @@ void gnss_aj_poll(void)
 	cnt_cap++;
 	last_valid = now;
 	cw_update(now);                    /* v2.4: on this capture's spectrum */
+	eq_update(now);                    /* v2.5: RX2 equaliser fit from this capture */
 
 	/* what the core is doing, and what its weights do to this capture */
 	gnss_pt_npi_snapshot(&snap);
@@ -1366,6 +1483,7 @@ void gnss_aj_enable(int on)
 	if(on) {
 		uint32_t ver = gnss_pt_read(GNSS_PT_REG_VERSION);
 		core_v24 = (ver >= 0x00020004U);
+		core_v25 = (ver >= 0x00020005U);
 		if(ver < 0x00020003U) {
 			console_print("gnss_aj: the FPGA reports gnss_passthrough %d.%d; PL-NPI v2.3 needs 2.3\n"
 				      "         (core on sys_cpu_clk, gating, normalisation, image taps). Anti-jam\n"
@@ -1389,6 +1507,8 @@ void gnss_aj_enable(int on)
 			add_event(now, EV_START, 0.0, 0.0, 0.0);
 		}
 		aj_on = 1;
+		eq_on = 0; eq_valid = 0; eq_cnt = 0;
+		eq_apply_words();
 		commit_core(1);
 		gnss_pt_set_npi(1);
 	} else {
@@ -1400,6 +1520,8 @@ void gnss_aj_enable(int on)
 		if(jam)
 			console_print("[AJ] anti-jam switched off (jammer state no longer monitored)\n");
 		aj_on = 0;
+		eq_on = 0; eq_valid = 0;
+		npi_eq_set((const double (*)[2])eq_c, 0);
 		jam = 0; fw_jam = 0; shift = 0;
 		ajs = AJS_UNKNOWN; ajs_t0 = now;
 		txl_abort();
@@ -1456,6 +1578,12 @@ void gnss_aj_set_dc(int on)
 {
 	dc_on = on ? 1 : 0;
 	commit_core(1);
+}
+
+void gnss_aj_set_eq(int on)
+{
+	eq_auto = on ? 1 : 0;
+	if(!eq_auto) eq_reset();
 }
 
 int gnss_aj_status(void) { return aj_on ? ajs : AJS_UNKNOWN; }
@@ -1634,6 +1762,17 @@ void gnss_aj_report(void)
 				console_print(" [%d] off", (long)k);
 		}
 		console_print("\n");
+		if(core_v25) {
+			if(eq_on)
+				console_print("rx2 equaliser : ON, taps (%s,%s) (%s,%s) (%s,%s); the jammer was %s dB over the noise, 3 taps null it %s dB deeper than one weight (gnss_aj_eq=)\n",
+					      f3(eq_c[0][0]), f3(eq_c[0][1]), f3(eq_c[1][0]), f3(eq_c[1][1]), f3(eq_c[2][0]), f3(eq_c[2][1]),
+					      f1(eq_jn_db), f1(eq_gain_db));
+			else
+				console_print("rx2 equaliser : off (%s; fitted while a jammer is there if it beats the single weight by %d dB; %d fit(s) so far)\n",
+					      (char*)(eq_auto ? "gnss_aj_eq=1" : "gnss_aj_eq=0"), (long)AJ_EQ_ON_GAIN_DB, (long)eq_nfit);
+			console_print("notch placement: in front of the loop on both channels, zero in Q1.15%s\n",
+				      (char*)((cfg & GNSS_PT_NPI_CFG_NOTCH(0)) && (cfg & GNSS_PT_NPI_CFG_NOTCH(1)) && notch_f[0] == notch_f[1] ? "; one CW: both notches on it" : ""));
+		}
 		if(cw_confirmed() || txl_verdict)
 			console_print("cw source     : %s\n",
 				      (char*)(txl_state ? "testing now: TX1 muted for 0.7 s to see if the CW survives" :
@@ -1724,6 +1863,8 @@ void gnss_aj_report(void)
 				console_print("CW %s   %s MHz, +%s dB in its FFT bin\n", (char*)(e->v3 > 0.5 ? "ON " : "OFF"),
 					      f3u(e->v1), f1u(e->v2));
 			break;
+		case EV_EQ:     console_print("EQUALISER   RX2 taps fitted: jammer %s dB over the noise, %s dB deeper than one weight, %d CW(s) notched first\n",
+					      f1(e->v2), f1(e->v1), (long)e->v3); break;
 		case EV_BG:
 			if(e->v1 > -90.0)
 				console_print("BACKGROUND  RX1/RX2 common signal, coherence %s dB at power J/N %s dB: not a jammer\n",
@@ -1846,6 +1987,7 @@ int gnss_band_set(int b)
 	band_applied = 1;
 	view_radio();
 	npi_cw_reset();
+	eq_reset();
 	{
 		int k;
 		for(k = 0; k < NPI_CW_MAX; k++) { cwt[k].used = 0; cwt[k].conf = 0; }

@@ -121,6 +121,14 @@ void gnss_pt_npi_write_ncoef(const uint32_t w[6])
     }
 }
 
+void gnss_pt_npi_write_eq(const uint32_t w[3])
+{
+    uint32_t k;
+    for (k = 0; k < 3U; k++) {
+        gnss_pt_write(GNSS_PT_REG_NPI_EQCOEF(k), w[k]);
+    }
+}
+
 void gnss_pt_npi_snapshot(gnss_pt_npi_snap_t *s)
 {
     uint32_t k;
@@ -198,15 +206,18 @@ void gnss_pt_print_state(void)
         uint32_t cfg = gnss_pt_read(GNSS_PT_REG_NPI_CFG_ACTIVE);
         uint32_t st  = gnss_pt_read(GNSS_PT_REG_NPI_SNAP);
         static const char *modes[4] = {"AUTO (detector)", "BYPASS", "ON", "HOLD"};
-        printf("  pl-npi v2.4    : mode %s, image taps %s, make-up shift %lu, g2 0x%08lx,\n"
-               "                   detector %s (threshold %lu LSB^2), filter %s, %lu detector events\n",
+        printf("  pl-npi v2.5    : mode %s, image taps %s, make-up shift %lu, g2 0x%08lx,\n"
+               "                   detector %s (threshold %lu LSB^2), filter %s, %lu detector events,\n"
+               "                   RX2 equaliser %s, notches %s the loop\n",
                modes[cfg & 3U], (cfg & GNSS_PT_NPI_CFG_IMAGE) ? "on" : "off",
                (unsigned long)((cfg >> 8) & 7U),
                (unsigned long)gnss_pt_read(GNSS_PT_REG_NPI_NORM),
                (st & GNSS_PT_NPI_ST_DET) ? "ON" : "off",
                (unsigned long)gnss_pt_read(GNSS_PT_REG_NPI_DET_THR),
                (st & GNSS_PT_NPI_ST_ACTIVE) ? "IN" : "bypassed",
-               (unsigned long)GNSS_PT_NPI_ST_CNT(st));
+               (unsigned long)GNSS_PT_NPI_ST_CNT(st),
+               (st & GNSS_PT_NPI_ST_EQ) ? "ON" : "off",
+               (st & GNSS_PT_NPI_ST_NOTCH_IN) ? "in front of" : "behind");
     }
     printf("  adc enable i/q : %d / %d\n",
            (s.status & GNSS_PT_ST_ADC_EN_I0) ? 1 : 0,

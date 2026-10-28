@@ -38,7 +38,7 @@
 #define GNSS_AJ_BUF_ADDR   0x11000000U
 #endif
 
-#define GNSS_AJ_VERSION_STR  "PL-NPI 2.4.0"
+#define GNSS_AJ_VERSION_STR  "PL-NPI 2.5.0"
 
 /* RF profiles (gnss_band=). RX and TX are always set together, so the
  * retransmitted signal comes out on the frequency it came in on and the
@@ -73,6 +73,7 @@ void gnss_aj_set_log(int seconds);  /* periodic status line, 0 = events only */
 void gnss_aj_set_events(int on);  /* 0 = no event lines (gnss_report? keeps them) */
 void gnss_aj_set_csv(int ms);       /* CSV line period, 0 = off              */
 void gnss_aj_set_notch(int on);     /* v2.4: automatic CW notches on/off     */
+void gnss_aj_set_eq(int on);        /* v2.5: RX2 equaliser auto-fit on/off   */
 void gnss_aj_set_dc(int on);        /* v2.4: the core's DC blocker on/off    */
 /* v2.4 JAMMER STATUS: 0 UNKNOWN, 1 OFF, 2 ON (as gnss_report prints it)    */
 int  gnss_aj_status(void);

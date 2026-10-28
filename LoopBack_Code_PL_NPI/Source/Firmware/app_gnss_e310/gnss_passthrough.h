@@ -90,7 +90,7 @@
 #define GNSS_PT_REG_NPI_ST_LATCHED  0x1BCU  /* RO latched core status         */
 #define GNSS_PT_REG_NPI_NCOEF(k)    (0x1C0U + ((k) * 4U)) /* RW k = 0..5, v2.4: notch
                                                       * k/3, q/p/p^2, {im,re} Q1.14 */
-#define GNSS_PT_NPI_INFO_EXPECTED   0x03020802U
+#define GNSS_PT_NPI_INFO_EXPECTED   0x03020803U
 /* NPI_CFG */
 #define GNSS_PT_NPI_MODE_AUTO       0x0U    /* power detector switches it     */
 #define GNSS_PT_NPI_MODE_BYPASS     0x1U    /* TX1 = RX1, weights 0           */
@@ -100,7 +100,13 @@
 #define GNSS_PT_NPI_CFG_SHIFT(s)    ((uint32_t)((s) & 7) << 8)
 #define GNSS_PT_NPI_CFG_DCBLK       0x8U    /* v2.4: input DC blocker on      */
 #define GNSS_PT_NPI_CFG_NOTCH(k)    (1U << (12 + (k)))  /* v2.4: CW notch k on */
-#define GNSS_PT_NPI_NOTCH_NFRAC     14      /* notch coefficients Q1.14       */
+#define GNSS_PT_NPI_NOTCH_NFRAC     14      /* notch p, p^2 coefficients Q1.14 */
+#define GNSS_PT_NPI_NOTCH_QFRAC     15      /* v2.5: notch zero q, Q1.15       */
+#define GNSS_PT_REG_NPI_EQCOEF(k)   (0x1D8U + ((k) * 4U)) /* RW k = 0..2, v2.5: RX2 equaliser taps */
+#define GNSS_PT_NPI_CFG_EQ          0x4000U /* v2.5: RX2 equaliser on         */
+#define GNSS_PT_NPI_EQ_FRAC         14      /* equaliser taps Q2.14           */
+#define GNSS_PT_NPI_ST_EQ           0x200U  /* v2.5: equaliser on             */
+#define GNSS_PT_NPI_ST_NOTCH_IN     0x400U  /* v2.5: notches in front of the loop */
 /* core status (NPI_SNAP / NPI_ST_LATCHED) */
 #define GNSS_PT_NPI_ST_DET          0x1U    /* power detector on              */
 #define GNSS_PT_NPI_ST_ACTIVE       0x2U    /* filter in the path             */
@@ -122,7 +128,7 @@
  * 2.3 = pl_npi_0 v2.0 on sys_cpu_clk (II=1) behind async FIFOs (61.44 MS/s),
  *       RX2 normalisation, image taps, gated adaptation, make-up gain:
  *       NPI_CFG/NORM/DET_* + NPI_COMMIT, NPI_SNAP/NPI_W read-back. */
-#define GNSS_PT_EXPECTED_VERSION    0x00020004U
+#define GNSS_PT_EXPECTED_VERSION    0x00020005U
 
 /* ---- CONTROL bits -------------------------------------------------------- */
 #define GNSS_PT_CTRL_PASS_EN        (1U << 0)  /* 1 = RX->TX passthrough      */
@@ -183,6 +189,10 @@ void     gnss_pt_npi_write(uint32_t cfg, int32_t g2_q13, uint32_t det_thr, uint3
 /* v2.4: the six notch coefficient words (shadow; committed by the next
  * gnss_pt_npi_write). */
 void     gnss_pt_npi_write_ncoef(const uint32_t w[6]);
+/* v2.5: the three RX2 equaliser tap words ({imag[31:16], real[15:0]}, Q2.14;
+ * word 0 offset +1, 1 centre, 2 offset -1), shadow, committed by the next
+ * gnss_pt_npi_write(). */
+void     gnss_pt_npi_write_eq(const uint32_t w[3]);
 /* v2.3: latches and reads the core's weights (Q12.20: w2 re, w2 im, c1 re,
  * c1 im, c2 re, c2 im), detector power and status as one coherent set. */
 typedef struct { uint32_t st, pow; int32_t w[6]; } gnss_pt_npi_snap_t;

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Step 3: Vitis HLS PL-NPI v2.4 core (11 C-sim scenarios, IP 2.1). Want clock <= 10 ns,
+# Step 3: Vitis HLS PL-NPI v2.5 core (11 C-sim scenarios incl. 13, IP 2.2; fallbacks PL_NPI_NOTCHES=1 | PL_NPI_NOTCH_IN=0 | PL_NPI_V25=0). Want clock <= 10 ns,
 # II 1, PL_NPI_HLS: PASS.
 # If it fails, send the PL_NPI_HLS lines and the critical path:
 #   grep -A14 "HLS 200-1016" Build/Logs/npi.log

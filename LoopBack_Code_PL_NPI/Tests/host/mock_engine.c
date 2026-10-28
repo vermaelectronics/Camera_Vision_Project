@@ -88,10 +88,10 @@ static double last_pow;
 static int core_active(void) { uint32_t m = cfg_a & 3; return m == 2 || m == 3 || (m == 0 && core_det); }
 static uint32_t core_st(void) {
     return (core_det ? 1u : 0u) | (core_active() ? 2u : 0u) | (core_active() && (cfg_a & 3) != 3 ? 0x10u : 0u) |
-           (2u << 5) | ((cfg_a & 8u) ? 0x100u : 0u) | ((uint32_t)(core_cnt & 0xFFFF) << 16);
+           (2u << 5) | ((cfg_a & 8u) ? 0x100u : 0u) | ((cfg_a & 0x4000u) ? 0x200u : 0u) | 0x400u | ((uint32_t)(core_cnt & 0xFFFF) << 16);
 }
 uint32_t gnss_pt_read(uint32_t off) {
-    if (off == GNSS_PT_REG_VERSION) return 0x00020004U;
+    if (off == GNSS_PT_REG_VERSION) return 0x00020005U;
     if (off == GNSS_PT_REG_STATUS) return ((ctrl & GNSS_PT_CTRL_NPI_EN) ? GNSS_PT_ST_NPI_EN_SYNCED : 0) |
         (mock_tx ? (GNSS_PT_ST_DAC_EN_I0 | GNSS_PT_ST_DAC_EN_Q0 | GNSS_PT_ST_PASS_EN_SYNCED) : 0);
     if (off == GNSS_PT_REG_CONTROL) return ctrl;
@@ -108,12 +108,21 @@ void gnss_pt_npi_write(uint32_t cfg, int32_t g2, uint32_t thr, uint32_t hold) {
     cfg_a = cfg; nrm_a = (uint32_t)(uint16_t)g2; thr_a = thr; hold_a = hold; commits++;
 }
 void gnss_pt_npi_write_ncoef(const uint32_t w[6]) { memcpy(ncoef_a, w, sizeof ncoef_a); ncoef_writes++; }
+static uint32_t eq_a[3]; static int eq_writes;
+void gnss_pt_npi_write_eq(const uint32_t w[3]) { memcpy(eq_a, w, sizeof eq_a); eq_writes++; }
+/* DC gain of the equaliser taps in the core (flat-channel model) */
+static double complex eq_gain(void) {
+    double complex g = 0;
+    if (!(cfg_a & 0x4000u)) return 1.0;
+    for (int k = 0; k < 3; k++) g += ((double)(int16_t)(eq_a[k] & 0xFFFF) + I * (double)(int16_t)(eq_a[k] >> 16)) / 16384.0;
+    return g;
+}
 void gnss_pt_npi_snapshot(gnss_pt_npi_snap_t *s) {
     double g2 = (double)(int16_t)nrm_a / 8192.0;
     snaps++;
     memset(s->w, 0, sizeof s->w);
     if (core_active() && cabs(h21) > 0) {
-        double complex w = -1.0 / (h21 * g2);
+        double complex w = -1.0 / (h21 * g2 * eq_gain());
         s->w[0] = (int32_t)lround(creal(w) * 1048576.0);
         s->w[1] = (int32_t)lround(cimag(w) * 1048576.0);
     }
@@ -151,6 +160,8 @@ static unsigned long long rs = 88172645463325252ULL;
 static double ur(void) { rs ^= rs << 13; rs ^= rs >> 7; rs ^= rs << 17; return ((rs >> 11) + 0.5) / 9007199254740992.0; }
 static double gr(void) { return sqrt(-2 * log(ur())) * cos(2 * M_PI * ur()); }
 static double jam_db = 30, nmul = 1.0, cw_jn = -99, cw_f = 0.1034, dc1 = 0, dc2 = 0;
+static double tau_wb = 0.0;                         /* RX2 delay of the wideband jammer [samples] */
+static double complex jprev;
 static int jam_on = 0; static long nsamp_abs; static int dma_dead; static int cw_leak;   /* cw_leak: the CW is TX1 feedback, gone when TX1 is muted */
 static void fill(void) {
     const double nrms = 20.0 * nmul, ja = 20.0 * sqrt(pow(10, jam_db / 10));
@@ -160,9 +171,11 @@ static void fill(void) {
     h21 = jam_on ? h : 0;
     for (int t = 0; t < NPI_NSAMP; t++, nsamp_abs++) {
         double complex j = jam_on ? ja * (gr() + I * gr()) : 0;
+        double complex j2 = (1.0 - tau_wb) * j + tau_wb * jprev;      /* RX2 sees it tau samples later */
+        jprev = j;
         double complex c = cwa * cexp(I * 2 * M_PI * cw_f * (double)nsamp_abs);
         double complex x1 = j + c + nrms * (gr() + I * gr()) + dc1;
-        double complex x2 = h * (j + c) + nrms * (gr() + I * gr()) + dc2;
+        double complex x2 = h * (j2 + c) + nrms * (gr() + I * gr()) + dc2;
         int a = (int)lround(creal(x1)), b = (int)lround(cimag(x1)), d = (int)lround(creal(x2)), e = (int)lround(cimag(x2));
         #define CL(v) ((v) > 2047 ? 2047 : (v) < -2048 ? -2048 : (v))
         a = CL(a); b = CL(b); d = CL(d); e = CL(e);
@@ -365,6 +378,33 @@ int main(int argc, char **argv) {
         jam_on = 1; run(1.0); gnss_aj_enable(0); gnss_aj_enable(1); run(0.3);
         ok &= check(gnss_aj_status() == 2, "ON again after toggling with the jammer present");
         jam_on = 0; run(3.0);
+        break; }
+    case 14: {  /* wideband jammer, RX2 path half a sample late: the RX2 equaliser must come on */
+        printf("scenario 14: wideband jammer J/N 30 dB, RX2 delayed 0.5 sample -> RX2 equaliser\n");
+        reset_counts(); eq_writes = 0;
+        tau_wb = 0.5; jam_on = 1; jam_db = 30;
+        run(4.0);
+        report_to(r1, sizeof r1);
+        double complex g = eq_gain(), hh = 0.62 * cexp(I * 0.7);
+        printf("  taps DC gain x channel = %.2f%+.2fj (1 = the jammer maps onto RX1)\n", creal(g * hh), cimag(g * hh));
+        ok &= check(gnss_aj_status() == 2, "status ON");
+        ok &= check((cfg_a & 0x4000u) != 0 && eq_writes >= 1, "equaliser switched on in the core");
+        ok &= check(cabs(g * hh - 1.0) < 0.5, "taps map the jammer path onto RX1 (DC gain within 0.5 of 1/h)");
+        ok &= check(has(r1, "rx2 equaliser : ON"), "report shows the equaliser");
+        jam_on = 0; run(3.0);
+        ok &= check(!(cfg_a & 0x4000u), "equaliser off again once the jammer is gone");
+        tau_wb = 0.0;
+        break; }
+    case 15: {  /* matched paths: no equaliser */
+        printf("scenario 15: matched RX1/RX2 paths, wideband J/N 30 and CW J/N 20: equaliser stays off\n");
+        reset_counts(); eq_writes = 0;
+        tau_wb = 0.0; jam_on = 1; jam_db = 30; run(6.0);
+        ok &= check(gnss_aj_status() == 2, "wideband: status ON");
+        ok &= check(!(cfg_a & 0x4000u), "wideband, matched paths: equaliser off (one weight is enough)");
+        jam_on = 0; run(3.0);
+        cw_f = 0.1034; cw_jn = 20; run(6.0);
+        ok &= check(!(cfg_a & 0x4000u), "CW: equaliser off");
+        cw_jn = -99; run(3.0);
         break; }
     default: printf("unknown scenario\n"); ok = 0;
     }

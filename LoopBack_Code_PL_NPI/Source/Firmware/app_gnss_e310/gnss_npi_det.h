@@ -46,6 +46,18 @@ typedef struct {
     double  dc1, dc2;       /* DC offset of RX1 / RX2 [LSB], removed before   */
                             /*   everything above and below                   */
 
+    /* ---- v2.5 RX2 equaliser fit, done by npi_detect() on request ------- */
+    int     eq_req;         /* in: fit the equaliser on this capture            */
+    int     eq_ncw;         /* in: CWs to notch before the fit (0..2)           */
+    double  eq_cwf[2];      /* in: their frequencies [fraction of fs]           */
+    int     eq_ok;          /* out: fit valid                                   */
+    double  eq_f[3][2];     /* out: fitted taps {re, im}: 0 offset +1, 1 centre,   */
+                            /*   2 offset -1 (e[n] = f0 x2[n+1] + f1 x2[n] + f2 x2[n-1]) */
+    double  eq_jn_db;       /* out: what is left at RX1 after the notches, over   */
+                            /*   the learned noise floor [dB]; -99 if no floor    */
+    double  eq_gain_db;     /* out: residual of ONE complex weight / of the 3 taps */
+    double  eq_cur_db;      /* out: residual of the CURRENT taps / of the fitted ones */
+
     /* ---- npi_measure() ------------------------------------------------ */
     double  w[6];           /* weights used: w2 re/im, c1 re/im, c2 re/im     */
     double  pout;           /* output power of those weights on the capture   */
@@ -55,6 +67,12 @@ typedef struct {
     double  res_db;         /* output / output noise [dB], 0 = fully nulled   */
     int     ok;
 } npi_det_t;
+
+/* v2.5: the RX2 equaliser that the FPGA applies (taps as above, on = the core
+ * has it enabled): npi_detect() applies the same taps to RX2 of every capture,
+ * so coherence, the CW scan and npi_measure() see what the FPGA's loop sees.
+ * The fit (eq_req) uses the capture BEFORE the taps are applied. */
+void npi_eq_set(const double f[3][2], int on);
 
 /* buf: one DMA capture, word 2n = RX1 {Q[31:16], I[15:0]}, word 2n+1 = RX2,
  * 12-bit samples right-aligned. nsamp must be NPI_NSAMP. Return 0 on success. */

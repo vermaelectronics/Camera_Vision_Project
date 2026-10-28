@@ -1,6 +1,14 @@
-# LoopBack_Code_PL_NPI: PL-NPI-only design (PL-NPI v2.4), Vivado / Vitis 2023.2
+# LoopBack_Code_PL_NPI: PL-NPI-only design (PL-NPI v2.5), Vivado / Vitis 2023.2
 
-> **v2.4.0** (this version): consistent `JAMMER STATUS: ON/OFF/UNKNOWN` in
+> **v2.5.0** (this version): wideband jammers through unequal RX1/RX2 paths
+> (cable mismatch) and CW + wideband: the CW notches move in front of the
+> adaptive loop on both channels (zero in Q1.15), and a 3-tap RX2 equaliser
+> (HLS IP `pl_npi` 2.2, bitstream 2.5; firmware fits it while a jammer is
+> there, `gnss_aj_eq=`). Simulation only (C model of the core, RTL sim, firmware
+> mock): see **`README_PL_NPI_v2.5.md`** for the research, what the
+> simulations show about the v2.4 core, the results and the limits.
+>
+> **v2.4.0:** consistent `JAMMER STATUS: ON/OFF/UNKNOWN` in
 > `gnss_report` (status separate from the filter, with hysteresis), an FPGA
 > DC blocker and two firmware-tuned CW notches (HLS IP `pl_npi` 2.1,
 > bitstream 2.4), a CW scan in the firmware, a new default RF profile
