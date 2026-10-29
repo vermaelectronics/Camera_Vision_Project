@@ -35,7 +35,7 @@
 #define GNSS_AJ_BUF_ADDR   0x11000000U
 #endif
 
-#define GNSS_AJ_VERSION_STR  "4.2.0"
+#define GNSS_AJ_VERSION_STR  "4.2.1"
 
 /* RF profiles (gnss_band=). RX and TX are always set together, so the
  * retransmitted signal comes out on the frequency it came in on and the
@@ -45,7 +45,7 @@
                                   /*   QZSS, SBAS, BeiDou B1I+B1C, GLONASS G1      */
 #define GNSS_BAND_NO_BDS      2   /* 1589.5 MHz, 50 MS/s: GPS, Galileo, GLONASS    */
 #define GNSS_BAND_NO_GLO      3   /* 1568.25 MHz, 50 MS/s: GPS, Galileo, BeiDou    */
-#define GNSS_BAND_COUNT       4
+#define GNSS_BAND_COUNT       5
 #define GNSS_BAND_DEFAULT     GNSS_BAND_ALL
 
 void gnss_aj_init(void);            /* once, after the radio and DMA are up  */

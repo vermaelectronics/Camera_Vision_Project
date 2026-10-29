@@ -1169,6 +1169,7 @@ static const struct band_cfg bands[GNSS_BAND_COUNT] = {
 	{1582500000ULL, 61440000U, 56000000U, "ALL: GPS, Galileo, QZSS, SBAS, BeiDou B1I + B1C, GLONASS G1"},
 	{1589500000ULL, 50000000U, 40000000U, "GPS, Galileo, GLONASS G1 at 50 MS/s (no BeiDou B1I)"},
 	{1568250000ULL, 50000000U, 40000000U, "GPS, Galileo, BeiDou B1I + B1C at 50 MS/s (no GLONASS)"},
+	{1601720000ULL, 20480000U, 16000000U, "GLONASS G1 only (narrow, low load): no GPS, Galileo or BeiDou"},
 };
 static int band_applied;
 static int radio_manual, manual_warn;   /* the operator set LO / rate / FIR by hand: the guard keeps its hands off */

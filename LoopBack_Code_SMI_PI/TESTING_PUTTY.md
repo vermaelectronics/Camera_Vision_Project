@@ -186,6 +186,19 @@ wrong, send the whole log of that session (or the part around the problem).
 
 ---
 
+## The five RF profiles (`gnss_band=N`)
+
+| N | LO | rate | RF bandwidth | carries |
+|---|---|---|---|---|
+| 0 | 1575.42 MHz | 30.72 MS/s | 18 MHz | GPS, Galileo, QZSS, SBAS, BeiDou B1C (L1 only) |
+| **1 (default)** | 1582.5 MHz | 61.44 MS/s | 56 MHz | all: GPS, Galileo, BeiDou B1I + B1C, GLONASS |
+| 2 | 1589.5 MHz | 50 MS/s | 40 MHz | GPS, Galileo, GLONASS (no BeiDou B1I) |
+| 3 | 1568.25 MHz | 50 MS/s | 40 MHz | GPS, Galileo, BeiDou (no GLONASS) |
+| 4 | 1601.72 MHz | 20.48 MS/s | 16 MHz | GLONASS G1 only |
+
+`gnss_band?` lists them and shows which signals the active one carries. Any other
+combination: `radio=` (next section).
+
 ## Every radio value by hand: `radio=` (firmware 4.2.0)
 
 One command sets **LO, sample rate, RF bandwidth, TX attenuation and RX gain**.
