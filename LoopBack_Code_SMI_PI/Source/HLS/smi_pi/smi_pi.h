@@ -1,5 +1,5 @@
 // ============================================================================
-//  smi_pi.h  --  space-time SMI power inversion core (SMI-PI v4.1)
+//  smi_pi.h  --  space-time SMI power inversion core (SMI-PI v4.4)
 //  ANTSDR E310 V1 / GNSS CRPA project, Vitis HLS 2023.2
 //
 //  See smi_pi.cpp for the filter, the fixed-point formats and why the
@@ -23,6 +23,9 @@
 // cfg bits
 #define SMI_CFG_BYPASS   0x1u  // 1 = output x1[n-8]: no weights at all
 #define SMI_CFG_SH_LSB   8     // [10:8] output make-up shift, 0..4 (6 dB each)
+#define SMI_CFG_WS_LSB   12    // [14:12] weight scale ws, 0..5: the weight words hold
+                               //   w * 2^ws, the core divides the sum by 2^ws (SMI-PI 4.4)
+#define SMI_MAXWS        5
 
 // s_axis_x : {rx2_q, rx2_i, rx1_q, rx1_i}, each a 16-bit word holding a
 //            12-bit RX sample right-aligned ([11:0] is used).
@@ -38,7 +41,15 @@
 //            each {imag[31:16], real[15:0]}, signed Q3.12.
 // wcj      : image taps, [31:0] c1 (RX1), [63:32] c2 (RX2 normalised), same
 //            word format as wts.
-// cfg      : [0] bypass, [10:8] output make-up shift s (0..4).
+// cfg      : [0] bypass, [10:8] output make-up shift s (0..4),
+//            [14:12] weight scale ws (0..5; 6, 7 act as 5).
+//            The weight words are w * 2^ws (still signed Q3.12). A jammer that
+//            is 60-70 dB above the noise needs the weights to 1e-4 or better;
+//            Q3.12 alone (2.4e-4) leaves a residual above the noise, and the
+//            small weights of a minimum-norm null are the worst case. The
+//            firmware picks the largest ws that keeps every weight inside
+//            Q3.12, the core takes it out again after the sum (no range or
+//            precision lost: the sum is 14 fractional bits wide).
 // nrm      : g2 = {imag[31:16], real[15:0]}, signed Q3.13 (1.0 = 0x2000).
 // wts, wcj, cfg and nrm come from gnss_passthrough's committed registers, in the
 // same clock domain as this core, so a commit changes all three at once.

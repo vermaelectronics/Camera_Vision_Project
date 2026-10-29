@@ -1,0 +1,21 @@
+=== before (4.3.0 = before, 4.4.0 = after)
+CW at -7.06 MHz from the LO, fs 61.44 MS/s, I/Q imbalance on (~49 dB image rejection), 10 seed(s)
+J/N 50 dB: mean suppression  64.8 dB, mean residual +0.20 dB (worst +0.52, 0 of 10 seeds above +3 dB) | mean satellite SNR loss  A(on CW) -0.75  B(+4 MHz)  1.31  C(-21 MHz)  0.09 dB, worst A  0.88
+J/N 55 dB: mean suppression  65.5 dB, mean residual +0.45 dB (worst +1.06, 0 of 10 seeds above +3 dB) | mean satellite SNR loss  A(on CW) -0.79  B(+4 MHz)  2.20  C(-21 MHz)  0.30 dB, worst A  0.75
+J/N 60 dB: mean suppression  64.8 dB, mean residual +1.11 dB (worst +2.26, 0 of 10 seeds above +3 dB) | mean satellite SNR loss  A(on CW) -0.29  B(+4 MHz)  3.65  C(-21 MHz)  1.01 dB, worst A  1.92
+J/N 62 dB: mean suppression  65.8 dB, mean residual +1.30 dB (worst +3.74, 1 of 10 seeds above +3 dB) | mean satellite SNR loss  A(on CW) -0.76  B(+4 MHz)  4.04  C(-21 MHz)  1.32 dB, worst A  1.59
+J/N 65 dB: mean suppression  65.2 dB, mean residual +2.44 dB (worst +5.30, 3 of 10 seeds above +3 dB) | mean satellite SNR loss  A(on CW)  1.38  B(+4 MHz)  5.53  C(-21 MHz)  2.53 dB, worst A  3.14
+J/N 68 dB: mean suppression  65.4 dB, mean residual +3.24 dB (worst +4.22, 6 of 10 seeds above +3 dB) | mean satellite SNR loss  A(on CW)  1.96  B(+4 MHz)  6.70  C(-21 MHz)  3.59 dB, worst A  6.83
+J/N 70 dB: mean suppression  65.3 dB, mean residual +5.11 dB (worst +9.50, 9 of 10 seeds above +3 dB) | mean satellite SNR loss  A(on CW)  2.53  B(+4 MHz)  8.06  C(-21 MHz)  4.88 dB, worst A  5.75
+J/N 75 dB: mean suppression  63.4 dB, mean residual +17.11 dB (worst +21.92, 10 of 10 seeds above +3 dB) | mean satellite SNR loss  A(on CW)  6.14  B(+4 MHz) 12.82  C(-21 MHz) 10.09 dB, worst A 12.87
+=== after (4.3.0 = before, 4.4.0 = after)
+CW at -7.06 MHz from the LO, fs 61.44 MS/s, I/Q imbalance on (~49 dB image rejection), 10 seed(s)
+J/N 50 dB: mean suppression  71.1 dB, mean residual +0.07 dB (worst +0.08, 0 of 10 seeds above +3 dB) | mean satellite SNR loss  A(on CW) -1.09  B(+4 MHz)  1.16  C(-21 MHz) -0.05 dB, worst A -0.04
+J/N 55 dB: mean suppression  71.4 dB, mean residual +0.07 dB (worst +0.09, 0 of 10 seeds above +3 dB) | mean satellite SNR loss  A(on CW) -1.07  B(+4 MHz)  1.82  C(-21 MHz) -0.08 dB, worst A -0.06
+J/N 60 dB: mean suppression  71.4 dB, mean residual +0.07 dB (worst +0.11, 0 of 10 seeds above +3 dB) | mean satellite SNR loss  A(on CW) -0.99  B(+4 MHz)  2.59  C(-21 MHz) -0.02 dB, worst A  0.08
+J/N 62 dB: mean suppression  71.4 dB, mean residual +0.07 dB (worst +0.10, 0 of 10 seeds above +3 dB) | mean satellite SNR loss  A(on CW) -0.92  B(+4 MHz)  2.82  C(-21 MHz)  0.09 dB, worst A  0.19
+J/N 65 dB: mean suppression  71.4 dB, mean residual +0.08 dB (worst +0.09, 0 of 10 seeds above +3 dB) | mean satellite SNR loss  A(on CW) -0.54  B(+4 MHz)  3.19  C(-21 MHz)  0.35 dB, worst A  0.51
+J/N 68 dB: mean suppression  71.3 dB, mean residual +0.34 dB (worst +0.38, 0 of 10 seeds above +3 dB) | mean satellite SNR loss  A(on CW) -0.19  B(+4 MHz)  3.82  C(-21 MHz)  0.82 dB, worst A  0.96
+J/N 70 dB: mean suppression  71.3 dB, mean residual +1.26 dB (worst +1.36, 0 of 10 seeds above +3 dB) | mean satellite SNR loss  A(on CW)  0.46  B(+4 MHz)  4.46  C(-21 MHz)  1.31 dB, worst A  1.76
+J/N 75 dB: mean suppression  71.3 dB, mean residual +10.16 dB (worst +10.61, 10 of 10 seeds above +3 dB) | mean satellite SNR loss  A(on CW)  2.98  B(+4 MHz)  6.63  C(-21 MHz)  3.56 dB, worst A  4.35
+

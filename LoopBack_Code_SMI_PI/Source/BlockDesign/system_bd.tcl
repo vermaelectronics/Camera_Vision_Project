@@ -77,12 +77,13 @@ if {[llength $gnss_ipdef] == 0} {
 }
 # The SMI-PI core is a separate Vitis HLS IP in the same repository
 # (Source/HLS/smi_pi/build_hls.tcl, build_all.sh stage "smi"). v4.1 needs
-# version 2.1 of it (weights + image taps + cfg + nrm ports); a 2.0 left over
-# from a v4.0 build has no cfg/nrm/wcj ports and is refused here.
+# version 2.2 of it (weights + image taps + cfg + nrm ports + the weight scale
+# in cfg[14:12]); a 2.0 or 2.1 left over from an earlier build is refused here
+# (2.1 would run, but ignores the weight scale, and the 4.4 firmware needs it).
 set smi_ipdef [get_ipdefs -all -quiet -filter \
-  {VLNV =~ *:smi_pi:2.1 && design_tool_contexts =~ *IPI* && UPGRADE_VERSIONS == ""}]
+  {VLNV =~ *:smi_pi:2.2 && design_tool_contexts =~ *IPI* && UPGRADE_VERSIONS == ""}]
 if {[llength $smi_ipdef] == 0} {
-  error "ERROR: smi_pi 2.1 was not found in the IP catalog at $gnss_ip_repo.\
+  error "ERROR: smi_pi 2.2 was not found in the IP catalog at $gnss_ip_repo.\
          Build it with Source/HLS/smi_pi/build_hls.tcl (vitis_hls), or run\
          Automation/Linux/build_all.sh --from smi."
 }
@@ -505,7 +506,7 @@ ad_connect gnss_passthrough/dac_data_q0 axi_ad9361/dac_data_q0
 ad_connect gnss_passthrough/dac_data_i1 axi_ad9361/dac_data_i1
 ad_connect gnss_passthrough/dac_data_q1 axi_ad9361/dac_data_q1
 
-# SMI-PI v4.1 space-time power-inversion filter (Vitis HLS IP smi_pi 2.1, II=1).
+# SMI-PI v4.1 space-time power-inversion filter (Vitis HLS IP smi_pi 2.2, II=1).
 #   It runs on sys_cpu_clk (100 MHz), NOT on axi_ad9361/l_clk: l_clk follows the
 #   sample rate (4x it in 2R2T, 200 MHz at 50 MS/s, 245.76 MHz at 61.44 MS/s),
 #   while sys_cpu_clk is fixed, so the filter's timing does not depend on the

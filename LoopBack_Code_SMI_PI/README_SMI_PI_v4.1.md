@@ -12,6 +12,16 @@
 Version 4.1.5 of `LoopBack_Code_SMI_PI`. It builds on v4.0 (the space-time
 filter) and makes these changes to the FPGA, the firmware and the scripts.
 
+> **Sharp CW on top of the GPS signal, J/N 60-75 dB (firmware 4.4.0, bitstream 4.4).**
+> After the field test of 28-Oct-2026 (CW at 1575.4 MHz, 15 dBm: no satellite): the
+> weights were rounded to 2.4e-4 steps, which limited the null of a very strong CW to
+> 58-68 dB. New **weight scale** (AJ_CFG[14:12], IP smi_pi 2.2): the weight words hold
+> `w * 2^ws`, up to 32 times finer. C simulation, CW 62-70 dB above the noise: residual
+> +1.3 / +2.4 / +3.2 / +5.1 dB -> +0.07 / +0.08 / +0.34 / +1.3 dB. **Needs the whole project
+> rebuilt** (the filter core changed). Details, limits (ADC, front-end overload, a
+> satellite in the jammer's direction) and test T7: `README_SMI_PI_v4.4_CW_on_L1.md`,
+> `TESTING_PUTTY.md`. Not run on the board.
+
 > **Slower lock than v2.2 (firmware 4.1.5).** After `gnss_band=` (new LO,
 > rate and bandwidth) the AD9361 TX quadrature / LO-leakage calibration is
 > now run again too (the driver only redoes it for LO moves > 100 MHz). A
@@ -68,7 +78,7 @@ filter) and makes these changes to the FPGA, the firmware and the scripts.
 - How to test it on PuTTY and what to send back: **`TESTING_PUTTY.md`**
 
 **Status.** v4.1 has been checked in C simulation (the HLS testbench runs the
-real filter with the firmware's own solver; 8 scenarios pass), in an RTL
+real filter with the firmware's own solver; 10 scenarios pass), in an RTL
 simulation of `gnss_passthrough` (iverilog) and in a host build of the
 firmware engine against a simulated radio. I could not run Vitis HLS
 synthesis, Vivado or the board here. On your PC, check `SMI_PI_HLS: PASS`
@@ -160,10 +170,10 @@ learned noise floor, so it also works when the jammer is already on at boot.
 | File | Change |
 |---|---|
 | `Source/HLS/smi_pi/smi_pi.cpp`, `.h` | **Rewritten.** New interface `smi_pi(s_axis_x, m_axis_y, wts[1024], wcj[64], cfg[32], nrm[32])`. The pipeline normalises RX2 (`x2n = g2·x2`, Q3.13 × Q0 → Q2, 18 bits, cannot overflow), then runs 31 space-time taps and 2 image taps `c1·conj(x1[n-8]) + c2·conj(x2n[n-8])`. Then bypass (`cfg[0]`) and the make-up shift (`cfg[10:8]`, 0–4). The accumulator is Q14 in 48 bits, rounded to nearest after the shift and saturated to 16 bits. 99 + 4 multipliers. Still II=1 at 100 MHz. |
-| `Source/HLS/smi_pi/testbench.cpp` | **Rewritten.** The bit-exact test now covers normalisation, image taps, bypass and the shift over all ranges. 8 scenarios, listed in §4. |
-| `Source/HLS/smi_pi/build_hls.tcl` | Runs 8 C-sim scenarios. Packages IP **`antsdr:gnss:smi_pi:2.1`**. |
+| `Source/HLS/smi_pi/testbench.cpp` | **Rewritten.** The bit-exact test now covers normalisation, image taps, bypass and the shift over all ranges. 10 scenarios, listed in §4. |
+| `Source/HLS/smi_pi/build_hls.tcl` | Runs 10 C-sim scenarios. Packages IP **`antsdr:gnss:smi_pi:2.2`**. |
 | `Source/HDL/gnss_passthrough.v` | VERSION **0x00040001** (4.1). New shadow registers **AJ_CFG 0x188** (reset `0x1` = bypass), **AJ_NORM 0x18C** (reset `0x2000` = 1.0), **AJ_WC0/1 0x190/0x194** (image taps), and **AJ_CFG_ACTIVE 0x198** (read-only). All of them are committed together with AJ_W by AJ_COMMIT in one clock edge. New ports `aj_wcj`, `aj_cfg`, `aj_nrm`. AJ_INFO is 0x10080C02. |
-| `Source/BlockDesign/system_bd.tcl` | Wires `aj_wcj→wcj`, `aj_cfg→cfg`, `aj_nrm→nrm`. Requires smi_pi **2.1**, so a stale 2.0 from a v4.0 build is refused with a clear message. |
+| `Source/BlockDesign/system_bd.tcl` | Wires `aj_wcj→wcj`, `aj_cfg→cfg`, `aj_nrm→nrm`. Requires smi_pi **2.2**, so a stale 2.0 / 2.1 from an earlier build is refused with a clear message. |
 
 ### Firmware (`Source/Firmware/app_gnss_e310`)
 

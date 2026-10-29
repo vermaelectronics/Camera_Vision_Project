@@ -11,7 +11,8 @@
 #    1. C simulation, scenarios 1 (bit-exact), 2 (wideband jammer), 3 (no
 #       jammer, bypass), 4 (CW jammer), 5 (jammer + reflection), 6 (50 dB
 #       jammer with I/Q imbalance), 7 (RX2 25 dB weaker: normalisation) and
-#       8 (60 dB jammer with I/Q imbalance).
+#       8 (60 dB jammer with I/Q imbalance), 9 and 10 (CW on top of the GPS signal,
+#       62 and 68 dB above the noise: the weight scale of v4.4).
 #       The weights come from the firmware's solver
 #       (Source/Firmware/app_gnss_e310/gnss_aj_math.c), compiled into the
 #       testbench. Each scenario needs a freshly reset core, so each is a
@@ -31,7 +32,7 @@
 #    SMI_PI_SKIP_CSIM=1   skip step 1
 #
 #  OUTPUT
-#    $GNSS_CRPA_IP_REPO/smi_pi/component.xml, VLNV antsdr:gnss:smi_pi:2.1
+#    $GNSS_CRPA_IP_REPO/smi_pi/component.xml, VLNV antsdr:gnss:smi_pi:2.2
 #    $GNSS_CRPA_IP_REPO/smi_pi/smi_pi_csynth.rpt
 #
 #  SUCCESS MARKER
@@ -89,7 +90,7 @@ set_clock_uncertainty $clk_uncertainty
 
 # ---- 1 C simulation -------------------------------------------------------------
 if {![info exists ::env(SMI_PI_SKIP_CSIM)] || $::env(SMI_PI_SKIP_CSIM) eq "0"} {
-  foreach scen {1 2 3 4 5 6 7 8} {
+  foreach scen {1 2 3 4 5 6 7 8 9 10} {
     puts "SMI_PI_HLS: csim scenario $scen"
     if {[catch {csim_design -argv $scen} err]} {
       puts "SMI_PI_HLS: FAIL - C simulation scenario $scen: $err"
@@ -130,7 +131,7 @@ if {$ii eq "" || $ii > $pipeline_ii} {
 
 # ---- 4 package as a Vivado IP ------------------------------------------------------
 export_design -format ip_catalog -rtl verilog \
-  -vendor antsdr -library gnss -version 2.1 -ipname smi_pi \
+  -vendor antsdr -library gnss -version 2.2 -ipname smi_pi \
   -display_name "SMI power inversion, space-time" \
   -description "Two-element space-time SMI power-inversion anti-jam filter (Vitis HLS): RX2 normalised to RX1 at the input, 16 taps on RX1 (reference tap fixed at 1), 16 on RX2 and 2 image (conjugate) taps, bypass and output make-up gain; weights from the ARM via gnss_passthrough. s_axis_x = RX1 and RX2 IQ, m_axis_y = filtered RX1."
 
@@ -157,6 +158,6 @@ file delete -force $out_ip
 file copy -force $ip_src $out_ip
 if {[file exists $rpt_txt]} { file copy -force $rpt_txt $out_ip }
 
-puts "SMI_PI_HLS: IP antsdr:gnss:smi_pi:2.1 -> $out_ip"
+puts "SMI_PI_HLS: IP antsdr:gnss:smi_pi:2.2 -> $out_ip"
 puts "SMI_PI_HLS: PASS"
 exit 0

@@ -39,6 +39,10 @@
 //       normalisation (g2 from the noise floors) suppression >= 35 dB and at
 //       least 10 dB more than without it
 //    8  wideband jammer 60 dB with I/Q imbalance: suppression >= 50 dB
+//    9  CW 62 dB above the noise at -7.06 MHz from the LO (1575.4 MHz with the LO
+//       at 1582.5 MHz, 61.44 MS/s), on top of the satellite, I/Q imbalance:
+//       suppression >= 64 dB, residual <= 1 dB (SMI-PI 4.4 weight scale)
+//    10 the same at 68 dB: suppression >= 64 dB, residual <= 2.5 dB
 //  Prints "SMI_PI_CSIM: PASS" or "SMI_PI_CSIM: FAIL".
 // ============================================================================
 #include <cstdio>
@@ -122,8 +126,9 @@ static void set_weights(const int16_t *wre, const int16_t *wim) {
     }
 }
 
-static void set_cfg(int bypass, int shift) {
-    g_cfg = (bypass ? SMI_CFG_BYPASS : 0u) | ((unsigned)(shift & 7) << SMI_CFG_SH_LSB);
+static void set_cfg(int bypass, int shift, int ws = 0) {
+    g_cfg = (bypass ? SMI_CFG_BYPASS : 0u) | ((unsigned)(shift & 7) << SMI_CFG_SH_LSB) |
+            ((unsigned)(ws & 7) << SMI_CFG_WS_LSB);
 }
 
 static void set_g2(int g2r, int g2i) {
@@ -176,7 +181,7 @@ static int test_bitexact() {
     std::vector<long long> x2nr(n), x2ni(n);
     int bad = 0, sat = 0, sat18c = 0, bypassed = 0, shifted = 0;
     int16_t wr[AJ_NW], wi[AJ_NW];
-    int g2r = 0, g2i = 0, byp = 0, sh = 0;
+    int g2r = 0, g2i = 0, byp = 0, sh = 0, wsc = 0;
     for (int i = 0; i < n; i++) {
         bool ext = (i % 97) < 20;
         a[i] = ext ? (urand() < 0.5 ? -2048 : 2047) : (int)(urand() * 4096) - 2048;
@@ -199,7 +204,8 @@ static int test_bitexact() {
             if (seg == 3) { g2r = 1 << SMI_GFRAC; g2i = 0; }
             byp = (seg % 4 == 3);
             sh = seg % 8;                                  // 5..7 must act as 4
-            set_weights(wr, wi); set_cfg(byp, sh); set_g2(g2r, g2i);
+            wsc = (seg * 3) % 8;                           // weight scale 0..7: 6, 7 must act as 5
+            set_weights(wr, wi); set_cfg(byp, sh, wsc); set_g2(g2r, g2i);
         }
         // the core normalises RX2 when the sample enters
         long long nr = (long long)g2r * c[i] - (long long)g2i * d[i];
@@ -216,23 +222,27 @@ static int test_bitexact() {
         const int Q = SMI_WFRAC + SMI_XFRAC;
         long long sr = at(a, i - SMI_REF) << Q, si = at(b, i - SMI_REF) << Q;
         if (!byp) {
+            long long tr = 0, ti = 0;       // the weighted taps, summed before the weight scale
             for (int k = 0; k < SMI_NT; k++) {
                 if (k != SMI_REF) {
                     long long xr = at(a, i - k), xi = at(b, i - k);
-                    sr -= (wr[k] * xr - wi[k] * xi) << SMI_XFRAC;
-                    si -= (wr[k] * xi + wi[k] * xr) << SMI_XFRAC;
+                    tr += (wr[k] * xr - wi[k] * xi) << SMI_XFRAC;
+                    ti += (wr[k] * xi + wi[k] * xr) << SMI_XFRAC;
                 }
                 long long xr = atl(x2nr, i - k), xi = atl(x2ni, i - k);
-                sr -= wr[16 + k] * xr - wi[16 + k] * xi; si -= wr[16 + k] * xi + wi[16 + k] * xr;
+                tr += wr[16 + k] * xr - wi[16 + k] * xi; ti += wr[16 + k] * xi + wi[16 + k] * xr;
             }
             {   // image taps: c conj(x)
                 long long xr = at(a, i - SMI_REF), xi = -at(b, i - SMI_REF);
-                sr -= (wr[AJ_IMG1] * xr - wi[AJ_IMG1] * xi) << SMI_XFRAC;
-                si -= (wr[AJ_IMG1] * xi + wi[AJ_IMG1] * xr) << SMI_XFRAC;
+                tr += (wr[AJ_IMG1] * xr - wi[AJ_IMG1] * xi) << SMI_XFRAC;
+                ti += (wr[AJ_IMG1] * xi + wi[AJ_IMG1] * xr) << SMI_XFRAC;
                 xr = atl(x2nr, i - SMI_REF); xi = -atl(x2ni, i - SMI_REF);
-                sr -= wr[AJ_IMG2] * xr - wi[AJ_IMG2] * xi;
-                si -= wr[AJ_IMG2] * xi + wi[AJ_IMG2] * xr;
+                tr += wr[AJ_IMG2] * xr - wi[AJ_IMG2] * xi;
+                ti += wr[AJ_IMG2] * xi + wi[AJ_IMG2] * xr;
             }
+            int w_eff = wsc > SMI_MAXWS ? SMI_MAXWS : wsc;
+            long long rnd = w_eff ? (1LL << (w_eff - 1)) : 0;
+            sr -= (tr + rnd) >> w_eff; si -= (ti + rnd) >> w_eff;
         } else bypassed++;
         int s_eff = sh > SMI_MAXSH ? SMI_MAXSH : sh;
         if (s_eff) shifted++;
@@ -252,7 +262,7 @@ static int test_bitexact() {
 }
 
 // ---- scenarios 2..8 ------------------------------------------------------------
-struct Scen { double jnr_db; bool cw; double echo; double rx2_db; bool iq; };
+struct Scen { double jnr_db; bool cw; double echo; double rx2_db; bool iq; double cwf; double satf; double chip; };
 
 // AD9361-like I/Q imbalance: gain error eps, phase error ph (degrees).
 static void iq_imbalance(cvec &x, double eps, double ph_deg) {
@@ -270,12 +280,12 @@ static double irr_db(double eps, double ph_deg) {
 
 static int test_jammer(int id, Scen sc) {
     const int N = 3 * AJ_NSAMP + 20000;
-    const double nrms = 20.0, fsat = -9.08 / 50.0;
+    const double nrms = 20.0, fsat = (sc.satf != 0) ? sc.satf : -9.08 / 50.0, cwf = (sc.cwf != 0) ? sc.cwf : 0.06, chip_step = (sc.chip != 0) ? sc.chip : 1.023 / 50.0;
     const double IQ1_EPS = 0.004, IQ1_PH = 0.3, IQ2_EPS = -0.003, IQ2_PH = -0.4;
     cvec J(N), J2, n1(N), n2(N), s1(N), s2(N);
     // jammer
     if (sc.cw) {
-        for (int i = 0; i < N; i++) J[i] = std::polar(1.0, 2 * M_PI * 0.06 * i);
+        for (int i = 0; i < N; i++) J[i] = std::polar(1.0, 2 * M_PI * cwf * i);
     } else {
         for (int i = 0; i < N; i++) J[i] = cd(grand(), grand());
         J = fir(J, lowpass(0.42, 41), 20);
@@ -300,7 +310,7 @@ static int test_jammer(int id, Scen sc) {
     for (int i = 0; i < N; i++) {
         n1[i] = cd(grand(), grand()) * nrms;
         n2[i] = cd(grand(), grand()) * nrms;
-        cph += 1.023 / 50.0; if (cph >= 1) { cph -= 1; chip = urand() < 0.5 ? -1 : 1; }
+        cph += chip_step; if (cph >= 1) { cph -= 1; chip = urand() < 0.5 ? -1 : 1; }
         s1[i] = std::polar(0.1 * nrms * chip, 2 * M_PI * fsat * i);
         s2[i] = s1[i] * std::polar(1.0, -1.1);
     }
@@ -379,7 +389,7 @@ static int test_jammer(int id, Scen sc) {
         double sc4 = std::pow(4.0, shift);
         set_weights(r.wre, r.wim);
         set_g2((int)std::floor(gn * 8192 + 0.5), 0);
-        set_cfg(0, shift);
+        set_cfg(0, shift, r.ws);
         cvec yj = run_core_c(seg(jx1), seg(jx2));
         cvec yx = run_core_c(seg(x1), seg(x2));
         cvec yn = run_core_c(seg(nx1), seg(nx2));
@@ -439,14 +449,14 @@ static int test_jammer(int id, Scen sc) {
     std::printf("  space-time 31+2 taps: suppression %.1f dB, residual %+.2f dB, satellite SNR loss %.2f dB, output %+.2f dB re RX1%s\n",
                 m.supp, m.res, m.loss, m.out_db, sh ? "" : "");
     if (sh) std::printf("  output make-up    : %d (x%d, +%d dB)\n", sh, 1 << sh, 6 * sh);
-    std::printf("  firmware figures  : J/N %.1f dB, suppression %.1f dB, residual %+.1f dB, |w|^2 %.2f, loading %.1f LSB^2 (%d passes)\n",
-                r.jn_db, r.supp_db, r.res_db, r.wn2, r.sig2, r.iters);
+    std::printf("  firmware figures  : J/N %.1f dB, suppression %.1f dB, residual %+.1f dB, |w|^2 %.2f, loading %.1f LSB^2 (%d passes), weight scale 2^%d\n",
+                r.jn_db, r.supp_db, r.res_db, r.wn2, r.sig2, r.iters, r.ws);
     std::printf("  detection         : coherence %.3f at lag %d -> J/N %.1f dB, RX1 %.0f RX2 %.0f LSB^2\n",
                 r.coh, r.coh_lag, r.jn_coh_db, r.p1, r.p2);
     if (!sc.cw && sc.jnr_db > -90)
         std::printf("  jammer estimate   : bandwidth %.2f fs, centre %+.3f fs\n", r.bw, r.foff);
     if (sc.cw)
-        std::printf("  jammer estimate   : bandwidth %.4f fs, centre %+.4f fs (true 0.06)\n", r.bw, r.foff);
+        std::printf("  jammer estimate   : bandwidth %.4f fs, centre %+.4f fs (true %.4f)\n", r.bw, r.foff, cwf);
 
     int ok = 1;
     switch (id) {
@@ -483,6 +493,19 @@ static int test_jammer(int id, Scen sc) {
         ok = m.supp >= 35 && m.loss <= 3 && m.supp >= m2.supp + 10;
         break; }
     case 8: ok = m.supp >= 50; break;
+    case 9: case 10: {
+        // the weight scale off (ws = 0) on the same data, for comparison
+        aj_result_t r0 = r;
+        for (int k = 0; k < AJ_NW; k++) {
+            r0.wre[k] = (int16_t)std::floor((double)r.wre[k] / (1 << r.ws) + 0.5);
+            r0.wim[k] = (int16_t)std::floor((double)r.wim[k] / (1 << r.ws) + 0.5);
+        }
+        r0.ws = 0;
+        Meas m0 = measure(r0, g2, sh);
+        std::printf("  weight scale off  : suppression %.1f dB, residual %+.2f dB, satellite SNR loss %.2f dB\n", m0.supp, m0.res, m0.loss);
+        if (id == 9)  ok = m.supp >= 64 && m.res <= 1.0 && m.loss <= 3;
+        else          ok = m.supp >= 64 && m.res <= 2.5 && m.loss <= 3.5;
+        break; }
     }
     return ok;
 }
@@ -499,6 +522,9 @@ int main(int argc, char **argv) {
     case 6: ok = test_jammer(6, {50, false, 0, 0, true}); break;
     case 7: ok = test_jammer(7, {40, false, 0, -25, false}); break;
     case 8: ok = test_jammer(8, {60, false, 0, 0, true}); break;
+    // CW on top of the GPS signal: 1575.4 MHz with the LO at 1582.5 MHz (-7.1 MHz), 61.44 MS/s
+    case 9:  ok = test_jammer(9,  {62, true, 0, 0, true, -7.06 / 61.44, -7.06 / 61.44, 1.023 / 61.44}); break;
+    case 10: ok = test_jammer(10, {68, true, 0, 0, true, -7.06 / 61.44, -7.06 / 61.44, 1.023 / 61.44}); break;
     default: std::printf("unknown scenario %d\n", scen); ok = 0;
     }
     std::printf("SMI_PI_CSIM: %s (scenario %d)\n", ok ? "PASS" : "FAIL", scen);

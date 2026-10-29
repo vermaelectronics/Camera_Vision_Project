@@ -124,13 +124,16 @@
 //                                    half-new set. Reads a commit counter.
 //    0x184   AJ_INFO         RO      {8'd taps per channel, 8'd reference delay,
 //                                     8'd fraction bits, 8'd layout version}
-//                                    = 0x10080C02 (layout 2 = v4.1)
+//                                    = 0x10080C03 (layout 3 = v4.4; layout 2 = v4.1)
 //    0x188   AJ_CFG          RW      SHADOW. [0] bypass: 1 = TX1 carries RX1
 //                                    delayed by 8 samples, no weights (reset
 //                                    value 0x1: nothing is filtered until the
 //                                    firmware has seen a jammer).
 //                                    [10:8] output make-up shift s, 0..4: the
 //                                    filter output x 2^s (6 dB per step).
+//                                    [14:12] weight scale ws, 0..5 (v4.4): the weight
+//                                    words hold w * 2^ws and the core divides the sum
+//                                    by 2^ws (finer steps for a CW 60-70 dB above noise).
 //    0x18C   AJ_NORM         RW      SHADOW. RX2 input normalisation g2,
 //                                    {imag[31:16], real[15:0]} signed Q3.13
 //                                    (1.0 = 0x2000, the reset value). The core
@@ -259,8 +262,11 @@ module gnss_passthrough #(
   // v4.1 -- adds AJ_CFG (bypass, output make-up shift), AJ_NORM (RX2 input
   //         normalisation) and the two image-tap words AJ_WC, all shadowed
   //         and committed together with the weights (smi_pi_0 v2.1).
-  localparam [31:0] CORE_VERSION = 32'h00040001;   // v4.1
-  localparam [31:0] AJ_INFO      = 32'h10080C02;
+  // v4.4 -- smi_pi_0 v2.2: AJ_CFG[14:12] is the weight scale (weight words hold
+  //         w * 2^ws); no register or port changed. AJ_INFO layout 3 tells the
+  //         firmware the bitstream has it (older bitstreams ignore the bits).
+  localparam [31:0] CORE_VERSION = 32'h00040004;   // v4.4
+  localparam [31:0] AJ_INFO      = 32'h10080C03;
   localparam [31:0] AJ_CFG_RESET = 32'h00000001;   // bypass
   localparam [31:0] AJ_NRM_RESET = 32'h00002000;   // g2 = 1.0
   localparam        AW           = FIFO_ADDR_WIDTH;

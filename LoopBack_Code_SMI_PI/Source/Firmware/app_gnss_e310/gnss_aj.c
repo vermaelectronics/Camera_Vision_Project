@@ -64,6 +64,7 @@ static aj_result_t res;
 static int      res_valid, res_solved;
 
 static uint32_t n_upd, n_det, n_fail, n_skip, cnt_upd, cnt_det, upd_rate, det_rate;
+static int      ws_hw = 1;         /* the bitstream has the weight scale (layout >= 3) */
 static int      state, on_cnt, on_why, jam_announced, jam_nulled, shift, on_ev;
 static XTime    jam_t0, quiet_t0, res_bad_t0, clear_t0, trig_t0;
 static double   jam_peak, null_ms = -1.0, null_ms_last = -1.0;
@@ -218,7 +219,7 @@ static void commit_bypass(void)
 static void commit_weights(void)
 {
 	gnss_rxg_set_digital_db(6 * shift);
-	gnss_pt_write_aj(res.wre, res.wim, GNSS_PT_AJ_CFG_SHIFT(shift), g2_q13());
+	gnss_pt_write_aj(res.wre, res.wim, GNSS_PT_AJ_CFG_SHIFT(shift) | GNSS_PT_AJ_CFG_WS(res.ws), g2_q13());
 }
 
 /* ---- DMA --------------------------------------------------------------------- */
@@ -864,6 +865,14 @@ void gnss_aj_init(void)
 	t_key = now - us(AJ_KEY_QUIET_US);
 	res.sig2_prev = -1.0;
 	aj_reset();
+	/* The weight scale (AJ_CFG[14:12]) exists from bitstream 4.4 (AJ_INFO layout 3).
+	 * An older bitstream would multiply the filter by 2^ws, so it is never used there. */
+	ws_hw = ((gnss_pt_read(GNSS_PT_REG_AJ_INFO) & 0xFFU) >= 3U);
+	aj_set_max_ws(ws_hw ? AJ_MAXWS : 0);
+	if(!ws_hw)
+		console_print("[AJ] NOTE: the bitstream is older than 4.4 (AJ_INFO layout %d): weight scale off, a CW 60 dB or\n"
+			      "     more above the noise is cancelled less well. Rebuild the whole project (not firmware only).\n",
+			      (long)(gnss_pt_read(GNSS_PT_REG_AJ_INFO) & 0xFFU));
 }
 
 void gnss_aj_command(int on)
@@ -1103,15 +1112,16 @@ void gnss_aj_report(void)
 			      supp_txt(res.supp_db), f1u(res_disp(res.res_db)),
 			      (char*)(res.res_db > AJ_WARN_RES_DB ? "  <-- jammer leaking" : ""));
 		for(k = 0; k < AJ_NSPT; k++) {
-			double m = (double)res.wre[k] * res.wre[k] + (double)res.wim[k] * res.wim[k];
+			double m = ((double)res.wre[k] * res.wre[k] + (double)res.wim[k] * res.wim[k]) / (double)(1 << (2 * res.ws));
 			if(m > wmax) { wmax = m; kmax = k; }
 		}
 		console_print("weights       : |w|^2 %s, largest %s tap at delay %d (|w| %s), image |c1| %s |c2| %s\n",
 			      f2u(res.wn2), (char*)(kmax < AJ_NT ? "RX1" : "RX2"), (long)(kmax % AJ_NT),
-			      f2u(aj_sqrt(wmax) / 4096.0),
-			      f3u(aj_sqrt((double)res.wre[AJ_IMG1] * res.wre[AJ_IMG1] + (double)res.wim[AJ_IMG1] * res.wim[AJ_IMG1]) / 4096.0),
-			      f3u(aj_sqrt((double)res.wre[AJ_IMG2] * res.wre[AJ_IMG2] + (double)res.wim[AJ_IMG2] * res.wim[AJ_IMG2]) / 4096.0));
-		console_print("solver        : loading %s LSB^2, %d passes\n", f1u(res.sig2), (long)res.iters);
+			      f2u(aj_sqrt(wmax) / 4096.0 / (double)(1 << res.ws)),
+			      f3u(aj_sqrt((double)res.wre[AJ_IMG1] * res.wre[AJ_IMG1] + (double)res.wim[AJ_IMG1] * res.wim[AJ_IMG1]) / (4096.0 * (1 << res.ws))),
+			      f3u(aj_sqrt((double)res.wre[AJ_IMG2] * res.wre[AJ_IMG2] + (double)res.wim[AJ_IMG2] * res.wim[AJ_IMG2]) / (4096.0 * (1 << res.ws))));
+		console_print("solver        : loading %s LSB^2, %d passes, weight scale 2^%d%s\n", f1u(res.sig2), (long)res.iters,
+			      (long)res.ws, (char*)(ws_hw ? "" : " (bitstream older than 4.4: off)"));
 	}
 	if(state == ST_JAMMED && null_ms >= 0.0)
 		console_print("time to null  : %s ms (this jammer)\n", fmt(null_ms, 0, 0));

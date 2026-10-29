@@ -449,6 +449,9 @@ static double out_power(double (*fr)[AJ_NW], double (*fi)[AJ_NW],
 	return fr[AJ_REF][AJ_REF] - 2.0 * mr + qr;
 }
 
+static int max_ws = AJ_MAXWS;
+void aj_set_max_ws(int ws) { max_ws = (ws < 0) ? 0 : (ws > AJ_MAXWS) ? AJ_MAXWS : ws; }
+
 static int16_t q312(double v)
 {
 	double s = v * (double)(1 << AJ_WFRAC);
@@ -573,8 +576,28 @@ int aj_compute(const uint32_t *buf, int nsamp, aj_result_t *r)
 	}
 	r->iters = it + 1;
 
+	/* Weight scale: the FPGA divides the sum by 2^ws, so the weights can be
+	 * written ws bits larger. The largest ws that keeps every component
+	 * inside Q3.12 (|v| < 7.5) gives the finest steps: a strong CW is a
+	 * minimum-norm null spread over 16 taps (~0.05 each) and needs the
+	 * weights to ~1e-4, finer than one Q3.12 step (2.4e-4). */
+	{
+		double mx = 0.0;
+		int ws = 0;
+		for(i = 0; i < n; i++) {
+			if(wr[i] > mx) mx = wr[i];
+			if(-wr[i] > mx) mx = -wr[i];
+			if(wi[i] > mx) mx = wi[i];
+			if(-wi[i] > mx) mx = -wi[i];
+		}
+		while(ws < max_ws && mx * (double)(2 << ws) < 7.5) ws++;
+		r->ws = ws;
+	}
 	for(k = 0; k < AJ_NW; k++) { r->wre[k] = 0; r->wim[k] = 0; }
-	for(i = 0; i < n; i++) { r->wre[idx[i]] = q312(wr[i]); r->wim[idx[i]] = q312(wi[i]); }
+	for(i = 0; i < n; i++) {
+		r->wre[idx[i]] = q312(wr[i] * (double)(1 << r->ws));
+		r->wim[idx[i]] = q312(wi[i] * (double)(1 << r->ws));
+	}
 
 	r->p1 = p1; r->p2 = p2; r->sig2 = s2; r->wn2 = wn2;
 	if(pev < 0.0) {                 /* first block: no history */
@@ -582,10 +605,10 @@ int aj_compute(const uint32_t *buf, int nsamp, aj_result_t *r)
 		pev_wn2 = wn2;
 	}
 	r->pout = pev; r->pout_wn2 = pev_wn2;
-	for(i = 0; i < n; i++) {      /* what the FPGA will run: the Q3.12 values */
+	for(i = 0; i < n; i++) {      /* what the FPGA will run: the quantised values */
 		prev_idx[i] = idx[i];
-		prev_wr[i] = (double)r->wre[idx[i]] / (double)(1 << AJ_WFRAC);
-		prev_wi[i] = (double)r->wim[idx[i]] / (double)(1 << AJ_WFRAC);
+		prev_wr[i] = (double)r->wre[idx[i]] / (double)(1 << AJ_WFRAC) / (double)(1 << r->ws);
+		prev_wi[i] = (double)r->wim[idx[i]] / (double)(1 << AJ_WFRAC) / (double)(1 << r->ws);
 		prev_nr[i] = nr[i];
 	}
 	prev_n = n;

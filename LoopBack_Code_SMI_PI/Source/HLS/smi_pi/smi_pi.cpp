@@ -1,5 +1,5 @@
 // ============================================================================
-//  smi_pi.cpp  --  space-time SMI power inversion core (SMI-PI v4.1)
+//  smi_pi.cpp  --  space-time SMI power inversion core (SMI-PI v4.4)
 //  ANTSDR E310 V1 / GNSS CRPA project, Vitis HLS 2023.2
 //
 //  PIPELINE (one sample pair per clock)
@@ -40,6 +40,14 @@
 //       before the rounding, at no cost in precision. The firmware only sets
 //       it while the jammer is nulled (a leaking jammer is never amplified).
 //
+//  WEIGHT SCALE (v4.4)
+//    The weight words hold w * 2^ws (ws = cfg[14:12], 0..5) and the sum of the
+//    weighted taps is divided by 2^ws before it is subtracted from the
+//    reference tap. A CW 60-70 dB above the noise has to be cancelled to 1e-4
+//    or better, and the null is a minimum-norm spread of one spatial weight
+//    over 16 taps (about 0.05 each), so a Q3.12 step (2.4e-4) leaves a residual
+//    above the noise. With ws the same 16-bit words give 2^-12 / 2^ws steps.
+//
 //  WEIGHTS
 //    The 33 weights are the SMI (closed-form) solution of the space-time
 //    power-inversion problem, computed by the ARM from a 4096-sample DMA
@@ -58,8 +66,9 @@
 //    weights : 16-bit signed Q3.12, complex multiply with 3 real multipliers
 //              (k1 = wr (xr + xi), k2 = xr (wi - wr), k3 = xi (wr + wi);
 //               re = k1 - k3, im = k1 + k2): 99 multipliers + 4 for g2
-//    sum     : 48 bits, Q14; rounded to nearest after the make-up shift,
-//              saturated to 16 bits.
+//    sum     : 48 bits, Q14; the weighted taps are summed first, divided by
+//              2^ws (weight scale, v4.4), then subtracted from the reference;
+//              rounded to nearest after the make-up shift, saturated to 16 bits.
 // ============================================================================
 #include "smi_pi.h"
 
@@ -141,10 +150,12 @@ void smi_pi(hls::stream<ap_uint<64> > &s_axis_x,
     h2r[0] = x2nr; h2i[0] = x2ni;
 
     // ---- 2. space-time filter, accumulated in Q14 ---------------------------
+    // sr, si = sum of all weighted taps (weights are w * 2^ws); the reference
+    // tap is added after the sum is scaled back by 2^ws.
     const int Q = SMI_WFRAC + SMI_XFRAC;                 // 14
     acc_t ref_r = acc_t(h1r[SMI_REF]) << Q;
     acc_t ref_i = acc_t(h1i[SMI_REF]) << Q;
-    acc_t ar = ref_r, ai = ref_i;
+    acc_t sr = 0, si = 0;
     for (int k = 0; k < SMI_NT; k++) {
 #pragma HLS UNROLL
         if (k != SMI_REF) {
@@ -152,8 +163,8 @@ void smi_pi(hls::stream<ap_uint<64> > &s_axis_x,
             w16_t wr = (w16_t)wts(32 * k + 15, 32 * k);
             w16_t wi = (w16_t)wts(32 * k + 31, 32 * k + 16);
             cmul3<12>(wr, wi, h1r[k], h1i[k], pr, pi);   // Q12
-            ar -= acc_t(pr) << SMI_XFRAC;
-            ai -= acc_t(pi) << SMI_XFRAC;
+            sr += acc_t(pr) << SMI_XFRAC;
+            si += acc_t(pi) << SMI_XFRAC;
         }
         {
             ap_int<37> pr, pi;
@@ -161,8 +172,8 @@ void smi_pi(hls::stream<ap_uint<64> > &s_axis_x,
             w16_t wr = (w16_t)wts(32 * j + 15, 32 * j);
             w16_t wi = (w16_t)wts(32 * j + 31, 32 * j + 16);
             cmul3<18>(wr, wi, h2r[k], h2i[k], pr, pi);   // Q14
-            ar -= acc_t(pr);
-            ai -= acc_t(pi);
+            sr += acc_t(pr);
+            si += acc_t(pi);
         }
     }
     {   // image taps: c1 conj(x1[n-8]) (Q12) and c2 conj(x2n[n-8]) (Q14)
@@ -172,9 +183,14 @@ void smi_pi(hls::stream<ap_uint<64> > &s_axis_x,
         w16_t c2r = (w16_t)wcj(47, 32), c2i = (w16_t)wcj(63, 48);
         cmul3<13>(c1r, c1i, ap_int<13>(h1r[SMI_REF]), ap_int<13>(-ap_int<13>(h1i[SMI_REF])), pr1, pi1);
         cmul3<19>(c2r, c2i, ap_int<19>(h2r[SMI_REF]), ap_int<19>(-ap_int<19>(h2i[SMI_REF])), pr2, pi2);
-        ar -= (acc_t(pr1) << SMI_XFRAC) + acc_t(pr2);
-        ai -= (acc_t(pi1) << SMI_XFRAC) + acc_t(pi2);
+        sr += (acc_t(pr1) << SMI_XFRAC) + acc_t(pr2);
+        si += (acc_t(pi1) << SMI_XFRAC) + acc_t(pi2);
     }
+    ap_uint<3> ws = cfg(14, 12);
+    if (ws > SMI_MAXWS) ws = SMI_MAXWS;
+    const acc_t wrnd = (ws == 0) ? acc_t(0) : (acc_t(1) << (ws - 1));
+    acc_t ar = ref_r - ((sr + wrnd) >> ws);
+    acc_t ai = ref_i - ((si + wrnd) >> ws);
 
     // ---- 3. bypass, 4. make-up shift and rounding -----------------------------
     if (cfg[0]) { ar = ref_r; ai = ref_i; }

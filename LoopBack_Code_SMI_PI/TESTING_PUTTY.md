@@ -67,9 +67,9 @@ things: J/N is relative to the board's noise.
 
 1. Power on with PuTTY connected. Look for:
    ```
-   gnss_pt: present at 0x43c00000, version 4.1
+   gnss_pt: present at 0x43c00000, version 4.4
    SELFTEST: PASS ...
-   ANTI-JAM (SMI-PI 4.1.5): ON, bypassed until a jammer appears.
+   ANTI-JAM (SMI-PI 4.4.0): ON, bypassed until a jammer appears.
    ```
 2. Type `gnss_band?`. All five signals must show `OK` and both FIRs `off`.
 3. Type `gnss_report?` and keep the block.
@@ -134,6 +134,31 @@ first second after the banner and `g2 ... from the jammer` in
 
 After each change, wait 20 s, then `gnss_report?` + satellites/C/N0.
 
+### T7. CW on top of the GPS signal (the field test of 28-Oct, firmware 4.4.0)
+
+Jammer: CW at 1575.4 MHz (the LO of `gnss_band=1` is 1582.5 MHz, so it is 7.1 MHz
+below it; `gnss_band=0` puts it at the LO and the AD9361 then takes part of it away).
+The same receiver, antennas and cables as before; TX attenuation 70 dB (`gnss_tx=1`;
+write down if you use another value, 20 dB makes the output into the receiver 50 dB hotter).
+
+1. No jammer first: `gnss_report?`, satellites seen/used, average C/N0.
+2. Jammer on at the lowest level, then 5 dBm higher, up to the highest you use
+   (for example 10, 15, 20, 25 dBm). At each: wait 30 s, then `gnss_report?`.
+3. From each block copy: `jammer` (J/N), `suppression`, `residual`, `rx gain` (and the
+   clean reference), `ADC peak`, `weights ... weight scale 2^n`. Then satellites seen/used
+   per system, average C/N0 and whether you have a fix; for cold / hot start also the
+   time to fix.
+4. How to read it:
+   * suppression about 60 dB or more and residual below +1 dB: the filter does its job;
+     if satellites are still missing, they are the ones in the jammer's direction (a
+     2-element array nulls one direction) or the receiver itself is overloaded;
+   * J/N printed above about 72 dB, or `rx gain` at 1-5 dB with `ADC peak` near 2047:
+     the jammer is too strong for the AD9361 itself: add an attenuator before the board;
+   * `weight scale 2^0` or the `NOTE: the bitstream is older than 4.4` line at boot: the
+     bitstream was not rebuilt: do the whole build (BUILD_STEPS.md), not only the firmware.
+5. Switch the jammer off: `jammer OFF ... filter bypassed` must appear, and the satellites
+   must come back within a few seconds.
+
 ---
 
 ## 4. Report template (copy, fill in, paste into your next message)
@@ -169,6 +194,10 @@ T3  generator  printed J/N  suppression  residual  NULLED in  sats used (G/E/R/C
     CW  ___ dBm   ____        ____         ____      ____ ms    __/__/__/__          ____      y/n
     WB  ___ dBm   ____        ____         ____      ____ ms    __/__/__/__          ____      y/n
     WB  ___ dBm   ____        ____         ____      ____ ms    __/__/__/__          ____      y/n
+
+T7  CW 1575.4   dBm  J/N   suppression  residual  rx gain / ADC peak  weight scale  sats G/E/R/C  avg C/N0  fix
+    ___            ____  ____         ____      ____ / ____         2^_           __/__/__/__   ____      y/n
+    ___            ____  ____         ____      ____ / ____         2^_           __/__/__/__   ____      y/n
 
 T4  kept fix through on/off?  30 dB: y/n   50 dB: y/n
 T5  detected at boot? y/n, NULLED in ___ ms, time to fix ___ s

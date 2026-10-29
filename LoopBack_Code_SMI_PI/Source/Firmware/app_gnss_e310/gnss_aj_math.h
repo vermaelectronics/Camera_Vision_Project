@@ -59,6 +59,7 @@ extern "C" {
 #define AJ_MAXDIM    33     /* adaptive weights                               */
 #define AJ_WFRAC     12     /* Q3.12                                          */
 #define AJ_GFRAC     13     /* RX2 normalisation g2, Q3.13                    */
+#define AJ_MAXWS      5     /* weight scale: words hold w * 2^ws (SMI-PI 4.4)  */
 #define AJ_NSAMP   4096     /* samples per block (one DMA capture)            */
 
 #define AJ_MODE_STAP  0     /* RX1 15 + RX2 16 + 2 image taps (default)       */
@@ -91,7 +92,8 @@ typedef struct {
                             /*   <= 0 means 1                                 */
 
     /* ---- results ------------------------------------------------------ */
-    int16_t wre[AJ_NW], wim[AJ_NW];   /* weights to write, Q3.12             */
+    int16_t wre[AJ_NW], wim[AJ_NW];   /* weights to write: w * 2^ws, Q3.12  */
+    int     ws;             /* weight scale for AJ_CFG[14:12], 0..AJ_MAXWS    */
     double  p1;             /* RX1 power [LSB^2]                              */
     double  p2;             /* RX2 power [LSB^2], raw (before g2)             */
     double  coh;            /* RX1-RX2 coherence, best lag (0..1)             */
@@ -140,6 +142,7 @@ void aj_metrics(aj_result_t *r, double noise_ref);
  * filter was bypassed, the mode, g2 or the RX gain changed), so the next
  * solve and its suppression figure start from this block alone. */
 void aj_reset(void);
+void aj_set_max_ws(int ws);   /* largest weight scale the bitstream supports; 0 = older than 4.4 */
 
 /* Helpers (no libm on the board). */
 double aj_sqrt(double x);
