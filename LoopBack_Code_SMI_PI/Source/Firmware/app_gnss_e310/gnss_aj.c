@@ -1164,14 +1164,20 @@ void gnss_aj_report(void)
  * the filters' transition band, attenuated twice (RX and TX) -- that is
  * why BeiDou was not seen -- and the upper GLONASS channels at the edge. */
 struct band_cfg { uint64_t lo; uint32_t fs, bw; const char *name; };
-static const struct band_cfg bands[GNSS_BAND_COUNT] = {
+static struct band_cfg bands[GNSS_BAND_COUNT] = {
 	{1575420000ULL, 30720000U, 18000000U, "GPS, Galileo, QZSS, SBAS, BeiDou B1C: L1 only (narrow)"},
 	{1582500000ULL, 61440000U, 56000000U, "ALL: GPS, Galileo, QZSS, SBAS, BeiDou B1I + B1C, GLONASS G1"},
 	{1589500000ULL, 50000000U, 40000000U, "GPS, Galileo, GLONASS G1 at 50 MS/s (no BeiDou B1I)"},
 	{1568250000ULL, 50000000U, 40000000U, "GPS, Galileo, BeiDou B1I + B1C at 50 MS/s (no GLONASS)"},
 	{1601720000ULL, 20480000U, 16000000U, "GLONASS G1 only (narrow, low load): no GPS, Galileo or BeiDou"},
+	/* 5 = CUSTOM: your own values, filled in with  gnss_band=5 <LO> <rate> [bw] [txAtt dB] [rxGain dB];
+	 * gnss_band=5 alone applies what was stored last (start-up: L1, 30.72 MS/s, 18 MHz). */
+	{1575420000ULL, 30720000U, 18000000U, "CUSTOM: your own LO, rate, bandwidth (gnss_band=5 <LO> <rate> [bw] [txAtt] [rxGain])"},
 };
 static int band_applied;
+/* the CUSTOM profile's optional TX attenuation / RX gain: not set = left as they are */
+static uint32_t cust_att_mdb;  static int cust_att_set;
+static int32_t  cust_gain_db;  static int cust_gain_set;
 static int radio_manual, manual_warn;   /* the operator set LO / rate / FIR by hand: the guard keeps its hands off */
 
 /* The signals the profiles must carry: centre and half the main lobe. */
@@ -1239,6 +1245,39 @@ static int radio_recal(void)
 	return r;
 }
 
+/* gnss_band=5 <LO> <rate> [bw] [txAtt dB] [rxGain dB]: store the CUSTOM profile (units as in radio=).
+ * Returns 0 and leaves everything stored, or -1 and changes nothing. */
+int gnss_band_custom(double *p, char n)
+{
+	uint64_t lo;
+	uint32_t fs, bw, mdb = 0;
+	int att_set = 0, gain_set = 0;
+	int32_t gain = 0;
+	if(n < 2 || n > 5) return -1;
+	if(gnss_radio_lo_hz(p[0], &lo) || gnss_radio_rate_hz(p[1], &fs)) return -1;
+	if(n >= 3 && p[2] > 0.0) {
+		if(gnss_radio_bw_hz(p[2], &bw)) return -1;
+	} else {
+		double a = 0.91 * (double)fs;
+		bw = (uint32_t)(a > 56.0e6 ? 56.0e6 : a);
+	}
+	if(n >= 4) {
+		if(gnss_radio_att_mdb(p[3], &mdb)) return -1;
+		att_set = 1;
+	}
+	if(n >= 5) {
+		if(p[4] < 1.0 || p[4] > 76.0) return -1;
+		gain = (int32_t)(p[4] + 0.5);
+		gain_set = 1;
+	}
+	bands[GNSS_BAND_CUSTOM].lo = lo;
+	bands[GNSS_BAND_CUSTOM].fs = fs;
+	bands[GNSS_BAND_CUSTOM].bw = bw;
+	if(att_set)  { cust_att_mdb = mdb;   cust_att_set = 1; }
+	if(gain_set) { cust_gain_db = gain;  cust_gain_set = 1; }
+	return 0;
+}
+
 int gnss_band_set(int b)
 {
 	const struct band_cfg *c;
@@ -1260,6 +1299,10 @@ int gnss_band_set(int b)
 	r |= ad9361_set_rx_rf_bandwidth(ad9361_phy, c->bw);
 	r |= ad9361_set_tx_rf_bandwidth(ad9361_phy, c->bw);
 	r |= radio_recal();
+	if(b == GNSS_BAND_CUSTOM) {
+		if(cust_att_set)  r |= ad9361_set_tx_attenuation(ad9361_phy, 0, cust_att_mdb);
+		if(cust_gain_set) gnss_rxg_set_gain(cust_gain_db);
+	}
 	band = b;
 	band_applied = 1;
 	radio_manual = 0; manual_warn = 0;
@@ -1489,6 +1532,12 @@ void gnss_band_print(void)
 		console_print("    %d = %s MHz, %s MS/s: %s%s\n", (long)i, f3u((double)bands[i].lo / 1e6),
 			      f2u((double)bands[i].fs / 1e6), (char*)bands[i].name,
 			      (char*)(i == GNSS_BAND_DEFAULT ? " (default)" : ""));
+	console_print("  CUSTOM (5) now: LO %s MHz, %s MS/s, RF bandwidth %s MHz, TX attenuation %s, RX gain %s\n",
+		      f4u((double)bands[GNSS_BAND_CUSTOM].lo / 1e6), f6u((double)bands[GNSS_BAND_CUSTOM].fs / 1e6),
+		      f3u((double)bands[GNSS_BAND_CUSTOM].bw / 1e6),
+		      (char*)(cust_att_set ? fmt((double)cust_att_mdb / 1000.0, 2, 0) : "unchanged"),
+		      (char*)(cust_gain_set ? fmt((double)cust_gain_db, 0, 0) : "unchanged"));
+	console_print("  fill it in:  gnss_band=5 <LO MHz> <rate MS/s> [bandwidth MHz] [txAtt dB] [rxGain dB]\n");
 	console_print("  Your receiver must also have the constellation switched ON (e.g. BeiDou is\n"
 		      "  off by default in many receivers; some track only 3 systems at once).\n");
 }

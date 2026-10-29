@@ -35,7 +35,7 @@
 #define GNSS_AJ_BUF_ADDR   0x11000000U
 #endif
 
-#define GNSS_AJ_VERSION_STR  "4.2.1"
+#define GNSS_AJ_VERSION_STR  "4.3.0"
 
 /* RF profiles (gnss_band=). RX and TX are always set together, so the
  * retransmitted signal comes out on the frequency it came in on and the
@@ -45,7 +45,8 @@
                                   /*   QZSS, SBAS, BeiDou B1I+B1C, GLONASS G1      */
 #define GNSS_BAND_NO_BDS      2   /* 1589.5 MHz, 50 MS/s: GPS, Galileo, GLONASS    */
 #define GNSS_BAND_NO_GLO      3   /* 1568.25 MHz, 50 MS/s: GPS, Galileo, BeiDou    */
-#define GNSS_BAND_COUNT       5
+#define GNSS_BAND_COUNT       6
+#define GNSS_BAND_CUSTOM      5     /* your own values: gnss_band=5 <LO> <rate> [bw] [txAtt] [rxGain] */
 #define GNSS_BAND_DEFAULT     GNSS_BAND_ALL
 
 void gnss_aj_init(void);            /* once, after the radio and DMA are up  */
@@ -72,6 +73,7 @@ void gnss_aj_dma_release(void);
 /* RF profile; returns 0 on success. */
 int  gnss_band_set(int band);
 int  gnss_band_get(void);
+int  gnss_band_custom(double *p, char n);   /* store the CUSTOM profile; 0 = ok, -1 = refused */
 void gnss_band_print(void);
 void gnss_radio_cmd(double *p, char n);   /* radio=: LO, rate, attenuation, gain, bandwidth by hand */
 char *gnss_fmt(double v, int dec);        /* "1575.4200" without printf's %f */

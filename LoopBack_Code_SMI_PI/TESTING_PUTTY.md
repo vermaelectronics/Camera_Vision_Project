@@ -186,7 +186,7 @@ wrong, send the whole log of that session (or the part around the problem).
 
 ---
 
-## The five RF profiles (`gnss_band=N`)
+## The six RF profiles (`gnss_band=N`)
 
 | N | LO | rate | RF bandwidth | carries |
 |---|---|---|---|---|
@@ -195,9 +195,25 @@ wrong, send the whole log of that session (or the part around the problem).
 | 2 | 1589.5 MHz | 50 MS/s | 40 MHz | GPS, Galileo, GLONASS (no BeiDou B1I) |
 | 3 | 1568.25 MHz | 50 MS/s | 40 MHz | GPS, Galileo, BeiDou (no GLONASS) |
 | 4 | 1601.72 MHz | 20.48 MS/s | 16 MHz | GLONASS G1 only |
+| **5 = CUSTOM** | your value | your value | your value | whatever you choose (start-up: 1575.42 MHz, 30.72 MS/s, 18 MHz) |
 
-`gnss_band?` lists them and shows which signals the active one carries. Any other
-combination: `radio=` (next section).
+`gnss_band?` lists them and shows which signals the active one carries.
+
+**Profile 5 (CUSTOM) is yours.** Fill it in and apply it in one line:
+
+```
+gnss_band=5 <LO MHz> <rate MS/s> [bandwidth MHz] [txAtt dB] [rxGain dB]
+gnss_band=5 1575.42 30.72 18 70 40         L1, 30.72 MS/s, 18 MHz wide, TX att 70 dB, RX gain 40 dB
+gnss_band=5 1590 40                        only LO and rate: bandwidth automatic, gain / attenuation unchanged
+gnss_band=5 1590 40 0 70 40                bandwidth 0 = automatic, then attenuation and gain
+gnss_band=5                                applies what was stored last
+```
+
+The values are checked against the AD9361 range first (a bad value changes nothing) and
+kept until power-off. `gnss_band?` shows what is stored. Unlike `radio=`, profile 5 is a
+real profile: the radio guard keeps it (puts it back if a GUI changes the radio) until
+you choose another `gnss_band=N`. Units are recognised by size, as in `radio=`
+(next section). Attenuation and gain are optional; left out, they stay as they are.
 
 ## Every radio value by hand: `radio=` (firmware 4.2.0)
 

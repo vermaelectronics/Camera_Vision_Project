@@ -98,6 +98,7 @@ synthesis, Vivado or the board here. On your PC, check `SMI_PI_HLS: PASS`
 | 2 | 1589.5 MHz | 50 MS/s, 40 MHz | GPS, Galileo, GLONASS (no BeiDou B1I) |
 | 3 | 1568.25 MHz | 50 MS/s, 40 MHz | GPS, Galileo, BeiDou B1I + B1C (no GLONASS) |
 | 4 | 1601.72 MHz | 20.48 MS/s, 16 MHz | GLONASS G1 only (all 14 channels, narrow, lowest load) |
+| **5 (custom)** | **yours** | **yours** | **`gnss_band=5 <LO> <rate> [bw] [txAtt] [rxGain]`** |
 
 Where each signal falls with the default profile (offset from the LO; the
 flat part of the AD9361 filters is about ±0.4 × 61.44 = ±24.6 MHz):

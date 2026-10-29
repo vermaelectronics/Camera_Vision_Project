@@ -146,7 +146,7 @@ command cmd_list[] = {
 	{"gnss_aj_csv=", "CSV line (AJCSV,...) every N ms, 100 to 60000; 0 = off (default).", "gnss_aj_csv=0", set_gnss_aj_csv},
 	{"gnss_aj_mode=", "0 = space-time 31 + 2 image taps (default), 1 = RX2 taps, 2 = one weight (v3), 3 = no image taps (v4.0).", "gnss_aj_mode=0", set_gnss_aj_mode},
 	{"gnss_band?", "RF profile and which GNSS signals it carries (GPS, Galileo, BeiDou, GLONASS).", "", get_gnss_band},
-	{"gnss_band=", "1 = ALL incl. BeiDou + GLONASS 1582.5 MHz/61.44 MS/s (default), 0 = L1 only, 2 = no BeiDou B1I, 3 = no GLONASS (2, 3: 50 MS/s), 4 = GLONASS only 20.48 MS/s.", "gnss_band=1", set_gnss_band},
+	{"gnss_band=", "1 = ALL incl. BeiDou + GLONASS 1582.5 MHz/61.44 MS/s (default), 0 = L1 only, 2 = no BeiDou B1I, 3 = no GLONASS (2, 3: 50 MS/s), 4 = GLONASS only 20.48 MS/s, 5 = CUSTOM: gnss_band=5 <LO MHz> <rate MS/s> [bw MHz] [txAtt dB] [rxGain dB].", "gnss_band=1", set_gnss_band},
 	{"gnss_rx_gain?", "Gets RX1/RX2 gain mode and gain [dB].", "", get_gnss_rx_gain},
 	{"gnss_rx_gain=", "Sets RX1 AND RX2 to the same gain [dB] (also the auto reference).", "gnss_rx_gain=40", set_gnss_rx_gain},
 	{"gnss_rx_agc=", "0 = manual locked, 1 = AD9361 AGC per channel, 2 = matched auto (SMI-PI).", "gnss_rx_agc=2", set_gnss_rx_agc},
@@ -425,8 +425,18 @@ void get_gnss_band(double* param, char param_no)
 void set_gnss_band(double* param, char param_no)
 {
 	if(param_no < 1 || param[0] < 0.0 || param[0] > (double)(GNSS_BAND_COUNT - 1)) {
-		console_print("gnss_band= needs 0, 1, 2, 3 or 4 (gnss_band? lists them)\n");
+		console_print("gnss_band= needs 0, 1, 2, 3, 4 or 5 (gnss_band? lists them)\n");
 		return;
+	}
+	if((int)param[0] == GNSS_BAND_CUSTOM && param_no > 1) {
+		/* gnss_band=5 <LO> <rate> [bw] [txAtt dB] [rxGain dB] */
+		if(gnss_band_custom(&param[1], param_no - 1) != 0) {
+			console_print("gnss_band=5 <LO> <rate> [bandwidth] [txAtt dB] [rxGain dB]: a value is missing or outside the\n"
+				      "     AD9361 range (LO 70-6000 MHz, rate 2.083333-61.44 MS/s, bandwidth 0.2-56 MHz,\n"
+				      "     attenuation 0-89.75 dB, gain 1-76 dB). Nothing was changed. Bandwidth 0 = automatic.\n"
+				      "     Example: gnss_band=5 1575.42 30.72 18 70 40\n");
+			return;
+		}
 	}
 	if(gnss_band_set((int)param[0]) != 0)
 		console_print("gnss_band: the AD9361 refused part of the setting; check gnss_status?\n");
