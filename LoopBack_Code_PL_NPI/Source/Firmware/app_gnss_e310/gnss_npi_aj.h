@@ -38,7 +38,7 @@
 #define GNSS_AJ_BUF_ADDR   0x11000000U
 #endif
 
-#define GNSS_AJ_VERSION_STR  "PL-NPI 2.5.0"
+#define GNSS_AJ_VERSION_STR  "PL-NPI 2.5.1"
 
 /* RF profiles (gnss_band=). RX and TX are always set together, so the
  * retransmitted signal comes out on the frequency it came in on and the
@@ -92,6 +92,7 @@ void gnss_aj_dma_release(void);
 int  gnss_band_set(int band);
 int  gnss_band_get(void);
 void gnss_band_print(void);
+void gnss_aj_radio_manual(void);   /* rx/tx_lo_freq=, rx/tx_samp_freq=, rx/tx_fir_en=: keep what the operator set */
 
 /* The console idle hook: matched RX gain loop + anti-jam engine + radio
  * guard (keeps the gnss_band= profile and the AD9361 FIRs off). */

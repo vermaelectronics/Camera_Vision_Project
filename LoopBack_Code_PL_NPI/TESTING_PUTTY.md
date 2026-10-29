@@ -280,3 +280,32 @@ the JAMMER ON / NULLED / OFF and CW lines.
 
 The PuTTY log files in `C:\AJlogs\` contain everything. If a test goes
 wrong, send the whole log of that session.
+
+---
+
+## Changing the LO and the sample rate by hand (firmware 2.5.1)
+
+`rx_lo_freq=` and `tx_lo_freq=` take **whole MHz**, `rx_samp_freq=` and
+`tx_samp_freq=` take **Hz** (`rx_rf_bandwidth=` / `tx_rf_bandwidth=` too).
+Set **both** RX and TX to the same value:
+
+```
+rx_lo_freq=1575
+tx_lo_freq=1575
+rx_samp_freq=30720000
+tx_samp_freq=30720000
+gnss_status?
+```
+
+Before this version the radio guard put the `gnss_band=` profile back about a
+second later ("radio changed outside gnss_band= ... restored"). Now a value typed
+with `rx_lo_freq=`, `tx_lo_freq=`, `rx_samp_freq=`, `tx_samp_freq=`,
+`rx_fir_en=` or `tx_fir_en=` is **kept**; the console says "radio set by hand:
+kept". The guard stays off until you type `gnss_band=N`, which sets a profile
+again and switches the guard back on. If RX and TX end up different, it warns
+once. A change made by a GUI or another program that does not use these commands
+is still put back. `gnss_band?` shows "set by hand" while the guard is off. The
+noise floors are learned again after each such change.
+AD9361 limits: sample rates below about 2.1 MS/s are refused ("Failed to find
+suitable dividers"); the LO takes only whole MHz here (use a profile in
+`bands[]` for 1570.25 MHz, see the build notes).

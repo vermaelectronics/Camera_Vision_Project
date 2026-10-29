@@ -1171,6 +1171,7 @@ static const struct band_cfg bands[GNSS_BAND_COUNT] = {
 	{1568250000ULL, 50000000U, 40000000U, "GPS, Galileo, BeiDou B1I + B1C at 50 MS/s (no GLONASS)"},
 };
 static int band_applied;
+static int radio_manual, manual_warn;   /* the operator set LO / rate / FIR by hand: the guard keeps its hands off */
 
 /* The signals the profiles must carry: centre and half the main lobe. */
 struct gsig { const char *name; double f, half; };
@@ -1253,6 +1254,7 @@ int gnss_band_set(int b)
 		r |= (ad9361_do_calib_run(ad9361_phy, TX_QUAD_CAL, -1) < 0) ? 1 : 0;
 	band = b;
 	band_applied = 1;
+	radio_manual = 0; manual_warn = 0;
 	/* noise power at the ADC depends on the bandwidth: learn it again */
 	nf0 = -1.0;
 	rho_n_re = rho_n_im = 0.0;
@@ -1260,6 +1262,27 @@ int gnss_band_set(int b)
 	res.sig2_prev = -1.0;
 	aj_reset();
 	return r ? -1 : 0;
+}
+
+/* Called by rx_lo_freq=, tx_lo_freq=, rx_samp_freq=, tx_samp_freq=, rx_fir_en=,
+ * tx_fir_en=: the operator is changing the radio by hand. The radio guard then
+ * stops putting the gnss_band= profile back (until the next gnss_band=), and the
+ * things that depend on the LO / rate / bandwidth are learned again. */
+void gnss_aj_radio_manual(void)
+{
+	XTime now;
+	XTime_GetTime(&now);
+	if(!radio_manual) {
+		stamp(now);
+		console_print("radio set by hand: kept (the radio guard is off until gnss_band=N). RX and TX\n"
+			      "     must have the same LO and rate or the receiver sees no satellite.\n");
+	}
+	radio_manual = 1; manual_warn = 0;
+	nf0 = -1.0;
+	rho_n_re = rho_n_im = 0.0;
+	ratio12 = -1.0; g2 = 1.0; rx2n = 1.0; g2_src = 0;
+	res.sig2_prev = -1.0;
+	aj_reset();
 }
 
 void gnss_band_print(void)
@@ -1274,7 +1297,10 @@ void gnss_band_print(void)
 		ad9361_get_rx_fir_en_dis(ad9361_phy, &rf);
 		ad9361_get_tx_fir_en_dis(ad9361_phy, &tf);
 	}
-	console_print("GNSS_BAND: %d = %s\n", (long)band, (char*)bands[band].name);
+	if(radio_manual)
+		console_print("GNSS_BAND: set by hand (gnss_band=N goes back to a profile; last profile %d = %s)\n", (long)band, (char*)bands[band].name);
+	else
+		console_print("GNSS_BAND: %d = %s\n", (long)band, (char*)bands[band].name);
 	console_print("  LO RX %s / TX %s MHz, %s MS/s, RF bandwidth %s MHz, AD9361 FIR RX %s / TX %s\n",
 		      f3u((double)lo / 1e6), f3u((double)tlo / 1e6), f2u((double)fs / 1e6),
 		      f1u((double)bw / 1e6), (char*)(rf ? "ON (wrong!)" : "off"), (char*)(tf ? "ON (wrong!)" : "off"));
@@ -1298,7 +1324,9 @@ void gnss_band_print(void)
  * vendor commands (rx_lo_freq=, rx_samp_freq=, rx_fir_en=, ...) can change
  * one side only; with RX and TX on different LOs or rates the receiver gets
  * every satellite shifted and sees none, and the FIR removes most of the
- * band. Put the profile back and say so. */
+ * band. Put the profile back and say so -- unless the operator set the radio
+ * by hand with rx_lo_freq= / tx_lo_freq= / rx_samp_freq= / tx_samp_freq= /
+ * rx_fir_en= / tx_fir_en= (radio_manual): then it is left alone. */
 static XTime t_guard;
 static void radio_guard(void)
 {
@@ -1321,6 +1349,18 @@ static void radio_guard(void)
 	ad9361_get_tx_sampling_freq(ad9361_phy, &tfs);
 	d1 = (int64_t)rlo - (int64_t)c->lo;  d2 = (int64_t)tlo - (int64_t)c->lo;
 	d3 = (int64_t)rfs - (int64_t)c->fs;  d4 = (int64_t)tfs - (int64_t)c->fs;
+	if(radio_manual) {
+		/* by hand: never restored; only warn (once) if RX and TX disagree */
+		int mism = (rlo > tlo ? rlo - tlo : tlo - rlo) > 1000ULL || (rfs > tfs ? rfs - tfs : tfs - rfs) > 1000U;
+		if(mism && !manual_warn) {
+			stamp(now);
+			console_print("WARNING radio by hand: RX LO %s / TX LO %s MHz, RX %s / TX %s MS/s differ. The\n"
+				      "     receiver needs the same LO and rate on both sides (set both, or gnss_band=N).\n",
+				      f3u((double)rlo / 1e6), f3u((double)tlo / 1e6), f2u((double)rfs / 1e6), f2u((double)tfs / 1e6));
+		}
+		manual_warn = mism;
+		return;
+	}
 	if(!rf && !tf && d1 > -1000 && d1 < 1000 && d2 > -1000 && d2 < 1000 &&
 	   d3 > -1000 && d3 < 1000 && d4 > -1000 && d4 < 1000)
 		return;

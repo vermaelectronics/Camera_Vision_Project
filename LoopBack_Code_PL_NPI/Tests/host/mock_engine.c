@@ -406,6 +406,32 @@ int main(int argc, char **argv) {
         ok &= check(!(cfg_a & 0x4000u), "CW: equaliser off");
         cw_jn = -99; run(3.0);
         break; }
+    case 16: {  /* radio guard: restores a gnss_band= profile, but keeps what the operator set by hand */
+        printf("scenario 16: rx_lo_freq= / rx_samp_freq= typed by hand are kept; gnss_band= restores a profile\n");
+        uint64_t lo = 0; uint32_t fs = 0, tfs = 0; uint64_t tlo = 0;
+        /* (a) changed behind the firmware's back (a GUI): put back within ~1 s */
+        ad9361_set_rx_lo_freq(ad9361_phy, 1570000000ULL);
+        run(2.5);
+        ad9361_get_rx_lo_freq(ad9361_phy, &lo);
+        ok &= check(lo == 1570250000ULL, "an unannounced change is restored to the profile");
+        /* (b) typed by the operator: kept */
+        gnss_aj_radio_manual();
+        ad9361_set_rx_lo_freq(ad9361_phy, 1575000000ULL); ad9361_set_tx_lo_freq(ad9361_phy, 1575000000ULL);
+        ad9361_set_rx_sampling_freq(ad9361_phy, 30000000U); ad9361_set_tx_sampling_freq(ad9361_phy, 30000000U);
+        run(5.0);
+        ad9361_get_rx_lo_freq(ad9361_phy, &lo); ad9361_get_tx_lo_freq(ad9361_phy, &tlo);
+        ad9361_get_rx_sampling_freq(ad9361_phy, &fs); ad9361_get_tx_sampling_freq(ad9361_phy, &tfs);
+        ok &= check(lo == 1575000000ULL && tlo == 1575000000ULL && fs == 30000000U && tfs == 30000000U, "by-hand LO and rate are kept for 5 s");
+        ok &= check(gnss_aj_status() == 1, "the engine keeps running (status OFF)");
+        /* (c) gnss_band= goes back to a profile and the guard is on again */
+        gnss_band_set(GNSS_BAND_DEFAULT);
+        ad9361_get_rx_lo_freq(ad9361_phy, &lo);
+        ok &= check(lo == 1570250000ULL, "gnss_band= restores the profile");
+        ad9361_set_rx_lo_freq(ad9361_phy, 1570000000ULL);
+        run(2.5);
+        ad9361_get_rx_lo_freq(ad9361_phy, &lo);
+        ok &= check(lo == 1570250000ULL, "guard active again after gnss_band=");
+        break; }
     default: printf("unknown scenario\n"); ok = 0;
     }
     printf(ok ? "MOCK: PASS (scenario %d)\n" : "MOCK: FAIL (scenario %d)\n", scen);

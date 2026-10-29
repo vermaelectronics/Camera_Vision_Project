@@ -675,6 +675,7 @@ void get_tx_lo_freq(double* param, char param_no) // "tx_lo_freq?" command
 *******************************************************************************/
 void set_tx_lo_freq(double* param, char param_no) // "tx_lo_freq=" command
 {
+	if(param_no >= 1) gnss_aj_radio_manual();   /* keep it: the radio guard must not put the profile back */
 	uint64_t lo_freq_hz;
 
 	if(param_no >= 1)
@@ -727,6 +728,7 @@ void get_tx_samp_freq(double* param, char param_no) // "tx_samp_freq?" command
 *******************************************************************************/
 void set_tx_samp_freq(double* param, char param_no) // "tx_samp_freq=" command
 {
+	if(param_no >= 1) gnss_aj_radio_manual();   /* keep it: the radio guard must not put the profile back */
 	uint32_t sampling_freq_hz;
 
 	if(param_no >= 1)
@@ -856,6 +858,7 @@ void get_tx_fir_en(double* param, char param_no) // "tx_fir_en?" command
 *******************************************************************************/
 void set_tx_fir_en(double* param, char param_no) // "tx_fir_en=" command
 {
+	if(param_no >= 1) gnss_aj_radio_manual();   /* keep it: the radio guard must not put the profile back */
 	uint8_t en_dis;
 
 	if(param_no >= 1)
@@ -889,6 +892,7 @@ void get_rx_lo_freq(double* param, char param_no) // "rx_lo_freq?" command
 *******************************************************************************/
 void set_rx_lo_freq(double* param, char param_no) // "rx_lo_freq=" command
 {
+	if(param_no >= 1) gnss_aj_radio_manual();   /* keep it: the radio guard must not put the profile back */
 	uint64_t lo_freq_hz;
 
 	if(param_no >= 1)
@@ -941,6 +945,7 @@ void get_rx_samp_freq(double* param, char param_no) // "rx_samp_freq?" command
 *******************************************************************************/
 void set_rx_samp_freq(double* param, char param_no) // "rx_samp_freq=" command
 {
+	if(param_no >= 1) gnss_aj_radio_manual();   /* keep it: the radio guard must not put the profile back */
 	uint32_t sampling_freq_hz;
 
 	if(param_no >= 1)
@@ -1135,6 +1140,7 @@ void get_rx_fir_en(double* param, char param_no) // "rx_fir_en?" command
 *******************************************************************************/
 void set_rx_fir_en(double* param, char param_no) // "rx_fir_en=" command
 {
+	if(param_no >= 1) gnss_aj_radio_manual();   /* keep it: the radio guard must not put the profile back */
 	uint8_t en_dis;
 
 	if(param_no >= 1)
