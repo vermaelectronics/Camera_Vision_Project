@@ -192,13 +192,11 @@ extern command	  	cmd_list[];
 extern char			cmd_no;
 extern cmd_function	cmd_functions[11];
 unsigned char		cmd				 =  0;
-double				param[5]		 = {0, 0, 0, 0, 0};
+double				param[CONSOLE_PARAM_MAX] = {0};
 char				param_no		 =  0;
 int					cmd_type		 = -1;
 char				invalid_cmd		 =  0;
-char				received_cmd[30] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-										0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-										0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+char				received_cmd[CONSOLE_CMD_MAX] = {0};
 #endif
 
 AD9361_InitParam default_init_param = {

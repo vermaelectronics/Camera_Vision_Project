@@ -1219,6 +1219,25 @@ static void print_band_cover(void)
 
 int gnss_band_get(void) { return band; }
 
+static int radio_recal(void)
+{
+	int r = 0;
+	/* The LO and the rate changed after the start-up calibrations: redo the
+	 * RF DC offset calibration and keep the BB/RF DC tracking on, or the
+	 * receivers' DC offset (LO leakage) stays in the samples. */
+	ad9361_phy->bbdc_track_en = true;
+	ad9361_phy->rfdc_track_en = true;
+	r |= (ad9361_do_calib_run(ad9361_phy, RFDC_CAL, 0) < 0) ? 1 : 0;
+	/* The TX quadrature / LO-leakage calibration is only redone by the
+	 * driver for LO moves > 100 MHz, not for the rate and bandwidth: a stale
+	 * one leaves a TX LO-leakage carrier on the LO frequency, which the GNSS
+	 * receiver sees as a CW jammer next to L1. Its test tone goes out of
+	 * TX1, so only while TX1 is not retransmitting. */
+	if(tx_noted != 1)
+		r |= (ad9361_do_calib_run(ad9361_phy, TX_QUAD_CAL, -1) < 0) ? 1 : 0;
+	return r;
+}
+
 int gnss_band_set(int b)
 {
 	const struct band_cfg *c;
@@ -1239,19 +1258,7 @@ int gnss_band_set(int b)
 	r |= ad9361_set_tx_sampling_freq(ad9361_phy, c->fs);
 	r |= ad9361_set_rx_rf_bandwidth(ad9361_phy, c->bw);
 	r |= ad9361_set_tx_rf_bandwidth(ad9361_phy, c->bw);
-	/* The LO and the rate changed after the start-up calibrations: redo the
-	 * RF DC offset calibration and keep the BB/RF DC tracking on, or the
-	 * receivers' DC offset (LO leakage) stays in the samples. */
-	ad9361_phy->bbdc_track_en = true;
-	ad9361_phy->rfdc_track_en = true;
-	r |= (ad9361_do_calib_run(ad9361_phy, RFDC_CAL, 0) < 0) ? 1 : 0;
-	/* The TX quadrature / LO-leakage calibration is only redone by the
-	 * driver for LO moves > 100 MHz, not for the rate and bandwidth: a stale
-	 * one leaves a TX LO-leakage carrier on the LO frequency, which the GNSS
-	 * receiver sees as a CW jammer next to L1. Its test tone goes out of
-	 * TX1, so only while TX1 is not retransmitting. */
-	if(tx_noted != 1)
-		r |= (ad9361_do_calib_run(ad9361_phy, TX_QUAD_CAL, -1) < 0) ? 1 : 0;
+	r |= radio_recal();
 	band = b;
 	band_applied = 1;
 	radio_manual = 0; manual_warn = 0;
@@ -1283,6 +1290,171 @@ void gnss_aj_radio_manual(void)
 	ratio12 = -1.0; g2 = 1.0; rx2n = 1.0; g2_src = 0;
 	res.sig2_prev = -1.0;
 	aj_reset();
+}
+
+/* ---- radio= / radio?: every value filled in by hand ----------------------------------- */
+char *gnss_fmt(double v, int dec) { return fmt(v, dec, 0); }   /* for command.c */
+#define f4u(v)  fmt((v), 4, 0)
+#define f6u(v)  fmt((v), 6, 0)
+
+/* Units are guessed from the size of the number, so both "1575.42" and
+ * "1575420000" work. Return 0 = ok, -1 = outside what the AD9361 can do. */
+int gnss_radio_lo_hz(double v, uint64_t *hz)         /* < 100000 = MHz, else Hz */
+{
+	if(!(v > 0.0)) return -1;
+	double h = (double)(uint64_t)(((v < 100000.0) ? v * 1e6 : v) + 0.5);
+	if(h < 70.0e6 || h > 6000.0e6) return -1;
+	*hz = (uint64_t)h;
+	return 0;
+}
+
+int gnss_radio_rate_hz(double v, uint32_t *hz)       /* < 1000 = MS/s, else Hz */
+{
+	if(!(v > 0.0)) return -1;
+	double h = (double)(uint32_t)(((v < 1000.0) ? v * 1e6 : v) + 0.5);
+	if(h < 2083333.0 || h > 61440000.0) return -1;
+	*hz = (uint32_t)h;
+	return 0;
+}
+
+int gnss_radio_bw_hz(double v, uint32_t *hz)         /* < 1000 = MHz, else Hz */
+{
+	if(!(v > 0.0)) return -1;
+	double h = (double)(uint32_t)(((v < 1000.0) ? v * 1e6 : v) + 0.5);
+	if(h < 200000.0 || h > 56000000.0) return -1;
+	*hz = (uint32_t)h;
+	return 0;
+}
+
+int gnss_radio_att_mdb(double db, uint32_t *mdb)     /* dB, 0.25 dB steps */
+{
+	if(db < 0.0 || db > 89.75) return -1;
+	*mdb = (uint32_t)(db * 4.0 + 0.5) * 250U;
+	return 0;
+}
+
+void gnss_radio_print(void)
+{
+	uint64_t rlo = 0, tlo = 0;
+	uint32_t rfs = 0, tfs = 0, rbw = 0, tbw = 0, att = 0;
+	int32_t g1 = 0, g2 = 0;
+	uint8_t m1 = 0, m2 = 0, rf = 0, tf = 0;
+	if(!ad9361_phy) return;
+	ad9361_get_rx_lo_freq(ad9361_phy, &rlo);
+	ad9361_get_tx_lo_freq(ad9361_phy, &tlo);
+	ad9361_get_rx_sampling_freq(ad9361_phy, &rfs);
+	ad9361_get_tx_sampling_freq(ad9361_phy, &tfs);
+	ad9361_get_rx_rf_bandwidth(ad9361_phy, &rbw);
+	ad9361_get_tx_rf_bandwidth(ad9361_phy, &tbw);
+	ad9361_get_tx_attenuation(ad9361_phy, 0, &att);
+	ad9361_get_rx_rf_gain(ad9361_phy, 0, &g1);
+	ad9361_get_rx_rf_gain(ad9361_phy, 1, &g2);
+	ad9361_get_rx_gain_control_mode(ad9361_phy, 0, &m1);
+	ad9361_get_rx_gain_control_mode(ad9361_phy, 1, &m2);
+	ad9361_get_rx_fir_en_dis(ad9361_phy, &rf);
+	ad9361_get_tx_fir_en_dis(ad9361_phy, &tf);
+	if(radio_manual)
+		console_print("RADIO: set by hand (gnss_band=N goes back to a profile)\n");
+	else
+		console_print("RADIO: profile gnss_band=%d (%s)\n", (long)band, (char*)bands[band].name);
+	console_print("                 RX                TX\n");
+	console_print("  LO [MHz]       %s   %s\n", f4u((double)rlo / 1e6), f4u((double)tlo / 1e6));
+	console_print("  rate [MS/s]    %s   %s\n", f6u((double)rfs / 1e6), f6u((double)tfs / 1e6));
+	console_print("  RF bw [MHz]    %s   %s\n", f3u((double)rbw / 1e6), f3u((double)tbw / 1e6));
+	console_print("  gain / atten   RX1 %d dB (%s), RX2 %d dB (%s)   TX1 attenuation %s dB\n",
+		      (long)g1, (char*)(m1 == RF_GAIN_MGC ? "manual" : "AGC"),
+		      (long)g2, (char*)(m2 == RF_GAIN_MGC ? "manual" : "AGC"),
+		      f2u((double)att / 1000.0));
+	console_print("  AD9361 FIR     RX %s / TX %s\n", (char*)(rf ? "ON (wrong for GNSS!)" : "off"),
+		      (char*)(tf ? "ON (wrong for GNSS!)" : "off"));
+	console_print("  received       ");
+	print_band_cover();
+	console_print("\n");
+	if((rlo > tlo ? rlo - tlo : tlo - rlo) > 1000ULL || (rfs > tfs ? rfs - tfs : tfs - rfs) > 1000U)
+		console_print("  WARNING: RX and TX differ in LO or rate: the receiver sees every satellite shifted.\n");
+}
+
+static void radio_usage(void)
+{
+	console_print("radio=  fills in every value by hand. Units are recognised by size:\n"
+		      "  LO < 100000 = MHz, else Hz;  rate and bandwidth < 1000 = MHz / MS/s, else Hz;\n"
+		      "  TX attenuation and RX gain in dB (attenuation 0 to 89.75, 0.25 steps; gain 1 to 76).\n"
+		      "  radio=<rxLO> <txLO> <rxRate> <txRate> <txAtt dB> <rxGain dB> [rfBandwidth]\n"
+		      "  radio=<LO> <rate> <txAtt dB> <rxGain dB> [rfBandwidth]        (same LO and rate on RX and TX)\n"
+		      "  example:  radio=1575.42 1575.42 30.72 30.72 70 40 18\n"
+		      "  example:  radio=1582.5 61.44 70 40            (bandwidth left out = 91 percent of the rate, max 56 MHz)\n"
+		      "  RX and TX share ONE sample rate in the AD9361 (FDD): both rates must be equal.\n"
+		      "  radio?  shows what is set now.  gnss_band=N goes back to a profile.\n");
+}
+
+int gnss_cmd_rx_lo_hz(uint64_t hz);    /* command.c: LO + the board's RF switch */
+int gnss_cmd_tx_lo_hz(uint64_t hz);
+
+void gnss_radio_cmd(double *p, char n)
+{
+	uint64_t rlo, tlo;
+	uint32_t rfs, tfs, rbw, tbw, mdb;
+	double gain, bwv = -1.0;
+	int r = 0;
+
+	if(!ad9361_phy) { console_print("radio=: the AD9361 is not initialised\n"); return; }
+	if(n == 4 || n == 5) {
+		if(n == 5) bwv = p[4];
+		if(gnss_radio_lo_hz(p[0], &rlo) || gnss_radio_rate_hz(p[1], &rfs)) goto range;
+		tlo = rlo; tfs = rfs;
+		if(gnss_radio_att_mdb(p[2], &mdb)) goto range;
+		gain = p[3];
+	} else if(n == 6 || n == 7) {
+		if(n == 7) bwv = p[6];
+		if(gnss_radio_lo_hz(p[0], &rlo) || gnss_radio_lo_hz(p[1], &tlo) ||
+		   gnss_radio_rate_hz(p[2], &rfs) || gnss_radio_rate_hz(p[3], &tfs)) goto range;
+		if(gnss_radio_att_mdb(p[4], &mdb)) goto range;
+		gain = p[5];
+	} else {
+		radio_usage();
+		return;
+	}
+	if(gain < 1.0 || gain > 76.0) goto range;
+	if(rfs != tfs) {
+		console_print("radio=: RX rate %d Hz and TX rate %d Hz differ. The AD9361 has ONE sample rate for\n"
+			      "     RX and TX; give the same value twice. Nothing was changed.\n", (long)rfs, (long)tfs);
+		return;
+	}
+	if(bwv < 0.0) {
+		double a = 0.91 * (double)rfs;
+		rbw = tbw = (uint32_t)(a > 56.0e6 ? 56.0e6 : a);
+	} else if(gnss_radio_bw_hz(bwv, &rbw)) {
+		goto range;
+	} else {
+		tbw = rbw;
+	}
+	if(mdb < 30000U)
+		console_print("radio=: TX1 attenuation %s dB is LOUD (about %d dBm out of TX1 when retransmitting).\n"
+			      "     Only into a cable and attenuator, never to an antenna.\n",
+			      f2u((double)mdb / 1000.0), (long)(7.0 - (double)mdb / 1000.0));
+
+	gnss_aj_dma_release();
+	/* the same order as gnss_band_set(): FIRs off, LO, rate, bandwidth */
+	r |= ad9361_set_rx_fir_en_dis(ad9361_phy, 0);
+	r |= ad9361_set_tx_fir_en_dis(ad9361_phy, 0);
+	r |= gnss_cmd_rx_lo_hz(rlo);
+	r |= gnss_cmd_tx_lo_hz(tlo);
+	r |= ad9361_set_rx_sampling_freq(ad9361_phy, rfs);
+	r |= ad9361_set_tx_sampling_freq(ad9361_phy, tfs);
+	r |= ad9361_set_rx_rf_bandwidth(ad9361_phy, rbw);
+	r |= ad9361_set_tx_rf_bandwidth(ad9361_phy, tbw);
+	r |= ad9361_set_tx_attenuation(ad9361_phy, 0, mdb);
+	gnss_rxg_set_gain((int32_t)(gain + 0.5));
+	r |= radio_recal();
+	gnss_aj_radio_manual();            /* the guard keeps its hands off; floors are learned again */
+	if(r)
+		console_print("radio=: the AD9361 refused part of it (see the values below; rate range, LO or bandwidth)\n");
+	gnss_radio_print();
+	return;
+range:
+	console_print("radio=: a value is outside the AD9361 range (LO 70 to 6000 MHz, rate 2.083333 to 61.44 MS/s,\n"
+		      "     bandwidth 0.2 to 56 MHz, attenuation 0 to 89.75 dB, gain 1 to 76 dB). Nothing was changed.\n");
+	radio_usage();
 }
 
 void gnss_band_print(void)

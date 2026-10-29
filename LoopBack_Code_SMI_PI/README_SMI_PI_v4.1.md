@@ -1,5 +1,14 @@
 # SMI-PI v4.1: what I changed and why
 
+> **Every radio value by hand (firmware 4.2.0).** `radio=` sets LO, sample rate,
+> RF bandwidth, TX attenuation and RX gain in one line, e.g.
+> `radio=1575.42 1575.42 30.72 30.72 70 40 18`; `radio?` shows them. LO and rate
+> accept decimals and either MHz / MS/s or Hz; values outside the AD9361 range are
+> refused without changing anything. `rx_lo_freq=`, `tx_lo_freq=`, `rx_samp_freq=`,
+> `tx_samp_freq=`, `rx_rf_bandwidth=`, `tx_rf_bandwidth=` take the same units, and
+> `tx_att_db=70.5` sets the attenuation in dB. The console line buffer is 128
+> characters (it was 30). See `TESTING_PUTTY.md`. Not run on hardware.
+
 Version 4.1.5 of `LoopBack_Code_SMI_PI`. It builds on v4.0 (the space-time
 filter) and makes these changes to the FPGA, the firmware and the scripts.
 

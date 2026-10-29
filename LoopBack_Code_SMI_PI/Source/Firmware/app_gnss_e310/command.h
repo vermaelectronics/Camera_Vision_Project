@@ -109,6 +109,9 @@ void get_rx_lo_freq(double* param, char param_no);
 
 /* Sets the RX LO frequency. */
 void set_rx_lo_freq(double* param, char param_no);
+void get_radio(double* param, char param_no);
+void set_radio(double* param, char param_no);
+void set_tx_att_db(double* param, char param_no);
 
 /* Gets current RX sampling frequency. */
 void get_rx_samp_freq(double* param, char param_no);

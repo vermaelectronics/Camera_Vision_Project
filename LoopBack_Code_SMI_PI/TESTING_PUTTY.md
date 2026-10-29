@@ -186,29 +186,65 @@ wrong, send the whole log of that session (or the part around the problem).
 
 ---
 
-## Changing the LO and the sample rate by hand (firmware 4.1.6)
+## Every radio value by hand: `radio=` (firmware 4.2.0)
 
-`rx_lo_freq=` and `tx_lo_freq=` take **whole MHz**, `rx_samp_freq=` and
-`tx_samp_freq=` take **Hz** (`rx_rf_bandwidth=` / `tx_rf_bandwidth=` too).
-Set **both** RX and TX to the same value:
+One command sets **LO, sample rate, RF bandwidth, TX attenuation and RX gain**.
+Type it on one line, values separated by blanks (commas also work):
 
 ```
-rx_lo_freq=1575
-tx_lo_freq=1575
-rx_samp_freq=30720000
-tx_samp_freq=30720000
-gnss_status?
+radio=<rxLO> <txLO> <rxRate> <txRate> <txAtt dB> <rxGain dB> [rfBandwidth]
+radio=<LO> <rate> <txAtt dB> <rxGain dB> [rfBandwidth]          same LO and rate on RX and TX
+radio?                                                         show what is set now
 ```
 
-Before this version the radio guard put the `gnss_band=` profile back about a
-second later ("radio changed outside gnss_band= ... restored"). Now a value typed
-with `rx_lo_freq=`, `tx_lo_freq=`, `rx_samp_freq=`, `tx_samp_freq=`,
-`rx_fir_en=` or `tx_fir_en=` is **kept**; the console says "radio set by hand:
-kept". The guard stays off until you type `gnss_band=N`, which sets a profile
-again and switches the guard back on. If RX and TX end up different, it warns
-once. A change made by a GUI or another program that does not use these commands
-is still put back. `gnss_band?` shows "set by hand" while the guard is off. The
-noise floors are learned again after each such change.
-AD9361 limits: sample rates below about 2.1 MS/s are refused ("Failed to find
-suitable dividers"); the LO takes only whole MHz here (use a profile in
-`bands[]` for 1570.25 MHz, see the build notes).
+Examples:
+
+```
+radio=1575.42 1575.42 30.72 30.72 70 40 18       L1 only, 30.72 MS/s, 18 MHz wide, TX att 70 dB, RX gain 40 dB
+radio=1582.5 61.44 70 40                         whole GNSS block, bandwidth chosen automatically
+radio=1575420000 1575420000 30720000 30720000 70.25 35 18000000      the same thing in Hz
+```
+
+| value | unit | recognised by size | range |
+|---|---|---|---|
+| LO | MHz with any decimals (1575.42, 1568.256) or Hz | below 100000 = MHz | 70 to 6000 MHz |
+| sample rate | MS/s with any decimals (30.72) or Hz | below 1000 = MS/s | 2.083333 to 61.44 MS/s |
+| RF bandwidth | MHz or Hz | below 1000 = MHz | 0.2 to 56 MHz (left out: 91 percent of the rate, at most 56 MHz) |
+| TX attenuation | dB, 0.25 steps | | 0 to 89.75 dB (smaller = louder) |
+| RX gain | dB | | 1 to 76 dB (both channels, manual, also the auto reference) |
+
+* A value outside the range is refused with a message and **nothing is changed**.
+* RX and TX share **one** sample rate inside the AD9361 (FDD): give the same value
+  twice; different values are refused.
+* TX attenuation below 30 dB prints a warning (loud: cable and attenuator only).
+* The AD9361 FIRs are switched off (a band-pass FIR would remove most of the band),
+  the DC / quadrature calibrations are redone, and the noise floors are learned
+  again. The radio guard then stays off until `gnss_band=N`.
+* After the change the console prints the table of `radio?`, including which
+  GNSS signals the new LO / rate / bandwidth still carries.
+
+Single values, also with decimals / units (each keeps the radio guard off):
+
+```
+rx_lo_freq=1575.42      tx_lo_freq=1575.42       MHz with decimals (or Hz)
+rx_samp_freq=30.72      tx_samp_freq=30.72       MS/s (or Hz)
+rx_rf_bandwidth=18      tx_rf_bandwidth=18       MHz (or Hz)
+tx_att_db=70.5          TX1 attenuation in dB    (tx1_attenuation= in milli-dB still works)
+gnss_rx_gain=40         both RX gains in dB
+```
+
+Long lines now work (the old console buffer held 30 characters; it is 128 now)
+and up to 10 values per command.
+
+## Changing the LO and the sample rate by hand (since firmware 4.1.6)
+
+A value typed with `rx_lo_freq=`, `tx_lo_freq=`, `rx_samp_freq=`, `tx_samp_freq=`,
+`rx_fir_en=` or `tx_fir_en=` (or `radio=`) is **kept**; the console says "radio set
+by hand: kept". Before 4.1.6 the radio guard put the `gnss_band=` profile back
+about a second later ("radio changed outside gnss_band= ... restored"). The guard
+stays off until you type `gnss_band=N`, which sets a profile again and switches the
+guard back on. If RX and TX end up different, it warns once. A change made by a GUI
+or another program that does not use these commands is still put back.
+`gnss_band?` shows "set by hand" while the guard is off.
+AD9361 limits: sample rates below about 2.08 MS/s are refused ("Failed to find
+suitable dividers"); the vendor LO command took whole MHz only before 4.2.0.

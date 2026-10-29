@@ -768,6 +768,11 @@ static void info_quickstart(void)
     console_print("   gnss_tx=1 / gnss_tx=0        live retransmit / ABORT\n");
     console_print("   gnss_ddr_tx=1 / =0          DDR round trip / stop\n");
     console_print("   tx1_attenuation=N           mdB. BIGGER = QUIETER.\n");
+    console_print("   radio?                      LO, rate, bandwidth, RX gain, TX attenuation now\n");
+    console_print("   radio=<rxLO> <txLO> <rxRate> <txRate> <txAtt dB> <rxGain dB> [bw]\n");
+    console_print("                               every value by hand, e.g. radio=1575.42 1575.42 30.72 30.72 70 40 18\n");
+    console_print("   radio=<LO> <rate> <txAtt> <rxGain> [bw]   same LO and rate on RX and TX\n");
+    console_print("   tx_att_db=70.5              TX1 attenuation in dB (0.25 steps)\n");
     console_print("   gnss_tx? / gnss_status?     state, read back from hardware\n");
     console_print("   gnss_smi=1 / gnss_smi=0     anti-jam on (default) / off\n");
     console_print("   gnss_aj?                    bypass/filter, jammer, J/N, suppression\n");

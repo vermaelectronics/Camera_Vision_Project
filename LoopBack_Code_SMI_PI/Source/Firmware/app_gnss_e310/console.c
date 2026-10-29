@@ -332,7 +332,12 @@ void console_get_command(char* command)
 	while((received_char != '\n') && (received_char != '\r'))
 	{
 		uart_read_char(&received_char);
-		command[char_number++] = received_char;
+		/* never write past the buffer: a too long line is cut, but its CR/LF
+		 * still ends it (the parser walks until it finds one) */
+		if(char_number < CONSOLE_CMD_MAX - 1)
+			command[char_number++] = received_char;
+		else if((received_char == '\n') || (received_char == '\r'))
+			command[CONSOLE_CMD_MAX - 1] = received_char;
 		console_mid_line = (received_char != '\n') && (received_char != '\r');
 	}
 	console_mid_line = 0;
@@ -359,7 +364,7 @@ int console_check_commands(char*	   received_cmd,
 {
 	int			  cmd_type		   = 1;
 	unsigned char char_index	   = 0;
-	char		  param_string[10] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+	char		  param_string[16] = {0};
 	unsigned char param_index	   = 0;
 	unsigned char index			   = 0;
 	const char	  digits[17]	   = "0123456789ABCDEF";
@@ -417,7 +422,12 @@ int console_check_commands(char*	   received_cmd,
 			while((received_cmd[char_index] != '\n') &&
 				  (received_cmd[char_index] != '\r'))
 			{
-				if((received_cmd[char_index] == 0x20))
+				if(((received_cmd[char_index] == 0x20) || (received_cmd[char_index] == ',')) &&
+				   (param_index == 0))
+				{
+					char_index++;          /* extra blank or comma: no empty value */
+				}
+				else if((received_cmd[char_index] == 0x20) || (received_cmd[char_index] == ','))
 				{
 					*param = 0;
 					if((param_string[0] == '0') && (param_string[1] == 'x'))
@@ -446,9 +456,12 @@ int console_check_commands(char*	   received_cmd,
 							*param = atof((const char*)param_string);
 						}
 					}
-					param++;
-					*param_no += 1;
-					for(param_index = 0; param_index < 10; param_index++)
+					if(*param_no < CONSOLE_PARAM_MAX - 1)   /* extra values are dropped */
+					{
+						param++;
+						*param_no += 1;
+					}
+					for(param_index = 0; param_index < 16; param_index++)
 					{
 						param_string[param_index] = 0;
 					}
@@ -457,9 +470,9 @@ int console_check_commands(char*	   received_cmd,
 				}
 				else
 				{
-					param_string[param_index] = received_cmd[char_index];
+					if(param_index < 15)
+						param_string[param_index++] = received_cmd[char_index];
 					char_index++;
-					param_index++;
 				}
 			}
 			if(param_index)

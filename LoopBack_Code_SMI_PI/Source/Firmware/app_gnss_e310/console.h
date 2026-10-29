@@ -62,6 +62,10 @@ int console_typing(void);
 void console_print(char* str, ...);
 
 /* Reads one command from console. */
+/* Longest command line (incl. the terminating CR/LF) and the most parameters
+ * one command can take. radio= needs 7 values and about 70 characters. */
+#define CONSOLE_CMD_MAX    128
+#define CONSOLE_PARAM_MAX  10
 void console_get_command(char* command);
 
 /* Compares two commands and returns the type of the command. */

@@ -82,6 +82,7 @@ command cmd_list[] = {
 	{"tx_rf_bandwidth=", "Sets the TX RF bandwidth [Hz].", "", set_tx_rf_bandwidth},
 	{"tx1_attenuation?", "Gets current TX1 attenuation [mdB].", "", get_tx1_attenuation},
 	{"tx1_attenuation=", "Sets the TX1 attenuation [mdB].", "", set_tx1_attenuation},
+	{"tx_att_db=", "TX1 attenuation in dB, 0 to 89.75 in 0.25 steps (smaller = louder).", "tx_att_db=70.5", set_tx_att_db},
 	{"tx2_attenuation?", "Gets current TX2 attenuation [mdB].", "", get_tx2_attenuation},
 	{"tx2_attenuation=", "Sets the TX2 attenuation [mdB].", "", set_tx2_attenuation},
 	{"tx_fir_en?", "Gets current TX FIR state.", "", get_tx_fir_en},
@@ -129,6 +130,8 @@ command cmd_list[] = {
 	/* GNSS-CRPA MOD-6: live control of the RX->PL->TX retransmit path, so a
 	 * conducted test can be started, stepped and ABORTED from the console
 	 * without reprogramming the board. See Docs/Architecture/MODIFICATIONS.md. */
+	{"radio?", "Shows RX/TX LO, sample rate, bandwidth, RX gain, TX attenuation.", "", get_radio},
+	{"radio=", "Sets everything by hand: radio=<rxLO> <txLO> <rxRate> <txRate> <txAtt dB> <rxGain dB> [bw]  or  radio=<LO> <rate> <txAtt> <rxGain> [bw].", "radio=1575.42 1575.42 30.72 30.72 70 40 18", set_radio},
 	{"gnss_tx?", "Gets the GNSS L1 retransmit state.", "", get_gnss_tx},
 	{"gnss_tx=", "1 = retransmit RX1 on TX1, 0 = silence TX1.", "gnss_tx=0", set_gnss_tx},
 	{"gnss_status?", "Prints AD9361 and gnss_passthrough runtime state.", "", get_gnss_status},
@@ -664,48 +667,78 @@ void get_tx_lo_freq(double* param, char param_no) // "tx_lo_freq?" command
 		ad9361_set_tx_rf_port_output(ad9361_phy, TXA);
 #endif
 
-	lo_freq_hz /= 1000000;
-	console_print("tx_lo_freq=%d\n", (uint32_t)lo_freq_hz);
+	console_print("tx_lo_freq=%s\n", gnss_fmt((double)lo_freq_hz / 1e6, 4));
+}
+
+/* LO helpers shared with radio= (gnss_aj.c): the E310's RF switch follows the LO. */
+int gnss_cmd_tx_lo_hz(uint64_t lo_freq_hz)
+{
+#ifdef ANTSDR_E310
+	/* set tx rf switch */
+	if(lo_freq_hz <= 3000000000ULL){
+		no_os_gpio_set_value(ad9361_phy->gpio_desc_tx1_ctrl_h   ,0);
+		no_os_gpio_set_value(ad9361_phy->gpio_desc_tx1_ctrl_l   ,1);
+		no_os_gpio_set_value(ad9361_phy->gpio_desc_tx2_ctrl_h   ,0);
+		no_os_gpio_set_value(ad9361_phy->gpio_desc_tx2_ctrl_l   ,1);
+		ad9361_set_tx_rf_port_output(ad9361_phy, TXB);
+	}
+	else {
+		no_os_gpio_set_value(ad9361_phy->gpio_desc_tx1_ctrl_h   ,1);
+		no_os_gpio_set_value(ad9361_phy->gpio_desc_tx1_ctrl_l   ,0);
+		no_os_gpio_set_value(ad9361_phy->gpio_desc_tx2_ctrl_h   ,1);
+		no_os_gpio_set_value(ad9361_phy->gpio_desc_tx2_ctrl_l   ,0);
+		ad9361_set_tx_rf_port_output(ad9361_phy, TXA);
+	}
+#else
+	ad9361_set_tx_rf_port_output(ad9361_phy, TXA);
+#endif
+	return ad9361_set_tx_lo_freq(ad9361_phy, lo_freq_hz) ? 1 : 0;
+}
+
+int gnss_cmd_rx_lo_hz(uint64_t lo_freq_hz)
+{
+#ifdef ANTSDR_E310
+	/* set rx rf swicth */
+	if(lo_freq_hz <= 3000000000ULL){
+		no_os_gpio_set_value(ad9361_phy->gpio_desc_rx1_ctrl_h   ,0);
+		no_os_gpio_set_value(ad9361_phy->gpio_desc_rx1_ctrl_l   ,1);
+		no_os_gpio_set_value(ad9361_phy->gpio_desc_rx2_ctrl_h   ,0);
+		no_os_gpio_set_value(ad9361_phy->gpio_desc_rx2_ctrl_l   ,1);
+		ad9361_set_rx_rf_port_input(ad9361_phy, B_BALANCED);
+	}
+	else {
+		no_os_gpio_set_value(ad9361_phy->gpio_desc_rx1_ctrl_h   ,1);
+		no_os_gpio_set_value(ad9361_phy->gpio_desc_rx1_ctrl_l   ,0);
+		no_os_gpio_set_value(ad9361_phy->gpio_desc_rx2_ctrl_h   ,1);
+		no_os_gpio_set_value(ad9361_phy->gpio_desc_rx2_ctrl_l   ,0);
+		ad9361_set_rx_rf_port_input(ad9361_phy, A_BALANCED);
+	}
+#else
+	ad9361_set_rx_rf_port_input(ad9361_phy, A_BALANCED);
+#endif
+	return ad9361_set_rx_lo_freq(ad9361_phy, lo_freq_hz) ? 1 : 0;
+}
+
+static void range_msg(const char *what, const char *range)
+{
+	console_print("%s is outside the AD9361 range (%s); nothing was changed.\n", (char*)what, (char*)range);
 }
 
 /**************************************************************************//***
- * @brief Sets the TX LO frequency [MHz].
- *
- * @return None.
+ * @brief Sets the TX LO frequency. 1575.42 = MHz (any decimals), or Hz if >= 100000.
 *******************************************************************************/
 void set_tx_lo_freq(double* param, char param_no) // "tx_lo_freq=" command
 {
-	if(param_no >= 1) gnss_aj_radio_manual();   /* keep it: the radio guard must not put the profile back */
 	uint64_t lo_freq_hz;
 
-	if(param_no >= 1)
-	{
-		lo_freq_hz = param[0];
-		lo_freq_hz *= 1000000;
-#ifdef ANTSDR_E310
-		/* set tx rf switch */
-		if(lo_freq_hz <= 3000000000){
-			no_os_gpio_set_value(ad9361_phy->gpio_desc_tx1_ctrl_h   ,0);
-			no_os_gpio_set_value(ad9361_phy->gpio_desc_tx1_ctrl_l   ,1);
-			no_os_gpio_set_value(ad9361_phy->gpio_desc_tx2_ctrl_h   ,0);
-			no_os_gpio_set_value(ad9361_phy->gpio_desc_tx2_ctrl_l   ,1);
-			ad9361_set_tx_rf_port_output(ad9361_phy, TXB);
-		}
-		else {
-			no_os_gpio_set_value(ad9361_phy->gpio_desc_tx1_ctrl_h   ,1);
-			no_os_gpio_set_value(ad9361_phy->gpio_desc_tx1_ctrl_l   ,0);
-			no_os_gpio_set_value(ad9361_phy->gpio_desc_tx2_ctrl_h   ,1);
-			no_os_gpio_set_value(ad9361_phy->gpio_desc_tx2_ctrl_l   ,0);
-			ad9361_set_tx_rf_port_output(ad9361_phy, TXA);
-		}
-#else
-		ad9361_set_tx_rf_port_output(ad9361_phy, TXA);
-#endif
-
-		ad9361_set_tx_lo_freq(ad9361_phy, lo_freq_hz);
-		lo_freq_hz /= 1000000;
-		console_print("tx_lo_freq=%d\n", (uint32_t)lo_freq_hz);
+	if(param_no < 1) { show_invalid_param_message(1); return; }
+	if(gnss_radio_lo_hz(param[0], &lo_freq_hz)) {
+		range_msg("tx_lo_freq", "70 to 6000 MHz");
+		return;
 	}
+	gnss_aj_radio_manual();   /* keep it: the radio guard must not put the profile back */
+	gnss_cmd_tx_lo_hz(lo_freq_hz);
+	get_tx_lo_freq(param, 0);
 }
 
 /**************************************************************************//***
@@ -722,25 +755,21 @@ void get_tx_samp_freq(double* param, char param_no) // "tx_samp_freq?" command
 }
 
 /**************************************************************************//***
- * @brief Sets the sampling frequency [Hz].
- *
- * @return None.
+ * @brief Sets the sampling frequency: 30.72 = MS/s (any decimals), or Hz if >= 1000.
 *******************************************************************************/
 void set_tx_samp_freq(double* param, char param_no) // "tx_samp_freq=" command
 {
-	if(param_no >= 1) gnss_aj_radio_manual();   /* keep it: the radio guard must not put the profile back */
 	uint32_t sampling_freq_hz;
 
-	if(param_no >= 1)
-	{
-		sampling_freq_hz = (uint32_t)param[0];
-		ad9361_set_tx_sampling_freq(ad9361_phy, sampling_freq_hz);
-		ad9361_get_tx_sampling_freq(ad9361_phy, &sampling_freq_hz);
-//		dds_update(ad9361_phy);
-		console_print("tx_samp_freq=%d\n", sampling_freq_hz);
+	if(param_no < 1) { show_invalid_param_message(1); return; }
+	if(gnss_radio_rate_hz(param[0], &sampling_freq_hz)) {
+		range_msg("tx_samp_freq", "2.083333 to 61.44 MS/s");
+		return;
 	}
-	else
-		show_invalid_param_message(1);
+	gnss_aj_radio_manual();   /* keep it: the radio guard must not put the profile back */
+	ad9361_set_tx_sampling_freq(ad9361_phy, sampling_freq_hz);
+	ad9361_get_tx_sampling_freq(ad9361_phy, &sampling_freq_hz);
+	console_print("tx_samp_freq=%d\n", sampling_freq_hz);
 }
 
 /**************************************************************************//***
@@ -765,13 +794,15 @@ void set_tx_rf_bandwidth(double* param, char param_no) // "tx_rf_bandwidth=" com
 {
 	uint32_t bandwidth_hz;
 
-	if(param_no >= 1)
-	{
-		bandwidth_hz = param[0];
-		ad9361_set_tx_rf_bandwidth(ad9361_phy, bandwidth_hz);
+	if(param_no < 1) { show_invalid_param_message(1); return; }
+	if(gnss_radio_bw_hz(param[0], &bandwidth_hz)) {
+		range_msg("tx_rf_bandwidth", "0.2 to 56 MHz");
+		return;
 	}
-	else
-		show_invalid_param_message(1);
+	gnss_aj_radio_manual();
+	ad9361_set_tx_rf_bandwidth(ad9361_phy, bandwidth_hz);
+	ad9361_get_tx_rf_bandwidth(ad9361_phy, &bandwidth_hz);
+	console_print("tx_rf_bandwidth=%d\n", bandwidth_hz);
 }
 
 /**************************************************************************//***
@@ -792,6 +823,31 @@ void get_tx1_attenuation(double* param, char param_no) // "tx1_attenuation?" com
  *
  * @return None.
 *******************************************************************************/
+void get_radio(double* param, char param_no) // "radio?" command
+{
+	gnss_radio_print();
+}
+
+void set_radio(double* param, char param_no) // "radio=" command
+{
+	gnss_radio_cmd(param, param_no);
+}
+
+/* "tx_att_db=70.5": dB with decimals, instead of tx1_attenuation= in milli-dB */
+void set_tx_att_db(double* param, char param_no)
+{
+	uint32_t mdb;
+
+	if(param_no < 1) { show_invalid_param_message(1); return; }
+	if(gnss_radio_att_mdb(param[0], &mdb)) {
+		range_msg("tx_att_db", "0 to 89.75 dB");
+		return;
+	}
+	ad9361_set_tx_attenuation(ad9361_phy, 0, mdb);
+	ad9361_get_tx_attenuation(ad9361_phy, 0, &mdb);
+	console_print("tx1_attenuation=%d mdB (%s dB)\n", mdb, gnss_fmt((double)mdb / 1000.0, 2));
+}
+
 void set_tx1_attenuation(double* param, char param_no) // "tx1_attenuation=" command
 {
 	uint32_t attenuation_mdb;
@@ -881,48 +937,24 @@ void get_rx_lo_freq(double* param, char param_no) // "rx_lo_freq?" command
 	uint64_t lo_freq_hz;
 
 	ad9361_get_rx_lo_freq(ad9361_phy, &lo_freq_hz);
-	lo_freq_hz /= 1000000;
-	console_print("rx_lo_freq=%d\n", (uint32_t)lo_freq_hz);
+	console_print("rx_lo_freq=%s\n", gnss_fmt((double)lo_freq_hz / 1e6, 4));
 }
 
 /**************************************************************************//***
- * @brief Sets the RX LO frequency [MHz].
- *
- * @return None.
+ * @brief Sets the RX LO frequency. 1575.42 = MHz (any decimals), or Hz if >= 100000.
 *******************************************************************************/
 void set_rx_lo_freq(double* param, char param_no) // "rx_lo_freq=" command
 {
-	if(param_no >= 1) gnss_aj_radio_manual();   /* keep it: the radio guard must not put the profile back */
 	uint64_t lo_freq_hz;
 
-	if(param_no >= 1)
-	{
-		lo_freq_hz = param[0];
-		lo_freq_hz *= 1000000;
-#ifdef ANTSDR_E310
-		/* set rx rf swicth */
-		if(lo_freq_hz <= 3000000000){
-			no_os_gpio_set_value(ad9361_phy->gpio_desc_rx1_ctrl_h   ,0);
-			no_os_gpio_set_value(ad9361_phy->gpio_desc_rx1_ctrl_l   ,1);
-			no_os_gpio_set_value(ad9361_phy->gpio_desc_rx2_ctrl_h   ,0);
-			no_os_gpio_set_value(ad9361_phy->gpio_desc_rx2_ctrl_l   ,1);
-			ad9361_set_rx_rf_port_input(ad9361_phy, B_BALANCED);
-		}
-		else {
-			no_os_gpio_set_value(ad9361_phy->gpio_desc_rx1_ctrl_h   ,1);
-			no_os_gpio_set_value(ad9361_phy->gpio_desc_rx1_ctrl_l   ,0);
-			no_os_gpio_set_value(ad9361_phy->gpio_desc_rx2_ctrl_h   ,1);
-			no_os_gpio_set_value(ad9361_phy->gpio_desc_rx2_ctrl_l   ,0);
-			ad9361_set_rx_rf_port_input(ad9361_phy, A_BALANCED);
-		}
-
-#else
-		ad9361_set_rx_rf_port_input(ad9361_phy, A_BALANCED);
-#endif
-		ad9361_set_rx_lo_freq(ad9361_phy, lo_freq_hz);
-		lo_freq_hz /= 1000000;
-		console_print("rx_lo_freq=%d\n", (uint32_t)lo_freq_hz);
+	if(param_no < 1) { show_invalid_param_message(1); return; }
+	if(gnss_radio_lo_hz(param[0], &lo_freq_hz)) {
+		range_msg("rx_lo_freq", "70 to 6000 MHz");
+		return;
 	}
+	gnss_aj_radio_manual();   /* keep it: the radio guard must not put the profile back */
+	gnss_cmd_rx_lo_hz(lo_freq_hz);
+	get_rx_lo_freq(param, 0);
 }
 
 /**************************************************************************//***
@@ -939,25 +971,21 @@ void get_rx_samp_freq(double* param, char param_no) // "rx_samp_freq?" command
 }
 
 /**************************************************************************//***
- * @brief Sets the RX sampling frequency [Hz].
- *
- * @return None.
+ * @brief Sets the RX sampling frequency: 30.72 = MS/s (any decimals), or Hz if >= 1000.
 *******************************************************************************/
 void set_rx_samp_freq(double* param, char param_no) // "rx_samp_freq=" command
 {
-	if(param_no >= 1) gnss_aj_radio_manual();   /* keep it: the radio guard must not put the profile back */
 	uint32_t sampling_freq_hz;
 
-	if(param_no >= 1)
-	{
-		sampling_freq_hz = (uint32_t)param[0];
-		ad9361_set_rx_sampling_freq(ad9361_phy, sampling_freq_hz);
-		ad9361_get_rx_sampling_freq(ad9361_phy, &sampling_freq_hz);
-//		dds_update(ad9361_phy);
-		console_print("rx_samp_freq=%d\n", sampling_freq_hz);
+	if(param_no < 1) { show_invalid_param_message(1); return; }
+	if(gnss_radio_rate_hz(param[0], &sampling_freq_hz)) {
+		range_msg("rx_samp_freq", "2.083333 to 61.44 MS/s");
+		return;
 	}
-	else
-		show_invalid_param_message(1);
+	gnss_aj_radio_manual();   /* keep it: the radio guard must not put the profile back */
+	ad9361_set_rx_sampling_freq(ad9361_phy, sampling_freq_hz);
+	ad9361_get_rx_sampling_freq(ad9361_phy, &sampling_freq_hz);
+	console_print("rx_samp_freq=%d\n", sampling_freq_hz);
 }
 
 /**************************************************************************//***
@@ -982,14 +1010,15 @@ void set_rx_rf_bandwidth(double* param, char param_no) // "rx_rf_bandwidth=" com
 {
 	uint32_t bandwidth_hz;
 
-	if(param_no >= 1)
-	{
-		bandwidth_hz = param[0];
-		ad9361_set_rx_rf_bandwidth(ad9361_phy, bandwidth_hz);
-		console_print("rx_rf_bandwidth=%d\n", bandwidth_hz);
+	if(param_no < 1) { show_invalid_param_message(1); return; }
+	if(gnss_radio_bw_hz(param[0], &bandwidth_hz)) {
+		range_msg("rx_rf_bandwidth", "0.2 to 56 MHz");
+		return;
 	}
-	else
-		show_invalid_param_message(1);
+	gnss_aj_radio_manual();
+	ad9361_set_rx_rf_bandwidth(ad9361_phy, bandwidth_hz);
+	ad9361_get_rx_rf_bandwidth(ad9361_phy, &bandwidth_hz);
+	console_print("rx_rf_bandwidth=%d\n", bandwidth_hz);
 }
 
 /**************************************************************************//***
