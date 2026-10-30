@@ -74,14 +74,19 @@ module pi_aj_notch #(
             sat_d = v[DW-1:0];
     endfunction
 
-    // highest set bit of a positive value (0 when v==0)
+    // index of the highest set bit (0 when v == 0); log-depth search
     function [6:0] msb;
         input [RW-1:0] v;
-        integer k;
+        reg [63:0] x;
         begin
+            x = v;
             msb = 0;
-            for (k = 0; k < RW; k = k + 1)
-                if (v[k]) msb = k;
+            if (x[63:32] != 0) begin msb = msb + 32; x = x >> 32; end
+            if (x[31:16] != 0) begin msb = msb + 16; x = x >> 16; end
+            if (x[15:8]  != 0) begin msb = msb + 8;  x = x >> 8;  end
+            if (x[7:4]   != 0) begin msb = msb + 4;  x = x >> 4;  end
+            if (x[3:2]   != 0) begin msb = msb + 2;  x = x >> 2;  end
+            if (x[1]     != 0) begin msb = msb + 1;               end
         end
     endfunction
 
@@ -127,22 +132,31 @@ module pi_aj_notch #(
     reg signed [PW:0]   pin, pout;          // always >= 0
     reg                 act;
     reg signed [DW-1:0] xs_re, xs_im;      // x0[n] for power
-    reg signed [YW-1:0] ys_re, ys_im;      // y0[n] for power
+    reg signed [DW-1:0] ys_re, ys_im;      // y0[n] for power (18 bit: one DSP48)
 
     // estimator pipeline
-    reg signed [RW-1:0] r1s_re, r1s_im;
+    reg signed [RW-1:0] r1s_re, r1s_im, r1q_re, r1q_im;
+    reg [RW-1:0]        r1_mx;
     reg [6:0]           r1_pos;
+    reg                 v7;
     reg signed [27:0]   at_re, at_im;
-    reg signed [56:0]   at_mag;
-    reg signed [28:0]   t_nr;
+    reg signed [37:0]   at_mag;            // |a|^2, Q32 (from an 18-bit a)
+    reg signed [17:0]   t_eps;             // (1 - |a|^2)/2, Q24, clamped
+    // Newton step a <- a (1.5 - |a|^2/2) = a + a*eps, done with 18x18 products.
+    // a is rounded to Q16 (|a| <= 1.02 fits 18 bits); the angle keeps full Q24.
+    wire signed [27:0]  at_rre   = at_re + 28'sd128;
+    wire signed [27:0]  at_rim   = at_im + 28'sd128;
+    wire signed [17:0]  at_hi_re = at_rre >>> 8;   // Q16
+    wire signed [17:0]  at_hi_im = at_rim >>> 8;
+    wire signed [38:0]  eps_w    = ($signed(39'sd4294967296) - at_mag) >>> 9;
 
     wire [RW-1:0] r1_abs_re = r1_re[RW-1] ? -r1_re : r1_re;
     wire [RW-1:0] r1_abs_im = r1_im[RW-1] ? -r1_im : r1_im;
     wire [RW-1:0] r1_max    = (r1_abs_re > r1_abs_im) ? r1_abs_re : r1_abs_im;
 
     // normalised r1 in Q16 with its largest component in [1,2)
-    wire signed [RW-1:0] nr_re = (r1_pos >= 16) ? (r1s_re >>> (r1_pos - 16)) : (r1s_re <<< (16 - r1_pos));
-    wire signed [RW-1:0] nr_im = (r1_pos >= 16) ? (r1s_im >>> (r1_pos - 16)) : (r1s_im <<< (16 - r1_pos));
+    wire signed [RW-1:0] nr_re = (r1_pos >= 16) ? (r1q_re >>> (r1_pos - 16)) : (r1q_re <<< (16 - r1_pos));
+    wire signed [RW-1:0] nr_im = (r1_pos >= 16) ? (r1q_im >>> (r1_pos - 16)) : (r1q_im <<< (16 - r1_pos));
     // increment in Q24, rounded:  norm(r1) * 2^-a_sh
     wire signed [27:0]   nr8_re = $signed(nr_re[18:0]) <<< 8;
     wire signed [27:0]   nr8_im = $signed(nr_im[18:0]) <<< 8;
@@ -159,7 +173,7 @@ module pi_aj_notch #(
 
     always @(posedge clk) begin
         if (rst) begin
-            v0 <= 0; v1 <= 0; v2 <= 0; v3 <= 0; v4 <= 0; v5 <= 0; v6 <= 0;
+            v0 <= 0; v1 <= 0; v2 <= 0; v3 <= 0; v4 <= 0; v5 <= 0; v6 <= 0; v7 <= 0;
             out_valid <= 0;
             xp0_re <= 0; xp0_im <= 0; xp1_re <= 0; xp1_im <= 0;
             yp0_re <= 0; yp0_im <= 0; yp1_re <= 0; yp1_im <= 0;
@@ -202,7 +216,7 @@ module pi_aj_notch #(
                     y0_re <= xd0_re; y0_im <= xd0_im; y1_re <= xd1_re; y1_im <= xd1_im;
                 end
                 xs_re <= xd0_re; xs_im <= xd0_im;
-                ys_re <= sat_y(yn0_re); ys_im <= sat_y(yn0_im);
+                ys_re <= sat_d(sat_y(yn0_re)); ys_im <= sat_d(sat_y(yn0_im));
                 if (clear) begin
                     r1_re <= 0; r1_im <= 0;
                 end else begin
@@ -226,29 +240,35 @@ module pi_aj_notch #(
                 else if (pin < pout + (pout >> 3))
                     act <= 1'b0;
                 r1s_re <= r1_re; r1s_im <= r1_im;
-                r1_pos <= msb(r1_max);
+                r1_mx  <= r1_max;
             end
-            // ---------------- estimator step 2: a + norm(r1)*2^-a_sh
+            // ---------------- estimator step 1b: leading one of |r1|
             v4 <= v3;
             if (v3) begin
+                r1q_re <= r1s_re; r1q_im <= r1s_im;
+                r1_pos <= msb(r1_mx);
+            end
+            // ---------------- estimator step 2: a + norm(r1)*2^-a_sh
+            v5 <= v4;
+            if (v4) begin
                 at_re <= a24_re + d_re;
                 at_im <= a24_im + d_im;
             end
             // ---------------- estimator step 3: |a|^2
-            v5 <= v4;
-            if (v4)
-                at_mag <= at_re * at_re + at_im * at_im;
-            // ---------------- estimator step 4: t = 1.5 - |a|^2/2   (Q24)
             v6 <= v5;
             if (v5)
-                t_nr <= 29'sd25165824 - (at_mag >>> 25);
-            // ---------------- estimator step 5: a = a*t
-            if (MODE == 0 && v6) begin
+                at_mag <= at_hi_re * at_hi_re + at_hi_im * at_hi_im;
+            // ---------------- estimator step 4: eps = (1 - |a|^2)/2   (Q24)
+            v7 <= v6;
+            if (v6)
+                t_eps <= (eps_w > 39'sd131071) ? 18'sd131071 : (eps_w < -39'sd131071) ? -18'sd131071 : eps_w[17:0];
+            // ---------------- estimator step 5: a = a + a*eps
+            if (MODE == 0 && v7) begin
                 if (clear) begin
                     a24_re <= ONE24; a24_im <= 0;
                 end else if (!freeze && r1_pos > 7) begin
-                    a24_re <= (at_re * t_nr + 57'sd8388608) >>> AF;
-                    a24_im <= (at_im * t_nr + 57'sd8388608) >>> AF;
+                    a24_re <= at_re + ((at_hi_re * t_eps + 36'sd32768) >>> 16);
+                    a24_im <= at_im + ((at_hi_im * t_eps + 36'sd32768) >>> 16);
                 end
             end
         end

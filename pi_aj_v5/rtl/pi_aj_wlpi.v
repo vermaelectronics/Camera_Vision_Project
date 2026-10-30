@@ -26,9 +26,9 @@
 //
 // Time-multiplexed: NL complex lanes handle NW weights in K = ceil(NW/NL)
 // clocks per sample. Requirements:   K >= 2,   clocks/sample >= K+1,
-//                                    DELAY*(clocks/sample) >= K + 7
+//                                    DELAY*(clocks/sample) >= K + 9
 // (defaults NW=19, NL=5 -> K=4: 5 clocks/sample, e.g. 18 MS/s @ >= 90 MHz;
-//  NL=10 -> K=2: 3 clocks/sample.)  'overrun' / 'late' flag violations.
+//  NL=10 -> K=2: 3 clocks/sample with DELAY=4.)  overrun / late flag violations.
 // ============================================================================
 `timescale 1ns / 1ps
 module pi_aj_wlpi #(
@@ -64,7 +64,7 @@ module pi_aj_wlpi #(
     localparam NWP  = K * NL;               // padded weight count
     localparam D    = (L - 1) / 2;
     localparam LB   = L + DELAY;
-    localparam OPW  = DW + 1;               // regressor width (conj headroom)
+    localparam OPW  = DW;                   // regressor width (one DSP48 port, conj saturates)
     localparam PFR  = 5;                    // power smoother fraction bits
     localparam PWID = 2*DW + 3 + PFR;
     localparam WFM  = WF - (WW - WM);       // fraction bits of filter weight
@@ -97,13 +97,19 @@ module pi_aj_wlpi #(
         f_cj = (i >= 2*L-1) ? 1 : 0;
     endfunction
 
+    // index of the highest set bit (0 when v == 0); log-depth search
     function [6:0] msb;
         input [PWID-1:0] v;
-        integer k;
+        reg [63:0] x;
         begin
+            x = v;
             msb = 0;
-            for (k = 0; k < PWID; k = k + 1)
-                if (v[k]) msb = k;
+            if (x[63:32] != 0) begin msb = msb + 32; x = x >> 32; end
+            if (x[31:16] != 0) begin msb = msb + 16; x = x >> 16; end
+            if (x[15:8]  != 0) begin msb = msb + 8;  x = x >> 8;  end
+            if (x[7:4]   != 0) begin msb = msb + 4;  x = x >> 4;  end
+            if (x[3:2]   != 0) begin msb = msb + 2;  x = x >> 2;  end
+            if (x[1]     != 0) begin msb = msb + 1;               end
         end
     endfunction
 
@@ -127,9 +133,12 @@ module pi_aj_wlpi #(
                 wire signed [OPW-1:0] ur = CH ? b1_re[TP+DELAY] : b0_re[TP+DELAY];
                 wire signed [OPW-1:0] ui = CH ? b1_im[TP+DELAY] : b0_im[TP+DELAY];
                 assign UF_RE[gi*OPW +: OPW] = fr;
-                assign UF_IM[gi*OPW +: OPW] = CJ ? -fi : fi;
+                // conjugate: negate, saturating the single value -2^(DW-1)
+                wire signed [OPW-1:0] fin = (fi == {1'b1, {(OPW-1){1'b0}}}) ? {1'b0, {(OPW-1){1'b1}}} : -fi;
+                wire signed [OPW-1:0] uin = (ui == {1'b1, {(OPW-1){1'b0}}}) ? {1'b0, {(OPW-1){1'b1}}} : -ui;
+                assign UF_IM[gi*OPW +: OPW] = CJ ? fin : fi;
                 assign UU_RE[gi*OPW +: OPW] = ur;
-                assign UU_IM[gi*OPW +: OPW] = CJ ? -ui : ui;
+                assign UU_IM[gi*OPW +: OPW] = CJ ? uin : ui;
             end else begin : g_pad
                 assign UF_RE[gi*OPW +: OPW] = 0;
                 assign UF_IM[gi*OPW +: OPW] = 0;
@@ -180,6 +189,13 @@ module pi_aj_wlpi #(
     reg signed [OPW-1:0]  p1_uf_re[0:NL-1], p1_uf_im[0:NL-1];
     reg                   p1_val  [0:NL-1];
 
+    // PD: rounded/shifted update, clamped to the weight range (+ flags)
+    reg signed [WW+1:0]   pd_dl_re[0:NL-1], pd_dl_im[0:NL-1];
+    reg                   pd_ov_re[0:NL-1], pd_un_re[0:NL-1], pd_ov_im[0:NL-1], pd_un_im[0:NL-1];
+    reg signed [WW-1:0]   pd_w_re [0:NL-1], pd_w_im [0:NL-1];
+    reg signed [OPW-1:0]  pd_uf_re[0:NL-1], pd_uf_im[0:NL-1];
+    reg                   pd_val  [0:NL-1];
+
     reg signed [WW-1:0]   p2_w_re [0:NL-1], p2_w_im [0:NL-1];
     reg signed [OPW-1:0]  p2_uf_re[0:NL-1], p2_uf_im[0:NL-1];
     reg                   p2_val  [0:NL-1];
@@ -190,12 +206,15 @@ module pi_aj_wlpi #(
     reg signed [WM+OPW+4:0] acc_re [0:NL-1], acc_im [0:NL-1];
 
     // stage control (common to all lanes)
-    reg s0, s1, s2, s3, s4, s5;
-    reg f0, f1, f2, f3;            // first cycle of a pass
-    reg l0, l1, l2, l3, l4;        // last cycle of a pass
-    reg [7:0] q0, q1, q2, q3, q4, q5;   // sample id
-    reg [3:0] c0, c1;                   // issue cycle of the P0/P1 data
+    reg s0, s1, sd, s2, s3, s4, s4b, s5;
+    reg f0, f1, fd, f2, f3;        // first cycle of a pass
+    reg l0, l1, ld, l2, l3, l4;    // last cycle of a pass
+    reg [7:0] q0, q1, qd, q2, q3, q4, q4b, q5;   // sample id
+    reg [3:0] c0, c1, cd;               // issue cycle of the P0/P1/PD data
     reg signed [WM+OPW+8:0] sum5_re, sum5_im;
+    // lane sum in two stages: groups of 4 lanes, then the groups
+    localparam NG = (NL + 3) / 4;
+    reg signed [WM+OPW+8:0] ps_re [0:NG-1], ps_im [0:NG-1];
 
     // ------------------------------------------------------------ lane logic
     // P2: weight update  w += round(up * 2^-(sh_upd))  (sh_upd may be < 0)
@@ -205,28 +224,38 @@ module pi_aj_wlpi #(
     wire signed [WM-1:0] wm_re [0:NL-1];
     wire signed [WM-1:0] wm_im [0:NL-1];
 
-    // shift amount for P2 (shared): s = sh_upd + 16, clamp [0,63]
+    // shift amount for the update (shared): s = sh_upd + 16, clamp [0,63]
     reg  [5:0] sh_p1;
+    wire signed [WW+1:0] dlc_re [0:NL-1];
+    wire signed [WW+1:0] dlc_im [0:NL-1];
+    wire                 dov_re [0:NL-1], dun_re [0:NL-1], dov_im [0:NL-1], dun_im [0:NL-1];
 
+    localparam signed [WW+1:0] WMAX = {3'b000, {(WW-1){1'b1}}};
+    localparam signed [WW+1:0] WMIN = {3'b111, {(WW-1){1'b0}}};
     genvar gl;
     generate
         for (gl = 0; gl < NL; gl = gl + 1) begin : g_lane
+            // P1 -> PD: the rounded, shifted update (64-bit, then clamped)
             wire signed [63:0] t_re = $signed(p1_up_re[gl]) <<< 16;
             wire signed [63:0] t_im = $signed(p1_up_im[gl]) <<< 16;
             wire signed [63:0] rnd  = (sh_p1 == 0) ? 64'sd0 : (64'sd1 <<< (sh_p1 - 1));
             wire signed [63:0] dl_re = (t_re + rnd) >>> sh_p1;
             wire signed [63:0] dl_im = (t_im + rnd) >>> sh_p1;
-            wire signed [WW+1:0] s_re = $signed(p1_w_re[gl]) + dl_re;
-            wire signed [WW+1:0] s_im = $signed(p1_w_im[gl]) + dl_im;
-            // saturate (dl is clamped to the weight range first)
-            wire ovr_re = (dl_re > $signed({1'b0, {(WW-1){1'b1}}})) | (s_re > $signed({1'b0, {(WW-1){1'b1}}}));
-            wire unr_re = (dl_re < $signed({1'b1, {(WW-1){1'b0}}})) | (s_re < $signed({1'b1, {(WW-1){1'b0}}}));
-            wire ovr_im = (dl_im > $signed({1'b0, {(WW-1){1'b1}}})) | (s_im > $signed({1'b0, {(WW-1){1'b1}}}));
-            wire unr_im = (dl_im < $signed({1'b1, {(WW-1){1'b0}}})) | (s_im < $signed({1'b1, {(WW-1){1'b0}}}));
+            assign dlc_re[gl] = (dl_re > WMAX) ? WMAX : (dl_re < WMIN) ? WMIN : dl_re[WW+1:0];
+            assign dlc_im[gl] = (dl_im > WMAX) ? WMAX : (dl_im < WMIN) ? WMIN : dl_im[WW+1:0];
+            assign dov_re[gl] = (dl_re > WMAX); assign dun_re[gl] = (dl_re < WMIN);
+            assign dov_im[gl] = (dl_im > WMAX); assign dun_im[gl] = (dl_im < WMIN);
+            // PD -> P2: w + update, saturated
+            wire signed [WW+1:0] s_re = $signed(pd_w_re[gl]) + pd_dl_re[gl];
+            wire signed [WW+1:0] s_im = $signed(pd_w_im[gl]) + pd_dl_im[gl];
+            wire ovr_re = pd_ov_re[gl] | (s_re > WMAX);
+            wire unr_re = pd_un_re[gl] | (s_re < WMIN);
+            wire ovr_im = pd_ov_im[gl] | (s_im > WMAX);
+            wire unr_im = pd_un_im[gl] | (s_im < WMIN);
             wire signed [WW-1:0] su_re = ovr_re ? {1'b0, {(WW-1){1'b1}}} : unr_re ? {1'b1, {(WW-1){1'b0}}} : s_re[WW-1:0];
             wire signed [WW-1:0] su_im = ovr_im ? {1'b0, {(WW-1){1'b1}}} : unr_im ? {1'b1, {(WW-1){1'b0}}} : s_im[WW-1:0];
-            assign wn_re[gl] = (freeze | ~en) ? p1_w_re[gl] : su_re;
-            assign wn_im[gl] = (freeze | ~en) ? p1_w_im[gl] : su_im;
+            assign wn_re[gl] = (freeze | ~en) ? pd_w_re[gl] : su_re;
+            assign wn_im[gl] = (freeze | ~en) ? pd_w_im[gl] : su_im;
             assign wm_re[gl] = p2_w_re[gl] >>> (WW - WM);
             assign wm_im[gl] = p2_w_im[gl] >>> (WW - WM);
         end
@@ -244,8 +273,14 @@ module pi_aj_wlpi #(
             lf_re[ml] = 0; lf_im[ml] = 0; lu_re[ml] = 0; lu_im[ml] = 0;
             for (mc = 0; mc < K; mc = mc + 1) begin
                 if (cyc == mc) begin
-                    lw_re[ml] = w_re[mc*NL + ml];
-                    lw_im[ml] = w_im[mc*NL + ml];
+                    // forward the weight being written back this cycle
+                    if (pd_val[ml] && cd == mc) begin
+                        lw_re[ml] = wn_re[ml];
+                        lw_im[ml] = wn_im[ml];
+                    end else begin
+                        lw_re[ml] = w_re[mc*NL + ml];
+                        lw_im[ml] = w_im[mc*NL + ml];
+                    end
                     lf_re[ml] = UF_RE[(mc*NL + ml)*OPW +: OPW];
                     lf_im[ml] = UF_IM[(mc*NL + ml)*OPW +: OPW];
                     lu_re[ml] = UU_RE[(mc*NL + ml)*OPW +: OPW];
@@ -255,14 +290,23 @@ module pi_aj_wlpi #(
         end
     end
 
-    // lane adder tree (combinational, used once per pass)
+    // lane sum: groups of 4 lanes (P5a), then the groups (P5b)
+    reg signed [WM+OPW+8:0] grp_re [0:NG-1], grp_im [0:NG-1];
     reg signed [WM+OPW+8:0] tree_re, tree_im;
-    integer t;
+    integer t, g;
     always @* begin
+        for (g = 0; g < NG; g = g + 1) begin
+            grp_re[g] = 0; grp_im[g] = 0;
+            for (t = 4*g; t < 4*g + 4; t = t + 1)
+                if (t < NL) begin
+                    grp_re[g] = grp_re[g] + acc_re[t];
+                    grp_im[g] = grp_im[g] + acc_im[t];
+                end
+        end
         tree_re = 0; tree_im = 0;
-        for (t = 0; t < NL; t = t + 1) begin
-            tree_re = tree_re + acc_re[t];
-            tree_im = tree_im + acc_im[t];
+        for (g = 0; g < NG; g = g + 1) begin
+            tree_re = tree_re + ps_re[g];
+            tree_im = tree_im + ps_im[g];
         end
     end
 
@@ -296,9 +340,9 @@ module pi_aj_wlpi #(
             overrun <= 0; late <= 0;
             out_valid <= 0; y_re <= 0; y_im <= 0;
             pv0 <= 0; pv1 <= 0; pacc <= 0;
-            s0 <= 0; s1 <= 0; s2 <= 0; s3 <= 0; s4 <= 0; s5 <= 0;
-            f0 <= 0; f1 <= 0; f2 <= 0; f3 <= 0;
-            l0 <= 0; l1 <= 0; l2 <= 0; l3 <= 0; l4 <= 0;
+            s0 <= 0; s1 <= 0; sd <= 0; s2 <= 0; s3 <= 0; s4 <= 0; s4b <= 0; s5 <= 0;
+            f0 <= 0; f1 <= 0; fd <= 0; f2 <= 0; f3 <= 0;
+            l0 <= 0; l1 <= 0; ld <= 0; l2 <= 0; l3 <= 0; l4 <= 0;
             for (j = 0; j < LB; j = j + 1) begin
                 b0_re[j] <= 0; b0_im[j] <= 0; b1_re[j] <= 0; b1_im[j] <= 0;
             end
@@ -311,7 +355,7 @@ module pi_aj_wlpi #(
             end
             for (j = 0; j < NL; j = j + 1) begin
                 acc_re[j] <= 0; acc_im[j] <= 0;
-                p0_val[j] <= 0; p1_val[j] <= 0; p2_val[j] <= 0; p3_val[j] <= 0;
+                p0_val[j] <= 0; p1_val[j] <= 0; pd_val[j] <= 0; p2_val[j] <= 0; p3_val[j] <= 0;
             end
         end else begin
             // ================= input / pass control
@@ -396,16 +440,27 @@ module pi_aj_wlpi #(
                 p1_val[ln]   <= p0_val[ln] & s0;
             end
 
+            // ================= PD: shifted, rounded, clamped update
+            sd <= s1; fd <= f1; ld <= l1; qd <= q1; cd <= c1;
+            for (ln = 0; ln < NL; ln = ln + 1) begin
+                pd_dl_re[ln] <= dlc_re[ln]; pd_dl_im[ln] <= dlc_im[ln];
+                pd_ov_re[ln] <= dov_re[ln]; pd_un_re[ln] <= dun_re[ln];
+                pd_ov_im[ln] <= dov_im[ln]; pd_un_im[ln] <= dun_im[ln];
+                pd_w_re[ln]  <= p1_w_re[ln];  pd_w_im[ln]  <= p1_w_im[ln];
+                pd_uf_re[ln] <= p1_uf_re[ln]; pd_uf_im[ln] <= p1_uf_im[ln];
+                pd_val[ln]   <= p1_val[ln];
+            end
+
             // ================= P2: weight update + write back
-            s2 <= s1; f2 <= f1; l2 <= l1; q2 <= q1;
+            s2 <= sd; f2 <= fd; l2 <= ld; q2 <= qd;
             for (ln = 0; ln < NL; ln = ln + 1) begin
                 p2_w_re[ln]  <= wn_re[ln];   p2_w_im[ln]  <= wn_im[ln];
-                p2_uf_re[ln] <= p1_uf_re[ln]; p2_uf_im[ln] <= p1_uf_im[ln];
-                p2_val[ln]   <= p1_val[ln];
+                p2_uf_re[ln] <= pd_uf_re[ln]; p2_uf_im[ln] <= pd_uf_im[ln];
+                p2_val[ln]   <= pd_val[ln];
             end
             // write back: weight j belongs to lane j%NL, issue cycle j/NL
             for (j = 0; j < NW; j = j + 1) begin
-                if (p1_val[j % NL] && c1 == j / NL) begin
+                if (pd_val[j % NL] && cd == j / NL) begin
                     w_re[j] <= wn_re[j % NL];
                     w_im[j] <= wn_im[j % NL];
                 end
@@ -434,9 +489,15 @@ module pi_aj_wlpi #(
                 end
             end
 
-            // ================= P5: lane sum
-            s5 <= s4; q5 <= q4;
-            if (s4) begin
+            // ================= P5a/P5b: lane sum
+            s4b <= s4; q4b <= q4;
+            if (s4)
+                for (g = 0; g < NG; g = g + 1) begin
+                    ps_re[g] <= grp_re[g];
+                    ps_im[g] <= grp_im[g];
+                end
+            s5 <= s4b; q5 <= q4b;
+            if (s4b) begin
                 sum5_re <= tree_re;
                 sum5_im <= tree_im;
             end

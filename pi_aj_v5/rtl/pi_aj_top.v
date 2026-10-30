@@ -60,6 +60,13 @@ module pi_aj_top #(
 );
     localparam DW = 18;
     localparam OW = 20;
+    localparam NWT  = WL ? (4*L - 1) : (2*L - 1);
+    localparam KCYC = (NWT + NL - 1) / NL;
+    localparam [7:0] CAP_CPS = KCYC + 1;
+    localparam [7:0] CAP_NL  = NL;
+    localparam [7:0] CAP_L   = L;
+    localparam [7:0] CAP_NW  = NWT;
+    wire [31:0] caps = {CAP_CPS, CAP_NL, CAP_L, CAP_NW};
 
     // ------------------------------------------------------------ registers
     wire [31:0]  r_control, r_adapt, r_levels;
@@ -76,7 +83,7 @@ module pi_aj_top #(
         .s_axi_arready(s_axi_arready), .s_axi_rdata(s_axi_rdata), .s_axi_rresp(s_axi_rresp),
         .s_axi_rvalid(s_axi_rvalid), .s_axi_rready(s_axi_rready),
         .r_control(r_control), .r_adapt(r_adapt), .r_levels(r_levels),
-        .r_wsel(r_wsel), .r_clr_tog(r_clr_tog), .st(st_axi)
+        .r_wsel(r_wsel), .r_clr_tog(r_clr_tog), .st(st_axi), .caps(caps)
     );
 
     // config -> clk domain

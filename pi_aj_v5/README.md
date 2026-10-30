@@ -48,19 +48,26 @@ Each scenario was produced by `sim/gen_stimulus.py`, which models:
 C/N0 is measured from the **RTL output** with a real correlator (1 ms coherent blocks). The
 jammer-free reference is ≈49.7 dB-Hz. *Read the change in C/N0, not the absolute value.*
 
-| Scenario (RTL output) | RX1 input C/N0 (dB-Hz) | **PI-AJ v5 output C/N0 (dB-Hz)** | RMS suppression (dB) |
+| Scenario (RTL output, AntSDR configuration) | sample rate | make-up shift | **TX1 C/N0 (dB-Hz)** |
 |---|---|---|---|
-| no jammer (reference) | 49.7 | 48.5 | -0.5 |
-| CW 1575.40 MHz, J/N 51 dB (~40 dB setting) | 16.7 | 45.9 | 52.0 |
-| CW 1575.40 MHz, J/N 61 dB (~30 dB setting) | 16.6 | 46.3 | 61.6 |
-| CW 1575.40 MHz, J/N 71 dB (~20 dB setting) | 16.6 | 41.7 | 68.6 |
-| CW 1575.40 MHz, J/N 76 dB (~15 dB setting) | 16.6 | 38.5 | 70.2 |
-| CW exactly 1575.42 MHz (DC), J/N 71 dB | -99.0 | 39.0 | 38.7 |
-| CW 1582.5 MHz (+7.08 MHz), J/N 61 dB | 16.1 | 50.0 | 61.2 |
-| barrage noise 18 MHz, J/N 40 dB | 31.2 | 50.9 | 32.7 |
-| barrage noise 18 MHz, J/N 50 dB | 31.2 | 47.8 | 36.9 |
-| barrage noise 2 MHz, J/N 50 dB | 30.1 | 37.6 | 44.6 |
+| no jammer (reference) | 30.72 MS/s | 0 | 48.5 |
+| CW 1575.40 MHz, J/N 61 dB (~30 dB setting) | 30.72 MS/s | 1 | 46.3 |
+| CW 1575.40 MHz, J/N 71 dB (~20 dB setting) | 30.72 MS/s | 3 | 42.0 |
+| CW 1575.40 MHz, J/N 76 dB (~15 dB setting) | 30.72 MS/s | 4 | 38.8 |
+| CW exactly 1575.42 MHz (DC), J/N 71 dB | 30.72 MS/s | 3 | 39.3 |
+| CW 1582.5 MHz (+7.08 MHz), J/N 61 dB | 30.72 MS/s | 1 | 49.9 |
+| barrage noise 18 MHz, J/N 40 dB | 30.72 MS/s | 0 | 50.8 |
+| barrage noise 18 MHz, J/N 50 dB | 30.72 MS/s | 1 | 47.7 |
+| barrage noise 2 MHz, J/N 50 dB | 30.72 MS/s | 1 | 36.2 |
+| CW 1575.40 MHz, J/N 71 dB (~20 dB setting) | 18.00 MS/s | 3 | 42.0 |
 
+This was simulated with:
+- `rtl/pi_aj_axis.v` at NL = 10, DELAY = 4, without notch 2, on a 100 MHz clock;
+- samples arriving through a FIFO at the stated sample rate;
+- registers set as the AntSDR firmware sets them;
+- the 12-bit TX1 output measured with the correlator.
+
+RMS suppression is 61.6 dB at J/N 61 and 68.6 dB at J/N 71 (`doc/rtl_regression_results.md`).
 Every row reports notch #1 frequency exactly (−20.11 kHz for the 1575.40 MHz jammer,
 0 Hz at 1575.42, +7.081 MHz at 1582.5). No ADC overload, PI late or overrun flags were set.
 
@@ -72,8 +79,8 @@ Every 10 dB less attenuation adds 10 dB of J/N.
 
 | Jammer setting | Expected outcome |
 |---|---|
-| **30 dB** (J/N 61) | Loss ≈ 2–3 dB. GPS and Galileo in the processed band track normally. |
-| **20 dB** (J/N 71) | Loss ≈ 8 dB. **GPS tracks** (strong satellites ~34–36 dB-Hz). Hot/warm start works. Cold-start acquisition of weak satellites is marginal. This is the target asked for, and it is the practical limit of this hardware. |
+| **30 dB** (J/N 61) | Loss ≈ 2 dB. GPS and Galileo in the processed band track normally. |
+| **20 dB** (J/N 71) | Loss ≈ 6.5 dB. **GPS tracks** (strong satellites ~34–36 dB-Hz). Hot/warm start works. Cold-start acquisition of weak satellites is marginal. This is the target asked for, and it is the practical limit of this hardware. |
 | **15 dB** (J/N 76) | Loss ≈ 11 dB. Only the strongest satellites may hold lock. Not reliable. |
 | **≤ 10 dB … full power** | **Not achievable by any digital algorithm on a 12-bit AD9361** (see §5). |
 | **Barrage** | J/N 40: no loss. J/N 50 over the full band: ≈2 dB loss. **J/N 50 concentrated in 2 MHz around L1:** ≈12 dB loss, which is the hardest case for 2 elements. |
@@ -96,8 +103,24 @@ Every 10 dB less attenuation adds 10 dB of J/N.
 | `sim/run_rtl.py` | Runs all scenarios on the RTL and prints the table above |
 | `sw/pi_aj.c/.h` | Vitis bare-metal driver: init, tuning, `pi_aj_print()` status report |
 | `vivado/add_pi_aj.tcl` | Adds the sources to a Vivado project |
+| `rtl/pi_aj_axis.v` | AXI-Stream wrapper: drop-in for the SMI-PI HLS core `smi_pi_0` |
+| `tb/tb_pi_aj_axis.v` | Wrapper testbench: fractional sample rate through a FIFO, firmware register settings |
+| `sim/run_axis.py` | Runs the scenarios through the wrapper (the AntSDR board configuration) |
 
 ## 4. Integration (AntSDR / ADI `axi_ad9361` design)
+
+**Ready-made for your LoopBack_Code project:**
+- `deliverables/LoopBack_Code_PI_AJ_v5.0.0.zip` (hardware + firmware + build scripts);
+- `deliverables/PI_AJ_v5.0.0_firmware_only.zip`;
+- `deliverables/PI_AJ_v5_standalone_rtl.zip` (this folder).
+
+There, `rtl/pi_aj_axis.v` replaces `smi_pi_0` in the block design: same AXI-Stream
+ports and async FIFOs, on `sys_cpu_clk` with `NL=10` and `DELAY=4`, registers at
+0x43C1_0000. `gnss_passthrough` is unchanged. See `README_PI_AJ_v5.md` and
+`BUILD_STEPS.md` inside that zip. `tb/tb_pi_aj_axis.v` and `sim/run_axis.py` verify
+that exact configuration.
+
+For a different design:
 
 1. Put `pi_aj_top` where your current `gnss_passthrough` / SMI-PI core sits:
    - inputs `adc_valid, adc_i0/q0/i1/q1` come from the axi_ad9361 ADC channels (RX1, RX2);
@@ -166,19 +189,25 @@ L1 test.
 
 ## 7. Resources (yosys `synth_xilinx`, xc7, defaults)
 
-| Resource | Used | Zynq-7020 |
+| Resource | `pi_aj_axis` (AntSDR: NL=10, no notch 2) | Zynq-7020 |
 |---|---|---|
-| DSP48E1 | 174 (≈140 with `HAS_NOTCH2=0`) | 220 |
-| LUT | ≈19.2k | 53.2k |
-| FF | ≈8.4k | 106.4k |
+| DSP48E1 | 134 | 220 |
+| LUT | ≈23.7k | 53.2k |
+| FF | ≈11.4k | 106.4k |
+
+All multipliers fit one DSP48 (25×18) each. The long paths are pipelined for
+100 MHz:
+- log-depth leading-one detectors;
+- a split weight update with forwarding;
+- a two-stage lane adder.
 
 Build parameters (`pi_aj_top`):
 
 | Parameter | Default | Meaning |
 |---|---|---|
-| `NL` | 5 | PI lanes. 5 needs clk ≥ 5·fs; 10 needs clk ≥ 3·fs (verified bit-exact against `NL=5`) |
+| `NL` | 5 | PI lanes. 5 needs clk ≥ 5·fs; 10 needs clk ≥ 3·fs with `DELAY=4` |
 | `L` | 5 | Taps per channel |
-| `DELAY` | 3 | PI update delay |
+| `DELAY` | 3 | PI update delay; must satisfy DELAY × clocks-per-sample ≥ K + 9 |
 | `WL` | 1 | Widely-linear (conjugate) taps |
 | `HAS_NOTCH2` | 1 | Second CW notch present |
 | `IN_SHIFT` | 4 | ADC word alignment |

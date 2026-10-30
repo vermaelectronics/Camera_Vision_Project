@@ -3,7 +3,7 @@
 //
 //  off  name      acc  description
 //  0x00 ID        R    0x50494A35 "PIJ5"
-//  0x04 VERSION   R    0x00050001  (5.0.1)
+//  0x04 VERSION   R    0x00050002  (5.0.2)
 //  0x08 CONTROL   RW   [0] core_en   (0: TX1 = RX1 bypass)          def 1
 //                      [1] notch_en  (CW notch #1, self-gated)       def 1
 //                      [2] notch2_en (CW notch #2, 2nd CW jammer)    def 0
@@ -40,6 +40,8 @@
 //  0x40 W_RE      R    PI weight[WSEL] real, Q3.28
 //  0x44 W_IM      R    PI weight[WSEL] imag, Q3.28
 //  0x48 SAMPLES   R    sample counter
+//  0x4C CAPS      R    {min clocks per sample, lanes NL, taps L, weights NW}
+//                      max sample rate = core clock / CAPS[31:24]
 //
 //  Suppression (dB)   = 10*log10(P_RX1 / P_OUT)
 //  Jammer offset (Hz) = atan2(im, re) / (2*pi) * fs
@@ -72,10 +74,11 @@ module pi_aj_axil_regs (
     output reg  [5:0]   r_wsel,
     output reg          r_clr_tog,
     // status in (already in this clock domain)
-    input  wire [351:0] st
+    input  wire [351:0] st,
+    input  wire [31:0]  caps
 );
     localparam [31:0] ID      = 32'h50494A35;
-    localparam [31:0] VERSION = 32'h00050001;
+    localparam [31:0] VERSION = 32'h00050002;
 
     assign s_axi_bresp = 2'b00;
     assign s_axi_rresp = 2'b00;
@@ -156,6 +159,7 @@ module pi_aj_axil_regs (
                     5'h10: s_axi_rdata <= st[ 8*32 +: 32];
                     5'h11: s_axi_rdata <= st[ 9*32 +: 32];
                     5'h12: s_axi_rdata <= st[10*32 +: 32];
+                    5'h13: s_axi_rdata <= caps;
                     default: s_axi_rdata <= 32'h0;
                 endcase
             end
