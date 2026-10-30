@@ -43,6 +43,11 @@
 //       at 1582.5 MHz, 61.44 MS/s), on top of the satellite, I/Q imbalance:
 //       suppression >= 64 dB, residual <= 1 dB (SMI-PI 4.4 weight scale)
 //    10 the same at 68 dB: suppression >= 64 dB, residual <= 2.5 dB
+//    11, 12, 13  barrage (noise) jammer over the whole band, I/Q imbalance, satellite at the
+//       LO, the custom band 1575.42 MHz / 18 MS/s of the field test: J/N 61, 51 and 41 dB
+//       (argv[2] overrides, argv[3] = RX2 path delay in samples); also checks that the
+//       output make-up brings the level into the receiver back near the clean one
+//    14 the make-up rule (aj_makeup_shift) on a table of cases
 //  Prints "SMI_PI_CSIM: PASS" or "SMI_PI_CSIM: FAIL".
 // ============================================================================
 #include <cstdio>
@@ -203,7 +208,7 @@ static int test_bitexact() {
             g2i = (seg == 1) ? 32767 : (seg == 2) ? -32768 : (int)(urand() * 65536) - 32768;
             if (seg == 3) { g2r = 1 << SMI_GFRAC; g2i = 0; }
             byp = (seg % 4 == 3);
-            sh = seg % 8;                                  // 5..7 must act as 4
+            sh = seg % 8;                                  // 0..7 all act (4.5)
             wsc = (seg * 3) % 8;                           // weight scale 0..7: 6, 7 must act as 5
             set_weights(wr, wi); set_cfg(byp, sh, wsc); set_g2(g2r, g2i);
         }
@@ -261,8 +266,28 @@ static int test_bitexact() {
     return bad == 0 && sat > 0 && sat18c == 0 && bypassed > 0 && shifted > 0;
 }
 
+// ---- scenario 14: the output make-up rule ---------------------------------------
+static int test_makeup() {
+    struct T { int cut; double out; int maxsh; int want; } t[] = {
+        {0, 0, 7, 0}, {5, 0, 7, 0}, {6, 0, 7, 1}, {10, 0, 7, 1}, {34, 0.3, 7, 5}, {34, 4.8, 7, 5},
+        {36, 3.3, 7, 5}, {42, 0, 7, 7}, {50, 0, 7, 7}, {40, 0, 4, 4},      // older bitstream: 4
+        {34, 20, 7, 2}, {34, 40, 7, 0}, {26, 0.3, 7, 4}, {26, 0.3, 4, 4}, {-3, 0, 7, 0}};
+    int bad = 0;
+    for (auto &c : t) {
+        int g = aj_makeup_shift(c.cut, c.out, c.maxsh);
+        if (g != c.want) { std::printf("  cut %d dB, output %+.1f dB over noise, max %d: got %d, want %d\n", c.cut, c.out, c.maxsh, g, c.want); bad++; }
+    }
+    {   // ADC excess model against the simulated losses (J/N 61: +1.8, 66: +4.1, 71: +7.8 dB)
+        double e61 = aj_adc_excess_db(61.0), e66 = aj_adc_excess_db(66.0), e71 = aj_adc_excess_db(71.0), e50 = aj_adc_excess_db(50.0);
+        std::printf("ADC excess model: J/N 50 %.2f, 61 %.2f, 66 %.2f, 71 %.2f dB\n", e50, e61, e66, e71);
+        if (e50 > 0.3 || std::fabs(e61 - 1.8) > 0.5 || std::fabs(e66 - 4.1) > 0.8 || std::fabs(e71 - 7.8) > 1.0) bad++;
+    }
+    std::printf("make-up rule: %d cases, %d wrong\n", (int)(sizeof t / sizeof t[0]), bad);
+    return bad == 0;
+}
+
 // ---- scenarios 2..8 ------------------------------------------------------------
-struct Scen { double jnr_db; bool cw; double echo; double rx2_db; bool iq; double cwf; double satf; double chip; };
+struct Scen { double jnr_db; bool cw; double echo; double rx2_db; bool iq; double cwf; double satf; double chip; double delay; };
 
 // AD9361-like I/Q imbalance: gain error eps, phase error ph (degrees).
 static void iq_imbalance(cvec &x, double eps, double ph_deg) {
@@ -292,7 +317,7 @@ static int test_jammer(int id, Scen sc) {
     }
     // RX2 sees it through a different path: 0.15-sample delay, 0.8 dB, 40 deg,
     // and a slightly different filter.
-    cvec h2 = frac_delay(0.15, 21);
+    cvec h2 = frac_delay((sc.delay != 0) ? sc.delay : 0.15, 21);
     cvec hd = {cd(0.03, 0.01), 1.0, cd(-0.02, 0.015)};
     J2 = fir(fir(J, h2, 10), hd, 1);
     cd g2p = std::polar(std::pow(10, 0.8 / 20), 40 * M_PI / 180);
@@ -383,7 +408,7 @@ static int test_jammer(int id, Scen sc) {
     // evaluation segment after the training captures
     const int e0 = 3 * AJ_NSAMP;
     auto seg = [&](const cvec &v) { return cvec(v.begin() + e0, v.end()); };
-    struct Meas { double supp, loss, out_db, res; };
+    struct Meas { double supp, loss, out_db, res, lvl; };
     auto measure = [&](const aj_result_t &r, double gn, int shift) {
         Meas m;
         double sc4 = std::pow(4.0, shift);
@@ -412,17 +437,17 @@ static int test_jammer(int id, Scen sc) {
         for (size_t i = 0; i < ref.size(); i++) clean[i] = n1s[i] / g + ref[i] / g;
         m.loss = 10 * std::log10(snr(clean, 0) / snr(yx, SMI_REF));
         m.out_db = 10 * std::log10(pwr(yx, 32) / sc4 / pwr(seg(x1), 0));
+        // output level into the receiver against the clean level (RX1 noise at full gain, no jammer)
+        m.lvl = 10 * std::log10(pwr(yx, 32) / pn);
         // residual: output with jammer / output of the same weights on the
         // noise alone (0 dB = jammer fully removed)
         m.res = 10 * std::log10(pwr(yx, 32) / std::max(pwr(yn, 32), 1e-9));
         return m;
     };
     auto shift_for = [&](const aj_result_t &r) {
-        // the firmware's rule: 6 dB per step of RX gain cut, only while nulled
-        int s = (int)(cut_db / 6.0);
-        if (s > SMI_MAXSH) s = SMI_MAXSH;
-        if (r.res_db > 3.0) s = 0;
-        return s;
+        // the firmware's rule (aj_makeup_shift): restore the clean output level, 6 dB per
+        // step of RX gain cut, never more than 3 dB above it
+        return aj_makeup_shift((int)cut_db, r.res_db + aj_db10(1.0 + r.wn2), SMI_MAXSH);
     };
 
     std::printf("scenario %d: JNR %.0f dB%s%s, RX gain cut %.1f dB", id, sc.jnr_db,
@@ -449,6 +474,7 @@ static int test_jammer(int id, Scen sc) {
     std::printf("  space-time 31+2 taps: suppression %.1f dB, residual %+.2f dB, satellite SNR loss %.2f dB, output %+.2f dB re RX1%s\n",
                 m.supp, m.res, m.loss, m.out_db, sh ? "" : "");
     if (sh) std::printf("  output make-up    : %d (x%d, +%d dB)\n", sh, 1 << sh, 6 * sh);
+    std::printf("  output level      : %+.1f dB against the clean level (RX gain cut %.0f dB, make-up +%d dB)\n", m.lvl, cut_db, 6 * sh);
     std::printf("  firmware figures  : J/N %.1f dB, suppression %.1f dB, residual %+.1f dB, |w|^2 %.2f, loading %.1f LSB^2 (%d passes), weight scale 2^%d\n",
                 r.jn_db, r.supp_db, r.res_db, r.wn2, r.sig2, r.iters, r.ws);
     std::printf("  detection         : coherence %.3f at lag %d -> J/N %.1f dB, RX1 %.0f RX2 %.0f LSB^2\n",
@@ -493,6 +519,14 @@ static int test_jammer(int id, Scen sc) {
         ok = m.supp >= 35 && m.loss <= 3 && m.supp >= m2.supp + 10;
         break; }
     case 8: ok = m.supp >= 50; break;
+    case 11: case 12: case 13: {
+        // the level into the receiver must be back near the clean one: within -6 dB (the 6 dB step)
+        // and +3.5 dB
+        bool lvl_ok = m.lvl >= -6.5 && m.lvl <= 3.5;
+        if (id == 11) ok = m.supp >= 54 && m.loss <= 4.5 && lvl_ok;        // 61 dB: at the ADC's limit
+        else if (id == 12) ok = m.supp >= 54 && m.loss <= 1.0 && m.res <= 1.0 && lvl_ok;   // 51 dB
+        else ok = m.supp >= 50 && m.loss <= 0.6 && m.res <= 0.6 && lvl_ok;                   // 41 dB
+        break; }
     case 9: case 10: {
         // the weight scale off (ws = 0) on the same data, for comparison
         aj_result_t r0 = r;
@@ -525,6 +559,12 @@ int main(int argc, char **argv) {
     // CW on top of the GPS signal: 1575.4 MHz with the LO at 1582.5 MHz (-7.1 MHz), 61.44 MS/s
     case 9:  ok = test_jammer(9,  {62, true, 0, 0, true, -7.06 / 61.44, -7.06 / 61.44, 1.023 / 61.44}); break;
     case 10: ok = test_jammer(10, {68, true, 0, 0, true, -7.06 / 61.44, -7.06 / 61.44, 1.023 / 61.44}); break;
+    // barrage (noise) jammer over the whole band, I/Q imbalance, satellite at the LO, custom band 5:
+    // 1575.42 MHz, 18 MS/s. J/N from argv[2] (default 61: the field test at the jammer's "30" setting)
+    case 11: case 12: case 13: {
+        double jn = (argc > 2) ? std::atof(argv[2]) : (scen == 11 ? 61.0 : scen == 12 ? 51.0 : 41.0);
+        ok = test_jammer(scen, {jn, false, 0, 0, true, 0, -0.02 / 18.0, 1.023 / 18.0, (argc > 3) ? std::atof(argv[3]) : 0.055}); break; }
+    case 14: ok = test_makeup(); break;
     default: std::printf("unknown scenario %d\n", scen); ok = 0;
     }
     std::printf("SMI_PI_CSIM: %s (scenario %d)\n", ok ? "PASS" : "FAIL", scen);

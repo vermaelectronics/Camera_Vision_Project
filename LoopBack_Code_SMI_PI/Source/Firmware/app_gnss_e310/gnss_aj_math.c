@@ -449,6 +449,36 @@ static double out_power(double (*fr)[AJ_NW], double (*fi)[AJ_NW],
 	return fr[AJ_REF][AJ_REF] - 2.0 * mr + qr;
 }
 
+double aj_adc_excess_db(double jn_db)
+{
+	/* The jammer sits near full scale whatever its level (the RX gain follows it), about
+	 * 64 dB above the ADC's quantisation noise for a noise-like jammer (crest factor ~4);
+	 * the receiver's thermal noise is jn_db below the jammer: quant / thermal = 10^((jn-64)/10). */
+	double x = 1.0;
+	int n = (int)(jn_db - 64.0), k;
+	double step = (n >= 0) ? 1.2589 : 0.7943;
+	k = (n >= 0) ? n : -n;
+	while(k-- > 0) x *= step;
+	return aj_db10(1.0 + x);
+}
+
+int aj_makeup_shift(int cut_db, double out_db, int max_shift)
+{
+	/* Output relative to the clean level, in dB: -cut + 6 s + out_db. The target is
+	 * 0 dB (s = cut / 6, rounded down: at most 5 dB low); a filter that leaves the
+	 * jammer in (out_db large) is amplified only up to +AJ_OUT_HEADROOM_DB. */
+	int s_restore, s_safe, s;
+	if(cut_db <= 0) return 0;
+	if(max_shift > AJ_MAXSH) max_shift = AJ_MAXSH;
+	s_restore = cut_db / 6;
+	s_safe = (int)((double)cut_db - (out_db > 0.0 ? out_db : 0.0) + AJ_OUT_HEADROOM_DB);
+	s_safe = (s_safe < 0) ? -1 : s_safe / 6;
+	s = (s_restore < s_safe) ? s_restore : s_safe;
+	if(s > max_shift) s = max_shift;
+	if(s < 0) s = 0;
+	return s;
+}
+
 static int max_ws = AJ_MAXWS;
 void aj_set_max_ws(int ws) { max_ws = (ws < 0) ? 0 : (ws > AJ_MAXWS) ? AJ_MAXWS : ws; }
 

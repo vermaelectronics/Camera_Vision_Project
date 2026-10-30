@@ -574,7 +574,7 @@ static void info_registers(void)
     console_print("   0x100 AJ_W0..31       RW  SMI-PI weights (shadow), Q3.12\n");
     console_print("                             {imag, real}; 0-15 RX1, 16-31 RX2\n");
     console_print("   0x180 AJ_COMMIT       W/R write: all AJ_* -> filter; read: count\n");
-    console_print("   0x184 AJ_INFO         RO  0x10080C03 (16 taps, ref 8, Q3.12, v4.4)\n");
+    console_print("   0x184 AJ_INFO         RO  0x10080C04 (16 taps, ref 8, Q3.12, v4.5)\n");
     console_print("   0x188 AJ_CFG          RW  [0] bypass (reset 1), [10:8] make-up\n");
     console_print("   0x18C AJ_NORM         RW  RX2 normalisation g2, Q3.13 (0x2000=1)\n");
     console_print("   0x190 AJ_WC0/WC1      RW  image taps (0x190 RX1, 0x194 RX2)\n");

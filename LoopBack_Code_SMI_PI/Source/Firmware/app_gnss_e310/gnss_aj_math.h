@@ -60,6 +60,8 @@ extern "C" {
 #define AJ_WFRAC     12     /* Q3.12                                          */
 #define AJ_GFRAC     13     /* RX2 normalisation g2, Q3.13                    */
 #define AJ_MAXWS      5     /* weight scale: words hold w * 2^ws (SMI-PI 4.4)  */
+#define AJ_MAXSH      7     /* output make-up shift, 6 dB per step (4.5; the 4.1-4.4 core stops at 4) */
+#define AJ_OUT_HEADROOM_DB  3.0   /* output may be this far above the clean level      */
 #define AJ_NSAMP   4096     /* samples per block (one DMA capture)            */
 
 #define AJ_MODE_STAP  0     /* RX1 15 + RX2 16 + 2 image taps (default)       */
@@ -142,6 +144,14 @@ void aj_metrics(aj_result_t *r, double noise_ref);
  * filter was bypassed, the mode, g2 or the RX gain changed), so the next
  * solve and its suppression figure start from this block alone. */
 void aj_reset(void);
+/* Output make-up shift for an RX gain cut of cut_db and a filter output out_db above the
+ * noise (at the present gain, 0 = nothing but noise): restores the clean output level,
+ * 6 dB per step, but never leaves the output more than AJ_OUT_HEADROOM_DB above it. */
+int  aj_makeup_shift(int cut_db, double out_db, int max_shift);
+/* Expected excess of the receiver's noise floor, in dB, from the 12-bit ADC's own
+ * quantisation noise when a jammer jn_db above the noise has to be kept off full scale
+ * (about 0 below J/N 54, +1.8 dB at 61, +4 dB at 66, +8 dB at 71). */
+double aj_adc_excess_db(double jn_db);
 void aj_set_max_ws(int ws);   /* largest weight scale the bitstream supports; 0 = older than 4.4 */
 
 /* Helpers (no libm on the board). */

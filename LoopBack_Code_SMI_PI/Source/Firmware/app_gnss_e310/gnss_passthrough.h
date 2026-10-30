@@ -76,12 +76,12 @@
  * counter. */
 #define GNSS_PT_REG_AJ_W(k)         (0x100U + ((k) * 4U)) /* RW, k = 0..31    */
 #define GNSS_PT_REG_AJ_COMMIT       0x180U  /* W: commit, R: count            */
-#define GNSS_PT_REG_AJ_INFO         0x184U  /* RO 0x10080C03                  */
+#define GNSS_PT_REG_AJ_INFO         0x184U  /* RO 0x10080C04                  */
 #define GNSS_PT_REG_AJ_CFG          0x188U  /* RW [0] bypass, [10:8] shift, [14:12] weight scale */
 #define GNSS_PT_REG_AJ_NORM         0x18CU  /* RW g2, Q3.13 {im, re}          */
 #define GNSS_PT_REG_AJ_WC(k)        (0x190U + ((k) * 4U)) /* RW image taps 0,1 */
 #define GNSS_PT_REG_AJ_CFG_ACTIVE   0x198U  /* RO AJ_CFG as committed         */
-#define GNSS_PT_AJ_INFO_EXPECTED    0x10080C03U   /* layout 3 = v4.4 (weight scale) */
+#define GNSS_PT_AJ_INFO_EXPECTED    0x10080C04U   /* layout 4 = v4.5 (make-up shift to 7); 3 = v4.4 */
 #define GNSS_PT_AJ_CFG_BYPASS       0x1U
 #define GNSS_PT_AJ_CFG_SHIFT(s)     ((uint32_t)((s) & 7) << 8)
 #define GNSS_PT_AJ_CFG_WS(w)        ((uint32_t)((w) & 7) << 12)   /* weight scale: words hold w * 2^ws (4.4) */

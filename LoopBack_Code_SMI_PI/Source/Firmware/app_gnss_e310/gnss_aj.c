@@ -37,7 +37,6 @@ extern struct axi_dmac *rx_dmac;
 #define AJ_G2_MAX         (32767.0 / 8192.0)      /* AJ_NORM is Q3.13           */
 #define AJ_G2_MIN         0.125
 /* output make-up gain, status */
-#define AJ_SHIFT_RES_DB   3.0     /* make-up only while the residual is below   */
 #define AJ_NULL_RES_DB    3.0     /* NULLED when the residual first drops below */
 #define AJ_WARN_RES_DB    3.0     /* residual above this while jammed ...        */
 #define AJ_WARN_US        1000000U /* ... for this long: warn                    */
@@ -64,6 +63,7 @@ static aj_result_t res;
 static int      res_valid, res_solved;
 
 static uint32_t n_upd, n_det, n_fail, n_skip, cnt_upd, cnt_det, upd_rate, det_rate;
+static int      sh_max = 4;        /* largest make-up shift the bitstream has (layout 4: 7, older: 4) */
 static int      ws_hw = 1;         /* the bitstream has the weight scale (layout >= 3) */
 static int      state, on_cnt, on_why, jam_announced, jam_nulled, shift, on_ev;
 static XTime    jam_t0, quiet_t0, res_bad_t0, clear_t0, trig_t0;
@@ -742,14 +742,24 @@ static void jammed_state(XTime now)
 	if(res.res_db <= AJ_WARN_RES_DB)
 		res_bad_t0 = now;
 	if(jam_announced && now - res_bad_t0 >= us(AJ_WARN_US) &&
-	   now - t_warn >= us(5000000U) && !jam_silent && ev_print(now)) {
+	   now - t_warn >= us(30000000U) && !jam_silent && ev_print(now)) {
 		t_warn = now;
 		stamp(now);
+		if(cut_db() >= 25 && res.jn_db >= 54.0) {
+			console_print("WARNING residual %s dB at J/N %s dB: the jammer is this far above the noise that the RX gain\n"
+				      "     is cut by %d dB to keep it off the 12-bit ADC, and the ADC's own quantisation noise is part\n"
+				      "     of the residual (about +%s dB at this J/N). That is the limit of the hardware, not leakage.\n"
+				      "     Satellites in the jammer's direction are nulled with it. Output level %s dB re clean.\n"
+				      "     Less jammer power or an attenuator before the board helps (gnss_report?).\n",
+				      f1(res.res_db), f1(res.jn_db), (long)cut_db(), f1u(aj_adc_excess_db(res.jn_db)),
+				      f1(-cut_db() + 6 * shift + gnss_rxg_comp_db()));
+		} else {
 		console_print("WARNING residual %s dB: the jammer is not fully nulled.\n"
 			      "     Two antennas null ONE direction (plus its reflections). Check that\n"
 			      "     RX2 has its antenna, that there is a single jammer, and the ADC peak\n"
 			      "     (gnss_rx_gain?).%s\n", f1(res.res_db),
 			      (char*)(aj_mode == AJ_MODE_STAP ? "" : " gnss_aj_mode=0 uses all 31+2 taps."));
+		}
 		add_event(now, EV_LEAK, res.res_db, res.jn_db, 0.0);
 	}
 }
@@ -781,10 +791,10 @@ static void solve_capture(XTime now)
 	n_upd++;
 	cnt_upd++;
 
-	/* Output make-up gain: 6 dB per step of RX gain cut, only while the
-	 * jammer is nulled. Down at once, up one step per update. */
-	want = (res.res_db <= AJ_SHIFT_RES_DB) ? cut_db() / 6 : 0;
-	if(want > 4) want = 4;
+	/* Output make-up gain: 6 dB per step of RX gain cut (up to 42 dB), so the
+	 * output into the receiver stays at the clean level; never more than 3 dB
+	 * above it (aj_makeup_shift). Down at once, up one step per update. */
+	want = aj_makeup_shift(cut_db(), res.res_db + aj_db10(1.0 + res.wn2), sh_max);
 	if(want < shift)      shift = want;
 	else if(want > shift) shift++;
 	if(!aj_frozen)
@@ -869,10 +879,12 @@ void gnss_aj_init(void)
 	 * An older bitstream would multiply the filter by 2^ws, so it is never used there. */
 	ws_hw = ((gnss_pt_read(GNSS_PT_REG_AJ_INFO) & 0xFFU) >= 3U);
 	aj_set_max_ws(ws_hw ? AJ_MAXWS : 0);
-	if(!ws_hw)
-		console_print("[AJ] NOTE: the bitstream is older than 4.4 (AJ_INFO layout %d): weight scale off, a CW 60 dB or\n"
-			      "     more above the noise is cancelled less well. Rebuild the whole project (not firmware only).\n",
-			      (long)(gnss_pt_read(GNSS_PT_REG_AJ_INFO) & 0xFFU));
+	sh_max = ((gnss_pt_read(GNSS_PT_REG_AJ_INFO) & 0xFFU) >= 4U) ? AJ_MAXSH : 4;
+	if(sh_max < AJ_MAXSH)
+		console_print("[AJ] NOTE: the bitstream is older than 4.5 (AJ_INFO layout %d): %s make-up shift limited to %d (+%d dB).\n"
+			      "     Rebuild the whole project (not firmware only) for the full 4.5 behaviour.\n",
+			      (long)(gnss_pt_read(GNSS_PT_REG_AJ_INFO) & 0xFFU),
+			      (char*)(ws_hw ? "" : "weight scale off,"), (long)sh_max, (long)(6 * sh_max));
 }
 
 void gnss_aj_command(int on)
@@ -1070,6 +1082,9 @@ void gnss_aj_report(void)
 	console_print("\n");
 	console_print("rx gain       : %d dB both channels (clean reference %d), ADC peak %d of 2047\n",
 		      (long)cur_gain(), (long)gnss_rxg_ref(), (long)gnss_rxg_peak());
+	if(cut_db() > 0)
+		console_print("output level  : %s dB re the clean level into the receiver (RX gain cut %d dB, make-up +%d dB, TX hold +%d dB)\n",
+			      f1(-cut_db() + 6 * shift + gnss_rxg_comp_db()), (long)cut_db(), (long)(6 * shift), (long)gnss_rxg_comp_db());
 	console_print("normalisation : g2 = %s (%s dB) %s; RX2 noise after it = %s x RX1\n",
 		      f3u(g2), f1(aj_db10(g2 * g2)), (char*)g2_src_txt(), f2u(rx2n));
 	if(nf0 > 0.0)

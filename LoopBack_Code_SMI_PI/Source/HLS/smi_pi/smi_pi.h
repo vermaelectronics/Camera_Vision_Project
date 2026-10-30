@@ -18,11 +18,11 @@
 #define SMI_WFRAC 12          // weights are signed Q3.12 (1.0 = 4096)
 #define SMI_GFRAC 13          // RX2 normalisation gain, signed Q3.13 (1.0 = 8192)
 #define SMI_XFRAC  2          // fractional bits kept on the normalised RX2
-#define SMI_MAXSH  4          // largest output make-up shift (x16 = +24 dB)
+#define SMI_MAXSH  7          // largest output make-up shift (x128 = +42 dB; 4.1 to 4.4: 4)
 
 // cfg bits
 #define SMI_CFG_BYPASS   0x1u  // 1 = output x1[n-8]: no weights at all
-#define SMI_CFG_SH_LSB   8     // [10:8] output make-up shift, 0..4 (6 dB each)
+#define SMI_CFG_SH_LSB   8     // [10:8] output make-up shift, 0..7 (6 dB each; 4.5: up to 7)
 #define SMI_CFG_WS_LSB   12    // [14:12] weight scale ws, 0..5: the weight words hold
                                //   w * 2^ws, the core divides the sum by 2^ws (SMI-PI 4.4)
 #define SMI_MAXWS        5
@@ -41,7 +41,7 @@
 //            each {imag[31:16], real[15:0]}, signed Q3.12.
 // wcj      : image taps, [31:0] c1 (RX1), [63:32] c2 (RX2 normalised), same
 //            word format as wts.
-// cfg      : [0] bypass, [10:8] output make-up shift s (0..4),
+// cfg      : [0] bypass, [10:8] output make-up shift s (0..7),
 //            [14:12] weight scale ws (0..5; 6, 7 act as 5).
 //            The weight words are w * 2^ws (still signed Q3.12). A jammer that
 //            is 60-70 dB above the noise needs the weights to 1e-4 or better;

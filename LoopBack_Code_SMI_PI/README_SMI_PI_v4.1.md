@@ -12,6 +12,13 @@
 Version 4.1.5 of `LoopBack_Code_SMI_PI`. It builds on v4.0 (the space-time
 filter) and makes these changes to the FPGA, the firmware and the scripts.
 
+> **Barrage jammer J/N about 60 dB, output level (firmware 4.5.0, bitstream 4.5).** With the jammer
+> at J/N 61 dB the board showed a residual of +4.8 dB and the make-up gain stayed at 0, so the level into
+> the receiver was about 30 dB below the clean one (TX attenuation 34 dB leaves the level hold only 4 dB).
+> The make-up gain now goes up to +42 dB and restores the clean level (never more than 3 dB above it);
+> IP smi_pi 2.3, **whole project rebuilt**. The ADC (12 bit) is the physical limit above J/N 60 dB.
+> Details, simulation table, limits: `README_SMI_PI_v4.5_barrage.md`; test T8 in `TESTING_PUTTY.md`. Not run on the board.
+
 > **Sharp CW on top of the GPS signal, J/N 60-75 dB (firmware 4.4.0, bitstream 4.4).**
 > After the field test of 28-Oct-2026 (CW at 1575.4 MHz, 15 dBm: no satellite): the
 > weights were rounded to 2.4e-4 steps, which limited the null of a very strong CW to
@@ -171,7 +178,7 @@ learned noise floor, so it also works when the jammer is already on at boot.
 |---|---|
 | `Source/HLS/smi_pi/smi_pi.cpp`, `.h` | **Rewritten.** New interface `smi_pi(s_axis_x, m_axis_y, wts[1024], wcj[64], cfg[32], nrm[32])`. The pipeline normalises RX2 (`x2n = g2·x2`, Q3.13 × Q0 → Q2, 18 bits, cannot overflow), then runs 31 space-time taps and 2 image taps `c1·conj(x1[n-8]) + c2·conj(x2n[n-8])`. Then bypass (`cfg[0]`) and the make-up shift (`cfg[10:8]`, 0–4). The accumulator is Q14 in 48 bits, rounded to nearest after the shift and saturated to 16 bits. 99 + 4 multipliers. Still II=1 at 100 MHz. |
 | `Source/HLS/smi_pi/testbench.cpp` | **Rewritten.** The bit-exact test now covers normalisation, image taps, bypass and the shift over all ranges. 10 scenarios, listed in §4. |
-| `Source/HLS/smi_pi/build_hls.tcl` | Runs 10 C-sim scenarios. Packages IP **`antsdr:gnss:smi_pi:2.2`**. |
+| `Source/HLS/smi_pi/build_hls.tcl` | Runs 14 C-sim scenarios. Packages IP **`antsdr:gnss:smi_pi:2.3`**. |
 | `Source/HDL/gnss_passthrough.v` | VERSION **0x00040001** (4.1). New shadow registers **AJ_CFG 0x188** (reset `0x1` = bypass), **AJ_NORM 0x18C** (reset `0x2000` = 1.0), **AJ_WC0/1 0x190/0x194** (image taps), and **AJ_CFG_ACTIVE 0x198** (read-only). All of them are committed together with AJ_W by AJ_COMMIT in one clock edge. New ports `aj_wcj`, `aj_cfg`, `aj_nrm`. AJ_INFO is 0x10080C02. |
 | `Source/BlockDesign/system_bd.tcl` | Wires `aj_wcj→wcj`, `aj_cfg→cfg`, `aj_nrm→nrm`. Requires smi_pi **2.2**, so a stale 2.0 / 2.1 from an earlier build is refused with a clear message. |
 

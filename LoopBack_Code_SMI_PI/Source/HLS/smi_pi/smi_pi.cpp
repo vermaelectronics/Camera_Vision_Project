@@ -32,13 +32,17 @@
 //       The firmware keeps the filter bypassed while there is no jammer and
 //       switches it in when one appears. Same 8-sample delay in both modes,
 //       so switching never shifts the satellites' code phase.
-//    4. OUTPUT MAKE-UP GAIN   y <<= s, s = cfg[10:8] (0..4, 6 dB each)
+//    4. OUTPUT MAKE-UP GAIN   y <<= s, s = cfg[10:8] (0..7, 6 dB each)
 //       A strong jammer makes the RX gain loop cut the gain (26 dB for a
-//       jammer 50 dB above the noise); the satellites then reach the output
-//       at a few LSB, and rounding them to integers would cost SNR. The
-//       accumulator has 14 fractional bits, so the shift restores the level
-//       before the rounding, at no cost in precision. The firmware only sets
-//       it while the jammer is nulled (a leaking jammer is never amplified).
+//       jammer 50 dB above the noise, 36 dB at 61 dB); the satellites then
+//       reach the output at a few LSB, and rounding them to integers would
+//       cost SNR. The accumulator has 14 fractional bits, so the shift
+//       restores the level before the rounding, at no cost in precision.
+//       v4.5: up to 7 steps (+42 dB, was 4 = +24 dB). The output into the
+//       GNSS receiver has to stay at the clean level, or its own noise starts
+//       to dominate. The firmware (aj_makeup_shift) sets the shift from the
+//       gain cut and the residual so that the output is never more than 3 dB
+//       above the clean level (a leaking jammer is never amplified).
 //
 //  WEIGHT SCALE (v4.4)
 //    The weight words hold w * 2^ws (ws = cfg[14:12], 0..5) and the sum of the

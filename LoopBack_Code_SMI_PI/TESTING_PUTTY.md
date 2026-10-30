@@ -67,9 +67,9 @@ things: J/N is relative to the board's noise.
 
 1. Power on with PuTTY connected. Look for:
    ```
-   gnss_pt: present at 0x43c00000, version 4.4
+   gnss_pt: present at 0x43c00000, version 4.5
    SELFTEST: PASS ...
-   ANTI-JAM (SMI-PI 4.4.0): ON, bypassed until a jammer appears.
+   ANTI-JAM (SMI-PI 4.5.0): ON, bypassed until a jammer appears.
    ```
 2. Type `gnss_band?`. All five signals must show `OK` and both FIRs `off`.
 3. Type `gnss_report?` and keep the block.
@@ -159,6 +159,23 @@ write down if you use another value, 20 dB makes the output into the receiver 50
 5. Switch the jammer off: `jammer OFF ... filter bypassed` must appear, and the satellites
    must come back within a few seconds.
 
+### T8. Barrage (noise) jammer, 50 MHz wide, on 1575.4 MHz (firmware 4.5.0)
+
+Set the radio the way the field test did: `gnss_band=5 1575.42 18 20 70 30` (LO 1575.42 MHz, 18 MS/s,
+20 MHz, TX att 70 dB, RX gain 30 dB). Then `gnss_tx=1`. If you need a lower TX attenuation to get
+the receiver to lock without a jammer (the field test used 34 dB), set it first and keep it.
+
+1. No jammer: `gnss_report?`, satellites seen/used, average C/N0 (the reference).
+2. Jammer on at "10", "20", "25", "30" (your generator's steps, 10 dB below its maximum of 40 for
+   "30"). At each: wait 60 s, then `gnss_report?`.
+3. Copy from each block: `jammer` (J/N), `suppression`, `residual`, `rx gain`, **`output level`**
+   (new: should be between about -6 and +3 dB), `ADC peak`, `weights ... scale`, and the satellites
+   seen/used per system and the average C/N0.
+4. Expected from the simulation (README_SMI_PI_v4.5_barrage.md §4): J/N up to about 51 dB (jammer
+   "20"): nothing lost; 56 dB: about 1 dB; 61 dB: about 3 dB; above 66 dB: 5 dB and more.
+5. If `output level` is far below -6 dB, tell me the `rx gain` lines and the TX attenuation: the level hold or
+   the make-up is not reaching the clean level.
+
 ---
 
 ## 4. Report template (copy, fill in, paste into your next message)
@@ -198,6 +215,10 @@ T3  generator  printed J/N  suppression  residual  NULLED in  sats used (G/E/R/C
 T7  CW 1575.4   dBm  J/N   suppression  residual  rx gain / ADC peak  weight scale  sats G/E/R/C  avg C/N0  fix
     ___            ____  ____         ____      ____ / ____         2^_           __/__/__/__   ____      y/n
     ___            ____  ____         ____      ____ / ____         2^_           __/__/__/__   ____      y/n
+
+T8  barrage 1575.4  setting  J/N  suppression  residual  output level  rx gain / ADC peak  sats G/E/R/C  avg C/N0  fix
+    ___            ____   ____   ____       ____          ____ / ____         __/__/__/__   ____      y/n
+    ___            ____   ____   ____       ____          ____ / ____         __/__/__/__   ____      y/n
 
 T4  kept fix through on/off?  30 dB: y/n   50 dB: y/n
 T5  detected at boot? y/n, NULLED in ___ ms, time to fix ___ s
