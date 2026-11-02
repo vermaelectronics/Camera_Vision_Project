@@ -287,7 +287,11 @@ static int test_makeup() {
 }
 
 // ---- scenarios 2..8 ------------------------------------------------------------
-struct Scen { double jnr_db; bool cw; double echo; double rx2_db; bool iq; double cwf; double satf; double chip; double delay; };
+// kind: 0 as before (noise or CW by .cw), 2 chirp (sawtooth sweep of k2 x fs in k1 samples),
+// 3 pulsed noise (period k1 samples, on-fraction k2; J/N is the level inside the pulse),
+// 4 CW that hops from k1 x fs to k1+k2 x fs after the three training captures (stale weights)
+struct Scen { double jnr_db; bool cw; double echo; double rx2_db; bool iq; double cwf; double satf; double chip; double delay;
+              int kind = 0; double k1 = 0, k2 = 0; };
 
 // AD9361-like I/Q imbalance: gain error eps, phase error ph (degrees).
 static void iq_imbalance(cvec &x, double eps, double ph_deg) {
@@ -309,7 +313,19 @@ static int test_jammer(int id, Scen sc) {
     const double IQ1_EPS = 0.004, IQ1_PH = 0.3, IQ2_EPS = -0.003, IQ2_PH = -0.4;
     cvec J(N), J2, n1(N), n2(N), s1(N), s2(N);
     // jammer
-    if (sc.cw) {
+    if (sc.kind == 2) {
+        double ph = 0;
+        for (int i = 0; i < N; i++) {
+            double fr = -sc.k2 / 2 + sc.k2 * std::fmod((double)i, sc.k1) / sc.k1;
+            ph += 2 * M_PI * fr; J[i] = std::polar(1.0, ph);
+        }
+    } else if (sc.kind == 4) {
+        double ph = 0;
+        for (int i = 0; i < N; i++) {
+            double fr = (i < 3 * AJ_NSAMP) ? sc.k1 : sc.k1 + sc.k2;
+            ph += 2 * M_PI * fr; J[i] = std::polar(1.0, ph);
+        }
+    } else if (sc.cw) {
         for (int i = 0; i < N; i++) J[i] = std::polar(1.0, 2 * M_PI * cwf * i);
     } else {
         for (int i = 0; i < N; i++) J[i] = cd(grand(), grand());
@@ -330,6 +346,9 @@ static int test_jammer(int id, Scen sc) {
     double pj = pwr(J, 0), pn = 2 * nrms * nrms;
     double js = (sc.jnr_db > -90) ? std::sqrt(pn * std::pow(10, sc.jnr_db / 10) / pj) : 0.0;
     for (int i = 0; i < N; i++) { J[i] *= js; J2[i] *= js; }
+    if (sc.kind == 3)
+        for (int i = 0; i < N; i++)
+            if (std::fmod((double)i, sc.k1) >= sc.k1 * sc.k2) { J[i] = 0; J2[i] = 0; }
     // noise and satellite
     int chip = 1; double cph = 0;
     for (int i = 0; i < N; i++) {
@@ -565,6 +584,14 @@ int main(int argc, char **argv) {
         double jn = (argc > 2) ? std::atof(argv[2]) : (scen == 11 ? 61.0 : scen == 12 ? 51.0 : 41.0);
         ok = test_jammer(scen, {jn, false, 0, 0, true, 0, -0.02 / 18.0, 1.023 / 18.0, (argc > 3) ? std::atof(argv[3]) : 0.055}); break; }
     case 14: ok = test_makeup(); break;
+    // exploration: 15 chirp / 3 pulse / hop. argv: kind jn k1 k2
+    case 15: {
+        int kind = (argc > 2) ? std::atoi(argv[2]) : 2;
+        double jn = (argc > 3) ? std::atof(argv[3]) : 40, k1 = (argc > 4) ? std::atof(argv[4]) : 600, k2 = (argc > 5) ? std::atof(argv[5]) : 0.8;
+        Scen sc = {jn, kind == 4, 0, 0, true, 0, 0, 0, 0};
+        sc.kind = kind; sc.k1 = k1; sc.k2 = k2;
+        if (kind == 4) sc.cwf = k1;
+        ok = test_jammer(15, sc); break; }
     default: std::printf("unknown scenario %d\n", scen); ok = 0;
     }
     std::printf("SMI_PI_CSIM: %s (scenario %d)\n", ok ? "PASS" : "FAIL", scen);

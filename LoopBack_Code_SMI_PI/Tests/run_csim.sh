@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# C simulation of the SMI-PI core + the firmware's weight solver, scenarios 1-14, with g++
+# C simulation of the SMI-PI core + the firmware's weight solver, scenarios 1-14, with g++ (scenario 15 = chirp/pulse/hop exploration, see README_SMI_PI_v4.5_chirp_pulse.md)
 # (no Vitis needed): HLS_INCLUDE=<dir that holds ap_int.h>  Tests/run_csim.sh
 set -e
 cd "$(dirname "$0")/.."
