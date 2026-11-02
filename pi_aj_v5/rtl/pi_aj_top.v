@@ -237,20 +237,24 @@ module pi_aj_top #(
     // ------------------------------------------------------------ monitors
     // RX2 and post-notch powers
     reg signed [DW-1:0] m1r, m1i, mnr, mni;
-    reg                 mv;
+    reg                 mv, mv2;
     reg [2*DW+12:0]     p_rx2, p_nt;
-    wire [2*DW:0]       q_rx2 = m1r*m1r + m1i*m1i;
-    wire [2*DW:0]       q_nt  = mnr*mnr + mni*mni;
+    reg [2*DW:0]        q_rx2, q_nt;            // registered squares (DSP48 PREG)
     always @(posedge clk) begin
         if (rst) begin
-            mv <= 0; p_rx2 <= 0; p_nt <= 0;
+            mv <= 0; mv2 <= 0; p_rx2 <= 0; p_nt <= 0;
         end else begin
             mv <= nc_v;
             if (nc_v) begin
                 m1r <= fe1r; m1i <= fe1i;       // RX2 (time alignment irrelevant)
                 mnr <= nc0r; mni <= nc0i;
             end
+            mv2 <= mv;
             if (mv) begin
+                q_rx2 <= m1r*m1r + m1i*m1i;
+                q_nt  <= mnr*mnr + mni*mni;
+            end
+            if (mv2) begin
                 if ({q_rx2, 12'd0} >= p_rx2) p_rx2 <= p_rx2 + (({q_rx2, 12'd0} - p_rx2) >> 12);
                 else                         p_rx2 <= p_rx2 - ((p_rx2 - {q_rx2, 12'd0}) >> 12);
                 if ({q_nt, 12'd0} >= p_nt)   p_nt  <= p_nt  + (({q_nt, 12'd0} - p_nt) >> 12);
@@ -281,8 +285,11 @@ module pi_aj_top #(
 
     wire [31:0] status = {19'd0, ag_sh, 2'b00, pi_overrun, pi_late, overload,
                           nc_act, nb_act, na_act};
-    wire [31:0] p_rx2_o = p_rx2[2*DW+12:12] > 32'hFFFFFFFF ? 32'hFFFFFFFF : p_rx2[43:12];
-    wire [31:0] p_nt_o  = p_nt [2*DW+12:12] > 32'hFFFFFFFF ? 32'hFFFFFFFF : p_nt [43:12];
+    reg  [31:0] p_rx2_o, p_nt_o;
+    always @(posedge clk) begin
+        p_rx2_o <= (|p_rx2[2*DW+12:44]) ? 32'hFFFFFFFF : p_rx2[43:12];
+        p_nt_o  <= (|p_nt [2*DW+12:44]) ? 32'hFFFFFFFF : p_nt [43:12];
+    end
     wire [351:0] st_clk = {samples, w_im, w_re, clip_cnt,
                            a2_im[17:2], a2_re[17:2], a1_im[17:2], a1_re[17:2],
                            p_out, p_nt_o, p_rx2_o, pin0_a, status};

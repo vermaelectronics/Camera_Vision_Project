@@ -20,7 +20,7 @@
 `timescale 1ns / 1ps
 module pi_aj_axis #(
     parameter NL         = 10,   // PI lanes: 10 -> 3 clocks/sample (33 MS/s @100 MHz)
-    parameter DELAY      = 4,    // PI update delay (>= (K+9)/clocks-per-sample)
+    parameter DELAY      = 4,    // PI update delay (>= (K+10)/clocks-per-sample)
     parameter L          = 5,
     parameter WL         = 1,
     parameter HAS_NOTCH2 = 0     // second CW notch (off by default: DSP budget)

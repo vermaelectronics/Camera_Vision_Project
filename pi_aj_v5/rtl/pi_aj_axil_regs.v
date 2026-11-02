@@ -3,7 +3,7 @@
 //
 //  off  name      acc  description
 //  0x00 ID        R    0x50494A35 "PIJ5"
-//  0x04 VERSION   R    0x00050002  (5.0.2)
+//  0x04 VERSION   R    0x00050003  (5.0.3)
 //  0x08 CONTROL   RW   [0] core_en   (0: TX1 = RX1 bypass)          def 1
 //                      [1] notch_en  (CW notch #1, self-gated)       def 1
 //                      [2] notch2_en (CW notch #2, 2nd CW jammer)    def 0
@@ -78,7 +78,7 @@ module pi_aj_axil_regs (
     input  wire [31:0]  caps
 );
     localparam [31:0] ID      = 32'h50494A35;
-    localparam [31:0] VERSION = 32'h00050002;
+    localparam [31:0] VERSION = 32'h00050003;
 
     assign s_axi_bresp = 2'b00;
     assign s_axi_rresp = 2'b00;

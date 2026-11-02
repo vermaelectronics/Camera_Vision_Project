@@ -26,9 +26,15 @@
 //
 // Time-multiplexed: NL complex lanes handle NW weights in K = ceil(NW/NL)
 // clocks per sample. Requirements:   K >= 2,   clocks/sample >= K+1,
-//                                    DELAY*(clocks/sample) >= K + 9
+//                                    DELAY*(clocks/sample) >= K + 10
 // (defaults NW=19, NL=5 -> K=4: 5 clocks/sample, e.g. 18 MS/s @ >= 90 MHz;
 //  NL=10 -> K=2: 3 clocks/sample with DELAY=4.)  overrun / late flag violations.
+//
+// Timing (rev 3): the weight is read only one clock before its update is
+// added (PDb), so the read-modify-write loop is 2 clocks and needs no
+// forwarding; the update u*conj(e)*2^-s is shifted in two stages (PDa: by
+// 8*s[5:3], PDb: by s[2:0]); the output rounding constant is preloaded into
+// lane 0's accumulator, so P6 is one subtraction + saturation.
 // ============================================================================
 `timescale 1ns / 1ps
 module pi_aj_wlpi #(
@@ -97,19 +103,24 @@ module pi_aj_wlpi #(
         f_cj = (i >= 2*L-1) ? 1 : 0;
     endfunction
 
-    // index of the highest set bit (0 when v == 0); log-depth search
-    function [6:0] msb;
+    // leading one in two clocked steps: thermometer (each bit an OR-reduce),
+    // then one-hot -> index. Same result as msb() (0 when v == 0).
+    function [PWID-1:0] therm;
         input [PWID-1:0] v;
-        reg [63:0] x;
+        integer i;
+        for (i = 0; i < PWID; i = i + 1)
+            therm[i] = |(v >> i);
+    endfunction
+    function [6:0] th_pos;
+        input [PWID-1:0] t;
+        reg   [PWID:0]   te;
+        integer i;
         begin
-            x = v;
-            msb = 0;
-            if (x[63:32] != 0) begin msb = msb + 32; x = x >> 32; end
-            if (x[31:16] != 0) begin msb = msb + 16; x = x >> 16; end
-            if (x[15:8]  != 0) begin msb = msb + 8;  x = x >> 8;  end
-            if (x[7:4]   != 0) begin msb = msb + 4;  x = x >> 4;  end
-            if (x[3:2]   != 0) begin msb = msb + 2;  x = x >> 2;  end
-            if (x[1]     != 0) begin msb = msb + 1;               end
+            te = {1'b0, t};
+            th_pos = 0;
+            for (i = 0; i < PWID; i = i + 1)
+                if (te[i] && !te[i+1])
+                    th_pos = th_pos | i;
         end
     endfunction
 
@@ -169,9 +180,12 @@ module pi_aj_wlpi #(
     reg signed [8:0]    sh_upd;
 
     // power normaliser pipeline
-    reg              pv0, pv1;
-    reg [7:0]        psid0, psid1;
+    reg              pv0, pv1, pv2, pv3, pv4;
+    reg [7:0]        psid0, psid1, psid2, psid3, psid4;
+    reg [PWID-1:0]   pacc_th;
+    reg [2*DW:0]     ipa, ipb;      // |x0|^2, |x1|^2 (registered DSP48 sums)
     reg [2*DW+1:0]   ip;
+    reg [6:0]        lp_m;
     reg [PWID-1:0]   pacc;
 
     // a new sample may arrive in the last issue cycle of the current pass
@@ -179,15 +193,20 @@ module pi_aj_wlpi #(
     wire [7:0] lag_n = sid_ctr - done_ctr;   // samples whose error is pending
 
     // per-lane pipeline registers
-    reg signed [WW-1:0]   p0_w_re [0:NL-1], p0_w_im [0:NL-1];
     reg signed [OPW-1:0]  p0_uf_re[0:NL-1], p0_uf_im[0:NL-1];
     reg signed [OPW-1:0]  p0_uu_re[0:NL-1], p0_uu_im[0:NL-1];
     reg                   p0_val  [0:NL-1];
 
     reg signed [2*DW+1:0] p1_up_re[0:NL-1], p1_up_im[0:NL-1];
-    reg signed [WW-1:0]   p1_w_re [0:NL-1], p1_w_im [0:NL-1];
     reg signed [OPW-1:0]  p1_uf_re[0:NL-1], p1_uf_im[0:NL-1];
     reg                   p1_val  [0:NL-1];
+
+    // PDa: update coarsely shifted by 8*s[5:3] (+ the bit just below it)
+    localparam TW = 2*DW + 2 + 16;          // width of up * 2^16
+    reg signed [TW-1:0]   pa_t_re [0:NL-1], pa_t_im [0:NL-1];
+    reg                   pa_g_re [0:NL-1], pa_g_im [0:NL-1];
+    reg signed [OPW-1:0]  pa_uf_re[0:NL-1], pa_uf_im[0:NL-1];
+    reg                   pa_val  [0:NL-1];
 
     // PD: rounded/shifted update, clamped to the weight range (+ flags)
     reg signed [WW+1:0]   pd_dl_re[0:NL-1], pd_dl_im[0:NL-1];
@@ -207,11 +226,11 @@ module pi_aj_wlpi #(
     reg signed [WM+OPW+4:0] acc_re [0:NL-1], acc_im [0:NL-1];
 
     // stage control (common to all lanes)
-    reg s0, s1, sd, s2, s3, s4, s4b, s5;
-    reg f0, f1, fd, f2, f3;        // first cycle of a pass
-    reg l0, l1, ld, l2, l3, l4;    // last cycle of a pass
-    reg [7:0] q0, q1, qd, q2, q3, q4, q4b, q5;   // sample id
-    reg [3:0] c0, c1, cd;               // issue cycle of the P0/P1/PD data
+    reg s0, s1, sa, sd, s2, s3, s4, s4b, s5;
+    reg f0, f1, fa, fd, f2, f3;    // first cycle of a pass
+    reg l0, l1, la, ld, l2, l3, l4;  // last cycle of a pass
+    reg [7:0] q0, q1, qa, qd, q2, q3, q4, q4b, q5;   // sample id
+    reg [3:0] c0, c1, ca, cd;           // issue cycle of the P0/P1/PDa/PDb data
     reg signed [WM+OPW+8:0] sum5_re, sum5_im;
     // lane sum in two stages: groups of 4 lanes, then the groups
     localparam NG = (NL + 3) / 4;
@@ -226,7 +245,11 @@ module pi_aj_wlpi #(
     wire signed [WM-1:0] wm_im [0:NL-1];
 
     // shift amount for the update (shared): s = sh_upd + 16, clamp [0,63]
-    reg  [5:0] sh_p1;
+    reg  [5:0] sh_p1;          // with the P0 data
+    reg  [5:0] sh_1;           // with the P1 data (coarse part used in PDa)
+    reg  [2:0] sh_lo;          // with the PDa data (fine part used in PDb)
+    wire signed [TW-1:0] tac_re [0:NL-1], tac_im [0:NL-1];
+    wire                 tg_re  [0:NL-1], tg_im  [0:NL-1];
     wire signed [WW+1:0] dlc_re [0:NL-1];
     wire signed [WW+1:0] dlc_im [0:NL-1];
     wire                 dov_re [0:NL-1], dun_re [0:NL-1], dov_im [0:NL-1], dun_im [0:NL-1];
@@ -237,24 +260,34 @@ module pi_aj_wlpi #(
     genvar gl;
     generate
         for (gl = 0; gl < NL; gl = gl + 1) begin : g_lane
-            // P1 -> PD: the shifted update. Round-half-up is split in two:
-            // (t + 2^(s-1)) >>> s == (t >>> s) + t[s-1], so this stage only
-            // shifts (no 64-bit adder before the shifter) and the rounding
-            // bit is added as a carry-in in P2. Overflow is a sign-bit check.
+            // P1 -> PDa -> PDb: the shifted update t >>> s, t = up * 2^16.
+            // Round-half-up is split in two: (t + 2^(s-1)) >>> s ==
+            // (t >>> s) + t[s-1], so no adder sits before the shifter and the
+            // rounding bit is added as a carry-in in P2. The shift itself is
+            // split in a coarse (8*s[5:3]) and a fine (s[2:0]) stage; the bit
+            // t[s-1] is t[8*hi-1] (kept by PDa) when s[2:0] == 0.
+            // Overflow is a sign-bit check.
             wire signed [63:0] t_re  = $signed(p1_up_re[gl]) <<< 16;
             wire signed [63:0] t_im  = $signed(p1_up_im[gl]) <<< 16;
-            wire signed [63:0] sh_re = t_re >>> sh_p1;
-            wire signed [63:0] sh_im = t_im >>> sh_p1;
-            wire [64-WW:0]     hb_re = sh_re[63:WW-1];   // must all equal the sign
-            wire [64-WW:0]     hb_im = sh_im[63:WW-1];
-            assign dov_re[gl] = ~sh_re[63] & (|hb_re);
-            assign dun_re[gl] =  sh_re[63] & ~(&hb_re);
-            assign dov_im[gl] = ~sh_im[63] & (|hb_im);
-            assign dun_im[gl] =  sh_im[63] & ~(&hb_im);
+            wire        [5:0]  hi8   = {sh_1[5:3], 3'b000};
+            wire signed [63:0] ta_re = t_re >>> hi8;
+            wire signed [63:0] ta_im = t_im >>> hi8;
+            assign tac_re[gl] = ta_re[TW-1:0];          // bits above are the sign
+            assign tac_im[gl] = ta_im[TW-1:0];
+            assign tg_re[gl]  = (hi8 == 0) ? 1'b0 : t_re[hi8 - 1];
+            assign tg_im[gl]  = (hi8 == 0) ? 1'b0 : t_im[hi8 - 1];
+            wire signed [TW-1:0] sh_re = pa_t_re[gl] >>> sh_lo;
+            wire signed [TW-1:0] sh_im = pa_t_im[gl] >>> sh_lo;
+            wire [TW-WW:0]     hb_re = sh_re[TW-1:WW-1];   // must all equal the sign
+            wire [TW-WW:0]     hb_im = sh_im[TW-1:WW-1];
+            assign dov_re[gl] = ~sh_re[TW-1] & (|hb_re);
+            assign dun_re[gl] =  sh_re[TW-1] & ~(&hb_re);
+            assign dov_im[gl] = ~sh_im[TW-1] & (|hb_im);
+            assign dun_im[gl] =  sh_im[TW-1] & ~(&hb_im);
             assign dlc_re[gl] = dov_re[gl] ? WMAX : dun_re[gl] ? WMIN : sh_re[WW+1:0];
             assign dlc_im[gl] = dov_im[gl] ? WMAX : dun_im[gl] ? WMIN : sh_im[WW+1:0];
-            assign drb_re[gl] = (sh_p1 == 0) ? 1'b0 : t_re[sh_p1 - 1];
-            assign drb_im[gl] = (sh_p1 == 0) ? 1'b0 : t_im[sh_p1 - 1];
+            assign drb_re[gl] = (sh_lo == 0) ? pa_g_re[gl] : pa_t_re[gl][sh_lo - 1];
+            assign drb_im[gl] = (sh_lo == 0) ? pa_g_im[gl] : pa_t_im[gl][sh_lo - 1];
             // PD -> P2: w + update + rounding carry, saturated (sign-bit check)
             wire signed [WW+1:0] s_re = $signed(pd_w_re[gl]) + pd_dl_re[gl] + $signed({1'b0, pd_rb_re[gl]});
             wire signed [WW+1:0] s_im = $signed(pd_w_im[gl]) + pd_dl_im[gl] + $signed({1'b0, pd_rb_im[gl]});
@@ -272,7 +305,10 @@ module pi_aj_wlpi #(
     endgenerate
 
     // lane operand select: lane ln only ever handles weights c*NL+ln,
-    // so each operand is a K-input mux (not an NW-input one)
+    // so each operand is a K-input mux (not an NW-input one).
+    // The weight is read in the PDb clock (into pd_w, next to the update it
+    // gets) and written back at the end of P2: a 2-clock loop, shorter than
+    // one sample (>= K+1 clocks), so the next sample reads the updated weight.
     reg signed [WW-1:0]  lw_re [0:NL-1], lw_im [0:NL-1];
     reg signed [OPW-1:0] lf_re [0:NL-1], lf_im [0:NL-1];
     reg signed [OPW-1:0] lu_re [0:NL-1], lu_im [0:NL-1];
@@ -282,15 +318,11 @@ module pi_aj_wlpi #(
             lw_re[ml] = 0; lw_im[ml] = 0;
             lf_re[ml] = 0; lf_im[ml] = 0; lu_re[ml] = 0; lu_im[ml] = 0;
             for (mc = 0; mc < K; mc = mc + 1) begin
+                if (ca == mc) begin
+                    lw_re[ml] = w_re[mc*NL + ml];
+                    lw_im[ml] = w_im[mc*NL + ml];
+                end
                 if (cyc == mc) begin
-                    // forward the weight being written back this cycle
-                    if (pd_val[ml] && cd == mc) begin
-                        lw_re[ml] = wn_re[ml];
-                        lw_im[ml] = wn_im[ml];
-                    end else begin
-                        lw_re[ml] = w_re[mc*NL + ml];
-                        lw_im[ml] = w_im[mc*NL + ml];
-                    end
                     lf_re[ml] = UF_RE[(mc*NL + ml)*OPW +: OPW];
                     lf_im[ml] = UF_IM[(mc*NL + ml)*OPW +: OPW];
                     lu_re[ml] = UU_RE[(mc*NL + ml)*OPW +: OPW];
@@ -320,10 +352,11 @@ module pi_aj_wlpi #(
         end
     end
 
-    // P6: e = d - round(sum >>> WFM)
+    // P6: e = d - round(sum >>> WFM); the rounding constant RND6 is already
+    // in the sum (it is the start value of lane 0's accumulator)
     localparam signed [WM+OPW+8:0] RND6 = 1 <<< (WFM - 1);
-    wire signed [WM+OPW+8:0] fs_re = (sum5_re + RND6) >>> WFM;
-    wire signed [WM+OPW+8:0] fs_im = (sum5_im + RND6) >>> WFM;
+    wire signed [WM+OPW+8:0] fs_re = sum5_re >>> WFM;
+    wire signed [WM+OPW+8:0] fs_im = sum5_im >>> WFM;
     wire signed [DW-1:0]     d5_re = d_buf_re[q5[HB-1:0]];
     wire signed [DW-1:0]     d5_im = d_buf_im[q5[HB-1:0]];
     wire signed [WM+OPW+8:0] e_re  = en ? (d5_re - fs_re) : d5_re;
@@ -351,10 +384,10 @@ module pi_aj_wlpi #(
             sid_ctr <= 0; sid <= 0; done_ctr <= 0;
             overrun <= 0; late <= 0;
             out_valid <= 0; y_re <= 0; y_im <= 0;
-            pv0 <= 0; pv1 <= 0; pacc <= 0;
-            s0 <= 0; s1 <= 0; sd <= 0; s2 <= 0; s3 <= 0; s4 <= 0; s4b <= 0; s5 <= 0;
-            f0 <= 0; f1 <= 0; fd <= 0; f2 <= 0; f3 <= 0;
-            l0 <= 0; l1 <= 0; ld <= 0; l2 <= 0; l3 <= 0; l4 <= 0;
+            pv0 <= 0; pv1 <= 0; pv2 <= 0; pv3 <= 0; pv4 <= 0; pacc <= 0;
+            s0 <= 0; s1 <= 0; sa <= 0; sd <= 0; s2 <= 0; s3 <= 0; s4 <= 0; s4b <= 0; s5 <= 0;
+            f0 <= 0; f1 <= 0; fa <= 0; fd <= 0; f2 <= 0; f3 <= 0;
+            l0 <= 0; l1 <= 0; la <= 0; ld <= 0; l2 <= 0; l3 <= 0; l4 <= 0;
             for (j = 0; j < LB; j = j + 1) begin
                 b0_re[j] <= 0; b0_im[j] <= 0; b1_re[j] <= 0; b1_im[j] <= 0;
             end
@@ -367,7 +400,7 @@ module pi_aj_wlpi #(
             end
             for (j = 0; j < NL; j = j + 1) begin
                 acc_re[j] <= 0; acc_im[j] <= 0;
-                p0_val[j] <= 0; p1_val[j] <= 0; pd_val[j] <= 0; p2_val[j] <= 0; p3_val[j] <= 0;
+                p0_val[j] <= 0; p1_val[j] <= 0; pa_val[j] <= 0; pd_val[j] <= 0; p2_val[j] <= 0; p3_val[j] <= 0;
             end
         end else begin
             // ================= input / pass control
@@ -409,11 +442,17 @@ module pi_aj_wlpi #(
             // ================= power normaliser (per sample)
             pv0 <= start;
             psid0 <= sid_ctr;
-            if (start)
-                ip <= b0_re[0]*b0_re[0] + b0_im[0]*b0_im[0] + b1_re[0]*b1_re[0] + b1_im[0]*b1_im[0];
+            if (start) begin
+                ipa <= b0_re[0]*b0_re[0] + b0_im[0]*b0_im[0];
+                ipb <= b1_re[0]*b1_re[0] + b1_im[0]*b1_im[0];
+            end
             pv1 <= pv0;
             psid1 <= psid0;
-            if (pv0) begin
+            if (pv0)
+                ip <= ipa + ipb;
+            pv2 <= pv1;
+            psid2 <= psid1;
+            if (pv1) begin
                 if ({3'b000, ip, {PFR{1'b0}}} > {pacc, 3'b000})
                     pacc <= {ip, {PFR{1'b0}}};
                 else if ({ip, {PFR{1'b0}}} >= pacc)
@@ -421,8 +460,16 @@ module pi_aj_wlpi #(
                 else
                     pacc <= pacc - ((pacc - {ip, {PFR{1'b0}}}) >> PFR);
             end
-            if (pv1)
-                lp_buf[psid1[HB-1:0]] <= (msb(pacc) > PFR) ? msb(pacc) - PFR : 7'd0;
+            pv3 <= pv2;
+            psid3 <= psid2;
+            if (pv2)
+                pacc_th <= therm(pacc);
+            pv4 <= pv3;
+            psid4 <= psid3;
+            if (pv3)
+                lp_m <= th_pos(pacc_th);
+            if (pv4)
+                lp_buf[psid4[HB-1:0]] <= (lp_m > PFR) ? lp_m - PFR : 7'd0;
 
             // ================= P0: operand fetch
             s0 <= issuing;
@@ -434,8 +481,6 @@ module pi_aj_wlpi #(
             c0 <= cyc;
             for (ln = 0; ln < NL; ln = ln + 1) begin
                 p0_val[ln]   <= issuing & ((cyc * NL + ln) < NW);
-                p0_w_re[ln]  <= lw_re[ln];
-                p0_w_im[ln]  <= lw_im[ln];
                 p0_uf_re[ln] <= lf_re[ln];
                 p0_uf_im[ln] <= lf_im[ln];
                 p0_uu_re[ln] <= lu_re[ln];
@@ -444,24 +489,34 @@ module pi_aj_wlpi #(
 
             // ================= P1: update product  u_old * conj(e_old)
             s1 <= s0; f1 <= f0; l1 <= l0; q1 <= q0; c1 <= c0;
+            sh_1 <= sh_p1;
             for (ln = 0; ln < NL; ln = ln + 1) begin
                 p1_up_re[ln] <= p0_uu_re[ln] * e_upd_re + p0_uu_im[ln] * e_upd_im;
                 p1_up_im[ln] <= p0_uu_im[ln] * e_upd_re - p0_uu_re[ln] * e_upd_im;
-                p1_w_re[ln]  <= p0_w_re[ln];  p1_w_im[ln]  <= p0_w_im[ln];
                 p1_uf_re[ln] <= p0_uf_re[ln]; p1_uf_im[ln] <= p0_uf_im[ln];
                 p1_val[ln]   <= p0_val[ln] & s0;
             end
 
-            // ================= PD: shifted, rounded, clamped update
-            sd <= s1; fd <= f1; ld <= l1; qd <= q1; cd <= c1;
+            // ================= PDa: coarse shift of the update
+            sa <= s1; fa <= f1; la <= l1; qa <= q1; ca <= c1;
+            sh_lo <= sh_1[2:0];
+            for (ln = 0; ln < NL; ln = ln + 1) begin
+                pa_t_re[ln]  <= tac_re[ln]; pa_t_im[ln]  <= tac_im[ln];
+                pa_g_re[ln]  <= tg_re[ln];  pa_g_im[ln]  <= tg_im[ln];
+                pa_uf_re[ln] <= p1_uf_re[ln]; pa_uf_im[ln] <= p1_uf_im[ln];
+                pa_val[ln]   <= p1_val[ln];
+            end
+
+            // ================= PDb: fine shift, rounding bit, clamp; weight fetch
+            sd <= sa; fd <= fa; ld <= la; qd <= qa; cd <= ca;
             for (ln = 0; ln < NL; ln = ln + 1) begin
                 pd_dl_re[ln] <= dlc_re[ln]; pd_dl_im[ln] <= dlc_im[ln];
                 pd_rb_re[ln] <= drb_re[ln]; pd_rb_im[ln] <= drb_im[ln];
                 pd_ov_re[ln] <= dov_re[ln]; pd_un_re[ln] <= dun_re[ln];
                 pd_ov_im[ln] <= dov_im[ln]; pd_un_im[ln] <= dun_im[ln];
-                pd_w_re[ln]  <= p1_w_re[ln];  pd_w_im[ln]  <= p1_w_im[ln];
-                pd_uf_re[ln] <= p1_uf_re[ln]; pd_uf_im[ln] <= p1_uf_im[ln];
-                pd_val[ln]   <= p1_val[ln];
+                pd_w_re[ln]  <= lw_re[ln];  pd_w_im[ln]  <= lw_im[ln];
+                pd_uf_re[ln] <= pa_uf_re[ln]; pd_uf_im[ln] <= pa_uf_im[ln];
+                pd_val[ln]   <= pa_val[ln];
             end
 
             // ================= P2: weight update + write back
@@ -490,13 +545,14 @@ module pi_aj_wlpi #(
             // ================= P4: per-lane accumulation over the pass
             s4 <= s3 & l3; q4 <= q3;
             for (ln = 0; ln < NL; ln = ln + 1) begin
+                // lane 0 starts from the P6 rounding constant
                 if (s3) begin
                     if (f3)
-                        acc_re[ln] <= p3_val[ln] ? p3_f_re[ln] : 0;
+                        acc_re[ln] <= (ln == 0 ? RND6 : 0) + (p3_val[ln] ? p3_f_re[ln] : 0);
                     else if (p3_val[ln])
                         acc_re[ln] <= acc_re[ln] + p3_f_re[ln];
                     if (f3)
-                        acc_im[ln] <= p3_val[ln] ? p3_f_im[ln] : 0;
+                        acc_im[ln] <= (ln == 0 ? RND6 : 0) + (p3_val[ln] ? p3_f_im[ln] : 0);
                     else if (p3_val[ln])
                         acc_im[ln] <= acc_im[ln] + p3_f_im[ln];
                 end

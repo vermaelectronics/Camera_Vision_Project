@@ -8,6 +8,10 @@
 // 16-bit DAC word. One step at most every 2^14 samples (~0.9 ms @18 MS/s), so
 // the GNSS receiver's own AGC sees only slow, small level changes.
 // agc_en = 0 -> fixed shift man_shift (signed, + = gain).
+//
+// Timing (rev 3): the output is shift -> register -> saturate -> register
+// (2 clocks); the power estimate is square (registered DSP48) -> difference
+// -> accumulate, one carry chain per clock. Needs >= 3 clocks per sample.
 // ============================================================================
 `timescale 1ns / 1ps
 module pi_aj_outagc #(
@@ -24,71 +28,109 @@ module pi_aj_outagc #(
     output reg                  out_valid,
     output reg  signed [15:0]   out_i, out_q,
     output wire signed [4:0]    shift_o,
-    output wire [31:0]          pow_o
+    output reg  [31:0]          pow_o
 );
     localparam PWD = 2*IW + PF + 1;
+    localparam XW  = IW + 17;
 
-    // index of the highest set bit (0 when v == 0); log-depth search
-    function [6:0] msb;
+    // leading one in two clocked steps: thermometer (each bit an OR-reduce),
+    // then one-hot -> index. Same result as msb() (0 when v == 0).
+    function [PWD-1:0] therm;
         input [PWD-1:0] v;
-        reg [63:0] x;
+        integer i;
+        for (i = 0; i < PWD; i = i + 1)
+            therm[i] = |(v >> i);
+    endfunction
+    function [6:0] th_pos;
+        input [PWD-1:0] t;
+        reg   [PWD:0]   te;
+        integer i;
         begin
-            x = v;
-            msb = 0;
-            if (x[63:32] != 0) begin msb = msb + 32; x = x >> 32; end
-            if (x[31:16] != 0) begin msb = msb + 16; x = x >> 16; end
-            if (x[15:8]  != 0) begin msb = msb + 8;  x = x >> 8;  end
-            if (x[7:4]   != 0) begin msb = msb + 4;  x = x >> 4;  end
-            if (x[3:2]   != 0) begin msb = msb + 2;  x = x >> 2;  end
-            if (x[1]     != 0) begin msb = msb + 1;               end
+            te = {1'b0, t};
+            th_pos = 0;
+            for (i = 0; i < PWD; i = i + 1)
+                if (te[i] && !te[i+1])
+                    th_pos = th_pos | i;
         end
     endfunction
 
+    // saturation by checking that the dropped bits all equal the sign
     function signed [15:0] sat16;
-        input signed [IW+16:0] v;
-        if (v > 32767)       sat16 = 16'sh7FFF;
-        else if (v < -32768) sat16 = -16'sh8000;
-        else                 sat16 = v[15:0];
+        input signed [XW-1:0] v;
+        if ((v[XW-1:15] == 0) || (&v[XW-1:15])) sat16 = v[15:0];
+        else if (v[XW-1])                       sat16 = 16'sh8000;
+        else                                    sat16 = 16'sh7FFF;
     endfunction
 
-    reg signed [PWD:0]  po;
+    reg signed [PWD:0]  po, dpo;
     reg [13:0]          tick;
     reg signed [4:0]    sh_agc;
-    wire signed [4:0]   sh = agc_en ? sh_agc : man_shift;
+    reg signed [4:0]    sh;                 // registered: agc_en ? sh_agc : man_shift
+    reg        [4:0]    nsh;                // registered -sh
+    reg  [PWD-1:0]      po_th;
     assign shift_o = sh;
-    assign pow_o   = (po >>> PF) > 33'sh0FFFFFFFF ? 32'hFFFFFFFF : po[PF+31:PF];
 
-    // power from the top 18 bits (one DSP48 per square), rescaled
-    wire signed [IW-3:0] pr_re = in_re >>> 2;
-    wire signed [IW-3:0] pr_im = in_im >>> 2;
-    wire signed [2*IW:0] pinst = (pr_re * pr_re + pr_im * pr_im) <<< 4;
-    reg  [6:0]  lp;                         // registered: log2 of the power
+    // power from the top 18 bits (one DSP48 per square, registered operands)
+    reg  signed [IW-3:0] pr_re, pr_im;
+    reg  signed [2*IW:0] pinst;
+    reg                  pv0, pv1, pv2;
+    reg  [6:0]  lp_m, lp;                   // log2 of the power
     wire signed [7:0] s_want = $signed({4'd0, target}) - $signed({2'b00, lp[6:1]});
     wire signed [7:0] s_cl   = (s_want > 15) ? 8'sd15 : (s_want < -8) ? -8'sd8 : s_want;
 
-    wire [4:0] nsh = -sh;
-    wire signed [IW+16:0] up_re = $signed(in_re) <<< sh;
-    wire signed [IW+16:0] up_im = $signed(in_im) <<< sh;
-    wire signed [IW+16:0] rn    = (sh < 0) ? ($signed(1) <<< (nsh - 1)) : 0;
-    wire signed [IW+16:0] dn_re = ($signed(in_re) + rn) >>> nsh;
-    wire signed [IW+16:0] dn_im = ($signed(in_im) + rn) >>> nsh;
+    reg  signed [XW-1:0] rn;                // registered rounding constant
+    wire signed [XW-1:0] up_re = $signed(in_re) <<< sh;
+    wire signed [XW-1:0] up_im = $signed(in_im) <<< sh;
+    wire signed [XW-1:0] dn_re = ($signed(in_re) + rn) >>> nsh;
+    wire signed [XW-1:0] dn_im = ($signed(in_im) + rn) >>> nsh;
+    reg  signed [XW-1:0] sc_re, sc_im;
+    reg                  scv;
 
     always @(posedge clk) begin
         if (rst) begin
-            po <= 0; tick <= 0; sh_agc <= 0; lp <= 0;
+            po <= 0; dpo <= 0; tick <= 0; sh_agc <= 0; sh <= 0; nsh <= 0; rn <= 0; po_th <= 0; lp_m <= 0; lp <= 0;
+            pv0 <= 0; pv1 <= 0; pv2 <= 0; scv <= 0; pow_o <= 0;
             out_valid <= 0; out_i <= 0; out_q <= 0;
         end else begin
-            out_valid <= in_valid;
-            lp <= (msb(po) > PF) ? (msb(po) - PF) : 7'd0;
+            // quasi-static: the shift settles 2 clocks after a change
+            sh   <= agc_en ? sh_agc : man_shift;
+            nsh  <= -sh;
+            rn   <= (sh < 0) ? ($signed(1) <<< (nsh - 1)) : 0;
+            po_th <= therm(po[PWD-1:0]);
+            lp_m <= th_pos(po_th);
+            lp   <= (lp_m > PF) ? (lp_m - PF) : 7'd0;
+            pow_o <= (|po[PWD:PF+32]) ? 32'hFFFFFFFF : po[PF+31:PF];
+            // power: square, difference, accumulate
+            pv0 <= in_valid;
             if (in_valid) begin
-                po   <= po + (((pinst <<< PF) - po) >>> 10);
+                pr_re <= in_re >>> 2;
+                pr_im <= in_im >>> 2;
+            end
+            pv1 <= pv0;
+            if (pv0)
+                pinst <= (pr_re * pr_re + pr_im * pr_im) <<< 4;
+            if (pv1)
+                dpo <= ($signed(pinst) <<< PF) - po;
+            pv2 <= pv1;
+            if (pv2)
+                po <= po + (dpo >>> 10);
+            if (in_valid) begin
                 tick <= tick + 14'd1;
                 if (tick == 0 && po != 0) begin
                     if (s_cl > sh_agc)      sh_agc <= sh_agc + 5'sd1;
                     else if (s_cl < sh_agc) sh_agc <= sh_agc - 5'sd1;
                 end
-                out_i <= sat16(sh >= 0 ? up_re : dn_re);
-                out_q <= sat16(sh >= 0 ? up_im : dn_im);
+            end
+            // output: shift, then saturate
+            scv <= in_valid;
+            if (in_valid) begin
+                sc_re <= (sh >= 0) ? up_re : dn_re;
+                sc_im <= (sh >= 0) ? up_im : dn_im;
+            end
+            out_valid <= scv;
+            if (scv) begin
+                out_i <= sat16(sc_re);
+                out_q <= sat16(sc_im);
             end
         end
     end

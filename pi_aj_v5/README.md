@@ -110,9 +110,11 @@ Every 10 dB less attenuation adds 10 dB of J/N.
 ## 4. Integration (AntSDR / ADI `axi_ad9361` design)
 
 **Ready-made for your LoopBack_Code project:**
-- `deliverables/LoopBack_Code_PI_AJ_v5.0.0.zip` (hardware + firmware + build scripts);
-- `deliverables/PI_AJ_v5.0.0_firmware_only.zip`;
-- `deliverables/PI_AJ_v5_standalone_rtl.zip` (this folder).
+- `deliverables/LoopBack_Code_PI_AJ_v5.0.3.zip` (hardware + firmware + build scripts);
+- `deliverables/PI_AJ_v5.0.3_timing_update.zip` (only the files changed for timing
+  closure, to unzip over an existing LoopBack_Code_PI_AJ folder);
+- `deliverables/PI_AJ_v5.0.3_firmware_only.zip`;
+- `deliverables/PI_AJ_v5.0.3_standalone_rtl.zip` (this folder).
 
 There, `rtl/pi_aj_axis.v` replaces `smi_pi_0` in the block design: same AXI-Stream
 ports and async FIFOs, on `sys_cpu_clk` with `NL=10` and `DELAY=4`, registers at
@@ -195,11 +197,20 @@ L1 test.
 | LUT | ≈23.7k | 53.2k |
 | FF | ≈11.4k | 106.4k |
 
-All multipliers fit one DSP48 (25×18) each. The long paths are pipelined for
-100 MHz:
-- log-depth leading-one detectors;
-- a split weight update with forwarding;
-- a two-stage lane adder.
+All multipliers fit one DSP48 (25×18) each. The design is pipelined for
+100 MHz (rev 5.0.3, after the first Vivado run on the AntSDR showed
+WNS −0.375 ns on `clk_fpga_0`):
+- every DSP48 has registered operands and a registered product;
+- notch: registered coefficient and rho·coefficient, a·x[n] formed one sample
+  ahead, r1/power/gating/estimator each in their own clock (the 4-clock
+  estimator loop is unchanged);
+- power inversion: update shifted in two stages (8·s[5:3], then s[2:0]), the
+  weight read one clock before its update is added (2-clock read-modify-write
+  loop, no forwarding), output rounding preloaded into lane 0's accumulator,
+  power normaliser in 4 stages, log-depth leading-one detectors, two-stage lane
+  adder (bit-exact with rev 5.0.2, 1 clock more latency);
+- output AGC and monitors: square → difference → accumulate, shift → saturate,
+  saturation by sign-bit checks instead of magnitude compares.
 
 Build parameters (`pi_aj_top`):
 
@@ -207,7 +218,7 @@ Build parameters (`pi_aj_top`):
 |---|---|---|
 | `NL` | 5 | PI lanes. 5 needs clk ≥ 5·fs; 10 needs clk ≥ 3·fs with `DELAY=4` |
 | `L` | 5 | Taps per channel |
-| `DELAY` | 3 | PI update delay; must satisfy DELAY × clocks-per-sample ≥ K + 9 |
+| `DELAY` | 3 | PI update delay; must satisfy DELAY × clocks-per-sample ≥ K + 10 |
 | `WL` | 1 | Widely-linear (conjugate) taps |
 | `HAS_NOTCH2` | 1 | Second CW notch present |
 | `IN_SHIFT` | 4 | ADC word alignment |
