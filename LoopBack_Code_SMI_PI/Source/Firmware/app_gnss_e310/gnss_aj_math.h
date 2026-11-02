@@ -93,6 +93,14 @@ typedef struct {
                             /*   0..0.995; <= 0 means AJ_AVG (0.5). A long    */
                             /*   memory (0.98 = about 50 blocks) makes a slow */
                             /*   chirp look like a wideband jammer (4.6)      */
+    int     gate;           /* 1 = skip a block that holds no jammer (pulsed   */
+                            /*   jammer: its gaps must not become weights);    */
+                            /*   aj_compute() then returns 1, keeps the old    */
+                            /*   weights and statistics, and fills p1, p2, coh,  */
+                            /*   jn_coh_db, jn_db (4.7)                         */
+    double  gate_coh_db;    /* ... coherence below this [dB]                   */
+    double  gate_pwr;       /* ... and RX1 power below noise_ref x this (linear) */
+    int     gated;          /* result: this block was skipped                  */
     double  rx2_noise;      /* normalised RX2 noise / RX1 noise: 1 when g2    */
                             /*   equalises them, less when g2 hit its limit;  */
                             /*   <= 0 means 1                                 */
@@ -155,6 +163,7 @@ void aj_last_dc(double *dc1, double *dc2);
  * About a third of the work of aj_compute(). Returns 0 on success. */
 int aj_detect(const uint32_t *buf, int nsamp, aj_result_t *r);
 
+/* Returns 0 on success, 1 when r->gate skipped a jammer-free block (r->gated = 1), < 0 on error. */
 /* buf: one DMA capture, 2 words per sample instant:
  *      word 2n   = {Q1[31:16], I1[15:0]}   RX1 (AD9361 channel 0)
  *      word 2n+1 = {Q2[31:16], I2[15:0]}   RX2 (AD9361 channel 1)

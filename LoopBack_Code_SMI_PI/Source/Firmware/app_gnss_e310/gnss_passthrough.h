@@ -76,12 +76,21 @@
  * counter. */
 #define GNSS_PT_REG_AJ_W(k)         (0x100U + ((k) * 4U)) /* RW, k = 0..31    */
 #define GNSS_PT_REG_AJ_COMMIT       0x180U  /* W: commit, R: count            */
-#define GNSS_PT_REG_AJ_INFO         0x184U  /* RO 0x10080C04                  */
+#define GNSS_PT_REG_AJ_INFO         0x184U  /* RO 0x10080C05                  */
 #define GNSS_PT_REG_AJ_CFG          0x188U  /* RW [0] bypass, [10:8] shift, [14:12] weight scale */
 #define GNSS_PT_REG_AJ_NORM         0x18CU  /* RW g2, Q3.13 {im, re}          */
 #define GNSS_PT_REG_AJ_WC(k)        (0x190U + ((k) * 4U)) /* RW image taps 0,1 */
 #define GNSS_PT_REG_AJ_CFG_ACTIVE   0x198U  /* RO AJ_CFG as committed         */
-#define GNSS_PT_AJ_INFO_EXPECTED    0x10080C04U   /* layout 4 = v4.5 (make-up shift to 7); 3 = v4.4 */
+/* bitstream 4.6 (AJ_INFO layout 5): pulse blanker on the filter output, RX peak hold */
+#define GNSS_PT_REG_AJ_BLK_THR      0x19CU  /* RW shadow: blanker threshold (sum of 8 samples of I^2+Q^2), committed by AJ_COMMIT */
+#define GNSS_PT_REG_AJ_BLK_THR_ACT  0x1A0U  /* RO committed threshold         */
+#define GNSS_PT_REG_AJ_BLK_COUNT    0x1A4U  /* RO samples blanked since the counter clear */
+#define GNSS_PT_REG_AJ_BLK_BURSTS   0x1A8U  /* RO bursts blanked since the counter clear  */
+#define GNSS_PT_REG_AJ_RX_PEAK      0x1ACU  /* RO [15:0] largest |I|,|Q| of RX1/RX2 in the last window, [31:16] window counter */
+#define GNSS_PT_AJ_INFO_EXPECTED    0x10080C05U   /* layout 5 = v4.6 (pulse blanker, peak hold); 4 = v4.5; 3 = v4.4 */
+#define GNSS_PT_AJ_LAYOUT_BLANK     5U            /* first layout with the blanker and the peak hold */
+#define GNSS_PT_AJ_CFG_BLANK        0x8000U       /* AJ_CFG[15]: blanker enable (layout 5) */
+#define GNSS_PT_BLK_THR_OFF         0xFFFFFFFFU   /* threshold that never triggers */
 #define GNSS_PT_AJ_CFG_BYPASS       0x1U
 #define GNSS_PT_AJ_CFG_SHIFT(s)     ((uint32_t)((s) & 7) << 8)
 #define GNSS_PT_AJ_CFG_WS(w)        ((uint32_t)((w) & 7) << 12)   /* weight scale: words hold w * 2^ws (4.4) */
@@ -159,7 +168,7 @@ void     gnss_pt_set_smi(int enable);
  * never runs a half-written set. re/im may be NULL to keep the weights that
  * are in the shadow registers (bypass switching). */
 void     gnss_pt_write_aj(const int16_t *re, const int16_t *im,
-                          uint32_t cfg, int32_t g2_q13);
+                          uint32_t cfg, int32_t g2_q13, uint32_t blk_thr);
 
 /* Snapshot of everything worth observing at runtime (requirement 58). */
 typedef struct {

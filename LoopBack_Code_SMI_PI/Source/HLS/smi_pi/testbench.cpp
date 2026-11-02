@@ -291,7 +291,7 @@ static int test_makeup() {
 // 3 pulsed noise (period k1 samples, on-fraction k2; J/N is the level inside the pulse),
 // 4 CW that hops from k1 x fs to k1+k2 x fs after the three training captures (stale weights)
 struct Scen { double jnr_db; bool cw; double echo; double rx2_db; bool iq; double cwf; double satf; double chip; double delay;
-              int kind = 0; double k1 = 0, k2 = 0; int nblk = 3; double avg = 0; };
+              int kind = 0; double k1 = 0, k2 = 0; int nblk = 3; double avg = 0; int gate = 0; };
 
 // AD9361-like I/Q imbalance: gain error eps, phase error ph (degrees).
 static void iq_imbalance(cvec &x, double eps, double ph_deg) {
@@ -305,6 +305,35 @@ static double irr_db(double eps, double ph_deg) {
     cd mu = (1.0 + (1 + eps) * std::polar(1.0, -ph)) / 2.0;
     cd nu = (1.0 - (1 + eps) * std::polar(1.0, ph)) / 2.0;
     return 10 * std::log10(std::norm(mu) / std::norm(nu));
+}
+
+// Model of gnss_pulse_blank.v (W = 8, D = 16, H = 16): the output is delayed by D samples and zeroed while
+// the sum of 8 samples of I^2+Q^2 exceeded thr within the last D+H samples or the next 7.
+static cvec sat12v(const cvec &y) {
+    cvec o(y.size());
+    for (size_t i = 0; i < y.size(); i++)
+        o[i] = cd(std::max(-2048.0, std::min(2047.0, y[i].real())), std::max(-2048.0, std::min(2047.0, y[i].imag())));
+    return o;
+}
+static cvec blank_model(const cvec &y, double thr, double *frac) {
+    const int W = 8, D = 16, H = 16;
+    size_t n = y.size();
+    std::vector<double> p(n);
+    std::vector<char> ex(n);
+    double S = 0;
+    for (size_t i = 0; i < n; i++) p[i] = y[i].real() * y[i].real() + y[i].imag() * y[i].imag();
+    for (size_t i = 0; i < n; i++) { S += p[i] - (i >= (size_t)W ? p[i - W] : 0.0); ex[i] = S > thr; }
+    cvec out(n);
+    size_t nb = 0;
+    for (size_t k = 0; k < n; k++) {
+        cd v = (k >= (size_t)D) ? y[k - D] : cd(0, 0);
+        bool blk = false;
+        for (int a = 8; a <= D + H && !blk; a++) if (k >= (size_t)a && ex[k - a]) blk = true;
+        if (blk) { v = 0; nb++; }
+        out[k] = v;
+    }
+    if (frac) *frac = (double)nb / (double)n;
+    return out;
 }
 
 static int test_jammer(int id, Scen sc) {
@@ -406,7 +435,7 @@ static int test_jammer(int id, Scen sc) {
         x2[i] = cd(q12((x2[i] * g).real()), q12((x2[i] * g).imag()));
     }
 
-    int sweep_blocks = 0;
+    int sweep_blocks = 0, gated_blocks = 0;
     // firmware solver on three consecutive DMA-format captures
     auto solve = [&](int mode, double gn, aj_result_t &r) {
         static uint32_t buf[2 * AJ_NSAMP];
@@ -415,7 +444,7 @@ static int test_jammer(int id, Scen sc) {
         r.rx2_noise = (gn == g2) ? rx2n : rx2n / (g2 * g2);
         aj_reset();
         aj_sweep_t swp; aj_sweep_reset(&swp);
-        sweep_blocks = 0;
+        sweep_blocks = 0; gated_blocks = 0;
         for (int b = 0; b < NBLK; b++) {
             r.avg = (sc.avg < 0) ? r.avg : sc.avg;     // sc.avg < 0: the firmware's own sweep detector
             for (int t = 0; t < AJ_NSAMP; t++) {
@@ -423,7 +452,10 @@ static int test_jammer(int id, Scen sc) {
                 buf[2 * t]     = (uint32_t)(uint16_t)(int16_t)a.real() | ((uint32_t)(uint16_t)(int16_t)a.imag() << 16);
                 buf[2 * t + 1] = (uint32_t)(uint16_t)(int16_t)c.real() | ((uint32_t)(uint16_t)(int16_t)c.imag() << 16);
             }
-            if (aj_compute(buf, AJ_NSAMP, &r) != 0 || !r.ok) return false;
+            r.gate = sc.gate; r.gate_coh_db = -6.0; r.gate_pwr = 3.0;
+            int rc = aj_compute(buf, AJ_NSAMP, &r);
+            if (rc == 1) { gated_blocks++; continue; }          // a gap between pulses: weights unchanged
+            if (rc != 0 || !r.ok) return false;
             r.sig2_prev = r.sig2;
             if (sc.avg < 0) { r.avg = aj_sweep_update(&swp, &r); sweep_blocks += (r.avg > 0); }
         }
@@ -433,16 +465,23 @@ static int test_jammer(int id, Scen sc) {
     // evaluation segment after the training captures
     const int e0 = NBLK * AJ_NSAMP;
     auto seg = [&](const cvec &v) { return cvec(v.begin() + e0, v.end()); };
-    struct Meas { double supp, loss, out_db, res, lvl; };
-    auto measure = [&](const aj_result_t &r, double gn, int shift) {
+    struct Meas { double supp, loss, out_db, res, lvl, blf; };
+    auto measure = [&](const aj_result_t &r, double gn, int shift, double bthr = -1.0, bool byp = false) {
         Meas m;
         double sc4 = std::pow(4.0, shift);
         set_weights(r.wre, r.wim);
         set_g2((int)std::floor(gn * 8192 + 0.5), 0);
-        set_cfg(0, shift, r.ws);
+        if (byp) set_cfg(1, 0); else set_cfg(0, shift, r.ws);
         cvec yj = run_core_c(seg(jx1), seg(jx2));
         cvec yx = run_core_c(seg(x1), seg(x2));
         cvec yn = run_core_c(seg(nx1), seg(nx2));
+        int bd = 0;
+        m.blf = 0;
+        if (bthr >= 0) {                       // the FPGA pulse blanker on the output
+            yj = blank_model(sat12v(yj), bthr, nullptr);
+            yx = blank_model(sat12v(yx), bthr, &m.blf);
+            bd = 16;
+        }
         m.supp = (sc.jnr_db > -90) ? 10 * std::log10(pwr(seg(J), 0) / std::max(pwr(yj, 32) / sc4, 1e-9)) : 0;
         // Satellite SNR by correlation with the known satellite waveform, on
         // the real (quantised, dithered by the noise) output, against RX1
@@ -460,7 +499,7 @@ static int test_jammer(int id, Scen sc) {
         };
         cvec clean(ref.size()), n1s = seg(n1);
         for (size_t i = 0; i < ref.size(); i++) clean[i] = n1s[i] / g + ref[i] / g;
-        m.loss = 10 * std::log10(snr(clean, 0) / snr(yx, SMI_REF));
+        m.loss = 10 * std::log10(snr(clean, 0) / snr(yx, SMI_REF + bd));
         m.out_db = 10 * std::log10(pwr(yx, 32) / sc4 / pwr(seg(x1), 0));
         // output level into the receiver against the clean level (RX1 noise at full gain, no jammer)
         m.lvl = 10 * std::log10(pwr(yx, 32) / pn);
@@ -516,6 +555,21 @@ static int test_jammer(int id, Scen sc) {
         Meas m2 = measure(r2, g2, 0);
         std::printf("  one weight (v3)   : suppression %.1f dB, satellite SNR loss %.2f dB\n", m2.supp, m2.loss);
         ok = m.supp >= 35 && m.loss <= 3 && m.supp >= m2.supp + 10;
+        break; }
+    case 19: case 20: {
+        // pulsed barrage, pulses of 326 us (more than a block): weights from the blocks that hold a pulse
+        // (gate on, id 20) or from every block (id 19); then the FPGA blanker on top
+        double nz = pn * g * g + 0.17, k = std::pow(10.0, 0.7);
+        double thr_f = 8.0 * nz * (1.0 + r.wn2) * std::pow(4.0, sh) * k, thr_b = 8.0 * nz * k;
+        Meas mb = measure(r, g2, sh, thr_f);
+        Meas m0 = measure(r, g2, 0, -1.0, true);
+        Meas m0b = measure(r, g2, 0, thr_b, true);
+        std::printf("  gate %s: %d of %d blocks skipped (no pulse in them)\n", sc.gate ? "ON " : "OFF", gated_blocks, NBLK);
+        std::printf("  filter, no blanker      : suppression %.1f dB, satellite SNR loss %.2f dB\n", m.supp, m.loss);
+        std::printf("  filter + blanker        : suppression %.1f dB, satellite SNR loss %.2f dB, %.0f %% blanked (a pulse train of %.0f %% duty)\n", mb.supp, mb.loss, 100 * mb.blf, 100 * sc.k2);
+        std::printf("  bypass (no weights)     : satellite SNR loss %.2f dB\n", m0.loss);
+        std::printf("  bypass + blanker        : satellite SNR loss %.2f dB, %.0f %% blanked\n", m0b.loss, 100 * m0b.blf);
+        ok = mb.loss <= 10 * std::log10(1.0 / (1.0 - sc.k2)) + 1.5 && m0b.loss <= 10 * std::log10(1.0 / (1.0 - sc.k2)) + 1.5 && m0b.loss + 6 < m0.loss;
         break; }
     case 16: ok = m.supp >= 40 && m.loss <= 3 && sweep_blocks >= 40; break;   // 1 ms chirp, detector on
     case 17: ok = m.supp >= 60 && m.loss <= 3 && sweep_blocks == 0; break;    // steady CW: detector must stay off
@@ -606,6 +660,7 @@ int main(int argc, char **argv) {
     // slow chirp (1 ms per 49 MHz sweep) with the firmware's sweep detector; steady CW; barrage
     case 16: { Scen sc = {40, false, 0, 0, true, 0, 0, 0, 0}; sc.kind = 2; sc.k1 = 61440; sc.k2 = 0.8; sc.nblk = 60; sc.avg = -1; ok = test_jammer(16, sc); break; }
     case 17: { Scen sc = {50, true, 0, 0, true, 0, 0, 0, 0}; sc.kind = 4; sc.k1 = -0.1; sc.k2 = 0.0; sc.nblk = 30; sc.avg = -1; ok = test_jammer(17, sc); break; }
+    case 19: case 20: { Scen sc = {40, false, 0, 0, true, 0, 0, 0, 0}; sc.kind = 3; sc.k1 = (argc > 3) ? std::atof(argv[3]) : 20000; sc.k2 = (argc > 2) ? std::atof(argv[2]) : 0.3; sc.nblk = 30; sc.gate = (scen == 20); ok = test_jammer(scen, sc); break; }
     case 18: { Scen sc = {40, false, 0, 0, true, 0, 0, 0, 0}; sc.nblk = 30; sc.avg = -1; ok = test_jammer(18, sc); break; }
     default: std::printf("unknown scenario %d\n", scen); ok = 0;
     }

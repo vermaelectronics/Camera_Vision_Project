@@ -1,4 +1,4 @@
-# SMI-PI 4.6.0: slow chirp (moving jammer) correction, and results for chirp, hop and pulsed jammers
+# SMI-PI 4.6.0 (superseded by 4.7.0, see README_SMI_PI_v4.7_pulse.md): slow chirp (moving jammer) correction, and results for chirp, hop and pulsed jammers
 
 **Firmware-only change.** The bitstream of 4.5 is reused; rebuild only the application and BOOT.BIN:
 

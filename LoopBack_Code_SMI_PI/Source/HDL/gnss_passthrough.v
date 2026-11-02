@@ -124,7 +124,8 @@
 //                                    half-new set. Reads a commit counter.
 //    0x184   AJ_INFO         RO      {8'd taps per channel, 8'd reference delay,
 //                                     8'd fraction bits, 8'd layout version}
-//                                    = 0x10080C04 (layout 4 = v4.5; 3 = v4.4; 2 = v4.1)
+//                                    = 0x10080C05 (layout 5 = v4.6: pulse blanker + RX peak hold; 4 = v4.5;
+//                                      3 = v4.4; 2 = v4.1)
 //    0x188   AJ_CFG          RW      SHADOW. [0] bypass: 1 = TX1 carries RX1
 //                                    delayed by 8 samples, no weights (reset
 //                                    value 0x1: nothing is filtered until the
@@ -142,6 +143,16 @@
 //                                    weight-word format.
 //    0x194   AJ_WC1          RW      SHADOW. Image tap c2 on conj(RX2n[n-8]).
 //    0x198   AJ_CFG_ACTIVE   RO      AJ_CFG as committed (what the core runs).
+//    0x19C   AJ_BLK_THR      RW      SHADOW (v4.6, AJ_INFO layout 5). Pulse blanker threshold: the
+//                                    blanker (gnss_pulse_blank.v) zeroes the filter output while the sum
+//                                    of 8 samples of I^2+Q^2 exceeds it. Reset 0xFFFFFFFF (never).
+//                                    AJ_CFG[15] = blanker enable (committed with the rest).
+//    0x1A0   AJ_BLK_THR_ACT  RO      the committed threshold.
+//    0x1A4   AJ_BLK_COUNT    RO      samples blanked since CONTROL[8] (counter clear).
+//    0x1A8   AJ_BLK_BURSTS   RO      bursts blanked (rising edges) since the clear.
+//    0x1AC   AJ_RX_PEAK      RO      [15:0] largest |I| or |Q| of RX1 and RX2 over the last window of
+//                                    2^19 sample strobes (8.5 ms at 61.44 MS/s), updated at the
+//                                    end of each window; [31:16] window counter (wraps).
 //
 //  SMI-PI v4 CLOCKING
 //    smi_pi_0 runs on sys_cpu_clk (= s_axi_aclk), not on clk: the block design
@@ -266,8 +277,11 @@ module gnss_passthrough #(
   //         w * 2^ws); no register or port changed. AJ_INFO layout 3 tells the
   //         firmware the bitstream has it (older bitstreams ignore the bits).
   // v4.5 -- smi_pi_0 v2.3: AJ_CFG[10:8] make-up shift 0..7 (was 0..4). AJ_INFO layout 4.
-  localparam [31:0] CORE_VERSION = 32'h00040005;   // v4.5
-  localparam [31:0] AJ_INFO      = 32'h10080C04;
+  // v4.6 -- pulse blanker on the filter output (gnss_pulse_blank.v), threshold AJ_BLK_THR
+  //         0x19C committed with AJ_COMMIT, enable AJ_CFG[15], counters 0x1A4/0x1A8, and an RX
+  //         peak hold 0x1AC. smi_pi_0 is unchanged (v2.3). AJ_INFO layout 5.
+  localparam [31:0] CORE_VERSION = 32'h00040006;   // v4.6
+  localparam [31:0] AJ_INFO      = 32'h10080C05;
   localparam [31:0] AJ_CFG_RESET = 32'h00000001;   // bypass
   localparam [31:0] AJ_NRM_RESET = 32'h00002000;   // g2 = 1.0
   localparam        AW           = FIFO_ADDR_WIDTH;
@@ -368,6 +382,9 @@ module gnss_passthrough #(
   reg  [31:0]   aj_wc0_sh  = 32'd0, aj_wc1_sh = 32'd0;
   reg  [63:0]   aj_wcj_act = 64'd0;
   reg  [31:0]   aj_commits = 32'd0;
+  reg  [31:0]   aj_thr_sh  = 32'hFFFFFFFF, aj_thr_act = 32'hFFFFFFFF;
+  reg           aj_thr_tog = 1'b0;
+  wire [31:0]   v_blk_cnt, v_blk_bursts, v_peak;
   wire          aj_w_sel   = (reg_waddr >= 12'h040) && (reg_waddr <= 12'h05F);
   wire          aj_commit  = reg_wr && (reg_waddr == 12'h060);
   integer ai;
@@ -382,6 +399,7 @@ module gnss_passthrough #(
       aj_wc0_sh  <= 32'd0;         aj_wc1_sh  <= 32'd0;
       aj_wcj_act <= 64'd0;
       aj_commits <= 32'd0;
+      aj_thr_sh  <= 32'hFFFFFFFF;  aj_thr_act <= 32'hFFFFFFFF;  aj_thr_tog <= 1'b0;
     end else begin
       if (reg_wr && aj_w_sel)
         aj_shadow[reg_waddr[4:0]] <= s_axi_wdata;
@@ -391,6 +409,7 @@ module gnss_passthrough #(
           12'h063: aj_nrm_sh <= s_axi_wdata;     // 0x18C
           12'h064: aj_wc0_sh <= s_axi_wdata;     // 0x190
           12'h065: aj_wc1_sh <= s_axi_wdata;     // 0x194
+          12'h067: aj_thr_sh <= s_axi_wdata;     // 0x19C
           default: ;
         endcase
       end
@@ -400,6 +419,8 @@ module gnss_passthrough #(
         aj_cfg_act <= aj_cfg_sh;
         aj_nrm_act <= aj_nrm_sh;
         aj_wcj_act <= {aj_wc1_sh, aj_wc0_sh};
+        aj_thr_act <= aj_thr_sh;
+        aj_thr_tog <= ~aj_thr_tog;
         aj_commits <= aj_commits + 1'b1;
       end
     end
@@ -452,6 +473,11 @@ module gnss_passthrough #(
       12'h064: axi_rdata <= aj_wc0_sh;             // 0x190
       12'h065: axi_rdata <= aj_wc1_sh;             // 0x194
       12'h066: axi_rdata <= aj_cfg_act;            // 0x198
+      12'h067: axi_rdata <= aj_thr_sh;             // 0x19C
+      12'h068: axi_rdata <= aj_thr_act;            // 0x1A0
+      12'h069: axi_rdata <= v_blk_cnt;             // 0x1A4
+      12'h06A: axi_rdata <= v_blk_bursts;          // 0x1A8
+      12'h06B: axi_rdata <= v_peak;                // 0x1AC
       12'h010, 12'h011, 12'h012, 12'h013,
       12'h014, 12'h015, 12'h016, 12'h017,
       12'h018, 12'h019, 12'h01A, 12'h01B,
@@ -584,7 +610,6 @@ module gnss_passthrough #(
   assign m_axis_smi_tdata  = smi_x_data;
   assign m_axis_smi_tvalid = smi_x_valid;
   assign s_axis_smi_tready = 1'b1;        // the elastic buffer always accepts
-  assign smi_out_valid     = s_axis_smi_tvalid;
 
   function [15:0] sat12(input [15:0] v);
     begin
@@ -594,8 +619,43 @@ module gnss_passthrough #(
     end
   endfunction
 
-  wire [15:0] smi_i = sat12(s_axis_smi_tdata[15:0]);
-  wire [15:0] smi_q = sat12(s_axis_smi_tdata[31:16]);
+  wire [15:0] smi_pre_i = sat12(s_axis_smi_tdata[15:0]);
+  wire [15:0] smi_pre_q = sat12(s_axis_smi_tdata[31:16]);
+
+  // ---- pulse blanker on the filter output (v4.6): enable and threshold come from the
+  // committed AJ_CFG[15] / AJ_BLK_THR (s_axi_aclk) and are brought into clk here; the
+  // threshold is copied only when the commit toggle has crossed (the value has been stable
+  // for far longer than the synchroniser needs).
+  (* ASYNC_REG = "TRUE" *) reg [1:0] blk_en_s   = 2'b00;
+  (* ASYNC_REG = "TRUE" *) reg       thr_tog_m   = 1'b0, thr_tog_s = 1'b0;
+  reg                                thr_tog_p   = 1'b0;
+  reg [31:0]                         blk_thr_c   = 32'hFFFFFFFF;
+  always @(posedge clk) begin
+    blk_en_s  <= {blk_en_s[0], aj_cfg_act[15]};
+    thr_tog_m <= aj_thr_tog;
+    thr_tog_s <= thr_tog_m;
+    thr_tog_p <= thr_tog_s;
+    if (thr_tog_s != thr_tog_p) blk_thr_c <= aj_thr_act;
+  end
+  wire        blk_out_valid;
+  wire [15:0] blk_out_i, blk_out_q;
+  wire [31:0] blk_cnt_w, blk_bursts_w;
+  gnss_pulse_blank u_blank (
+    .clk(clk), .rst_n(smi_rst_n_r), .clr(cnt_clear),
+    .in_valid(s_axis_smi_tvalid), .in_i(smi_pre_i), .in_q(smi_pre_q),
+    .en(blk_en_s[1]), .thr(blk_thr_c),
+    .out_valid(blk_out_valid), .out_i(blk_out_i), .out_q(blk_out_q),
+    .blk_cnt(blk_cnt_w), .burst_cnt(blk_bursts_w));
+  assign smi_out_valid = blk_out_valid;
+  wire [15:0] smi_i = blk_out_i;
+  wire [15:0] smi_q = blk_out_q;
+
+  // largest |I|,|Q| of both RX channels per window (for the RX gain loop)
+  wire [15:0] peak_w, peak_idx_w;
+  gnss_peak_hold u_peak (
+    .clk(clk), .rst_n(~rst), .valid(adc_valid_i0 & adc_valid_i1),
+    .a0(adc_data_i0), .b0(adc_data_q0), .a1(adc_data_i1), .b1(adc_data_q1),
+    .peak_win(peak_w), .win_idx(peak_idx_w));
 
   wire [15:0] proc_i0 = smi_en ? smi_i : adc_data_i0;
   wire [15:0] proc_q0 = smi_en ? smi_q : adc_data_q0;
@@ -760,6 +820,7 @@ module gnss_passthrough #(
   reg         cap_toggle = 1'b0;
   reg  [31:0] cap_status, cap_rx0, cap_tx0, cap_ovf, cap_unf;
   reg  [31:0] cap_rxs0, cap_txs0, cap_lvl, cap_rx1, cap_tx1, cap_rxs1;
+  reg  [31:0] cap_blk, cap_bursts, cap_peak;
 
   always @(posedge clk) begin
     cap_div <= cap_div + 1'b1;
@@ -775,6 +836,9 @@ module gnss_passthrough #(
       cap_rx1    <= rx_cnt1;
       cap_tx1    <= tx_cnt1;
       cap_rxs1   <= rx_snap1;
+      cap_blk    <= blk_cnt_w;
+      cap_bursts <= blk_bursts_w;
+      cap_peak   <= {peak_idx_w, peak_w};
       cap_toggle <= ~cap_toggle;
     end
   end
@@ -786,6 +850,7 @@ module gnss_passthrough #(
   reg [31:0] h_status = 32'd0, h_rx0 = 32'd0, h_tx0 = 32'd0;
   reg [31:0] h_ovf = 32'd0, h_unf = 32'd0, h_rxs0 = 32'd0, h_txs0 = 32'd0;
   reg [31:0] h_lvl = 32'd0, h_rx1 = 32'd0, h_tx1 = 32'd0, h_rxs1 = 32'd0;
+  reg [31:0] h_blk = 32'd0, h_bursts = 32'd0, h_peak = 32'd0;
 
   always @(posedge s_axi_aclk) begin
     tog_meta <= cap_toggle;
@@ -803,6 +868,9 @@ module gnss_passthrough #(
       h_rx1    <= cap_rx1;
       h_tx1    <= cap_tx1;
       h_rxs1   <= cap_rxs1;
+      h_blk    <= cap_blk;
+      h_bursts <= cap_bursts;
+      h_peak   <= cap_peak;
     end
   end
 
@@ -817,5 +885,8 @@ module gnss_passthrough #(
   assign v_rx_cnt1  = h_rx1;
   assign v_tx_cnt1  = h_tx1;
   assign v_rx_snap1 = h_rxs1;
+  assign v_blk_cnt    = h_blk;
+  assign v_blk_bursts = h_bursts;
+  assign v_peak       = h_peak;
 
 endmodule

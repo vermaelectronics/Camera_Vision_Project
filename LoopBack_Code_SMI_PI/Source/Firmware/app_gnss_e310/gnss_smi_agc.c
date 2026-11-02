@@ -28,6 +28,20 @@ static XTime    rxg_next;
 static uint32_t rxg_changes;                  /* gain steps, for gnss_aj.c   */
 static int      rxg_check;                    /* polls since the mode check  */
 
+/* Pulsed jammers (4.7). A jammer that is off for tens of ms lets the fast release raise the gain,
+ * and the next pulse clips the ADC: the gain pumps. Two defences:
+ *  - bitstream 4.6 keeps the largest |I|,|Q| of every 8.5 ms window (AJ_RX_PEAK), which sees
+ *    every pulse (the 256-sample snapshot sees one only if it happens to be on);
+ *  - after a release that is followed by another attack within RXG_CYCLE_US the jammer is
+ *    pulsed: no release for RXG_PULSY_HOLD_US after the last attack. */
+#define RXG_CYCLE_US        5000000U
+#define RXG_PULSY_HOLD_US   3000000U
+static int      hw_peak_ok;                   /* bitstream has AJ_RX_PEAK    */
+static uint16_t hw_idx_last, hw_idx_ignore;
+static int      rxg_released;
+static XTime    rxg_release_t, rxg_pulsy_until;
+static int      rxg_cycles;
+
 static uint32_t att_base;        /* operator's TX1 attenuation [mdB]        */
 static uint32_t att_written;     /* last value written by this loop         */
 static int      att_holding;     /* 1 = att_written is in effect            */
@@ -74,7 +88,23 @@ static int set_both(int32_t db)
 	if(ad9361_set_rx_rf_gain(ad9361_phy, 0, db) != 0) return -1;
 	if(ad9361_set_rx_rf_gain(ad9361_phy, 1, db) != 0) return -1;
 	rxg_gain = db;
+	if(hw_peak_ok)      /* the window in progress mixes two gains: ignore it and the one that completes next */
+		hw_idx_ignore = (uint16_t)((gnss_pt_read(GNSS_PT_REG_AJ_RX_PEAK) >> 16) + 2U);
 	return 0;
+}
+
+/* Peak of a window that completed since the last call and is clean (one gain), else -1. */
+static int hw_peak_new(void)
+{
+	uint32_t v;
+	uint16_t idx;
+	if(!hw_peak_ok) return -1;
+	v = gnss_pt_read(GNSS_PT_REG_AJ_RX_PEAK);
+	idx = (uint16_t)(v >> 16);
+	if(idx == hw_idx_last) return -1;
+	hw_idx_last = idx;
+	if((int16_t)(idx - hw_idx_ignore) < 0) return -1;
+	return (int)(v & 0xFFFFU);
 }
 
 static void manual_both(void)
@@ -138,6 +168,10 @@ static void start_loop(void)
 	att_written = cur;
 	att_holding = 0;
 	pout_ref = 0.0;
+	hw_peak_ok = ((gnss_pt_read(GNSS_PT_REG_AJ_INFO) & 0xFFU) >= GNSS_PT_AJ_LAYOUT_BLANK);
+	hw_idx_last = (uint16_t)(gnss_pt_read(GNSS_PT_REG_AJ_RX_PEAK) >> 16);
+	hw_idx_ignore = hw_idx_last;
+	rxg_released = 0; rxg_cycles = 0; rxg_pulsy_until = 0;
 	XTime_GetTime(&rxg_next);
 }
 
@@ -162,6 +196,15 @@ void gnss_rxg_set_mode(int mode)
 }
 
 int gnss_rxg_mode(void) { return rxg_mode; }
+
+int gnss_rxg_pulsy(void)
+{
+	XTime now;
+	if(rxg_mode != GNSS_RXG_MATCHED) return 0;
+	XTime_GetTime(&now);
+	if(now >= rxg_pulsy_until && rxg_cycles >= 2) rxg_cycles = 0;
+	return now < rxg_pulsy_until;
+}
 
 int32_t gnss_rxg_gain(void)
 {
@@ -237,6 +280,10 @@ void gnss_rxg_poll(void)
 	p0 = rx_peak(GNSS_PT_REG_RX_SNAPSHOT_CH0);
 	p1 = rx_peak(GNSS_PT_REG_RX_SNAPSHOT_CH1);
 	peak = p0 > p1 ? p0 : p1;
+	{
+		int hw = hw_peak_new();            /* a pulse the snapshots did not catch */
+		if(hw > peak) peak = hw;
+	}
 	last_peak = peak;
 
 	if(peak > GNSS_RXG_PEAK_HIGH) {
@@ -260,7 +307,13 @@ void gnss_rxg_poll(void)
 			if(g != rxg_gain) set_both(g);
 		}
 		rxg_quiet = 0;
-	} else if(peak < GNSS_RXG_PEAK_LOW && rxg_gain < rxg_ref) {
+		/* attack soon after a release = the jammer is pulsed: hold the gain down */
+		if(rxg_released && now - rxg_release_t < (XTime)((uint64_t)COUNTS_PER_SECOND * RXG_CYCLE_US / 1000000U))
+			rxg_cycles++;
+		rxg_released = 0;
+		if(rxg_cycles >= 2)
+			rxg_pulsy_until = now + (XTime)((uint64_t)COUNTS_PER_SECOND * RXG_PULSY_HOLD_US / 1000000U);
+	} else if(peak < GNSS_RXG_PEAK_LOW && rxg_gain < rxg_ref && now >= rxg_pulsy_until) {
 		/* Fast release: after 20 ms below the low mark, jump up by as much
 		 * as the measured peak allows (towards ~1450, 1 dB margin, at most
 		 * 12 dB, never above the clean reference). With the jammer gone the
@@ -276,6 +329,8 @@ void gnss_rxg_poll(void)
 			if(rxg_gain + up > rxg_ref) up = rxg_ref - rxg_gain;
 			set_both(rxg_gain + up);
 			rxg_quiet = 0;
+			rxg_released = 1;
+			rxg_release_t = now;
 		}
 	} else {
 		rxg_quiet = 0;

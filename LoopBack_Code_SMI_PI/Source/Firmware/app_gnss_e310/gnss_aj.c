@@ -197,6 +197,62 @@ static double noise_now(void)
 
 static int32_t g2_q13(void) { return (int32_t)(g2 * 8192.0 + 0.5); }
 
+/* ---- pulse blanker (bitstream 4.6) and pulsed jammers (firmware 4.7) ------------------------
+ * A jammer that is on only part of the time (pulsed barrage) leaves bursts at the filter output
+ * whenever the weights are not right for it, and the receiver loses lock on them. The FPGA
+ * blanker (gnss_pulse_blank.v) zeroes the output while a burst is present; the threshold is set
+ * here from the output noise: 8 samples of I^2+Q^2 above (noise x gains) x 10^(blk_db/10).
+ * It is also armed while the filter is bypassed (no jammer detected yet), so a pulse the
+ * detector never sees is still blanked. If it ends up blanking most of the output (a continuous
+ * jammer the filter does not null) it is switched off for AJ_BLK_OFF_US. The burst counter is
+ * also the evidence of a PULSED jammer: the weights are then solved from the blocks that contain
+ * a pulse only (aj_result_t.gate), JAMMER OFF is delayed, and the RX gain loop keeps the gain
+ * down (gnss_rxg_pulsy). */
+#define AJ_BLK_DB_DEFAULT   7.0         /* threshold above the output noise [dB]               */
+#define AJ_BLK_DUTY_MAX     0.6         /* blanked more than this for AJ_BLK_GUARD_US: not pulses */
+#define AJ_BLK_GUARD_US     1000000U
+#define AJ_BLK_OFF_US       10000000U
+#define AJ_BLK_POLL_US      100000U
+#define AJ_BLK_BURSTS_MIN   4           /* bursts in one poll that count as a pulse train      */
+#define AJ_PULSE_HOLD_US    3000000U    /* pulses seen this recently: pulsed jammer            */
+#define AJ_OFF_PULSE_US     3000000U    /* JAMMER OFF delay while it is pulsed                 */
+
+static int      blk_hw, blk_mode = 1, blk_seeded, blk_guard_on;
+static double   blk_db = AJ_BLK_DB_DEFAULT, blk_duty;
+static uint32_t blk_thr_set = GNSS_PT_BLK_THR_OFF, blk_c0, blk_b0, blk_r0, n_gate;
+static XTime    blk_t0, blk_guard_t0, blk_off_until, blk_ref_t, pulse_t;
+
+static uint32_t blk_threshold(int filtered)
+{
+	double nz, nout, thr;
+	int k;
+	XTime now;
+
+	if(!blk_hw || blk_mode == 0) return GNSS_PT_BLK_THR_OFF;
+	XTime_GetTime(&now);
+	if(blk_mode == 1 && now < blk_off_until) return GNSS_PT_BLK_THR_OFF;
+	nz = noise_now();
+	if(nz <= 0.0 && filtered && res.sig2 > 0.0) nz = res.sig2;   /* no clean floor yet */
+	if(nz <= 0.0) return GNSS_PT_BLK_THR_OFF;
+	nout = nz * (filtered ? 1.0 + res.wn2 : 1.0);
+	for(k = 0; k < shift; k++) nout *= 4.0;
+	thr = 8.0 * nout * db2lin(blk_db);
+	if(thr > 4.0e9) thr = 4.0e9;
+	if(thr < 16.0) thr = 16.0;
+	return (uint32_t)thr;
+}
+
+static uint32_t blk_cfg_bit(uint32_t thr)
+{
+	return (blk_hw && thr != GNSS_PT_BLK_THR_OFF) ? GNSS_PT_AJ_CFG_BLANK : 0U;
+}
+
+static int pulsed(XTime now)
+{
+	if(gnss_rxg_pulsy()) return 1;
+	return pulse_t != 0 && now - pulse_t < us(AJ_PULSE_HOLD_US);
+}
+
 static void stamp(XTime now)
 {
 	console_print("[AJ %s s] ", f3u((double)ms_since(t_boot, now) / 1000.0));
@@ -216,13 +272,16 @@ static void commit_bypass(void)
 {
 	shift = 0;
 	gnss_rxg_set_digital_db(0);
-	gnss_pt_write_aj(0, 0, GNSS_PT_AJ_CFG_BYPASS, g2_q13());
+	blk_thr_set = blk_threshold(0);
+	gnss_pt_write_aj(0, 0, GNSS_PT_AJ_CFG_BYPASS | blk_cfg_bit(blk_thr_set), g2_q13(), blk_thr_set);
 }
 
 static void commit_weights(void)
 {
 	gnss_rxg_set_digital_db(6 * shift);
-	gnss_pt_write_aj(res.wre, res.wim, GNSS_PT_AJ_CFG_SHIFT(shift) | GNSS_PT_AJ_CFG_WS(res.ws), g2_q13());
+	blk_thr_set = blk_threshold(1);
+	gnss_pt_write_aj(res.wre, res.wim, GNSS_PT_AJ_CFG_SHIFT(shift) | GNSS_PT_AJ_CFG_WS(res.ws) | blk_cfg_bit(blk_thr_set),
+	                 g2_q13(), blk_thr_set);
 }
 
 /* ---- DMA --------------------------------------------------------------------- */
@@ -739,7 +798,7 @@ static void jammed_state(XTime now)
 	quiet = res.jn_coh_db < coh_off() && res.jn_db < AJ_OFF_DB && cut_db() == 0;
 	if(!quiet) {
 		quiet_t0 = now;
-	} else if(now - quiet_t0 >= us(AJ_OFF_US)) {
+	} else if(now - quiet_t0 >= us(pulsed(now) ? AJ_OFF_PULSE_US : AJ_OFF_US)) {
 		leave_jammed(now);
 		return;
 	}
@@ -772,7 +831,7 @@ static void jammed_state(XTime now)
 /* JAMMED: solve this capture and commit the weights. */
 static void solve_capture(XTime now)
 {
-	int want;
+	int want, rc;
 
 	if(gnss_rxg_changes() != gain_seen) {
 		/* the RX gain stepped since the last solve: the two channels' phase
@@ -788,7 +847,17 @@ static void solve_capture(XTime now)
 	res.g2 = g2;
 	res.rx2_noise = rx2n;
 	res.avg = sweep_en ? sweep_avg : 0.0;
-	if(aj_compute((const uint32_t *)GNSS_AJ_BUF_ADDR, AJ_NSAMP, &res) != 0 || !res.ok) {
+	res.gate = pulsed(now);                         /* a pulsed jammer: skip the blocks in its gaps */
+	res.gate_coh_db = AJ_OFF_COH_DB;
+	res.gate_pwr = 1.0 + db2lin(AJ_OFF_DB);
+	rc = aj_compute((const uint32_t *)GNSS_AJ_BUF_ADDR, AJ_NSAMP, &res);
+	if(rc == 1 && res.gated) {
+		n_gate++;
+		res_valid = 1;
+		jammed_state(now);                          /* weights and statistics unchanged */
+		return;
+	}
+	if(rc != 0 || !res.ok) {
 		n_fail++;
 		return;
 	}
@@ -808,6 +877,83 @@ static void solve_capture(XTime now)
 		commit_weights();
 	jammed_state(now);
 }
+
+/* Rewrite the threshold (and the enable) without new weights. */
+static void blk_refresh(void)
+{
+	if(!blk_hw) return;
+	if(state == ST_CLEAR)
+		commit_bypass();
+	else if(res_solved && !aj_frozen)
+		commit_weights();
+}
+
+/* Every capture: watch the blanker's counters, keep the threshold in step with the noise. */
+static void blk_service(XTime now)
+{
+	uint32_t c, b, r, dc, dn, dr, thr;
+
+	if(!blk_hw) return;
+	if(now - blk_t0 < us(AJ_BLK_POLL_US)) return;
+	blk_t0 = now;
+	c = gnss_pt_read(GNSS_PT_REG_AJ_BLK_COUNT);
+	b = gnss_pt_read(GNSS_PT_REG_AJ_BLK_BURSTS);
+	r = gnss_pt_read(GNSS_PT_REG_RX_COUNT_CH0);
+	dc = c - blk_c0; dn = b - blk_b0; dr = r - blk_r0;
+	blk_c0 = c; blk_b0 = b; blk_r0 = r;
+	if(!blk_seeded) { blk_seeded = 1; return; }
+	blk_duty = dr ? (double)dc / (double)dr : 0.0;
+
+	/* pulse train: several bursts, and most of the time unblanked */
+	if(blk_thr_set != GNSS_PT_BLK_THR_OFF && dn >= AJ_BLK_BURSTS_MIN && blk_duty < AJ_BLK_DUTY_MAX)
+		pulse_t = now;
+
+	/* blanking most of the output for a second is not a pulse train */
+	if(blk_mode == 1 && blk_thr_set != GNSS_PT_BLK_THR_OFF && blk_duty > AJ_BLK_DUTY_MAX) {
+		if(!blk_guard_on) {
+			blk_guard_on = 1;
+			blk_guard_t0 = now;
+		} else if(now - blk_guard_t0 >= us(AJ_BLK_GUARD_US)) {
+			blk_guard_on = 0;
+			blk_off_until = now + us(AJ_BLK_OFF_US);
+			blk_refresh();
+			stamp(now);
+			console_print("pulse blanker OFF for %d s: it was blanking %s %% of the output. That is a jammer the\n"
+				      "     filter does not null (see 'residual' in gnss_report?), not a pulse train.\n",
+				      (long)(AJ_BLK_OFF_US / 1000000U), f1(100.0 * blk_duty));
+		}
+	} else {
+		blk_guard_on = 0;
+	}
+
+	/* the threshold follows the noise floor and the gain (every 0.5 s, only when it moved) */
+	if(now - blk_ref_t >= us(500000U)) {
+		blk_ref_t = now;
+		thr = blk_threshold(state == ST_CLEAR ? 0 : 1);
+		if((thr == GNSS_PT_BLK_THR_OFF) != (blk_thr_set == GNSS_PT_BLK_THR_OFF) ||
+		   (thr != GNSS_PT_BLK_THR_OFF && ((double)thr > 1.3 * (double)blk_thr_set ||
+		                                   (double)thr < 0.77 * (double)blk_thr_set)))
+			blk_refresh();
+	}
+}
+
+void gnss_aj_set_blank(int mode)
+{
+	blk_mode = (mode < 0) ? 0 : (mode > 2 ? 2 : mode);
+	blk_off_until = 0;
+	blk_guard_on = 0;
+	blk_refresh();
+}
+
+void gnss_aj_set_blank_db(double db)
+{
+	if(db < 3.0) db = 3.0;
+	if(db > 30.0) db = 30.0;
+	blk_db = db;
+	blk_refresh();
+}
+
+int gnss_aj_blank_available(void) { return blk_hw; }
 
 void gnss_aj_poll(void)
 {
@@ -870,6 +1016,7 @@ void gnss_aj_poll(void)
 		print_csv(now);
 	}
 	flap_poll(now);
+	blk_service(now);
 }
 
 /* ---- control ------------------------------------------------------------------ */
@@ -887,6 +1034,12 @@ void gnss_aj_init(void)
 	ws_hw = ((gnss_pt_read(GNSS_PT_REG_AJ_INFO) & 0xFFU) >= 3U);
 	aj_set_max_ws(ws_hw ? AJ_MAXWS : 0);
 	sh_max = ((gnss_pt_read(GNSS_PT_REG_AJ_INFO) & 0xFFU) >= 4U) ? AJ_MAXSH : 4;
+	blk_hw = ((gnss_pt_read(GNSS_PT_REG_AJ_INFO) & 0xFFU) >= GNSS_PT_AJ_LAYOUT_BLANK);
+	blk_seeded = 0;
+	if(!blk_hw)
+		console_print("[AJ] NOTE: the bitstream has no pulse blanker (AJ_INFO layout %d, needs 5 = bitstream 4.6): pulsed\n"
+			      "     jammers are only handled by the weights. Rebuild the whole project for it.\n",
+			      (long)(gnss_pt_read(GNSS_PT_REG_AJ_INFO) & 0xFFU));
 	if(sh_max < AJ_MAXSH)
 		console_print("[AJ] NOTE: the bitstream is older than 4.5 (AJ_INFO layout %d): %s make-up shift limited to %d (+%d dB).\n"
 			      "     Rebuild the whole project (not firmware only) for the full 4.5 behaviour.\n",
@@ -1113,6 +1266,20 @@ void gnss_aj_report(void)
 		      (long)cfg, (long)((cfg >> 8) & 7U), (long)(6 * ((cfg >> 8) & 7U)),
 		      (char*)(aj_frozen ? ", FROZEN" : ""));
 	console_print("mode          : %s\n", (char*)mode_name(aj_mode));
+	console_print("pulse blanker : %s\n",
+		      (char*)(!blk_hw ? "not in this bitstream (needs bitstream 4.6, AJ_INFO layout 5)" :
+		              blk_mode == 0 ? "OFF (gnss_aj_blank=0)" :
+		              blk_thr_set == GNSS_PT_BLK_THR_OFF ? "armed, waiting for a noise floor (no clean moment yet)" :
+		              (blk_mode == 1 && now < blk_off_until) ? "OFF for a while: it was blanking most of the output" :
+		              "ON"));
+	if(blk_hw && blk_thr_set != GNSS_PT_BLK_THR_OFF)
+		console_print("                threshold %lu (8 samples of I^2+Q^2, %s dB over the output noise), blanked %s %% of the last 100 ms,\n"
+			      "                %lu samples in %lu bursts in total, %lu jammer-free blocks skipped, pulses %s, hardware peak %d\n",
+			      (unsigned long)blk_thr_set, f1(blk_db), f1(100.0 * blk_duty),
+			      (unsigned long)gnss_pt_read(GNSS_PT_REG_AJ_BLK_COUNT),
+			      (unsigned long)gnss_pt_read(GNSS_PT_REG_AJ_BLK_BURSTS), (unsigned long)n_gate,
+			      (char*)(pulsed(now) ? "SEEN" : "not seen"),
+			      (long)(gnss_pt_read(GNSS_PT_REG_AJ_RX_PEAK) & 0xFFFFU));
 	console_print("sweep         : %s (gnss_aj_sweep=%d)\n",
 		      (char*)(!sweep_en ? "detector OFF" : sweep_avg > 0.0 ? "MOVING JAMMER (chirp): long memory ON, 0.98 = about 50 solves" : "none seen (fixed or fast jammer, memory 0.5)"),
 		      sweep_en);

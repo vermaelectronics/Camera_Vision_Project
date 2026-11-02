@@ -574,11 +574,14 @@ static void info_registers(void)
     console_print("   0x100 AJ_W0..31       RW  SMI-PI weights (shadow), Q3.12\n");
     console_print("                             {imag, real}; 0-15 RX1, 16-31 RX2\n");
     console_print("   0x180 AJ_COMMIT       W/R write: all AJ_* -> filter; read: count\n");
-    console_print("   0x184 AJ_INFO         RO  0x10080C04 (16 taps, ref 8, Q3.12, v4.5)\n");
+    console_print("   0x184 AJ_INFO         RO  0x10080C05 (16 taps, ref 8, Q3.12, v4.6)\n");
     console_print("   0x188 AJ_CFG          RW  [0] bypass (reset 1), [10:8] make-up\n");
     console_print("   0x18C AJ_NORM         RW  RX2 normalisation g2, Q3.13 (0x2000=1)\n");
     console_print("   0x190 AJ_WC0/WC1      RW  image taps (0x190 RX1, 0x194 RX2)\n");
     console_print("   0x198 AJ_CFG_ACTIVE   RO  AJ_CFG as committed\n");
+    console_print("   0x19C AJ_BLK_THR      RW  pulse blanker threshold (shadow; AJ_CFG[15] = enable), 0x1A0 active\n");
+    console_print("   0x1A4 AJ_BLK_COUNT    RO  samples blanked,  0x1A8 AJ_BLK_BURSTS  RO  bursts blanked\n");
+    console_print("   0x1AC AJ_RX_PEAK      RO  [15:0] RX peak of the last 8.5 ms window, [31:16] window counter\n");
     rule();
     console_print(" STATUS BITS [2] AND [3] ARE THE IMPORTANT ONES.\n");
     console_print("   They are axi_ad9361's read-back of (dac_data_sel == 4'h2),\n");
@@ -782,6 +785,7 @@ static void info_quickstart(void)
     console_print("   gnss_aj_csv=N               CSV line every N ms (100..), 0 = off\n");
     console_print("   gnss_aj_mode=0 / 1 / 2 / 3  31+2 taps (default) / RX2 / one / no image\n");
     console_print("   gnss_aj_sweep=1 / 0         long memory for a moving (chirp) jammer, default on\n");
+    console_print("   gnss_aj_blank=1 / 0 / 2     pulse blanker (bitstream 4.6): auto (default) / off / on; gnss_aj_blank_db=7\n");
     console_print("   gnss_band=1 / 0 / 2 / 3 / 4 RF profile (1 = ALL incl. BeiDou, default)\n");
     console_print("   gnss_band=5 <LO> <rate> [bw] [txAtt] [rxGain]   CUSTOM profile, your own values\n");
     console_print("   gnss_band?                  which GNSS signals the profile carries\n");

@@ -528,6 +528,31 @@ int aj_compute(const uint32_t *buf, int nsamp, aj_result_t *r)
 	cnt = build_stats(buf, nsamp, g2);
 	coherence(r, cnt);
 
+	/* Pulsed jammer: a block captured in a gap holds no jammer. Averaged in, it would pull the
+	 * weights back to "no jammer" and the next pulse would find them useless. Keep the old
+	 * weights and statistics; the caller still gets this block's power and coherence. */
+	r->gated = 0;
+	if(r->gate) {
+		double inv = 1.0 / (double)cnt, p1q = (double)S11r[0] * inv;
+		if(r->jn_coh_db < r->gate_coh_db &&
+		   (r->noise_ref <= 0.0 || p1q < r->noise_ref * r->gate_pwr)) {
+			double noise = r->noise_ref;
+			r->p1 = p1q;
+			r->p2 = (double)S22r[0] * inv;
+			if(noise > 0.0) {
+				if(noise < AJ_QFLOOR) noise = AJ_QFLOOR;
+				r->noise = noise;
+				r->jn_db = (p1q > noise) ? aj_db10((p1q - noise) / noise) : -99.0;
+			} else {
+				r->noise = 0.0;
+				r->jn_db = -99.0;
+			}
+			r->gated = 1;
+			r->ok = 1;
+			return 1;
+		}
+	}
+
 	/* statistics for the solve: this block, averaged with the last ones */
 	av = (r->avg > 0.0) ? r->avg : AJ_AVG;
 	if(av > 0.995) av = 0.995;

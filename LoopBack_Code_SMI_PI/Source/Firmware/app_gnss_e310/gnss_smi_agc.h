@@ -60,7 +60,8 @@ int32_t  gnss_rxg_ref(void);           /* clean reference gain [dB]         */
 uint32_t gnss_rxg_changes(void);       /* counts every gain step            */
 void     gnss_rxg_set_digital_db(int db); /* make-up gain already applied in */
                                        /* the filter (6 dB per shift step)  */
-int      gnss_rxg_peak(void);          /* last ADC peak of both channels    */
+int      gnss_rxg_peak(void);
+int      gnss_rxg_pulsy(void);       /* 1 while the gain keeps being cut again after a release (pulsed jammer) */
 uint32_t gnss_rxg_att_base(void);      /* operator's TX1 attenuation [mdB]  */
 int      gnss_rxg_comp_db(void);       /* TX level hold in effect [dB]      */
 

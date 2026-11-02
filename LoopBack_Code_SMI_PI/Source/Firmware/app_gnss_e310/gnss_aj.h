@@ -35,7 +35,7 @@
 #define GNSS_AJ_BUF_ADDR   0x11000000U
 #endif
 
-#define GNSS_AJ_VERSION_STR  "4.6.0"
+#define GNSS_AJ_VERSION_STR  "4.7.0"
 
 /* RF profiles (gnss_band=). RX and TX are always set together, so the
  * retransmitted signal comes out on the frequency it came in on and the
@@ -55,6 +55,9 @@ void gnss_aj_command(int on);       /* the same, by the operator (gnss_smi=) */
 int  gnss_aj_enabled(void);
 int  gnss_aj_user_off(void);        /* 1 if the operator typed gnss_smi=0    */
 void gnss_aj_freeze(int on);        /* keep the present weights              */
+void gnss_aj_set_blank(int mode);           /* pulse blanker: 0 off, 1 auto (default), 2 on (bitstream 4.6) */
+void gnss_aj_set_blank_db(double db);       /* blanker threshold above the output noise [dB], 3..30      */
+int  gnss_aj_blank_available(void);         /* 1 = the bitstream has the blanker                          */
 void gnss_aj_set_sweep(int on);           /* slow-chirp detector on/off (default on) */
 int  gnss_aj_sweep_active(void);          /* 1 while a moving jammer is being averaged */
 void gnss_aj_set_mode(int mode);    /* AJ_MODE_STAP / _RX2 / _NB / _LIN      */

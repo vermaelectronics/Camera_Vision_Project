@@ -178,6 +178,13 @@ the receiver to lock without a jammer (the field test used 34 dB), set it first 
 
 ---
 
+### T9. Pulsed barrage jammer (firmware 4.7.0, bitstream 4.6)
+
+See `README_SMI_PI_v4.7_pulse.md`, section "Test T9": jammer off for 10 s (noise floor), then pulsed; `gnss_report?` twice, 10 s apart; compare
+`gnss_aj_blank=0` and `1`. Send the two blocks, the generator's pulse period and duty, and the receiver's satellites in use.
+
+---
+
 ## 4. Report template (copy, fill in, paste into your next message)
 
 ```

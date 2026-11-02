@@ -144,6 +144,8 @@ command cmd_list[] = {
 	{"gnss_aj_log=", "Status line every N s on the console (default 0 = off: only JAMMER ON/OFF events; held back while you type).", "gnss_aj_log=30", set_gnss_aj_log},
 	{"gnss_aj_events=", "1 = print JAMMER ON/NULLED/OFF events (default), 0 = console silent (gnss_report? still lists them).", "gnss_aj_events=0", set_gnss_aj_events},
 	{"gnss_aj_csv=", "CSV line (AJCSV,...) every N ms, 100 to 60000; 0 = off (default).", "gnss_aj_csv=0", set_gnss_aj_csv},
+	{"gnss_aj_blank=", "Pulse blanker (bitstream 4.6): 1 = automatic (default), 0 = off, 2 = always on.", "gnss_aj_blank=1", set_gnss_aj_blank},
+	{"gnss_aj_blank_db=", "Pulse blanker threshold above the output noise [dB], 3..30, default 7.", "gnss_aj_blank_db=7", set_gnss_aj_blank_db},
 	{"gnss_aj_sweep=", "1 = detect a moving (chirping) jammer and average over about 50 solves (default), 0 = off.", "gnss_aj_sweep=1", set_gnss_aj_sweep},
 	{"gnss_aj_mode=", "0 = space-time 31 + 2 image taps (default), 1 = RX2 taps, 2 = one weight (v3), 3 = no image taps (v4.0).", "gnss_aj_mode=0", set_gnss_aj_mode},
 	{"gnss_band?", "RF profile and which GNSS signals it carries (GPS, Galileo, BeiDou, GLONASS).", "", get_gnss_band},
@@ -414,6 +416,28 @@ void set_gnss_aj_mode(double* param, char param_no)
 		return;
 	}
 	gnss_aj_set_mode((int)param[0]);
+	gnss_aj_print_short();
+}
+
+void set_gnss_aj_blank(double* param, char param_no)
+{
+	if(param_no < 1 || param[0] < 0.0 || param[0] > 2.0) {
+		console_print("gnss_aj_blank= needs 1 (automatic, default), 0 (off) or 2 (always on)\n");
+		return;
+	}
+	if(!gnss_aj_blank_available())
+		console_print("the bitstream has no pulse blanker (needs 4.6); the setting is kept for when it has\n");
+	gnss_aj_set_blank((int)param[0]);
+	gnss_aj_print_short();
+}
+
+void set_gnss_aj_blank_db(double* param, char param_no)
+{
+	if(param_no < 1 || param[0] < 3.0 || param[0] > 30.0) {
+		console_print("gnss_aj_blank_db= needs 3..30 (dB above the output noise, default 7)\n");
+		return;
+	}
+	gnss_aj_set_blank_db(param[0]);
 	gnss_aj_print_short();
 }
 
