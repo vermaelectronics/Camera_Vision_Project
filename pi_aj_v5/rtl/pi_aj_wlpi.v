@@ -192,6 +192,7 @@ module pi_aj_wlpi #(
     // PD: rounded/shifted update, clamped to the weight range (+ flags)
     reg signed [WW+1:0]   pd_dl_re[0:NL-1], pd_dl_im[0:NL-1];
     reg                   pd_ov_re[0:NL-1], pd_un_re[0:NL-1], pd_ov_im[0:NL-1], pd_un_im[0:NL-1];
+    reg                   pd_rb_re[0:NL-1], pd_rb_im[0:NL-1];
     reg signed [WW-1:0]   pd_w_re [0:NL-1], pd_w_im [0:NL-1];
     reg signed [OPW-1:0]  pd_uf_re[0:NL-1], pd_uf_im[0:NL-1];
     reg                   pd_val  [0:NL-1];
@@ -229,29 +230,38 @@ module pi_aj_wlpi #(
     wire signed [WW+1:0] dlc_re [0:NL-1];
     wire signed [WW+1:0] dlc_im [0:NL-1];
     wire                 dov_re [0:NL-1], dun_re [0:NL-1], dov_im [0:NL-1], dun_im [0:NL-1];
+    wire                 drb_re [0:NL-1], drb_im [0:NL-1];
 
     localparam signed [WW+1:0] WMAX = {3'b000, {(WW-1){1'b1}}};
     localparam signed [WW+1:0] WMIN = {3'b111, {(WW-1){1'b0}}};
     genvar gl;
     generate
         for (gl = 0; gl < NL; gl = gl + 1) begin : g_lane
-            // P1 -> PD: the rounded, shifted update (64-bit, then clamped)
-            wire signed [63:0] t_re = $signed(p1_up_re[gl]) <<< 16;
-            wire signed [63:0] t_im = $signed(p1_up_im[gl]) <<< 16;
-            wire signed [63:0] rnd  = (sh_p1 == 0) ? 64'sd0 : (64'sd1 <<< (sh_p1 - 1));
-            wire signed [63:0] dl_re = (t_re + rnd) >>> sh_p1;
-            wire signed [63:0] dl_im = (t_im + rnd) >>> sh_p1;
-            assign dlc_re[gl] = (dl_re > WMAX) ? WMAX : (dl_re < WMIN) ? WMIN : dl_re[WW+1:0];
-            assign dlc_im[gl] = (dl_im > WMAX) ? WMAX : (dl_im < WMIN) ? WMIN : dl_im[WW+1:0];
-            assign dov_re[gl] = (dl_re > WMAX); assign dun_re[gl] = (dl_re < WMIN);
-            assign dov_im[gl] = (dl_im > WMAX); assign dun_im[gl] = (dl_im < WMIN);
-            // PD -> P2: w + update, saturated
-            wire signed [WW+1:0] s_re = $signed(pd_w_re[gl]) + pd_dl_re[gl];
-            wire signed [WW+1:0] s_im = $signed(pd_w_im[gl]) + pd_dl_im[gl];
-            wire ovr_re = pd_ov_re[gl] | (s_re > WMAX);
-            wire unr_re = pd_un_re[gl] | (s_re < WMIN);
-            wire ovr_im = pd_ov_im[gl] | (s_im > WMAX);
-            wire unr_im = pd_un_im[gl] | (s_im < WMIN);
+            // P1 -> PD: the shifted update. Round-half-up is split in two:
+            // (t + 2^(s-1)) >>> s == (t >>> s) + t[s-1], so this stage only
+            // shifts (no 64-bit adder before the shifter) and the rounding
+            // bit is added as a carry-in in P2. Overflow is a sign-bit check.
+            wire signed [63:0] t_re  = $signed(p1_up_re[gl]) <<< 16;
+            wire signed [63:0] t_im  = $signed(p1_up_im[gl]) <<< 16;
+            wire signed [63:0] sh_re = t_re >>> sh_p1;
+            wire signed [63:0] sh_im = t_im >>> sh_p1;
+            wire [64-WW:0]     hb_re = sh_re[63:WW-1];   // must all equal the sign
+            wire [64-WW:0]     hb_im = sh_im[63:WW-1];
+            assign dov_re[gl] = ~sh_re[63] & (|hb_re);
+            assign dun_re[gl] =  sh_re[63] & ~(&hb_re);
+            assign dov_im[gl] = ~sh_im[63] & (|hb_im);
+            assign dun_im[gl] =  sh_im[63] & ~(&hb_im);
+            assign dlc_re[gl] = dov_re[gl] ? WMAX : dun_re[gl] ? WMIN : sh_re[WW+1:0];
+            assign dlc_im[gl] = dov_im[gl] ? WMAX : dun_im[gl] ? WMIN : sh_im[WW+1:0];
+            assign drb_re[gl] = (sh_p1 == 0) ? 1'b0 : t_re[sh_p1 - 1];
+            assign drb_im[gl] = (sh_p1 == 0) ? 1'b0 : t_im[sh_p1 - 1];
+            // PD -> P2: w + update + rounding carry, saturated (sign-bit check)
+            wire signed [WW+1:0] s_re = $signed(pd_w_re[gl]) + pd_dl_re[gl] + $signed({1'b0, pd_rb_re[gl]});
+            wire signed [WW+1:0] s_im = $signed(pd_w_im[gl]) + pd_dl_im[gl] + $signed({1'b0, pd_rb_im[gl]});
+            wire ovr_re = pd_ov_re[gl] | (~s_re[WW+1] & (|s_re[WW:WW-1]));
+            wire unr_re = pd_un_re[gl] | ( s_re[WW+1] & ~(&s_re[WW:WW-1]));
+            wire ovr_im = pd_ov_im[gl] | (~s_im[WW+1] & (|s_im[WW:WW-1]));
+            wire unr_im = pd_un_im[gl] | ( s_im[WW+1] & ~(&s_im[WW:WW-1]));
             wire signed [WW-1:0] su_re = ovr_re ? {1'b0, {(WW-1){1'b1}}} : unr_re ? {1'b1, {(WW-1){1'b0}}} : s_re[WW-1:0];
             wire signed [WW-1:0] su_im = ovr_im ? {1'b0, {(WW-1){1'b1}}} : unr_im ? {1'b1, {(WW-1){1'b0}}} : s_im[WW-1:0];
             assign wn_re[gl] = (freeze | ~en) ? pd_w_re[gl] : su_re;
@@ -319,17 +329,19 @@ module pi_aj_wlpi #(
     wire signed [WM+OPW+8:0] e_re  = en ? (d5_re - fs_re) : d5_re;
     wire signed [WM+OPW+8:0] e_im  = en ? (d5_im - fs_im) : d5_im;
 
+    // saturation by checking that the dropped bits all equal the sign
+    // (same result as a magnitude compare, a few LUT levels instead of a carry chain)
     function signed [OW-1:0] sat_o;
         input signed [WM+OPW+8:0] v;
-        if (v > $signed({1'b0, {(OW-1){1'b1}}}))      sat_o = {1'b0, {(OW-1){1'b1}}};
-        else if (v < $signed({1'b1, {(OW-1){1'b0}}})) sat_o = {1'b1, {(OW-1){1'b0}}};
-        else                                           sat_o = v[OW-1:0];
+        if ((v[WM+OPW+8:OW-1] == 0) || (&v[WM+OPW+8:OW-1])) sat_o = v[OW-1:0];
+        else if (v[WM+OPW+8])                               sat_o = {1'b1, {(OW-1){1'b0}}};
+        else                                                sat_o = {1'b0, {(OW-1){1'b1}}};
     endfunction
     function signed [DW-1:0] sat_e;
         input signed [WM+OPW+8:0] v;
-        if (v > $signed({1'b0, {(DW-1){1'b1}}}))      sat_e = {1'b0, {(DW-1){1'b1}}};
-        else if (v < $signed({1'b1, {(DW-1){1'b0}}})) sat_e = {1'b1, {(DW-1){1'b0}}};
-        else                                           sat_e = v[DW-1:0];
+        if ((v[WM+OPW+8:DW-1] == 0) || (&v[WM+OPW+8:DW-1])) sat_e = v[DW-1:0];
+        else if (v[WM+OPW+8])                               sat_e = {1'b1, {(DW-1){1'b0}}};
+        else                                                sat_e = {1'b0, {(DW-1){1'b1}}};
     endfunction
 
     integer j, ln;
@@ -444,6 +456,7 @@ module pi_aj_wlpi #(
             sd <= s1; fd <= f1; ld <= l1; qd <= q1; cd <= c1;
             for (ln = 0; ln < NL; ln = ln + 1) begin
                 pd_dl_re[ln] <= dlc_re[ln]; pd_dl_im[ln] <= dlc_im[ln];
+                pd_rb_re[ln] <= drb_re[ln]; pd_rb_im[ln] <= drb_im[ln];
                 pd_ov_re[ln] <= dov_re[ln]; pd_un_re[ln] <= dun_re[ln];
                 pd_ov_im[ln] <= dov_im[ln]; pd_un_im[ln] <= dun_im[ln];
                 pd_w_re[ln]  <= p1_w_re[ln];  pd_w_im[ln]  <= p1_w_im[ln];

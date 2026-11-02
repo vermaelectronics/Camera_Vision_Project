@@ -54,24 +54,19 @@ module pi_aj_notch #(
     localparam PF = 12;                          // power fraction bits
     localparam PW = 2*DW + 2 + PF;
 
+    // saturation by checking that the dropped bits all equal the sign
     function signed [YW-1:0] sat_y;
         input signed [2*DW+8:0] v;
-        if (v > $signed({{(2*DW+9-YW+1){1'b0}}, {(YW-1){1'b1}}}))
-            sat_y = {1'b0, {(YW-1){1'b1}}};
-        else if (v < $signed({{(2*DW+9-YW+1){1'b1}}, {(YW-1){1'b0}}}))
-            sat_y = {1'b1, {(YW-1){1'b0}}};
-        else
-            sat_y = v[YW-1:0];
+        if ((v[2*DW+8:YW-1] == 0) || (&v[2*DW+8:YW-1])) sat_y = v[YW-1:0];
+        else if (v[2*DW+8])                             sat_y = {1'b1, {(YW-1){1'b0}}};
+        else                                            sat_y = {1'b0, {(YW-1){1'b1}}};
     endfunction
 
     function signed [DW-1:0] sat_d;
         input signed [YW-1:0] v;
-        if (v > $signed({2'b00, {(DW-1){1'b1}}}))
-            sat_d = {1'b0, {(DW-1){1'b1}}};
-        else if (v < $signed({2'b11, {(DW-1){1'b0}}}))
-            sat_d = {1'b1, {(DW-1){1'b0}}};
-        else
-            sat_d = v[DW-1:0];
+        if ((v[YW-1:DW-1] == 0) || (&v[YW-1:DW-1])) sat_d = v[DW-1:0];
+        else if (v[YW-1])                           sat_d = {1'b1, {(DW-1){1'b0}}};
+        else                                        sat_d = {1'b0, {(DW-1){1'b1}}};
     endfunction
 
     // index of the highest set bit (0 when v == 0); log-depth search
