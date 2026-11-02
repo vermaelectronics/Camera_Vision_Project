@@ -89,6 +89,10 @@ typedef struct {
                             /*   [LSB^2], learned while no jammer, <= 0: none */
     double  g2;             /* RX2 normalisation the core applies (the Q3.13  */
                             /*   value written to AJ_NORM), <= 0 means 1      */
+    double  avg;            /* weight of the past statistics in this solve,   */
+                            /*   0..0.995; <= 0 means AJ_AVG (0.5). A long    */
+                            /*   memory (0.98 = about 50 blocks) makes a slow */
+                            /*   chirp look like a wideband jammer (4.6)      */
     double  rx2_noise;      /* normalised RX2 noise / RX1 noise: 1 when g2    */
                             /*   equalises them, less when g2 hit its limit;  */
                             /*   <= 0 means 1                                 */
@@ -118,6 +122,29 @@ typedef struct {
     int     iters;          /* loading iterations used                        */
     int     ok;             /* 1 = weights valid                              */
 } aj_result_t;
+
+/* ---- Slow chirp / sweeping jammer (SMI-PI 4.6) -----------------------------
+ * A jammer that is narrow inside one 4096-sample block but whose centre moves
+ * from solve to solve (a chirp that takes longer than ~1 ms per sweep) gives
+ * a rank-1 statistic that is good at ONE frequency only (4 dB left after a
+ * step of 5 MHz). If the statistics are averaged over a long memory the
+ * jammer fills its whole sweep range and looks like a wideband jammer, and
+ * the same 33 weights null it at every frequency. aj_sweep_update() watches
+ * the jammer's centre frequency from solve to solve and says when to use the
+ * long memory. Fast chirps (wide inside one block) and steady jammers are not
+ * touched. */
+#define AJ_SWEEP_AVG    0.98   /* memory while a sweep is seen (about 50 blocks)  */
+#define AJ_SWEEP_STEP   0.004  /* centre moved by more than this (x fs) = moving */
+#define AJ_SWEEP_BW     0.2    /* only for a jammer narrower than this (x fs)    */
+#define AJ_SWEEP_ON     10     /* score to switch the long memory on             */
+#define AJ_SWEEP_MAX    30     /* score ceiling = solves of quiet before off     */
+
+typedef struct { double last; int have; int score; int on; } aj_sweep_t;
+
+void aj_sweep_reset(aj_sweep_t *s);
+/* Call after every solve while jammed. Returns the r->avg to use for the next
+ * solve: AJ_SWEEP_AVG while a sweep is seen, 0 (= AJ_AVG) otherwise. */
+double aj_sweep_update(aj_sweep_t *s, const aj_result_t *r);
 
 /* DC offset of RX1 / RX2 [LSB] in the last capture; removed before the
  * statistics, the detection and the weights. */

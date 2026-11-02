@@ -50,6 +50,9 @@ enum { EV_ON = 1, EV_NULLED, EV_OFF, EV_LEAK, EV_TX, EV_START, EV_BG, EV_FLOOR }
 
 /* ---- state --------------------------------------------------------------- */
 static int      aj_on, aj_user_off, aj_frozen, aj_mode = AJ_MODE_STAP;
+static aj_sweep_t sweep;            /* slow-chirp detector (4.6)                       */
+static int      sweep_en = 1;       /* gnss_aj_sweep=0 turns the long memory off        */
+static double   sweep_avg = 0.0;    /* r->avg for the next solve                        */
 static int      aj_log_s = 0, aj_csv_ms = 0, csv_hdr;
 /* Periodic lines (status, CSV) are held back while a command is being typed
  * and for this long after the last key, so they never run through it. */
@@ -575,6 +578,8 @@ static void enter_jammed(XTime now)
 	aj_reset();
 	res.sig2_prev = -1.0;
 	gain_seen = gnss_rxg_changes();
+	aj_sweep_reset(&sweep);
+	sweep_avg = 0.0;
 }
 
 static void leave_jammed(XTime now)
@@ -782,10 +787,12 @@ static void solve_capture(XTime now)
 	res.rho_noise_im = rho_n_im;
 	res.g2 = g2;
 	res.rx2_noise = rx2n;
+	res.avg = sweep_en ? sweep_avg : 0.0;
 	if(aj_compute((const uint32_t *)GNSS_AJ_BUF_ADDR, AJ_NSAMP, &res) != 0 || !res.ok) {
 		n_fail++;
 		return;
 	}
+	sweep_avg = sweep_en ? aj_sweep_update(&sweep, &res) : 0.0;
 	res.sig2_prev = res.sig2;
 	res_valid = res_solved = 1;
 	n_upd++;
@@ -957,6 +964,15 @@ void gnss_aj_set_mode(int mode)
 	aj_reset();                   /* the old taps are not comparable */
 }
 
+void gnss_aj_set_sweep(int on)
+{
+	sweep_en = on ? 1 : 0;
+	aj_sweep_reset(&sweep);
+	sweep_avg = 0.0;
+}
+
+int gnss_aj_sweep_active(void) { return sweep_en && sweep_avg > 0.0; }
+
 void gnss_aj_set_events(int on)
 {
 	aj_events = on ? 1 : 0;
@@ -1097,6 +1113,9 @@ void gnss_aj_report(void)
 		      (long)cfg, (long)((cfg >> 8) & 7U), (long)(6 * ((cfg >> 8) & 7U)),
 		      (char*)(aj_frozen ? ", FROZEN" : ""));
 	console_print("mode          : %s\n", (char*)mode_name(aj_mode));
+	console_print("sweep         : %s (gnss_aj_sweep=%d)\n",
+		      (char*)(!sweep_en ? "detector OFF" : sweep_avg > 0.0 ? "MOVING JAMMER (chirp): long memory ON, 0.98 = about 50 solves" : "none seen (fixed or fast jammer, memory 0.5)"),
+		      sweep_en);
 	if(state == ST_JAMMED)
 		console_print("state         : JAMMED for %s s (since t = %s s)\n",
 			      f1u((double)ms_since(jam_t0, now) / 1000.0),

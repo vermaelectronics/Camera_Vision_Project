@@ -291,7 +291,7 @@ static int test_makeup() {
 // 3 pulsed noise (period k1 samples, on-fraction k2; J/N is the level inside the pulse),
 // 4 CW that hops from k1 x fs to k1+k2 x fs after the three training captures (stale weights)
 struct Scen { double jnr_db; bool cw; double echo; double rx2_db; bool iq; double cwf; double satf; double chip; double delay;
-              int kind = 0; double k1 = 0, k2 = 0; };
+              int kind = 0; double k1 = 0, k2 = 0; int nblk = 3; double avg = 0; };
 
 // AD9361-like I/Q imbalance: gain error eps, phase error ph (degrees).
 static void iq_imbalance(cvec &x, double eps, double ph_deg) {
@@ -308,7 +308,7 @@ static double irr_db(double eps, double ph_deg) {
 }
 
 static int test_jammer(int id, Scen sc) {
-    const int N = 3 * AJ_NSAMP + 20000;
+    const int NBLK = sc.nblk, N = NBLK * AJ_NSAMP + 20000;
     const double nrms = 20.0, fsat = (sc.satf != 0) ? sc.satf : -9.08 / 50.0, cwf = (sc.cwf != 0) ? sc.cwf : 0.06, chip_step = (sc.chip != 0) ? sc.chip : 1.023 / 50.0;
     const double IQ1_EPS = 0.004, IQ1_PH = 0.3, IQ2_EPS = -0.003, IQ2_PH = -0.4;
     cvec J(N), J2, n1(N), n2(N), s1(N), s2(N);
@@ -322,7 +322,7 @@ static int test_jammer(int id, Scen sc) {
     } else if (sc.kind == 4) {
         double ph = 0;
         for (int i = 0; i < N; i++) {
-            double fr = (i < 3 * AJ_NSAMP) ? sc.k1 : sc.k1 + sc.k2;
+            double fr = (i < NBLK * AJ_NSAMP) ? sc.k1 : sc.k1 + sc.k2;
             ph += 2 * M_PI * fr; J[i] = std::polar(1.0, ph);
         }
     } else if (sc.cw) {
@@ -406,6 +406,7 @@ static int test_jammer(int id, Scen sc) {
         x2[i] = cd(q12((x2[i] * g).real()), q12((x2[i] * g).imag()));
     }
 
+    int sweep_blocks = 0;
     // firmware solver on three consecutive DMA-format captures
     auto solve = [&](int mode, double gn, aj_result_t &r) {
         static uint32_t buf[2 * AJ_NSAMP];
@@ -413,7 +414,10 @@ static int test_jammer(int id, Scen sc) {
         r.mode = mode; r.sig2_prev = -1; r.noise_ref = pn * g * g + 0.17; r.g2 = gn;
         r.rx2_noise = (gn == g2) ? rx2n : rx2n / (g2 * g2);
         aj_reset();
-        for (int b = 0; b < 3; b++) {
+        aj_sweep_t swp; aj_sweep_reset(&swp);
+        sweep_blocks = 0;
+        for (int b = 0; b < NBLK; b++) {
+            r.avg = (sc.avg < 0) ? r.avg : sc.avg;     // sc.avg < 0: the firmware's own sweep detector
             for (int t = 0; t < AJ_NSAMP; t++) {
                 cd a = x1[b * AJ_NSAMP + t], c = x2[b * AJ_NSAMP + t];
                 buf[2 * t]     = (uint32_t)(uint16_t)(int16_t)a.real() | ((uint32_t)(uint16_t)(int16_t)a.imag() << 16);
@@ -421,11 +425,13 @@ static int test_jammer(int id, Scen sc) {
             }
             if (aj_compute(buf, AJ_NSAMP, &r) != 0 || !r.ok) return false;
             r.sig2_prev = r.sig2;
+            if (sc.avg < 0) { r.avg = aj_sweep_update(&swp, &r); sweep_blocks += (r.avg > 0); }
         }
+        if (sc.avg < 0) std::printf("  sweep detector    : long memory on for %d of %d blocks\n", sweep_blocks, NBLK);
         return true;
     };
     // evaluation segment after the training captures
-    const int e0 = 3 * AJ_NSAMP;
+    const int e0 = NBLK * AJ_NSAMP;
     auto seg = [&](const cvec &v) { return cvec(v.begin() + e0, v.end()); };
     struct Meas { double supp, loss, out_db, res, lvl; };
     auto measure = [&](const aj_result_t &r, double gn, int shift) {
@@ -511,6 +517,9 @@ static int test_jammer(int id, Scen sc) {
         std::printf("  one weight (v3)   : suppression %.1f dB, satellite SNR loss %.2f dB\n", m2.supp, m2.loss);
         ok = m.supp >= 35 && m.loss <= 3 && m.supp >= m2.supp + 10;
         break; }
+    case 16: ok = m.supp >= 40 && m.loss <= 3 && sweep_blocks >= 40; break;   // 1 ms chirp, detector on
+    case 17: ok = m.supp >= 60 && m.loss <= 3 && sweep_blocks == 0; break;    // steady CW: detector must stay off
+    case 18: ok = m.supp >= 35 && m.loss <= 3 && sweep_blocks == 0; break;    // wideband (barrage) jammer: detector off
     case 3: ok = std::fabs(m.out_db) <= 0.5 && std::fabs(m.loss) <= 0.5 && r.jn_db < 3 && r.jn_coh_db < -6; break;
     case 4: ok = m.supp >= 40 && m.loss <= 3; break;
     case 5: ok = m.supp >= 30 && m.loss <= 3; break;
@@ -590,8 +599,14 @@ int main(int argc, char **argv) {
         double jn = (argc > 3) ? std::atof(argv[3]) : 40, k1 = (argc > 4) ? std::atof(argv[4]) : 600, k2 = (argc > 5) ? std::atof(argv[5]) : 0.8;
         Scen sc = {jn, kind == 4, 0, 0, true, 0, 0, 0, 0};
         sc.kind = kind; sc.k1 = k1; sc.k2 = k2;
+        if (argc > 6) sc.nblk = std::atoi(argv[6]);
+        if (argc > 7) sc.avg = std::atof(argv[7]);
         if (kind == 4) sc.cwf = k1;
         ok = test_jammer(15, sc); break; }
+    // slow chirp (1 ms per 49 MHz sweep) with the firmware's sweep detector; steady CW; barrage
+    case 16: { Scen sc = {40, false, 0, 0, true, 0, 0, 0, 0}; sc.kind = 2; sc.k1 = 61440; sc.k2 = 0.8; sc.nblk = 60; sc.avg = -1; ok = test_jammer(16, sc); break; }
+    case 17: { Scen sc = {50, true, 0, 0, true, 0, 0, 0, 0}; sc.kind = 4; sc.k1 = -0.1; sc.k2 = 0.0; sc.nblk = 30; sc.avg = -1; ok = test_jammer(17, sc); break; }
+    case 18: { Scen sc = {40, false, 0, 0, true, 0, 0, 0, 0}; sc.nblk = 30; sc.avg = -1; ok = test_jammer(18, sc); break; }
     default: std::printf("unknown scenario %d\n", scen); ok = 0;
     }
     std::printf("SMI_PI_CSIM: %s (scenario %d)\n", ok ? "PASS" : "FAIL", scen);

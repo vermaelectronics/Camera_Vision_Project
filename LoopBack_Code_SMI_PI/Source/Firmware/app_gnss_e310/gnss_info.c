@@ -781,6 +781,7 @@ static void info_quickstart(void)
     console_print("   gnss_aj_events=0 / =1       console silent / jammer events printed (default)\n");
     console_print("   gnss_aj_csv=N               CSV line every N ms (100..), 0 = off\n");
     console_print("   gnss_aj_mode=0 / 1 / 2 / 3  31+2 taps (default) / RX2 / one / no image\n");
+    console_print("   gnss_aj_sweep=1 / 0         long memory for a moving (chirp) jammer, default on\n");
     console_print("   gnss_band=1 / 0 / 2 / 3 / 4 RF profile (1 = ALL incl. BeiDou, default)\n");
     console_print("   gnss_band=5 <LO> <rate> [bw] [txAtt] [rxGain]   CUSTOM profile, your own values\n");
     console_print("   gnss_band?                  which GNSS signals the profile carries\n");

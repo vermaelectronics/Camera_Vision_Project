@@ -144,6 +144,7 @@ command cmd_list[] = {
 	{"gnss_aj_log=", "Status line every N s on the console (default 0 = off: only JAMMER ON/OFF events; held back while you type).", "gnss_aj_log=30", set_gnss_aj_log},
 	{"gnss_aj_events=", "1 = print JAMMER ON/NULLED/OFF events (default), 0 = console silent (gnss_report? still lists them).", "gnss_aj_events=0", set_gnss_aj_events},
 	{"gnss_aj_csv=", "CSV line (AJCSV,...) every N ms, 100 to 60000; 0 = off (default).", "gnss_aj_csv=0", set_gnss_aj_csv},
+	{"gnss_aj_sweep=", "1 = detect a moving (chirping) jammer and average over about 50 solves (default), 0 = off.", "gnss_aj_sweep=1", set_gnss_aj_sweep},
 	{"gnss_aj_mode=", "0 = space-time 31 + 2 image taps (default), 1 = RX2 taps, 2 = one weight (v3), 3 = no image taps (v4.0).", "gnss_aj_mode=0", set_gnss_aj_mode},
 	{"gnss_band?", "RF profile and which GNSS signals it carries (GPS, Galileo, BeiDou, GLONASS).", "", get_gnss_band},
 	{"gnss_band=", "1 = ALL incl. BeiDou + GLONASS 1582.5 MHz/61.44 MS/s (default), 0 = L1 only, 2 = no BeiDou B1I, 3 = no GLONASS (2, 3: 50 MS/s), 4 = GLONASS only 20.48 MS/s, 5 = CUSTOM: gnss_band=5 <LO MHz> <rate MS/s> [bw MHz] [txAtt dB] [rxGain dB].", "gnss_band=1", set_gnss_band},
@@ -413,6 +414,16 @@ void set_gnss_aj_mode(double* param, char param_no)
 		return;
 	}
 	gnss_aj_set_mode((int)param[0]);
+	gnss_aj_print_short();
+}
+
+void set_gnss_aj_sweep(double* param, char param_no)
+{
+	if(param_no < 1 || (param[0] != 0.0 && param[0] != 1.0)) {
+		console_print("gnss_aj_sweep= needs 1 (long memory for a moving jammer, default) or 0 (off)\n");
+		return;
+	}
+	gnss_aj_set_sweep((int)param[0]);
 	gnss_aj_print_short();
 }
 

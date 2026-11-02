@@ -519,7 +519,7 @@ int aj_compute(const uint32_t *buf, int nsamp, aj_result_t *r)
 	int idx[AJ_MAXDIM], n = 0, i, j, k, it, cnt;
 	double gr[AJ_MAXDIM], gi[AJ_MAXDIM], wr[AJ_MAXDIM], wi[AJ_MAXDIM], ld[AJ_MAXDIM];
 	double nr[AJ_MAXDIM];
-	double p1, p2, s2, pout = 0.0, wn2 = 0.0, lo, hi, pev, pev_wn2, g2, nr2;
+	double p1, p2, s2, pout = 0.0, wn2 = 0.0, lo, hi, pev, pev_wn2, g2, nr2, av;
 
 	r->ok = 0;
 	if(!buf || nsamp != AJ_NSAMP) return -1;
@@ -529,11 +529,13 @@ int aj_compute(const uint32_t *buf, int nsamp, aj_result_t *r)
 	coherence(r, cnt);
 
 	/* statistics for the solve: this block, averaged with the last ones */
-	if(avg_valid && AJ_AVG > 0.0) {
+	av = (r->avg > 0.0) ? r->avg : AJ_AVG;
+	if(av > 0.995) av = 0.995;
+	if(avg_valid && av > 0.0) {
 		for(i = 0; i < AJ_NW; i++)
 			for(j = 0; j < AJ_NW; j++) {
-				AR[i][j] = AJ_AVG * AR[i][j] + (1.0 - AJ_AVG) * FR[i][j];
-				AI[i][j] = AJ_AVG * AI[i][j] + (1.0 - AJ_AVG) * FI[i][j];
+				AR[i][j] = av * AR[i][j] + (1.0 - av) * FR[i][j];
+				AI[i][j] = av * AI[i][j] + (1.0 - av) * FI[i][j];
 			}
 	} else {
 		for(i = 0; i < AJ_NW; i++)
@@ -648,4 +650,32 @@ int aj_compute(const uint32_t *buf, int nsamp, aj_result_t *r)
 	spectrum(r, cnt, p1, r->noise);
 	r->ok = 1;
 	return 0;
+}
+
+void aj_sweep_reset(aj_sweep_t *s)
+{
+	s->last = 0.0; s->have = 0; s->score = 0; s->on = 0;
+}
+
+double aj_sweep_update(aj_sweep_t *s, const aj_result_t *r)
+{
+	double d;
+
+	if(!r->ok || r->bw >= AJ_SWEEP_BW) {      /* wide inside the block: not a sweep */
+		s->have = 0;
+		if(s->score > 0) s->score--;
+	} else {
+		if(s->have) {
+			d = r->foff - s->last;
+			if(d < 0.0) d = -d;
+			if(d > 0.5) d = 1.0 - d;
+			if(d > AJ_SWEEP_STEP) s->score += 5;
+			else if(s->score > 0) s->score--;
+			if(s->score > AJ_SWEEP_MAX) s->score = AJ_SWEEP_MAX;
+		}
+		s->last = r->foff; s->have = 1;
+	}
+	if(s->score >= AJ_SWEEP_ON) s->on = 1;
+	else if(s->score == 0) s->on = 0;
+	return s->on ? AJ_SWEEP_AVG : 0.0;
 }

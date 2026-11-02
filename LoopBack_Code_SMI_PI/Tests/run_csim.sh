@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# C simulation of the SMI-PI core + the firmware's weight solver, scenarios 1-14, with g++ (scenario 15 = chirp/pulse/hop exploration, see README_SMI_PI_v4.5_chirp_pulse.md)
+# C simulation of the SMI-PI core + the firmware's weight solver, scenarios 1-14 and 16-18 (slow chirp, steady CW, barrage with the sweep detector), with g++ (scenario 15 = exploration, see README_SMI_PI_v4.6_chirp.md)
 # (no Vitis needed): HLS_INCLUDE=<dir that holds ap_int.h>  Tests/run_csim.sh
 set -e
 cd "$(dirname "$0")/.."
@@ -9,5 +9,5 @@ OUT=${TMPDIR:-/tmp}/smi_pi_tb
 g++ -O2 -w -I"$INC" -ITests/shim -ISource/HLS/smi_pi -ISource/Firmware/app_gnss_e310 \
     Source/HLS/smi_pi/testbench.cpp Source/HLS/smi_pi/smi_pi.cpp Source/Firmware/app_gnss_e310/gnss_aj_math.c -o "$OUT"
 rc=0
-for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14; do "$OUT" $i | grep SMI_PI_CSIM || rc=1; done
+for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 16 17 18; do "$OUT" $i | grep SMI_PI_CSIM || rc=1; done
 exit $rc
