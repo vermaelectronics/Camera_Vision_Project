@@ -116,7 +116,7 @@ Every 10 dB less attenuation adds 10 dB of J/N.
 
 There, `rtl/pi_aj_axis.v` replaces `smi_pi_0` in the block design: same AXI-Stream
 ports and async FIFOs, on `sys_cpu_clk` with `NL=10` and `DELAY=4`, registers at
-0x43C1_0000. `gnss_passthrough` is unchanged. See `README_PI_AJ_v5.md` and
+0x43D0_0000. `gnss_passthrough` is unchanged. See `README_PI_AJ_v5.md` and
 `BUILD_STEPS.md` inside that zip. `tb/tb_pi_aj_axis.v` and `sim/run_axis.py` verify
 that exact configuration.
 
