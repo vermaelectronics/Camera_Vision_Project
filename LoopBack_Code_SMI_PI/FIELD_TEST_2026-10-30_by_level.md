@@ -48,6 +48,29 @@ with the receiver at rest (a drifting position), C/N0 not readable.
 The remaining photo at 11:01:41 (number 10) should be the **35 dB** step; confirm.
 
 Notes for 35 dB (user's words, no photo yet): "after 30 dB no satellite was visible" -- the receiver lost all satellites at the 35 dB step
-(about J/N 66 dB by the 30 dB = 61.1 mapping). The extrapolated trend from 25 to 30 dB (-3.1 dB-Hz per step) would put the mean C/N0 near 20 dB-Hz,
+(J/N about 44 dB if the generator steps are 1 dB per dB from the 20 dB reading below; the earlier 61.1 dB mapping was an assumption and is withdrawn). The extrapolated trend from 25 to 30 dB (-3.1 dB-Hz per step) would put the mean C/N0 near 20 dB-Hz,
 which is about the receiver's tracking limit, so loss of lock at 35 dB is consistent with the trend. Cause not isolated: needs `gnss_report?`
 (J/N, residual, RX gain cut, output level, ADC-limit warning) at 30 and 35 dB.
+
+## Console readings at the 20 dB step (16:16-16:17, photos `field_photos/status_20dB_gnss_status_1616.webp`, `field_photos/report_20dB_gnss_report_1617.webp`)
+
+SMI-PI 4.5.0, bitstream 4.5, layout 0x10080C04, uptime 428.1 s, gnss_band=1, LO 1582.5 MHz, 61.44 MS/s, RF bandwidth 56 MHz, TX1 attenuation 70 dB.
+
+| Item | Value |
+|---|---|
+| RX gain | 34 dB (clean reference 64 dB, cut 30 dB); ADC peak 924 of 2047 |
+| Output level | -6.0 dB re the clean level (make-up +24 dB = shift 4, TX hold +0 dB) |
+| Jammer | partial-band ~35.8 MHz wide, centre -5.5 MHz (RF 1577.0 MHz), J/N +29.5 dB (peak +33.1); at detection J/N +20.5 dB |
+| Detection | RX1/RX2 coherence 0.874 (+8.4 dB, on above -3.0); detected at 0.033 s |
+| Powers | RX1 227658.1, RX2 262810.8 LSB^2; DC offsets 5.5 / 9.0 LSB |
+| Null | suppression 39.1 dB, residual 0.2 dB (0 = fully nulled); first null after 2 ms, ">60 dB" |
+| Weights | \|w\|^2 1.71, largest RX2 tap at delay 8 (0.12), image \|c1\| 0.002 \|c2\| 0.002; weight scale 2^3 |
+| Solver | loading 257.8 LSB^2, 1 pass, 95 solves/s, 40753 solves, 0 DMA errors |
+| Noise floor | not learned yet (the jammer was on from t = 0.033 s); g2 = 0.717 from the jammer |
+
+Check of J/N from the raw numbers: output power = loading x (1+|w|^2) = 257.8 x 2.71 = 699 LSB^2; divided by the noise gain 2.71 the input noise is 258 LSB^2
+(16 LSB rms); 227658 / 258 = 29.5 dB. So J/N at the 20 dB step is about 30 dB, not 51 as assumed before. The 12-bit quantisation noise is 0.29 LSB rms, 35 dB below
+this noise, so the ADC limit (J/N about 64 dB) is not reached at this step.
+
+gnss_status? (16:16, just after TX1 ON at 80.2 s): RX gain 41 dB, make-up shift 3, g2 0x16F4, 8087 weight commits. FIFO overflow count 42186629 sticky=1
+(rx count 1008327784 - tx count 966141140 = 42186644): looks like samples before TX was switched on; to confirm, check that the number does not grow with TX on.
