@@ -193,9 +193,9 @@ L1 test.
 
 | Resource | `pi_aj_axis` (AntSDR: NL=10, no notch 2) | Zynq-7020 |
 |---|---|---|
-| DSP48E1 | 134 | 220 |
-| LUT | ≈23.7k | 53.2k |
-| FF | ≈11.4k | 106.4k |
+| DSP48E1 | 138 | 220 |
+| LUT | ≈19.1k | 53.2k |
+| FF | ≈13.8k | 106.4k |
 
 All multipliers fit one DSP48 (25×18) each. The design is pipelined for
 100 MHz (rev 5.0.3, after the first Vivado run on the AntSDR showed

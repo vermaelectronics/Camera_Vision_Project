@@ -33,24 +33,37 @@ module pi_aj_outagc #(
     localparam PWD = 2*IW + PF + 1;
     localparam XW  = IW + 17;
 
-    // leading one in two clocked steps: thermometer (each bit an OR-reduce),
-    // then one-hot -> index. Same result as msb() (0 when v == 0).
-    function [PWD-1:0] therm;
+    // leading one in two clocked steps (same result as a priority encoder,
+    // 0 when v == 0):  therm(): per 8-bit group, "non-zero" + index of its
+    // top 1;  th_pos(): top non-zero group, then that group's index.
+    // Both are about 2 LUT levels; pure AND/OR logic.
+    function [2:0] top8;                     // index of the top 1 of 8 bits
+        input [7:0] b;
+        reg h2, h1;
+        begin
+            h2 = |b[7:4];
+            h1 = h2 ? |b[7:6] : |b[3:2];
+            top8 = {h2, h1, h2 ? (h1 ? b[7] : b[5]) : (h1 ? b[3] : b[1])};
+        end
+    endfunction
+    function [31:0] therm;                   // {idx7..idx0, nz7..nz0}
         input [PWD-1:0] v;
-        integer i;
-        for (i = 0; i < PWD; i = i + 1)
-            therm[i] = |(v >> i);
+        reg [63:0] x;
+        integer j;
+        begin
+            x = v;
+            for (j = 0; j < 8; j = j + 1) begin
+                therm[j]           = |x[8*j +: 8];
+                therm[8+3*j +: 3]  = top8(x[8*j +: 8]);
+            end
+        end
     endfunction
     function [6:0] th_pos;
-        input [PWD-1:0] t;
-        reg   [PWD:0]   te;
-        integer i;
+        input [31:0] t;
+        reg [2:0] q;
         begin
-            te = {1'b0, t};
-            th_pos = 0;
-            for (i = 0; i < PWD; i = i + 1)
-                if (te[i] && !te[i+1])
-                    th_pos = th_pos | i;
+            q = top8(t[7:0]);
+            th_pos = {q, t[8+3*q +: 3]};
         end
     endfunction
 
@@ -67,7 +80,7 @@ module pi_aj_outagc #(
     reg signed [4:0]    sh_agc;
     reg signed [4:0]    sh;                 // registered: agc_en ? sh_agc : man_shift
     reg        [4:0]    nsh;                // registered -sh
-    reg  [PWD-1:0]      po_th;
+    reg  [31:0]      po_th;
     assign shift_o = sh;
 
     // power from the top 18 bits (one DSP48 per square, registered operands)
