@@ -46,3 +46,8 @@ five more bars are 11 to 18 dB-Hz (not in use). The four photos at 10:59:50, :52
 are the **30 dB** step. Edge CRPA in those photos: TTFF 19 s, HDOP 1.50, 1.30, 1.60 and about 1.8, speed 1.9, 0.3, 2.4 and 2.5 m/s shown
 with the receiver at rest (a drifting position), C/N0 not readable.
 The remaining photo at 11:01:41 (number 10) should be the **35 dB** step; confirm.
+
+Notes for 35 dB (user's words, no photo yet): "after 30 dB no satellite was visible" -- the receiver lost all satellites at the 35 dB step
+(about J/N 66 dB by the 30 dB = 61.1 mapping). The extrapolated trend from 25 to 30 dB (-3.1 dB-Hz per step) would put the mean C/N0 near 20 dB-Hz,
+which is about the receiver's tracking limit, so loss of lock at 35 dB is consistent with the trend. Cause not isolated: needs `gnss_report?`
+(J/N, residual, RX gain cut, output level, ADC-limit warning) at 30 and 35 dB.
