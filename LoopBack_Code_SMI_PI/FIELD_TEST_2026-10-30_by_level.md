@@ -11,6 +11,7 @@ levels as the user tells us; this file collects the labeled ones.
 | **15 dB** | `field_photos/level_15dB_104948.jpg` | 10:49:48 | 67 s | 0.80 | 6: 30 29 28 31 25 31 (PRN 2 7 8 9 14 30; one weak 20 not used) | 6: 30 34 37 33 31 36 (69 78 79 81 82 88) | 2: 30 31 (24 33; four more bars of 5 to 31 are weak) | **0** tracked (weak bars only) | **14** | **31.1 dB-Hz** | 300/300 points, 2D RMS 0.93 m, CEP50 0.76 m |
 | **20 dB** | `field_photos/level_20dB_105149.jpg` | 10:51:49 | 67 s | 0.80 | 6: 32 32 35 31 29 33 (PRN 2 7 8 9 14 30; one weak 22 not used) | 6: 26 29 36 25 28 32 (69 78 79 81 82 88) | 2: 36 24 (24 33; weak bars 25, 27) | 1: 33 (PRN 2) | **15** | **30.7 dB-Hz** | 300/300 points, 2D RMS about 0.9 m |
 | **25 dB** | `field_photos/level_25dB_105624.jpg` | 10:56:24 | 2 s (hot restart) | 0.80 | 6: 25 24 27 25 23 25 (PRN 2 7 8 9 14 30; weak 8) | 5: 27 25 31 31 30 (69 78 79 82 88; weak 22) | 2: 25 22 (24 33; weak 24, 26) | 2: 26 27 (PRN 2 32) | **15** | **26.2 dB-Hz** | 300/300 points, 2D RMS 1.05 m, CEP50 0.87 m |
+| **30 dB** | `field_photos/level_30dB_105957.jpg` | 10:59:57 | 2 s | 0.90 | 6: 23 23 24 17 23 23 (PRN 2 8 9 14 30 194; weak 18, 12) | 6: 24 18 27 22 25 27 (69 78 79 81 82 88) | 1: 25 (PRN 24; weak 18 13 17 11) | 2: 23 23 (PRN 2 32; weak 11) | **15** | **23.1 dB-Hz** | 300/300 points, 2D RMS 0.96 m, CEP50 0.69 m |
 
 Notes for 10 dB: speed 0.00, position Fix 3D shown, all four constellations tracked, no bar below 25 dB-Hz.
 The scatter (2D RMS 3.2 m) is larger than in the later photos (about 1 m): the fix was only about
@@ -32,9 +33,16 @@ The edge CRPA readings in photo 2 (10:51:47: TTFF 19, HDOP 1.10, GPS about 21 dB
 Time order so far: 10 dB 10:46, 15 dB 10:49, 20 dB 10:51; the 10:56 photos (two) and the 10:59 photos (four) and 11:01 (one) are
 expected to be 25, 30 and 35 dB; confirm when the levels are sent.
 
-Summary so far (satellites in use, mean C/N0 of the bars): 10 dB 19 / 34.8; 15 dB 14 / 31.1; 20 dB 15 / 30.7; 25 dB 15 / 26.2.
+Summary so far (satellites in use, mean C/N0 of the bars): 10 dB 19 / 34.8; 15 dB 14 / 31.1; 20 dB 15 / 30.7; 25 dB 15 / 26.2; 30 dB 15 / 23.1.
 
 Notes for 25 dB: speed 0.00, HDOP 0.80, position scatter 1.05 m RMS. The satellite count is the same as at 20 dB (15), but all
 four constellations are present (GPS 6, GLONASS 5, BeiDou 2, Galileo 2) and the mean C/N0 is 4.5 dB lower than at 20 dB; no bar is above 31 dB-Hz.
 The two photos at 10:56:18 and 10:56:24 (numbers 4 and 5 of `FIELD_TEST_SMI-PI_vs_edge_CRPA.md`) are the **25 dB** step: at 10:56:18
 28.4 dB-Hz (18 bars), at 10:56:24 26.2 dB-Hz on the solid bars (15 satellites).
+
+Notes for 30 dB: speed 0.00, HDOP 0.90, scatter 0.96 m RMS. 15 satellites are still in use (GPS 6, GLONASS 6, BeiDou 1, Galileo 2) but the
+C/N0 fell by 3.1 dB more than at 25 dB: the strongest bars are 27 dB-Hz, the weakest in use 17; BeiDou has only one satellite left and
+five more bars are 11 to 18 dB-Hz (not in use). The four photos at 10:59:50, :52, :55 and :57 (numbers 6 to 9 of `FIELD_TEST_SMI-PI_vs_edge_CRPA.md`)
+are the **30 dB** step. Edge CRPA in those photos: TTFF 19 s, HDOP 1.50, 1.30, 1.60 and about 1.8, speed 1.9, 0.3, 2.4 and 2.5 m/s shown
+with the receiver at rest (a drifting position), C/N0 not readable.
+The remaining photo at 11:01:41 (number 10) should be the **35 dB** step; confirm.
