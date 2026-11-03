@@ -35,14 +35,32 @@ one clean antenna; negative means SFAP and STAP gain from the second antenna bec
 STAP "as built" is my model of the 4.x schedule (200 solves per second, 1 ms ARM delay); it is an assumption, not a measurement. "STAP ideal" solves
 every block.
 
-| jammer | J/N | steady loss, dB | | | time to loss < 3 dB | | |
+| jammer | J/N | steady loss, dB: STAP ideal | STAP as built | **SFAP** | time to loss < 3 dB: STAP ideal | STAP as built | **SFAP** |
 |---|---|---|---|---|---|---|---|
-| | | STAP ideal | STAP as built | **SFAP** | STAP ideal | STAP as built | **SFAP** |
-SIMTABLE
+| barrage 50 MHz | 30 | -1.7 | -0.9 | **-3.0** | 133 us | 3533 us | **0 us** |
+| barrage 50 MHz + echo | 30 | -2.0 | -0.8 | **-4.5** | 133 us | 3533 us | **0 us** |
+| barrage 50 MHz | 40 | -1.8 | -0.8 | **-3.0** | 133 us | 3533 us | **0 us** |
+| barrage 50 MHz + echo | 40 | -2.0 | -0.9 | **-4.3** | 133 us | 3533 us | **0 us** |
+| barrage 50 MHz | 50 | -1.5 | -0.2 | **-2.5** | 133 us | 3533 us | **0 us** |
+| barrage 50 MHz + echo | 50 | -1.3 | -0.1 | **-3.1** | 133 us | 3533 us | **0 us** |
+| barrage 50 MHz | 60 | 0.0 | 1.3 | **-0.9** | 133 us | 3533 us | **0 us** |
+| barrage 50 MHz + echo | 60 | 0.8 | 2.4 | **1.4** | 133 us | 3566 us | **150 us** |
+| CW | 40 | -0.0 | 0.9 | **0.7** | 133 us | 3533 us | **0 us** |
+| CW + echo | 40 | 0.1 | 1.1 | **0.8** | 133 us | 3533 us | **0 us** |
+| CW | 60 | 1.1 | 2.4 | **-1.1** | 133 us | 3533 us | **0 us** |
+| CW + echo | 60 | 0.5 | 2.0 | **-0.4** | 133 us | 3533 us | **16 us** |
+| chirp 100 us | 40 | -1.5 | -0.4 | **-3.2** | 133 us | 3533 us | **16 us** |
+| chirp 100 us + echo | 40 | -1.9 | 6.0 | **-4.6** | 216 us | 3566 us | **33 us** |
+| chirp 1 ms | 40 | 1.1 | 31.6 | **-4.0** | 1066 us | 4450 us | **16 us** |
+| chirp 1 ms + echo | 40 | 2.6 | 31.7 | **-4.6** | 1066 us | 4450 us | **16 us** |
+| pulsed barrage | 40 | -0.2 | 0.5 | **1.7** | 16 us | 16 us | **16 us** |
+| pulsed barrage + echo | 50 | 5.2 | 4.8 | **7.2** | 16 us | 16 us | **33 us** |
 
-Where SFAP is **not** better: a pulsed barrage with multipath (about 7 dB loss for SFAP, 5 dB for STAP; the pulse blanker of 4.7 is still in the path and
-helps both), and a 60 dB barrage with multipath (about equal, 1 to 3 dB for both). I have not found a case where SFAP is much worse, but I cannot say
-"better in every case": the simulation does not contain the AD9361's real I/Q imbalance, its AGC steps, or your antenna's coupling.
+Where SFAP is **not** better than an ideal STAP (one that solves every block, which the ARM cannot do) in steady state: CW at 40 dB (0.7 against 0.0 dB),
+a 60 dB barrage with an echo (1.4 against 0.8 dB), and both pulsed cases (1.7 against -0.2 dB, and 7.2 against 5.2 dB with an echo; the pulse blanker of
+4.7 stays in the path for both). Against the STAP as I modelled it on the board ("as built", an assumption), SFAP is better or equal everywhere except
+the pulsed cases. So the honest summary is: much faster, better against moving jammers and wide echoes, about equal otherwise, a little worse on pulses.
+I cannot say "better in every case": the simulation has no real I/Q imbalance, no AGC steps and no antenna coupling.
 
 ## 3. What was verified in RTL
 
@@ -51,7 +69,24 @@ helps both), and a 60 dB barrage with multipath (about equal, 1 to 3 dB for both
 * `sfap_fft.v` against numpy: 76 to 83 dB signal-to-error, back-to-back blocks, fixed latency 1068 clocks (1072 with the pipeline registers added for timing).
 * `sfap_bin.v` against a floating-point model of the same recursion: 1.4 LSB rms error on bins of 3e5 amplitude; a 66 dB jammer comes out at the noise level.
 * the whole core with the weights forced to zero: output = input delayed, correlation 0.9996, gain 0.998.
-RTLTABLE
+
+Whole core, RTL (iverilog), 60000 samples, jammer on at 20000 samples, 12-bit input with the jammer at 500 LSB rms, echo 9 samples later from another direction.
+"Excess" is the output power against the same core run without the jammer; 3 dB is what two antennas of independent noise give (it is the same in the simulation above).
+
+| jammer | J/N | within 5 dB of baseline after | steady excess, median | worst window | note |
+|---|---|---|---|---|---|
+| barrage 50 MHz | 30 (no echo) | 17 us | 2.8 dB | 3.2 dB | |
+| barrage 50 MHz + echo | 40 | 17 us | 3.4 dB | 8.8 dB | re-run on the final (timing-hardened) RTL: identical |
+| barrage 50 MHz + echo | 50 | 17 us | 1.5 dB | 15.2 dB | bursts coincide with clipped input samples |
+| barrage 50 MHz + echo | 60 | 17 us | -0.5 dB | 17.2 dB | the noise is at the ADC's own quantisation level |
+| CW + echo | 40 | 17 us | 0.6 dB | 1.9 dB | |
+| CW + echo | 60 | 50 us | 3.1 dB | 10.7 dB | |
+| chirp 100 us + echo | 40 | 17 us | 3.4 dB | 17.0 dB | |
+| chirp 1 ms + echo | 40 | 17 us | 2.8 dB | 14.8 dB | |
+
+The two pulsed-barrage runs are **not valid** and are not quoted: my test scaling put the noise at 150 LSB. The pulsed case has been simulated in
+floating point only (table above); SFAP is not better than STAP there.
+
 
 ## 4. Registers (new, `gnss_passthrough` 5.0)
 

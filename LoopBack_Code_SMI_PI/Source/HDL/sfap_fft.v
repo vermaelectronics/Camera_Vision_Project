@@ -113,7 +113,7 @@ module sfap_bf #(
     endgenerate
 endmodule
 
-// ---- twiddle multiplier W_M^(r*j) (latency TWLAT = 6) ----------------------
+// ---- twiddle multiplier W_M^(r*j) (latency TWLAT = 7) ----------------------
 module sfap_tw #(
     parameter WD = 25,
     parameter LM = 10                 // M = 2^LM
@@ -161,10 +161,13 @@ module sfap_tw #(
         m_rs <= a2_re * s2; m_ic <= a2_im * c2;
         i3 <= i2;
     end
+    // stage 3b: second register behind the multipliers (MREG and PREG)
+    reg signed [WD+17:0] n_rc, n_is, n_rs, n_ic; reg [9:0] i3b;
+    always @(posedge clk) begin n_rc <= m_rc; n_is <= m_is; n_rs <= m_rs; n_ic <= m_ic; i3b <= i3; end
     // stage 4: combine
     reg signed [WD+18:0] p_re, p_im; reg [9:0] i4;
     always @(posedge clk) begin
-        p_re <= m_rc - m_is; p_im <= m_rs + m_ic; i4 <= i3;
+        p_re <= n_rc - n_is; p_im <= n_rs + n_ic; i4 <= i3b;
     end
     // stage 5: Q1.16 -> data format, saturate
     localparam signed [WD-1:0] MAXV = {1'b0, {(WD-1){1'b1}}};

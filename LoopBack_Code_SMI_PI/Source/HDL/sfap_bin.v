@@ -11,9 +11,11 @@
 //  The current frame is part of the average, so the weights are ready for the
 //  frame they are applied to: nothing waits for the ARM.
 //
-//  One bin per clock, latency 27. Every stage is one operator (add, shift or
-//  multiply with the DSP registers), because the 4.7.0 build failed 245.76 MHz
-//  timing by packing several operators into one step.
+//  One bin per clock, latency 31. Every stage is ONE operator (an add, a barrel
+//  shift, a compare or a multiply with its M and P registers), because the
+//  4.7.0 build failed 245.76 MHz timing by packing several operators into one
+//  step. Operands of every multiplier are registered, and every product has two
+//  register stages behind it, so the DSP48 can use AREG/BREG/MREG/PREG.
 //
 //  Division without a divider: normalise D = R22 + LOAD to m * 2^E with
 //  m in [1,2), look up 1/m (512 entries, Q1.17) and refine with one
@@ -50,81 +52,93 @@ module sfap_bin #(
     output reg  [9:0]           ot,
     output reg  signed [WD-1:0] yr, yi
 );
+    localparam XW = RW + 20;
+
     // ---- stage 1: registers, covariance memory read ------------------------
-    reg v1; reg [9:0] t1; reg signed [WD-1:0] x1r1, x1i1, x2r1, x2i1; reg init1; reg [2:0] sh1; reg [31:0] ld1;
+    reg signed [WD-1:0] x1r1, x1i1, x2r1, x2i1;
     reg [3*RW-1:0] rmem [0:1023];
     reg [3*RW-1:0] rd;
+    reg [4:0] ctl1; reg [31:0] ld1; reg [10:0] meta1;
     always @(posedge clk) begin
-        v1 <= v0; t1 <= t0; x1r1 <= x1r0; x1i1 <= x1i0; x2r1 <= x2r0; x2i1 <= x2i0;
-        init1 <= init0; sh1 <= sh0; ld1 <= load0;
+        x1r1 <= x1r0; x1i1 <= x1i0; x2r1 <= x2r0; x2i1 <= x2i0;
+        ctl1 <= {init0, sh0, 1'b0}; ld1 <= load0; meta1 <= {v0, t0};
         rd <= rmem[t0];
     end
 
-    // ---- stage 2..5: products and sums -------------------------------------
-    reg signed [WD-1:0] a2, b2, c2, d2; reg v2; reg [9:0] t2;
-    always @(posedge clk) begin a2 <= x2r1; b2 <= x2i1; c2 <= x1r1; d2 <= x1i1; v2 <= v1; t2 <= t1; end
-    reg signed [2*WD-1:0] maa3, mbb3, mca3, mdb3, mda3, mcb3; reg v3; reg [9:0] t3;
+    // alignments from stage 1
+    wire [3*RW-1:0] rd5;     sfap_dly #(.W(3*RW), .N(4))  u_drd (.clk(clk), .d(rd),    .q(rd5));
+    wire [4:0]      ctl6;    sfap_dly #(.W(5),    .N(5))  u_dct (.clk(clk), .d(ctl1),  .q(ctl6));
+    wire [31:0]     ld8;     sfap_dly #(.W(32),   .N(7))  u_dld (.clk(clk), .d(ld1),   .q(ld8));
+    wire [10:0]     meta8;   sfap_dly #(.W(11),   .N(7))  u_dm8 (.clk(clk), .d(meta1), .q(meta8));
+    wire [10:0]     meta30;  sfap_dly #(.W(11),   .N(29)) u_dm30(.clk(clk), .d(meta1), .q(meta30));
+    wire [2*WD-1:0] x2_25;   sfap_dly #(.W(2*WD), .N(24)) u_dx2 (.clk(clk), .d({x2i1, x2r1}), .q(x2_25));
+    wire [2*WD-1:0] x1_29;   sfap_dly #(.W(2*WD), .N(28)) u_dx1 (.clk(clk), .d({x1i1, x1r1}), .q(x1_29));
+
+    // ---- stages 2..5: products and sums -------------------------------------
+    reg signed [WD-1:0] a2, b2, c2, d2;
+    always @(posedge clk) begin a2 <= x2r1; b2 <= x2i1; c2 <= x1r1; d2 <= x1i1; end
+    reg signed [2*WD-1:0] maa3, mbb3, mca3, mdb3, mda3, mcb3;
     always @(posedge clk) begin
         maa3 <= a2 * a2; mbb3 <= b2 * b2; mca3 <= c2 * a2; mdb3 <= d2 * b2; mda3 <= d2 * a2; mcb3 <= c2 * b2;
-        v3 <= v2; t3 <= t2;
     end
-    reg signed [2*WD-1:0] maa4, mbb4, mca4, mdb4, mda4, mcb4; reg v4; reg [9:0] t4;
+    reg signed [2*WD-1:0] maa4, mbb4, mca4, mdb4, mda4, mcb4;
     always @(posedge clk) begin
-        maa4 <= maa3; mbb4 <= mbb3; mca4 <= mca3; mdb4 <= mdb3; mda4 <= mda3; mcb4 <= mcb3; v4 <= v3; t4 <= t3;
+        maa4 <= maa3; mbb4 <= mbb3; mca4 <= mca3; mdb4 <= mdb3; mda4 <= mda3; mcb4 <= mcb3;
     end
-    reg signed [RW-1:0] p22_5, p12r_5, p12i_5; reg v5; reg [9:0] t5;
+    reg signed [RW-1:0] p22_5, p12r_5, p12i_5;
     always @(posedge clk) begin
         p22_5  <= maa4 + mbb4;
         p12r_5 <= mca4 + mdb4;
         p12i_5 <= mda4 - mcb4;
-        v5 <= v4; t5 <= t4;
     end
-
-    // covariance read data, and the controls, aligned to stage 5
-    wire [3*RW-1:0] rd5;  wire init5_w; wire [2:0] sh5_w;
-    sfap_dly #(.W(3*RW), .N(4)) u_drd (.clk(clk), .d(rd), .q(rd5));
-    wire [3:0] ctl5;
-    sfap_dly #(.W(4), .N(4)) u_dctl (.clk(clk), .d({init1, sh1}), .q(ctl5));
-    wire [31:0] ld7;
-    sfap_dly #(.W(32), .N(6)) u_dld (.clk(clk), .d(ld1), .q(ld7));   // aligned to stage 7
-
-    // ---- stage 6: differences ---------------------------------------------
-    reg signed [RW:0] dd22_6, dd12r_6, dd12i_6;
-    reg signed [RW-1:0] p22_6, p12r_6, p12i_6, r22_6, r12r_6, r12i_6;
-    reg v6; reg [9:0] t6; reg [3:0] ctl6;
     wire signed [RW-1:0] r22_5  = rd5[RW-1:0];
     wire signed [RW-1:0] r12r_5 = rd5[2*RW-1:RW];
     wire signed [RW-1:0] r12i_5 = rd5[3*RW-1:2*RW];
+
+    // ---- stage 6: differences ---------------------------------------------
+    reg signed [RW:0]   dd22_6, dd12r_6, dd12i_6;
+    reg signed [RW-1:0] p22_6, p12r_6, p12i_6, r22_6, r12r_6, r12i_6;
     always @(posedge clk) begin
         dd22_6  <= p22_5  - r22_5;
         dd12r_6 <= p12r_5 - r12r_5;
         dd12i_6 <= p12i_5 - r12i_5;
         p22_6 <= p22_5; p12r_6 <= p12r_5; p12i_6 <= p12i_5;
         r22_6 <= r22_5; r12r_6 <= r12r_5; r12i_6 <= r12i_5;
-        v6 <= v5; t6 <= t5; ctl6 <= ctl5;
     end
 
-    // ---- stage 7: averaged covariance --------------------------------------
-    reg signed [RW-1:0] r22_7, r12r_7, r12i_7; reg v7; reg [9:0] t7;
-    wire init6 = ctl6[3]; wire [2:0] sh6 = ctl6[2:0];
+    // ---- stage 7: divide the difference by 2^sh -------------------------------
+    reg signed [RW:0]   sd22_7, sd12r_7, sd12i_7;
+    reg signed [RW-1:0] p22_7, p12r_7, p12i_7, r22_7, r12r_7, r12i_7;
+    reg init7;
+    wire [2:0] sh6 = ctl6[3:1];
     always @(posedge clk) begin
-        r22_7  <= init6 ? p22_6  : r22_6  + (dd22_6  >>> sh6);
-        r12r_7 <= init6 ? p12r_6 : r12r_6 + (dd12r_6 >>> sh6);
-        r12i_7 <= init6 ? p12i_6 : r12i_6 + (dd12i_6 >>> sh6);
-        v7 <= v6; t7 <= t6;
+        sd22_7  <= dd22_6  >>> sh6;
+        sd12r_7 <= dd12r_6 >>> sh6;
+        sd12i_7 <= dd12i_6 >>> sh6;
+        p22_7 <= p22_6; p12r_7 <= p12r_6; p12i_7 <= p12i_6;
+        r22_7 <= r22_6; r12r_7 <= r12r_6; r12i_7 <= r12i_6;
+        init7 <= ctl6[4];
     end
 
-    // ---- stage 8: write back, add the diagonal load -------------------------
-    reg we8; reg [9:0] wa8; reg [3*RW-1:0] wd8;
-    reg [RW-1:0] d8; reg signed [RW-1:0] r12r_8, r12i_8; reg v8; reg [9:0] t8;
+    // ---- stage 8: averaged covariance --------------------------------------
+    reg signed [RW-1:0] r22_8, r12r_8, r12i_8;
     always @(posedge clk) begin
-        we8 <= v7; wa8 <= t7; wd8 <= {r12i_7, r12r_7, r22_7};
-        d8 <= r22_7 + {{(RW-32){1'b0}}, ld7};
-        r12r_8 <= r12r_7; r12i_8 <= r12i_7; v8 <= v7; t8 <= t7;
+        r22_8  <= init7 ? p22_7  : r22_7  + sd22_7;
+        r12r_8 <= init7 ? p12r_7 : r12r_7 + sd12r_7;
+        r12i_8 <= init7 ? p12i_7 : r12i_7 + sd12i_7;
     end
-    always @(posedge clk) if (we8) rmem[wa8] <= wd8;
 
-    // ---- stage 9: leading zeros --------------------------------------------
+    // ---- stage 9: write back, add the diagonal load -------------------------
+    reg we9; reg [9:0] wa9; reg [3*RW-1:0] wd9;
+    reg [RW-1:0] d9; reg signed [RW-1:0] r12r_9, r12i_9;
+    always @(posedge clk) begin
+        we9 <= meta8[10]; wa9 <= meta8[9:0]; wd9 <= {r12i_8, r12r_8, r22_8};
+        d9 <= r22_8 + {{(RW-32){1'b0}}, ld8};
+        r12r_9 <= r12r_8; r12i_9 <= r12i_8;
+    end
+    always @(posedge clk) if (we9) rmem[wa9] <= wd9;
+
+    // ---- stage 10: leading zeros ---------------------------------------------
     function [5:0] clz52(input [51:0] d);
         integer i; reg f;
         begin
@@ -133,119 +147,105 @@ module sfap_bin #(
                 if (!f && d[i]) begin clz52 = 51 - i; f = 1'b1; end
         end
     endfunction
-    reg [5:0] lz9; reg [RW-1:0] d9; reg signed [RW-1:0] r12r_9, r12i_9; reg v9; reg [9:0] t9;
+    reg [5:0] lz10; reg [RW-1:0] d10; reg signed [RW-1:0] r12r_10, r12i_10;
+    always @(posedge clk) begin lz10 <= clz52(d9); d10 <= d9; r12r_10 <= r12r_9; r12i_10 <= r12i_9; end
+
+    // ---- stages 11, 12, 13: normalise D, scale R12 -----------------------------
+    reg [RW-1:0] dn11; reg [5:0] lz11, sr11; reg signed [XW-1:0] x11r, x11i;
     always @(posedge clk) begin
-        lz9 <= clz52(d8); d9 <= d8; r12r_9 <= r12r_8; r12i_9 <= r12i_8; v9 <= v8; t9 <= t8;
+        dn11 <= d10 << {lz10[5:3], 3'b000};
+        lz11 <= lz10;
+        sr11 <= (lz10 > 6'd51) ? 6'd0 : (6'd51 - lz10);
+        x11r <= {r12r_10, 20'b0}; x11i <= {r12i_10, 20'b0};
+    end
+    reg [RW-1:0] dn12; reg [5:0] sr12; reg signed [XW-1:0] x12r, x12i;
+    always @(posedge clk) begin
+        dn12 <= dn11 << lz11[2:0];
+        sr12 <= sr11;
+        x12r <= x11r >>> {sr11[5:3], 3'b000}; x12i <= x11i >>> {sr11[5:3], 3'b000};
+    end
+    reg [17:0] m13; reg signed [XW-1:0] x13r, x13i;
+    always @(posedge clk) begin
+        m13 <= dn12[RW-1:RW-18];
+        x13r <= x12r >>> sr12[2:0]; x13i <= x12i >>> sr12[2:0];
     end
 
-    // ---- stages 10, 11, 12: normalise D, scale R12 -----------------------------
-    reg [RW-1:0] dn10; reg [5:0] lz10, sr10; reg signed [RW+19:0] x10r, x10i; reg v10; reg [9:0] t10;
-    always @(posedge clk) begin
-        dn10 <= d9 << {lz9[5:3], 3'b000};
-        lz10 <= lz9;
-        sr10 <= (lz9 > 6'd51) ? 6'd0 : (6'd51 - lz9);
-        x10r <= {r12r_9, 20'b0}; x10i <= {r12i_9, 20'b0};
-        v10 <= v9; t10 <= t9;
-    end
-    reg [RW-1:0] dn11; reg [5:0] sr11; reg signed [RW+19:0] x11r, x11i; reg v11; reg [9:0] t11;
-    always @(posedge clk) begin
-        dn11 <= dn10 << lz10[2:0];
-        sr11 <= sr10;
-        x11r <= x10r >>> {sr10[5:3], 3'b000}; x11i <= x10i >>> {sr10[5:3], 3'b000};
-        v11 <= v10; t11 <= t10;
-    end
-    reg [17:0] m12; reg signed [RW+19:0] x12r, x12i; reg v12; reg [9:0] t12;
-    always @(posedge clk) begin
-        m12 <= dn11[RW-1:RW-18];
-        x12r <= x11r >>> sr11[2:0]; x12i <= x11i >>> sr11[2:0];
-        v12 <= v11; t12 <= t11;
-    end
+    // ---- stage 14: reciprocal seed ---------------------------------------------
+    wire [17:0] r0_14;
+    sfap_recip_rom u_rom (.clk(clk), .a(m13[16:8]), .d(r0_14));
+    reg [17:0] m14; reg signed [XW-1:0] x14r, x14i;
+    always @(posedge clk) begin m14 <= m13; x14r <= x13r; x14i <= x13i; end
 
-    // ---- stage 13: reciprocal seed ------------------------------------------
-    wire [17:0] r0_13;
-    sfap_recip_rom u_rom (.clk(clk), .a(m12[16:8]), .d(r0_13));
-    reg [17:0] m13; reg signed [RW+19:0] x13r, x13i; reg v13; reg [9:0] t13;
-    always @(posedge clk) begin m13 <= m12; x13r <= x12r; x13i <= x12i; v13 <= v12; t13 <= t12; end
+    // ---- stages 15..21: Newton-Raphson  r1 = r0 (2 - m r0) ------------------------
+    reg signed [37:0] e15;
+    always @(posedge clk) e15 <= $signed({1'b0, m14}) * $signed({1'b0, r0_14});
+    reg signed [37:0] e16; reg [17:0] r0_15, r0_16;
+    always @(posedge clk) begin e16 <= e15; r0_15 <= r0_14; r0_16 <= r0_15; end
+    reg signed [19:0] tq17; reg [17:0] r0_17;
+    always @(posedge clk) begin tq17 <= (20'sd1 <<< 18) - (e16 >>> 17); r0_17 <= r0_16; end
+    reg signed [19:0] tq18; reg [17:0] r0_18;
+    always @(posedge clk) begin tq18 <= tq17; r0_18 <= r0_17; end
+    reg signed [39:0] rr19;
+    always @(posedge clk) rr19 <= $signed({1'b0, r0_18}) * tq18;
+    reg signed [39:0] rr20;
+    always @(posedge clk) rr20 <= rr19;
 
-    // ---- stages 14..18: Newton-Raphson  r1 = r0 (2 - m r0) --------------------
-    reg signed [37:0] e14; reg [17:0] r0_14; reg signed [RW+19:0] x14r, x14i; reg v14; reg [9:0] t14;
-    always @(posedge clk) begin
-        e14 <= $signed({1'b0, m13}) * $signed({1'b0, r0_13});
-        r0_14 <= r0_13; x14r <= x13r; x14i <= x13i; v14 <= v13; t14 <= t13;
-    end
-    reg signed [19:0] tq15; reg [17:0] r0_15; reg signed [RW+19:0] x15r, x15i; reg v15; reg [9:0] t15;
-    always @(posedge clk) begin
-        tq15 <= (20'sd1 <<< 18) - (e14 >>> 17);
-        r0_15 <= r0_14; x15r <= x14r; x15i <= x14i; v15 <= v14; t15 <= t14;
-    end
-    reg signed [19:0] tq16; reg [17:0] r0_16; reg signed [RW+19:0] x16r, x16i; reg v16; reg [9:0] t16;
-    always @(posedge clk) begin
-        tq16 <= tq15; r0_16 <= r0_15; x16r <= x15r; x16i <= x15i; v16 <= v15; t16 <= t15;
-    end
-    reg signed [39:0] rr17; reg signed [RW+19:0] x17r, x17i; reg v17; reg [9:0] t17;
-    always @(posedge clk) begin
-        rr17 <= $signed({1'b0, r0_16}) * tq16;
-        x17r <= x16r; x17i <= x16i; v17 <= v16; t17 <= t16;
-    end
-    // r1 (Q1.17) and the scaled R12 clamped to 25 bits
+    wire [2*XW-1:0] x20;      // scaled R12 aligned to stage 20 (from stage 14: 6 stages)
+    sfap_dly #(.W(2*XW), .N(6)) u_dx (.clk(clk), .d({x14i, x14r}), .q(x20));
     localparam signed [WD-1:0] TMAX = {1'b0, {(WD-1){1'b1}}};
     localparam signed [WD-1:0] TMIN = {1'b1, {(WD-1){1'b0}}};
-    reg [17:0] r1_18; reg signed [WD-1:0] tr18, ti18; reg v18; reg [9:0] t18;
-    wire signed [39:0] rr_s = rr17 >>> 17;
+    reg [17:0] r1_21; reg signed [WD-1:0] tr21, ti21;
+    wire signed [39:0] rr_s = rr20 >>> 17;
+    wire signed [XW-1:0] x20r = x20[XW-1:0];
+    wire signed [XW-1:0] x20i = x20[2*XW-1:XW];
     always @(posedge clk) begin
-        r1_18 <= (rr_s > 40'sd131071) ? 18'd131071 : (rr_s < 0 ? 18'd0 : rr_s[17:0]);
-        tr18  <= (x17r > TMAX) ? TMAX : (x17r < TMIN) ? TMIN : x17r[WD-1:0];
-        ti18  <= (x17i > TMAX) ? TMAX : (x17i < TMIN) ? TMIN : x17i[WD-1:0];
-        v18 <= v17; t18 <= t17;
+        r1_21 <= (rr_s > 40'sd131071) ? 18'd131071 : (rr_s < 0 ? 18'd0 : rr_s[17:0]);
+        tr21  <= (x20r > TMAX) ? TMAX : (x20r < TMIN) ? TMIN : x20r[WD-1:0];
+        ti21  <= (x20i > TMAX) ? TMAX : (x20i < TMIN) ? TMIN : x20i[WD-1:0];
     end
 
-    // ---- stages 19..21: c = T * r1 (Q3.20) ------------------------------------
-    reg signed [WD-1:0] tr19, ti19; reg signed [18:0] r19; reg v19; reg [9:0] t19;
-    always @(posedge clk) begin tr19 <= tr18; ti19 <= ti18; r19 <= $signed({1'b0, r1_18}); v19 <= v18; t19 <= t18; end
-    reg signed [WD+18:0] cf20r, cf20i; reg v20; reg [9:0] t20;
-    always @(posedge clk) begin cf20r <= tr19 * r19; cf20i <= ti19 * r19; v20 <= v19; t20 <= t19; end
+    // ---- stages 22..25: c = T * r1 (Q3.20) ------------------------------------
+    reg signed [WD-1:0] tr22, ti22; reg signed [18:0] r22;
+    always @(posedge clk) begin tr22 <= tr21; ti22 <= ti21; r22 <= $signed({1'b0, r1_21}); end
+    reg signed [WD+18:0] cf23r, cf23i;
+    always @(posedge clk) begin cf23r <= tr22 * r22; cf23i <= ti22 * r22; end
+    reg signed [WD+18:0] cf24r, cf24i;
+    always @(posedge clk) begin cf24r <= cf23r; cf24i <= cf23i; end
     localparam signed [23:0] CMAX = 24'sh7FFFFF;
     localparam signed [23:0] CMIN = 24'sh800000;
-    reg signed [23:0] cr21, ci21; reg v21; reg [9:0] t21;
-    wire signed [WD+18:0] cs_r = cf20r >>> 17;
-    wire signed [WD+18:0] cs_i = cf20i >>> 17;
+    reg signed [23:0] cr25, ci25;
+    wire signed [WD+18:0] cs_r = cf24r >>> 17;
+    wire signed [WD+18:0] cs_i = cf24i >>> 17;
     always @(posedge clk) begin
-        cr21 <= (cs_r > CMAX) ? CMAX : (cs_r < CMIN) ? CMIN : cs_r[23:0];
-        ci21 <= (cs_i > CMAX) ? CMAX : (cs_i < CMIN) ? CMIN : cs_i[23:0];
-        v21 <= v20; t21 <= t20;
+        cr25 <= (cs_r > CMAX) ? CMAX : (cs_r < CMIN) ? CMIN : cs_r[23:0];
+        ci25 <= (cs_i > CMAX) ? CMAX : (cs_i < CMIN) ? CMIN : cs_i[23:0];
     end
 
-    // ---- stages 22..25: c * X2 ------------------------------------------------
-    wire [2*WD-1:0] x2_21;       // X2 aligned to stage 21
-    sfap_dly #(.W(2*WD), .N(20)) u_dx2 (.clk(clk), .d({x2i1, x2r1}), .q(x2_21));
-    reg signed [23:0] cr22, ci22; reg signed [WD-1:0] x2r22, x2i22; reg v22; reg [9:0] t22;
+    // ---- stages 26..29: c * X2 ------------------------------------------------
+    reg signed [23:0] cr26, ci26; reg signed [WD-1:0] x2r26, x2i26;
     always @(posedge clk) begin
-        cr22 <= cr21; ci22 <= ci21; x2r22 <= x2_21[WD-1:0]; x2i22 <= x2_21[2*WD-1:WD]; v22 <= v21; t22 <= t21;
+        cr26 <= cr25; ci26 <= ci25; x2r26 <= x2_25[WD-1:0]; x2i26 <= x2_25[2*WD-1:WD];
     end
-    reg signed [WD+23:0] q1_23, q2_23, q3_23, q4_23; reg v23; reg [9:0] t23;
+    reg signed [WD+23:0] q1_27, q2_27, q3_27, q4_27;
     always @(posedge clk) begin
-        q1_23 <= cr22 * x2r22; q2_23 <= ci22 * x2i22; q3_23 <= cr22 * x2i22; q4_23 <= ci22 * x2r22;
-        v23 <= v22; t23 <= t22;
+        q1_27 <= cr26 * x2r26; q2_27 <= ci26 * x2i26; q3_27 <= cr26 * x2i26; q4_27 <= ci26 * x2r26;
     end
-    reg signed [WD+23:0] q1_24, q2_24, q3_24, q4_24; reg v24; reg [9:0] t24;
-    always @(posedge clk) begin q1_24 <= q1_23; q2_24 <= q2_23; q3_24 <= q3_23; q4_24 <= q4_23; v24 <= v23; t24 <= t23; end
-    reg signed [WD+24:0] qr25, qi25; reg v25; reg [9:0] t25;
-    always @(posedge clk) begin qr25 <= q1_24 - q2_24; qi25 <= q3_24 + q4_24; v25 <= v24; t25 <= t24; end
+    reg signed [WD+23:0] q1_28, q2_28, q3_28, q4_28;
+    always @(posedge clk) begin q1_28 <= q1_27; q2_28 <= q2_27; q3_28 <= q3_27; q4_28 <= q4_27; end
+    reg signed [WD+24:0] qr29, qi29;
+    always @(posedge clk) begin qr29 <= q1_28 - q2_28; qi29 <= q3_28 + q4_28; end
 
-    // ---- stages 26, 27: Y = X1 - c X2 ----------------------------------------
-    wire [2*WD-1:0] x1_25;
-    sfap_dly #(.W(2*WD), .N(24)) u_dx1 (.clk(clk), .d({x1i1, x1r1}), .q(x1_25));
-    reg signed [WD+4:0] y26r, y26i; reg v26; reg [9:0] t26;
-    wire signed [WD+24:0] qsr = qr25 >>> 20;
-    wire signed [WD+24:0] qsi = qi25 >>> 20;
+    // ---- stages 30, 31: Y = X1 - c X2 ----------------------------------------
+    reg signed [WD+4:0] y30r, y30i;
+    wire signed [WD+24:0] qsr = qr29 >>> 20;
+    wire signed [WD+24:0] qsi = qi29 >>> 20;
     always @(posedge clk) begin
-        y26r <= $signed(x1_25[WD-1:0])      - qsr;
-        y26i <= $signed(x1_25[2*WD-1:WD])   - qsi;
-        v26 <= v25; t26 <= t25;
+        y30r <= $signed(x1_29[WD-1:0])    - qsr;
+        y30i <= $signed(x1_29[2*WD-1:WD]) - qsi;
     end
     always @(posedge clk) begin
-        yr <= (y26r > TMAX) ? TMAX : (y26r < TMIN) ? TMIN : y26r[WD-1:0];
-        yi <= (y26i > TMAX) ? TMAX : (y26i < TMIN) ? TMIN : y26i[WD-1:0];
-        ov <= v26; ot <= t26;
+        yr <= (y30r > TMAX) ? TMAX : (y30r < TMIN) ? TMIN : y30r[WD-1:0];
+        yi <= (y30i > TMAX) ? TMAX : (y30i < TMIN) ? TMIN : y30i[WD-1:0];
+        ov <= meta30[10]; ot <= meta30[9:0];
     end
 endmodule

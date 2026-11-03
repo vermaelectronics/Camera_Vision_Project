@@ -115,12 +115,15 @@ module sfap_core (
     // a3: products
     reg signed [29:0] pi3, pq3; reg [9:0] g3;
     always @(posedge clk) begin pi3 <= si2 * $signed(w2); pq3 <= sq2 * $signed(w2); g3 <= g2; end
+    // a3b: second register behind the multipliers (MREG and PREG)
+    reg signed [29:0] pi3b, pq3b; reg [9:0] g3b;
+    always @(posedge clk) begin pi3b <= pi3; pq3b <= pq3; g3b <= g3; end
     // a4: round, drop 12 bits -> FFT input
     reg signed [WD-1:0] fa_re, fa_im; reg [9:0] fa_idx;
-    wire signed [29:0] pi3r = pi3 + 30'sd2048;
-    wire signed [29:0] pq3r = pq3 + 30'sd2048;
+    wire signed [29:0] pi3r = pi3b + 30'sd2048;
+    wire signed [29:0] pq3r = pq3b + 30'sd2048;
     always @(posedge clk) begin
-        fa_re <= pi3r >>> 12; fa_im <= pq3r >>> 12; fa_idx <= g3;
+        fa_re <= pi3r >>> 12; fa_im <= pq3r >>> 12; fa_idx <= g3b;
     end
 
     // The FFT returns bin number t = out_idx + 1 (its latency is 1068 clocks, tag latency 1067 + 1):
@@ -245,14 +248,19 @@ module sfap_core (
         pr3 <= cr2 * $signed(sw2); pi3o <= ci2 * $signed(sw2);
         tr3 <= tr2; ti3 <= ti2; ov3 <= ov2; on3 <= on2; p1_3 <= p1_2;
     end
+    // o3b: second register behind the multipliers (MREG and PREG)
+    reg signed [34:0] pr3b, pi3ob; reg signed [19:0] tr3b, ti3b; reg ov3b, p1_3b; reg [9:0] on3b;
+    always @(posedge clk) begin
+        pr3b <= pr3; pi3ob <= pi3o; tr3b <= tr3; ti3b <= ti3; ov3b <= ov3; on3b <= on3; p1_3b <= p1_3;
+    end
     // o4: window result, overlap-add with the stored tail
     reg signed [19:0] wr4, wi4, sr4, si4; reg ov4, p1_4; reg [9:0] on4;
-    wire signed [19:0] wrs = pr3[34:15];       // x w / 2^15 -> one extra fractional bit kept
-    wire signed [19:0] wis = pi3o[34:15];
+    wire signed [19:0] wrs = pr3b[34:15];      // x w / 2^15 -> one extra fractional bit kept
+    wire signed [19:0] wis = pi3ob[34:15];
     always @(posedge clk) begin
         wr4 <= wrs; wi4 <= wis;
-        sr4 <= wrs + tr3; si4 <= wis + ti3;     // tail is stored in the same format
-        ov4 <= ov3; on4 <= on3; p1_4 <= p1_3;
+        sr4 <= wrs + tr3b; si4 <= wis + ti3b;   // tail is stored in the same format
+        ov4 <= ov3b; on4 <= on3b; p1_4 <= p1_3b;
     end
     always @(posedge clk) if (ov4 && on4[9]) tail[on4[8:0]] <= {wi4, wr4};
     // o5: make-up gain: (v << mk) >> 4  (v = 2 x 8 x x12 because one fractional bit is kept)
@@ -265,9 +273,13 @@ module sfap_core (
     // o6: saturate, write the output FIFO
     reg [31:0] ofifo [0:1023];
     reg [9:0] ofw = 10'd0, ofr = 10'd0;
-    wire signed [15:0] sat_r = (mr5 > 28'sd32767) ? 16'sd32767 : (mr5 < -28'sd32768) ? -16'sd32768 : mr5[15:0];
-    wire signed [15:0] sat_i = (mi5 > 28'sd32767) ? 16'sd32767 : (mi5 < -28'sd32768) ? -16'sd32768 : mi5[15:0];
-    always @(posedge clk) if (ov5) ofifo[ofw] <= {sat_i, sat_r};
+    reg signed [15:0] sat_r, sat_i; reg ov6;
+    always @(posedge clk) begin
+        sat_r <= (mr5 > 28'sd32767) ? 16'sd32767 : (mr5 < -28'sd32768) ? -16'sd32768 : mr5[15:0];
+        sat_i <= (mi5 > 28'sd32767) ? 16'sd32767 : (mi5 < -28'sd32768) ? -16'sd32768 : mi5[15:0];
+        ov6 <= ov5;
+    end
+    always @(posedge clk) if (ov6) ofifo[ofw] <= {sat_i, sat_r};
     wire [9:0] level = ofw - ofr;
     reg primed = 1'b0;
     reg [31:0] fq32;
@@ -275,7 +287,7 @@ module sfap_core (
     always @(posedge clk) begin
         if (!en_s) begin ofw <= 10'd0; ofr <= 10'd0; primed <= 1'b0; ready <= 1'b0; underrun <= 1'b0; out_v <= 1'b0; end
         else begin
-            if (ov5) ofw <= ofw + 10'd1;
+            if (ov6) ofw <= ofw + 10'd1;
             if (!primed && level >= 10'd256) begin primed <= 1'b1; ready <= 1'b1; end
             out_v <= 1'b0;
             if (in_v && primed) begin

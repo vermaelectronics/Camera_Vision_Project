@@ -15,6 +15,6 @@ out=rows[:,1]+1j*rows[:,2]
 br=np.array([int(format(k,'010b')[::-1],2) for k in range(N)])
 for f,x in enumerate(frames):
     exp=(np.fft.fft(x)/2)[br]
-    off=f*N+1068
+    off=f*N+1072
     seg=out[off:off+N]
     print("frame",f,"err",round(np.sqrt(np.mean(abs(seg-exp)**2)),1),"rms",round(np.sqrt(np.mean(abs(exp)**2)),1))
