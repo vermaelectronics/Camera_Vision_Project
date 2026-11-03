@@ -1,0 +1,12 @@
+rtl/run_*/
+rtl/out_*.txt
+rtl/batch.out
+rtl/*.hex
+rtl/*.npy
+rtl/core_*.txt
+rtl/fft_out.txt
+rtl/bin_out.txt
+rtl/tb_fft
+rtl/tb_bin
+rtl/tb_core
+__pycache__/

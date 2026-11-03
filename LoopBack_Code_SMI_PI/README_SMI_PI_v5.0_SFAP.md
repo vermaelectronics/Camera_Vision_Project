@@ -1,0 +1,90 @@
+# SMI-PI 5.0: SFAP, space-frequency adaptive processing
+
+Firmware 5.0.0, bitstream 5.0 (`CORE_VERSION` 0x00050000). STAP (the 16-tap space-time filter of 4.x) is still there and stays the default. SFAP is a
+second filter that you switch on with one command, so the two can be compared on the same hardware with the same jammer.
+
+**Nothing in this release has run on the board.** The algorithm was simulated in floating point (`Tests/sfap/study.py`), the FPGA core was simulated
+in RTL (iverilog, `Tests/sfap/`), and the firmware was syntax-checked. Vivado timing and utilisation are not known until you build it (section 7).
+
+## 1. What was wrong with STAP, and what SFAP changes
+
+| | STAP (4.x) | SFAP (5.0) |
+|---|---|---|
+| Where the weights are computed | on the ARM, from a 4096-sample DMA capture, 50 to 300 solves per second | in the FPGA, for every 512 samples (8.3 us) |
+| Weights per antenna | 16 taps, the same for all frequencies | one complex weight per FFT bin, 1024 bins (60 kHz each) |
+| Time to react to a new jammer | one capture + one solve + the ARM's detection loop: milliseconds | the first frame that contains the jammer: about 17 us |
+| A jammer that moves (chirp) | needs the sweep detector and a long memory | each bin only has to follow its own frequency |
+| Multipath (echo of the jammer) | cancelled up to 11 samples by the delayed reference tap | per bin, any echo delay up to about 100 samples |
+| Cost | about 100 DSP48 (HLS) | about 60 DSP48 and 17 BRAM36 more (estimate) |
+
+STAP is a closed-form power-inversion filter with 33 weights. SFAP is the same power inversion, but solved for each frequency separately:
+
+    Y[k] = X1[k] - c[k] X2[k],     c[k] = R12[k] / (R22[k] + load)
+    R22[k] <- R22[k] + (|X2[k]|^2   - R22[k]) / 2^lam
+    R12[k] <- R12[k] + (X1[k] X2[k]^* - R12[k]) / 2^lam
+
+X1, X2 are the 1024-point FFTs (sqrt-Hann window, 50 % overlap) of the two antennas. The current frame is part of the average, so the weight is already
+there for the frame it is applied to. The result goes back through an inverse FFT and overlap-add. The covariance of every bin is only a 2x2 matrix, so
+the solve is one division, and there is no Cholesky, no ARM and no DMA.
+
+## 2. What the simulation says (floating point, `Tests/sfap/study.py`, 6 ms of signal, jammer on at 1 ms)
+
+Scene: GNSS-like BPSK at -18 dB per sample, two antennas with a frequency-dependent mismatch (3-tap FIR on RX2), jammer from another direction, optional
+echo of the jammer 9 samples later from a third direction, 12-bit ADC with the jammer at -12 dBFS. "Loss" is the output signal-to-noise ratio against
+one clean antenna; negative means SFAP and STAP gain from the second antenna because the satellite and the jammer arrive from different directions.
+STAP "as built" is my model of the 4.x schedule (200 solves per second, 1 ms ARM delay); it is an assumption, not a measurement. "STAP ideal" solves
+every block.
+
+| jammer | J/N | steady loss, dB | | | time to loss < 3 dB | | |
+|---|---|---|---|---|---|---|---|
+| | | STAP ideal | STAP as built | **SFAP** | STAP ideal | STAP as built | **SFAP** |
+SIMTABLE
+
+Where SFAP is **not** better: a pulsed barrage with multipath (about 7 dB loss for SFAP, 5 dB for STAP; the pulse blanker of 4.7 is still in the path and
+helps both), and a 60 dB barrage with multipath (about equal, 1 to 3 dB for both). I have not found a case where SFAP is much worse, but I cannot say
+"better in every case": the simulation does not contain the AD9361's real I/Q imbalance, its AGC steps, or your antenna's coupling.
+
+## 3. What was verified in RTL
+
+`Tests/sfap/run_rtl.sh` (iverilog + numpy):
+
+* `sfap_fft.v` against numpy: 76 to 83 dB signal-to-error, back-to-back blocks, fixed latency 1068 clocks (1072 with the pipeline registers added for timing).
+* `sfap_bin.v` against a floating-point model of the same recursion: 1.4 LSB rms error on bins of 3e5 amplitude; a 66 dB jammer comes out at the noise level.
+* the whole core with the weights forced to zero: output = input delayed, correlation 0.9996, gain 0.998.
+RTLTABLE
+
+## 4. Registers (new, `gnss_passthrough` 5.0)
+
+| Offset | Name | |
+|---|---|---|
+| 0x1B0 | SFAP_CTRL | RW: [0] en, [1] sel (1 = SFAP feeds TX1), [2] clr, [5:3] lam (3 to 6), [10:8] make-up shift |
+| 0x1B4 | SFAP_LOAD | RW: diagonal load, about the noise power per FFT bin (the firmware sets it from the learned noise floor) |
+| 0x1B8 | SFAP_STAT | RO: [0] ready, [1] underrun, [2] overrun, [3] selected, [31:16] frames |
+| 0x1BC | SFAP_IN | RO: mean |I|+|Q| of RX1 over 32768 samples |
+| 0x1C0 | SFAP_OUT | RO: the same at the SFAP output |
+| 0x1C4 | SFAP_INFO | RO: 0x5FA90100 when the core is there |
+
+## 5. Commands (PuTTY)
+
+* `gnss_aj_sfap=0` STAP only (default). `=1` SFAP carries TX1 while a jammer is there; the core runs all the time, so its averages are ready. `=2` SFAP always.
+* `gnss_report?` shows an `SFAP` line: mode, core ready, frames, load, UNDERRUN/OVERRUN, and the measured in/out ratio.
+* Everything else (`gnss_aj_blank`, `gnss_aj_sweep`, `gnss_aj_mode`) is unchanged and still applies to STAP; the pulse blanker also runs behind SFAP.
+
+Detection of the jammer, the RX gain loop and the make-up gain stay with the ARM as before. SFAP replaces the filter, not the supervision. With
+`gnss_aj_sfap=1` the time until SFAP takes over is therefore still the ARM's detection time. With `=2` there is no switch at all, SFAP is always on.
+
+## 6. Build
+
+Unchanged: `Automation/Linux/build_all.sh --jobs 16`, or the ten step scripts. Step 4 now packages six more HDL files into the IP. A bitstream
+and firmware must match: the firmware prints `the bitstream has no SFAP core` otherwise and keeps working as 4.8.
+
+## 7. What I do not know yet
+
+* **Utilisation and timing.** My estimate is about 60 more DSP48 (the design used 133 of 220) and 17 more BRAM36. Every stage is one operator and
+  every multiplier has its M and P registers, because 4.7.0 failed 245.76 MHz that way. I have not run Vivado. If `BUILD_TIMING` is `VIOLATED`, send
+  the two lines from `Build/Logs/build.log` and the worst path as before.
+* **The first output frame.** SFAP delays the signal by about 2600 samples (42 us) and drops its first frame. Switching between the STAP and SFAP
+  paths flushes the TX buffer; the receiver sees a short gap, not a problem for tracking.
+* **Pulses.** The pulse blanker is behind SFAP, but SFAP's averages still see the pulses; mode 1 vs 2 and `gnss_aj_blank` will tell.
+* **Clipping.** A sample that clips the ADC is a non-linear error no weight can remove; the RTL runs showed one 5 to 8 dB burst for each clipped sample.
+  Keep the AGC headroom.

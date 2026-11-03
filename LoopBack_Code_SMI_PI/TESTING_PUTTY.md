@@ -183,6 +183,21 @@ the receiver to lock without a jammer (the field test used 34 dB), set it first 
 See `README_SMI_PI_v4.7_pulse.md`, section "Test T9": jammer off for 10 s (noise floor), then pulsed; `gnss_report?` twice, 10 s apart; compare
 `gnss_aj_blank=0` and `1`. Send the two blocks, the generator's pulse period and duty, and the receiver's satellites in use.
 
+### T10. SFAP, the space-frequency filter (firmware 5.0.0, bitstream 5.0)
+
+The same boot, the same jammer, two runs: STAP (`gnss_aj_sfap=0`, the default) and SFAP. Everything else stays the same.
+
+1. After boot type `gnss_report?`. The line `SFAP          :` must say `OFF, STAP only` (hardware present). If it says `not in this bitstream`, the BOOT.BIN
+   is not the 5.0 build.
+2. Jammer OFF, `gnss_tx=1`, wait 10 s (noise floor learned). Switch the jammer on. Run A: wait 60 s, write down the satellites in use
+   and the time to the first fix after the jammer was switched on, then `gnss_report?`.
+3. Jammer OFF for 10 s. Type `gnss_aj_sfap=1` (SFAP carries TX1 while a jammer is there), or `gnss_aj_sfap=2` (SFAP always).
+   Run B exactly like A. `gnss_report?` shows `SFAP : CARRYING TX1`, `core ready`, `frames` growing, no `UNDERRUN` / `OVERRUN`, and the measured
+   `|I|+|Q| in ... out ... dB` line: the jammer suppression as the hardware measures it.
+4. Send both `gnss_report?` blocks, the satellites and the times to the first fix of A and B, and the jammer type and level.
+
+If B is worse than A: `gnss_aj_sfap=0` returns to STAP at once. Please send the SFAP lines of the report either way.
+
 ---
 
 ## 4. Report template (copy, fill in, paste into your next message)

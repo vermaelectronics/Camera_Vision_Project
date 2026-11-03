@@ -267,6 +267,62 @@ static int add_event(XTime now, int type, double v1, double v2, double v3)
 	return ev_n++;
 }
 
+/* ---- SFAP (bitstream 5.0) ----------------------------------------------------------
+ * The SFAP core runs by itself in the sample clock domain: it learns the covariance of every FFT bin
+ * frame by frame and needs nothing from this firmware but the on/select bits, the make-up shift and the
+ * diagonal load. It keeps running while the anti-jam is on (mode 1: the STAP path carries TX1 until a
+ * jammer is found, then SFAP does; mode 2: SFAP always), so its averages are already there when the
+ * jammer arrives. */
+#ifndef GNSS_SFAP_DEFAULT
+#define GNSS_SFAP_DEFAULT 0
+#endif
+#define AJ_SFAP_LAM    5            /* averaging 1 - 2^-5 per frame: 32 frames = 270 us */
+static int      sfap_hw, sfap_mode = GNSS_SFAP_DEFAULT, sfap_sel_set = -1;
+static uint32_t sfap_load_set;
+static XTime    sfap_t0;
+
+static void sfap_apply(int jammed)
+{
+	int en, sel;
+	if(!sfap_hw) return;
+	en  = (sfap_mode != 0 && aj_on) ? 1 : 0;
+	sel = (en && (sfap_mode == 2 || jammed)) ? 1 : 0;
+	gnss_pt_sfap_ctrl(en, sel, AJ_SFAP_LAM, jammed ? shift : 0);
+	sfap_sel_set = sel;
+}
+
+/* The load is the noise power per FFT bin: noise (LSB^2, complex) x 16^2 (inputs are scaled by 16) x 512
+ * (sum of the squared window) / 4 (the forward FFT halves). */
+static void sfap_service(XTime now)
+{
+	double nz;
+	uint32_t ld;
+	if(!sfap_hw || sfap_mode == 0 || !aj_on) return;
+	if(now - sfap_t0 < us(500000U)) return;
+	sfap_t0 = now;
+	nz = noise_now();
+	if(nz <= 0.0) nz = 2.0;                  /* not learned yet: about 1 LSB per component */
+	ld = (uint32_t)(nz * 256.0 * 512.0 / 4.0);
+	if(ld < 64U) ld = 64U;
+	if(sfap_load_set == 0U || (double)ld > 1.3 * (double)sfap_load_set || (double)ld < 0.77 * (double)sfap_load_set) {
+		gnss_pt_sfap_load(ld);
+		sfap_load_set = ld;
+	}
+}
+
+void gnss_aj_set_sfap(int mode)
+{
+	sfap_mode = (mode < 0) ? 0 : (mode > 2 ? 2 : mode);
+	sfap_load_set = 0U;
+	sfap_t0 = 0;
+	if(aj_on && sfap_hw) {
+		gnss_pt_sfap_clear(sfap_mode != 0, 0, AJ_SFAP_LAM, 0);
+		sfap_apply(state == ST_JAMMED);
+	}
+}
+
+int gnss_aj_sfap_available(void) { return sfap_hw; }
+
 /* ---- FPGA filter ------------------------------------------------------------ */
 static void commit_bypass(void)
 {
@@ -274,6 +330,7 @@ static void commit_bypass(void)
 	gnss_rxg_set_digital_db(0);
 	blk_thr_set = blk_threshold(0);
 	gnss_pt_write_aj(0, 0, GNSS_PT_AJ_CFG_BYPASS | blk_cfg_bit(blk_thr_set), g2_q13(), blk_thr_set);
+	sfap_apply(0);
 }
 
 static void commit_weights(void)
@@ -282,6 +339,7 @@ static void commit_weights(void)
 	blk_thr_set = blk_threshold(1);
 	gnss_pt_write_aj(res.wre, res.wim, GNSS_PT_AJ_CFG_SHIFT(shift) | GNSS_PT_AJ_CFG_WS(res.ws) | blk_cfg_bit(blk_thr_set),
 	                 g2_q13(), blk_thr_set);
+	sfap_apply(1);
 }
 
 /* ---- DMA --------------------------------------------------------------------- */
@@ -1017,6 +1075,7 @@ void gnss_aj_poll(void)
 	}
 	flap_poll(now);
 	blk_service(now);
+	sfap_service(now);
 }
 
 /* ---- control ------------------------------------------------------------------ */
@@ -1036,6 +1095,7 @@ void gnss_aj_init(void)
 	sh_max = ((gnss_pt_read(GNSS_PT_REG_AJ_INFO) & 0xFFU) >= 4U) ? AJ_MAXSH : 4;
 	blk_hw = ((gnss_pt_read(GNSS_PT_REG_AJ_INFO) & 0xFFU) >= GNSS_PT_AJ_LAYOUT_BLANK);
 	blk_seeded = 0;
+	sfap_hw = gnss_pt_sfap_present();
 	if(!blk_hw)
 		console_print("[AJ] NOTE: the bitstream has no pulse blanker (AJ_INFO layout %d, needs 5 = bitstream 4.6): pulsed\n"
 			      "     jammers are only handled by the weights. Rebuild the whole project for it.\n",
@@ -1094,9 +1154,16 @@ void gnss_aj_enable(int on)
 		}
 		aj_on = 1;
 		gnss_pt_set_smi(1);
+		if(sfap_hw && sfap_mode) {
+			sfap_load_set = 0U;
+			sfap_t0 = 0;
+			gnss_pt_sfap_clear(1, sfap_sel_set > 0, AJ_SFAP_LAM, 0);
+			sfap_apply(state == ST_JAMMED);
+		}
 	} else {
 		gnss_aj_dma_release();
 		aj_on = 0;
+		if(sfap_hw) gnss_pt_sfap_ctrl(0, 0, AJ_SFAP_LAM, 0);
 		gnss_rxg_stop_tx_hold();
 		gnss_rxg_set_digital_db(0);
 		gnss_pt_set_smi(0);
@@ -1280,6 +1347,20 @@ void gnss_aj_report(void)
 		      (long)cfg, (long)((cfg >> 8) & 7U), (long)(6 * ((cfg >> 8) & 7U)),
 		      (char*)(aj_frozen ? ", FROZEN" : ""));
 	console_print("mode          : %s\n", (char*)mode_name(aj_mode));
+	if(sfap_hw) {
+		uint32_t st = gnss_pt_read(GNSS_PT_REG_SFAP_STAT);
+		uint32_t mi = gnss_pt_read(GNSS_PT_REG_SFAP_IN), mo = gnss_pt_read(GNSS_PT_REG_SFAP_OUT);
+		console_print("SFAP          : %s (gnss_aj_sfap=%d); core %s, frames %lu, load %lu%s%s\n",
+			      (char*)(sfap_mode == 0 ? "OFF, STAP only" : sfap_sel_set > 0 ? "CARRYING TX1" : "running, STAP carries TX1"),
+			      (long)sfap_mode, (char*)((st & 1U) ? "ready" : "starting"), (unsigned long)(st >> 16),
+			      (unsigned long)sfap_load_set, (char*)((st & 2U) ? ", UNDERRUN" : ""), (char*)((st & 4U) ? ", OVERRUN (frames behind the input)" : ""));
+		if(sfap_mode && mi > 0U && mo > 0U)
+			console_print("                measured |I|+|Q| in %lu, out %lu: %s dB (amplitude ratio; with the make-up gain %d dB in the output)\n",
+				      (unsigned long)(mi >> 15), (unsigned long)(mo >> 15),
+				      f1(aj_db10(((double)mi / (double)mo) * ((double)mi / (double)mo))), (long)(6 * (shift)));
+	} else {
+		console_print("SFAP          : not in this bitstream (needs bitstream 5.0)\n");
+	}
 	console_print("pulse blanker : %s\n",
 		      (char*)(!blk_hw ? "not in this bitstream (needs bitstream 4.6, AJ_INFO layout 5)" :
 		              blk_mode == 0 ? "OFF (gnss_aj_blank=0)" :

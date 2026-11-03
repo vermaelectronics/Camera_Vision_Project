@@ -84,6 +84,16 @@
 /* bitstream 4.6 (AJ_INFO layout 5): pulse blanker on the filter output, RX peak hold */
 #define GNSS_PT_REG_AJ_BLK_THR      0x19CU  /* RW shadow: blanker threshold (sum of 8 samples of I^2+Q^2), committed by AJ_COMMIT */
 #define GNSS_PT_REG_AJ_BLK_THR_ACT  0x1A0U  /* RO committed threshold         */
+/* SFAP (bitstream 5.0): space-frequency adaptive processing core, see sfap_core.v */
+#define GNSS_PT_REG_SFAP_CTRL       0x1B0U  /* RW [0] en [1] sel [2] clr [5:3] sh_lam [10:8] make-up shift */
+#define GNSS_PT_REG_SFAP_LOAD       0x1B4U  /* RW diagonal load (about the noise power per FFT bin)        */
+#define GNSS_PT_REG_SFAP_STAT       0x1B8U  /* RO [0] ready [1] underrun [2] overrun [3] selected [31:16] frames */
+#define GNSS_PT_REG_SFAP_IN         0x1BCU  /* RO mean |I|+|Q| of RX1, 32768 samples */
+#define GNSS_PT_REG_SFAP_OUT        0x1C0U  /* RO the same at the SFAP output          */
+#define GNSS_PT_REG_SFAP_INFO       0x1C4U  /* RO 0x5FA9vvvv: SFAP present            */
+#define GNSS_PT_SFAP_ID_MASK        0xFFFF0000U
+#define GNSS_PT_SFAP_ID             0x5FA90000U
+
 #define GNSS_PT_REG_AJ_BLK_COUNT    0x1A4U  /* RO samples blanked since the counter clear */
 #define GNSS_PT_REG_AJ_BLK_BURSTS   0x1A8U  /* RO bursts blanked since the counter clear  */
 #define GNSS_PT_REG_AJ_RX_PEAK      0x1ACU  /* RO [15:0] largest |I|,|Q| of RX1/RX2 in the last window, [31:16] window counter */
@@ -110,7 +120,7 @@
  *       loading, no weight band.
  * 4.1 = adds AJ_CFG (bypass, output make-up shift), AJ_NORM (RX2 input
  *       normalisation) and the image taps AJ_WC (smi_pi_0 v2.1). */
-#define GNSS_PT_EXPECTED_VERSION    0x00040001U
+#define GNSS_PT_EXPECTED_VERSION    0x00050000U
 
 /* ---- CONTROL bits -------------------------------------------------------- */
 #define GNSS_PT_CTRL_PASS_EN        (1U << 0)  /* 1 = RX->TX passthrough      */
@@ -167,6 +177,10 @@ void     gnss_pt_set_smi(int enable);
  * (Q3.13 real part; imaginary 0), and commits them in one go: the filter
  * never runs a half-written set. re/im may be NULL to keep the weights that
  * are in the shadow registers (bypass switching). */
+int      gnss_pt_sfap_present(void);                       /* 1 if the bitstream has the SFAP core */
+void     gnss_pt_sfap_ctrl(int en, int sel, int lam, int mk);  /* clr = 0 */
+void     gnss_pt_sfap_clear(int en, int sel, int lam, int mk); /* restart the covariance averages */
+void     gnss_pt_sfap_load(uint32_t load);
 void     gnss_pt_write_aj(const int16_t *re, const int16_t *im,
                           uint32_t cfg, int32_t g2_q13, uint32_t blk_thr);
 

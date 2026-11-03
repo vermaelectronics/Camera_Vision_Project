@@ -145,6 +145,7 @@ command cmd_list[] = {
 	{"gnss_aj_events=", "1 = print JAMMER ON/NULLED/OFF events (default), 0 = console silent (gnss_report? still lists them).", "gnss_aj_events=0", set_gnss_aj_events},
 	{"gnss_aj_csv=", "CSV line (AJCSV,...) every N ms, 100 to 60000; 0 = off (default).", "gnss_aj_csv=0", set_gnss_aj_csv},
 	{"gnss_aj_blank=", "Pulse blanker (bitstream 4.6): 1 = automatic (default), 0 = off, 2 = always on.", "gnss_aj_blank=1", set_gnss_aj_blank},
+	{"gnss_aj_sfap=", "SFAP, space-frequency filter (bitstream 5.0): 0 = off (STAP only, default), 1 = SFAP while a jammer is there, 2 = SFAP always.", "gnss_aj_sfap=1", set_gnss_aj_sfap},
 	{"gnss_aj_blank_db=", "Pulse blanker threshold above the output noise [dB], 3..30, default 7.", "gnss_aj_blank_db=7", set_gnss_aj_blank_db},
 	{"gnss_aj_sweep=", "1 = detect a moving (chirping) jammer and average over about 50 solves (default), 0 = off.", "gnss_aj_sweep=1", set_gnss_aj_sweep},
 	{"gnss_aj_mode=", "0 = space-time 31 + 2 image taps (default), 1 = RX2 taps, 2 = one weight (v3), 3 = no image taps (v4.0).", "gnss_aj_mode=0", set_gnss_aj_mode},
@@ -428,6 +429,18 @@ void set_gnss_aj_blank(double* param, char param_no)
 	if(!gnss_aj_blank_available())
 		console_print("the bitstream has no pulse blanker (needs 4.6); the setting is kept for when it has\n");
 	gnss_aj_set_blank((int)param[0]);
+	gnss_aj_print_short();
+}
+
+void set_gnss_aj_sfap(double* param, char param_no)
+{
+	if(param_no < 1 || param[0] < 0.0 || param[0] > 2.0) {
+		console_print("gnss_aj_sfap= needs 0 (off, STAP only), 1 (SFAP while a jammer is there) or 2 (SFAP always)\n");
+		return;
+	}
+	if(!gnss_aj_sfap_available())
+		console_print("the bitstream has no SFAP core (needs 5.0); the setting is kept for when it has\n");
+	gnss_aj_set_sfap((int)param[0]);
 	gnss_aj_print_short();
 }
 

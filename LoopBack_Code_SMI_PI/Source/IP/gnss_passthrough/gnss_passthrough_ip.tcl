@@ -30,9 +30,12 @@ set ip_name    "gnss_passthrough"
 set ip_dir     [file join $ip_repo_dir $ip_name]
 set rtl_file   [file join $src_dir "HDL" "${ip_name}.v"]
 set blank_file [file join $src_dir "HDL" "gnss_pulse_blank.v"]   ;# pulse blanker + RX peak hold (v4.6)
+set sfap_files [list sfap_core.v sfap_fft.v sfap_bin.v sfap_twiddle.v sfap_recip_rom.v sfap_win_rom.v]   ;# SFAP core (v5.0)
 set xdc_file   [file join $src_dir "IP" $ip_name "${ip_name}_constr.xdc"]
 
-foreach f [list $rtl_file $blank_file $xdc_file] {
+set sfap_paths {}
+foreach n $sfap_files { lappend sfap_paths [file join $src_dir "HDL" $n] }
+foreach f [concat [list $rtl_file $blank_file $xdc_file] $sfap_paths] {
   if {![file exists $f]} {
     puts "ERROR: required source not found: $f"
     exit 2
@@ -51,7 +54,7 @@ file mkdir $ip_dir
 create_project -force ${ip_name}_pkg [file join $ip_dir ".pkg_project"] -part xc7z020clg400-2
 set_property target_language Verilog [current_project]
 
-add_files -norecurse [list $rtl_file $blank_file]
+add_files -norecurse [concat [list $rtl_file $blank_file] $sfap_paths]
 set_property top $ip_name [current_fileset]
 update_compile_order -fileset sources_1
 

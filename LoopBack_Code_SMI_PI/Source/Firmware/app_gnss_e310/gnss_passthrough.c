@@ -282,3 +282,34 @@ int32_t gnss_pt_check_dataflow(uint32_t delay_ms)
 
     return GNSS_PT_OK;
 }
+
+/* ---- SFAP (bitstream 5.0) ------------------------------------------------------ */
+int gnss_pt_sfap_present(void)
+{
+    return (gnss_pt_read(GNSS_PT_REG_SFAP_INFO) & GNSS_PT_SFAP_ID_MASK) == GNSS_PT_SFAP_ID;
+}
+
+static uint32_t sfap_word(int en, int sel, int lam, int mk, int clr)
+{
+    if (lam < 3) lam = 3;
+    if (lam > 6) lam = 6;
+    if (mk < 0) mk = 0;
+    if (mk > 7) mk = 7;
+    return (en ? 1U : 0U) | (sel ? 2U : 0U) | (clr ? 4U : 0U) | ((uint32_t)lam << 3) | ((uint32_t)mk << 8);
+}
+
+void gnss_pt_sfap_ctrl(int en, int sel, int lam, int mk)
+{
+    gnss_pt_write(GNSS_PT_REG_SFAP_CTRL, sfap_word(en, sel, lam, mk, 0));
+}
+
+void gnss_pt_sfap_clear(int en, int sel, int lam, int mk)
+{
+    gnss_pt_write(GNSS_PT_REG_SFAP_CTRL, sfap_word(en, sel, lam, mk, 1));
+    gnss_pt_write(GNSS_PT_REG_SFAP_CTRL, sfap_word(en, sel, lam, mk, 0));
+}
+
+void gnss_pt_sfap_load(uint32_t load)
+{
+    gnss_pt_write(GNSS_PT_REG_SFAP_LOAD, load);
+}

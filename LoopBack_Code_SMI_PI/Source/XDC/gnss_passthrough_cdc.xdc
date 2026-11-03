@@ -86,3 +86,14 @@ set_max_delay -datapath_only \
   -from [get_cells -quiet -hier -filter {NAME =~ *aj_thr_act_reg*}] \
   -to   [get_cells -quiet -hier -filter {NAME =~ *blk_thr_c_reg*}] \
   8.000
+
+# --- 5. SFAP (v5.0) ----------------------------------------------------------------------------------
+# The load register crosses with the same toggle handshake as the blanker threshold: sfap_ld_act is
+# written once and is stable for far longer than the toggle needs; sfap_ld_c copies it when the toggle
+# (sfap_ld_tog_meta) has arrived. SFAP_CTRL crosses bit-wise through sfap_ctrl_meta (false path 3).
+set_false_path \
+  -to [get_cells -quiet -hier -filter {NAME =~ *sfap_ld_tog_meta_reg*}]
+set_max_delay -datapath_only \
+  -from [get_cells -quiet -hier -filter {NAME =~ *sfap_ld_act_reg*}] \
+  -to   [get_cells -quiet -hier -filter {NAME =~ *sfap_ld_c_reg*}] \
+  8.000
