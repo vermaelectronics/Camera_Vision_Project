@@ -399,11 +399,11 @@ static void info_pl(void)
     console_print("   through another. RX2 is first scaled to RX1's level (g2,\n");
     console_print("   learned from the noise floors), then 16 taps on RX1, 16 on\n");
     console_print("   RX2 and 2 image taps (the AD9361 I/Q mirror of the jammer):\n");
-    console_print("     y = x1[n-8] - sum a_k x1[n-k] - sum b_k x2n[n-k]\n");
-    console_print("                 - c1 conj(x1[n-8]) - c2 conj(x2n[n-8])\n");
-    console_print("   RX1's tap at delay 8 is fixed at 1, so the output can never be\n");
+    console_print("     y = x1[n-4] - sum a_k x1[n-k] - sum b_k x2n[n-k]\n");
+    console_print("                 - c1 conj(x1[n-4]) - c2 conj(x2n[n-4])\n");
+    console_print("   RX1's tap at delay 4 is fixed at 1, so the output can never be\n");
     console_print("   turned down as a whole. With no jammer the filter is BYPASSED\n");
-    console_print("   (y = x1[n-8] exactly) and the ARM only runs a cheap detector.\n");
+    console_print("   (y = x1[n-4] exactly) and the ARM only runs a cheap detector.\n");
     console_print("   When a jammer appears the ARM computes the 33 weights from\n");
     console_print("   4096-sample DMA captures of both channels (gnss_aj.c), a few\n");
     console_print("   hundred times a second, and commits weights, bypass, make-up\n");
@@ -574,7 +574,7 @@ static void info_registers(void)
     console_print("   0x100 AJ_W0..31       RW  SMI-PI weights (shadow), Q3.12\n");
     console_print("                             {imag, real}; 0-15 RX1, 16-31 RX2\n");
     console_print("   0x180 AJ_COMMIT       W/R write: all AJ_* -> filter; read: count\n");
-    console_print("   0x184 AJ_INFO         RO  0x10080C05 (16 taps, ref 8, Q3.12, v4.6)\n");
+    console_print("   0x184 AJ_INFO         RO  0x10040C06 (16 taps, ref 4, Q3.12, v4.7)\n");
     console_print("   0x188 AJ_CFG          RW  [0] bypass (reset 1), [10:8] make-up\n");
     console_print("   0x18C AJ_NORM         RW  RX2 normalisation g2, Q3.13 (0x2000=1)\n");
     console_print("   0x190 AJ_WC0/WC1      RW  image taps (0x190 RX1, 0x194 RX2)\n");

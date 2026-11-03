@@ -124,7 +124,7 @@
 //                                    half-new set. Reads a commit counter.
 //    0x184   AJ_INFO         RO      {8'd taps per channel, 8'd reference delay,
 //                                     8'd fraction bits, 8'd layout version}
-//                                    = 0x10080C05 (layout 5 = v4.6: pulse blanker + RX peak hold; 4 = v4.5;
+//                                    = 0x10040C06 (layout 6 = v4.7: reference delay 4; 5 = v4.6: pulse blanker + RX peak hold; 4 = v4.5;
 //                                      3 = v4.4; 2 = v4.1)
 //    0x188   AJ_CFG          RW      SHADOW. [0] bypass: 1 = TX1 carries RX1
 //                                    delayed by 8 samples, no weights (reset
@@ -280,8 +280,11 @@ module gnss_passthrough #(
   // v4.6 -- pulse blanker on the filter output (gnss_pulse_blank.v), threshold AJ_BLK_THR
   //         0x19C committed with AJ_COMMIT, enable AJ_CFG[15], counters 0x1A4/0x1A8, and an RX
   //         peak hold 0x1AC. smi_pi_0 is unchanged (v2.3). AJ_INFO layout 5.
-  localparam [31:0] CORE_VERSION = 32'h00040006;   // v4.6
-  localparam [31:0] AJ_INFO      = 32'h10080C05;
+  // v4.7 -- smi_pi_0 v2.4: the RX1 reference tap is at delay 4 (was 8), so a reflection of the jammer
+  //         up to 11 samples later can be cancelled (was 7). AJ_INFO byte 2 = 4, layout 6; the firmware
+  //         refuses to start the filter if that byte differs from its own AJ_REF.
+  localparam [31:0] CORE_VERSION = 32'h00040007;   // v4.7
+  localparam [31:0] AJ_INFO      = 32'h10040C06;
   localparam [31:0] AJ_CFG_RESET = 32'h00000001;   // bypass
   localparam [31:0] AJ_NRM_RESET = 32'h00002000;   // g2 = 1.0
   localparam        AW           = FIFO_ADDR_WIDTH;

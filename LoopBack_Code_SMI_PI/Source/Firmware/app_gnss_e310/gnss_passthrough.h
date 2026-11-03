@@ -76,7 +76,7 @@
  * counter. */
 #define GNSS_PT_REG_AJ_W(k)         (0x100U + ((k) * 4U)) /* RW, k = 0..31    */
 #define GNSS_PT_REG_AJ_COMMIT       0x180U  /* W: commit, R: count            */
-#define GNSS_PT_REG_AJ_INFO         0x184U  /* RO 0x10080C05                  */
+#define GNSS_PT_REG_AJ_INFO         0x184U  /* RO 0x10040C06                  */
 #define GNSS_PT_REG_AJ_CFG          0x188U  /* RW [0] bypass, [10:8] shift, [14:12] weight scale */
 #define GNSS_PT_REG_AJ_NORM         0x18CU  /* RW g2, Q3.13 {im, re}          */
 #define GNSS_PT_REG_AJ_WC(k)        (0x190U + ((k) * 4U)) /* RW image taps 0,1 */
@@ -87,7 +87,7 @@
 #define GNSS_PT_REG_AJ_BLK_COUNT    0x1A4U  /* RO samples blanked since the counter clear */
 #define GNSS_PT_REG_AJ_BLK_BURSTS   0x1A8U  /* RO bursts blanked since the counter clear  */
 #define GNSS_PT_REG_AJ_RX_PEAK      0x1ACU  /* RO [15:0] largest |I|,|Q| of RX1/RX2 in the last window, [31:16] window counter */
-#define GNSS_PT_AJ_INFO_EXPECTED    0x10080C05U   /* layout 5 = v4.6 (pulse blanker, peak hold); 4 = v4.5; 3 = v4.4 */
+#define GNSS_PT_AJ_INFO_EXPECTED    0x10040C06U   /* layout 6 = v4.7 (reference delay 4); 5 = v4.6 (pulse blanker, peak hold); 4 = v4.5 */
 #define GNSS_PT_AJ_LAYOUT_BLANK     5U            /* first layout with the blanker and the peak hold */
 #define GNSS_PT_AJ_CFG_BLANK        0x8000U       /* AJ_CFG[15]: blanker enable (layout 5) */
 #define GNSS_PT_BLK_THR_OFF         0xFFFFFFFFU   /* threshold that never triggers */

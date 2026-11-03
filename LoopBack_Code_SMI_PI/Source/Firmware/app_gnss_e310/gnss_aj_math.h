@@ -51,7 +51,9 @@ extern "C" {
 #endif
 
 #define AJ_NT        16     /* taps per channel, delays 0..15                 */
-#define AJ_REF        8     /* RX1 reference delay                            */
+#ifndef AJ_REF
+#define AJ_REF        4     /* RX1 reference delay (4.8: was 8; echoes up to 11 samples can be cancelled) */
+#endif
 #define AJ_NSPT      32     /* space-time weight words (RX1 16 + RX2 16)      */
 #define AJ_IMG1      32     /* image tap c1: conj(x1[n-8])                    */
 #define AJ_IMG2      33     /* image tap c2: conj(x2n[n-8])                   */
@@ -71,10 +73,14 @@ extern "C" {
 #define AJ_NMODES     4
 
 /* Weight of the previous block's statistics in the solve (0 = none). */
+#ifndef AJ_AVG
 #define AJ_AVG       0.5
+#endif
 
 /* Extra diagonal loading on RX1's own taps (see gnss_aj_math.c). */
+#ifndef AJ_RX1_LOAD
 #define AJ_RX1_LOAD  4.0
+#endif
 
 /* Lowest noise estimate allowed [LSB^2]: 12-bit quantisation of I and Q. */
 #define AJ_QFLOOR    0.25

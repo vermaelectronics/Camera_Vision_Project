@@ -1066,6 +1066,18 @@ void gnss_aj_enable(int on)
 				      (long)(ver >> 16), (long)(ver & 0xFFFFU));
 			return;
 		}
+		{
+			/* The reference tap's delay is compiled into BOTH the core and this firmware (AJ_REF); a
+			 * mismatch would put every weight on the wrong tap. */
+			uint32_t info = gnss_pt_read(GNSS_PT_REG_AJ_INFO);
+			if(((info >> 16) & 0xFFU) != (uint32_t)AJ_REF) {
+				console_print("gnss_aj: the bitstream's reference tap is at delay %d, this firmware needs %d (AJ_INFO 0x%x).\n"
+					      "         Anti-jam NOT started: rebuild the WHOLE project (build_all.sh --from smi) so the\n"
+					      "         bitstream and the firmware match.\n",
+					      (long)((info >> 16) & 0xFFU), (long)AJ_REF, (unsigned long)info);
+				return;
+			}
+		}
 		/* The weights assume both channels always have the same gain: two
 		 * independent AD9361 AGCs would step them apart. A manual gain the
 		 * operator locked (gnss_rx_agc=0) is matched too and is kept. */
@@ -1259,7 +1271,9 @@ void gnss_aj_report(void)
 	if(nf0 > 0.0)
 		console_print("noise floor   : RX1 %s LSB^2 at the present gain (learned)\n", f1u(noise_now()));
 	else
-		console_print("noise floor   : not learned yet (needs a moment with no jammer)\n");
+		console_print("noise floor   : not learned yet (needs a moment with no jammer: switch the jammer OFF for 10 s, then ON).\n"
+			      "                Until then J/N, suppression and residual below are measured against the filter's OWN noise\n"
+			      "                estimate, so 'residual 0 dB' does not prove the jammer is gone.\n");
 	console_print("anti-jam      : %s, filter %s (cfg 0x%x, make-up shift %d = +%d dB)%s\n",
 		      (char*)(aj_on ? "ON" : "OFF"),
 		      (char*)((cfg & GNSS_PT_AJ_CFG_BYPASS) ? "BYPASSED (TX1 = RX1)" : "IN"),

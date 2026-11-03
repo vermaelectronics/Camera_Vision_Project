@@ -32,7 +32,7 @@
 #    SMI_PI_SKIP_CSIM=1   skip step 1
 #
 #  OUTPUT
-#    $GNSS_CRPA_IP_REPO/smi_pi/component.xml, VLNV antsdr:gnss:smi_pi:2.3
+#    $GNSS_CRPA_IP_REPO/smi_pi/component.xml, VLNV antsdr:gnss:smi_pi:2.4
 #    $GNSS_CRPA_IP_REPO/smi_pi/smi_pi_csynth.rpt
 #
 #  SUCCESS MARKER
@@ -131,7 +131,7 @@ if {$ii eq "" || $ii > $pipeline_ii} {
 
 # ---- 4 package as a Vivado IP ------------------------------------------------------
 export_design -format ip_catalog -rtl verilog \
-  -vendor antsdr -library gnss -version 2.3 -ipname smi_pi \
+  -vendor antsdr -library gnss -version 2.4 -ipname smi_pi \
   -display_name "SMI power inversion, space-time" \
   -description "Two-element space-time SMI power-inversion anti-jam filter (Vitis HLS): RX2 normalised to RX1 at the input, 16 taps on RX1 (reference tap fixed at 1), 16 on RX2 and 2 image (conjugate) taps, bypass and output make-up gain; weights from the ARM via gnss_passthrough. s_axis_x = RX1 and RX2 IQ, m_axis_y = filtered RX1."
 
@@ -158,6 +158,6 @@ file delete -force $out_ip
 file copy -force $ip_src $out_ip
 if {[file exists $rpt_txt]} { file copy -force $rpt_txt $out_ip }
 
-puts "SMI_PI_HLS: IP antsdr:gnss:smi_pi:2.3 -> $out_ip"
+puts "SMI_PI_HLS: IP antsdr:gnss:smi_pi:2.4 -> $out_ip"
 puts "SMI_PI_HLS: PASS"
 exit 0

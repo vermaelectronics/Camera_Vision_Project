@@ -292,7 +292,7 @@ static int test_makeup() {
 // 4 CW that hops from k1 x fs to k1+k2 x fs after the three training captures (stale weights)
 struct Scen { double jnr_db; bool cw; double echo; double rx2_db; bool iq; double cwf; double satf; double chip; double delay;
               int kind = 0; double k1 = 0, k2 = 0; int nblk = 3; double avg = 0; int gate = 0;
-              double jc = 0, jbw = 0, cwjn = -99; };   // jc, jbw: centre and width of a band-limited barrage (x fs); cwjn: an extra CW (at .cwf) at this J/N
+              double jc = 0, jbw = 0, cwjn = -99; int echod = 3; };   // jc, jbw: centre and width of a band-limited barrage (x fs); cwjn: an extra CW (at .cwf) at this J/N
 
 // AD9361-like I/Q imbalance: gain error eps, phase error ph (degrees).
 static void iq_imbalance(cvec &x, double eps, double ph_deg) {
@@ -380,7 +380,7 @@ static int test_jammer(int id, Scen sc) {
     for (auto &v : J2) v *= g2p;
     if (sc.echo > 0) {      // a reflection 3 samples later from another direction
         cvec e1(N), e2(N);
-        for (int i = 3; i < N; i++) { e1[i] = sc.echo * std::polar(1.0, 1.3) * J[i - 3]; e2[i] = sc.echo * std::polar(1.0, 2.9) * J[i - 3]; }
+        for (int i = sc.echod; i < N; i++) { e1[i] = sc.echo * std::polar(1.0, 1.3) * J[i - sc.echod]; e2[i] = sc.echo * std::polar(1.0, 2.9) * J[i - sc.echod]; }
         for (int i = 0; i < N; i++) { J[i] += e1[i]; J2[i] += e2[i]; }
     }
     double pj = (sc.cwjn > -90 && !sc.cw) ? pj0 : pwr(J, 0), pn = 2 * nrms * nrms;
@@ -451,7 +451,7 @@ static int test_jammer(int id, Scen sc) {
     auto solve = [&](int mode, double gn, aj_result_t &r) {
         static uint32_t buf[2 * AJ_NSAMP];
         std::memset(&r, 0, sizeof r);
-        r.mode = mode; r.sig2_prev = -1; r.noise_ref = pn * g * g + 0.17; r.g2 = gn;
+        r.mode = mode; r.sig2_prev = -1; r.noise_ref = std::getenv("SMI_NOREF") ? -1.0 : pn * g * g + 0.17; r.g2 = gn;   // SMI_NOREF=1: noise floor not learned (jammer on from power-up)
         r.rx2_noise = (gn == g2) ? rx2n : rx2n / (g2 * g2);
         aj_reset();
         aj_sweep_t swp; aj_sweep_reset(&swp);
@@ -582,6 +582,7 @@ static int test_jammer(int id, Scen sc) {
         std::printf("  bypass + blanker        : satellite SNR loss %.2f dB, %.0f %% blanked\n", m0b.loss, 100 * m0b.blf);
         ok = mb.loss <= 10 * std::log10(1.0 / (1.0 - sc.k2)) + 1.5 && m0b.loss <= 10 * std::log10(1.0 / (1.0 - sc.k2)) + 1.5 && m0b.loss + 6 < m0.loss;
         break; }
+    case 22: ok = m.supp >= 25; break;
     case 21: ok = m.supp >= 30 && m.loss <= 3.5; break;
     case 16: ok = m.supp >= 40 && m.loss <= 3 && sweep_blocks >= 40; break;   // 1 ms chirp, detector on
     case 17: ok = m.supp >= 60 && m.loss <= 3 && sweep_blocks == 0; break;    // steady CW: detector must stay off
@@ -679,10 +680,17 @@ int main(int argc, char **argv) {
         double jb = (argc > 2) ? std::atof(argv[2]) : 40, jc = (argc > 3) ? std::atof(argv[3]) : -99;
         const double fs = 61.44, off = -7.08 / fs;
         Scen sc = {jb, false, 0, 0, true, off, -7.06 / fs, 1.023 / fs, 0};
-        sc.nblk = 12;
+        sc.nblk = (argc > 4) ? std::atoi(argv[4]) : 12;
         if (jb < -90) { sc.jnr_db = jc; sc.cw = true; }               // CW only
         else { sc.jc = off; sc.jbw = 50.0 / fs; sc.cwjn = jc; }       // barrage, plus CW when jc > -90
         ok = test_jammer(21, sc); break; }
+    // field-like: partial-band barrage 36 MHz wide centred -5.5 MHz (as the board measured), a reflection of the jammer
+    // that reaches the two antennas differently; argv: J/N, echo amplitude, echo delay [samples]
+    case 22: {
+        const double fs = 61.44;
+        Scen sc = {(argc > 2) ? std::atof(argv[2]) : 45, false, (argc > 3) ? std::atof(argv[3]) : 0.5, 0, true, 0, -7.06 / fs, 1.023 / fs, 0};
+        sc.nblk = 12; sc.jc = -5.5 / fs; sc.jbw = 36.0 / fs; sc.echod = (argc > 4) ? std::atoi(argv[4]) : 3;
+        ok = test_jammer(22, sc); break; }
     case 18: { Scen sc = {40, false, 0, 0, true, 0, 0, 0, 0}; sc.nblk = 30; sc.avg = -1; ok = test_jammer(18, sc); break; }
     default: std::printf("unknown scenario %d\n", scen); ok = 0;
     }

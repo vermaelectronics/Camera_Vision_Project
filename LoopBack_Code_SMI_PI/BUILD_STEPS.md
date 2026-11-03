@@ -80,7 +80,7 @@ Check, all of these in the output:
 ```
 SMI_PI_CSIM: PASS (scenario 1)   ... up to (scenario 14)
 SMI_PI_HLS: estimated clock period X ns (target 10 ns), achieved II 1 (requested 1)
-SMI_PI_HLS: IP antsdr:gnss:smi_pi:2.3 -> .../Build/ip_repo/smi_pi
+SMI_PI_HLS: IP antsdr:gnss:smi_pi:2.4 -> .../Build/ip_repo/smi_pi
 SMI_PI_HLS: PASS
 ```
 If the clock estimate is above 10 ns, run `SMI_PI_CLK_NS=8 ./Automation/Linux/steps/03_smi.sh`
@@ -100,7 +100,7 @@ Check: `IP_PACKAGE_OK`
 ./Automation/Linux/steps/05_project.sh
 ```
 Check: `CREATE_RESULT: PASS`
-(`GNSS-CRPA: SMI-PI IP resolved in catalog: antsdr:gnss:smi_pi:2.3` is
+(`GNSS-CRPA: SMI-PI IP resolved in catalog: antsdr:gnss:smi_pi:2.4` is
 printed in `Build/Logs/project.log`.)
 
 ### Step 6: synthesis, implementation, bitstream (20–60 min)

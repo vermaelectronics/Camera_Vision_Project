@@ -81,9 +81,9 @@ if {[llength $gnss_ipdef] == 0} {
 # cfg[14:12], make-up shift to 7); a 2.0 / 2.1 / 2.2 left over from an earlier build is
 # refused here (they would run, but ignore parts of cfg that the 4.5 firmware uses).
 set smi_ipdef [get_ipdefs -all -quiet -filter \
-  {VLNV =~ *:smi_pi:2.3 && design_tool_contexts =~ *IPI* && UPGRADE_VERSIONS == ""}]
+  {VLNV =~ *:smi_pi:2.4 && design_tool_contexts =~ *IPI* && UPGRADE_VERSIONS == ""}]
 if {[llength $smi_ipdef] == 0} {
-  error "ERROR: smi_pi 2.3 was not found in the IP catalog at $gnss_ip_repo.\
+  error "ERROR: smi_pi 2.4 was not found in the IP catalog at $gnss_ip_repo.\
          Build it with Source/HLS/smi_pi/build_hls.tcl (vitis_hls), or run\
          Automation/Linux/build_all.sh --from smi."
 }
@@ -506,7 +506,7 @@ ad_connect gnss_passthrough/dac_data_q0 axi_ad9361/dac_data_q0
 ad_connect gnss_passthrough/dac_data_i1 axi_ad9361/dac_data_i1
 ad_connect gnss_passthrough/dac_data_q1 axi_ad9361/dac_data_q1
 
-# SMI-PI v4.1 space-time power-inversion filter (Vitis HLS IP smi_pi 2.3, II=1).
+# SMI-PI v4.1 space-time power-inversion filter (Vitis HLS IP smi_pi 2.4, II=1).
 #   It runs on sys_cpu_clk (100 MHz), NOT on axi_ad9361/l_clk: l_clk follows the
 #   sample rate (4x it in 2R2T, 200 MHz at 50 MS/s, 245.76 MHz at 61.44 MS/s),
 #   while sys_cpu_clk is fixed, so the filter's timing does not depend on the

@@ -14,7 +14,9 @@
 // Taps per channel (delays 0..15) and the RX1 reference delay. Must match
 // AJ_NT / AJ_REF in Source/Firmware/app_gnss_e310/gnss_aj_math.h.
 #define SMI_NT    16
-#define SMI_REF    8
+#ifndef SMI_REF
+#define SMI_REF    4
+#endif
 #define SMI_WFRAC 12          // weights are signed Q3.12 (1.0 = 4096)
 #define SMI_GFRAC 13          // RX2 normalisation gain, signed Q3.13 (1.0 = 8192)
 #define SMI_XFRAC  2          // fractional bits kept on the normalised RX2
