@@ -107,7 +107,9 @@ module sfap_core (
     wire [10:0] raddr = {fbase, 9'd0} + {1'b0, aidx};
     wire [15:0] win_a, win_s;
     reg  [9:0]  on = 10'd0;             // overlap-add pass counter (below)
-    sfap_win_rom u_win (.clk(clk), .a(aidx), .d(win_a), .b(on), .e(win_s));
+    reg  [9:0]  onw = 10'd0;            // own address register for the synthesis window (cuts the fan-out of 'on')
+    always @(posedge clk) onw <= on;
+    sfap_win_rom u_win (.clk(clk), .a(aidx), .d(win_a), .b(onw), .e(win_s));   // port b: 2 clocks after onw
     reg [47:0] rd48;
     reg [1:0]  k1; reg [9:0] g1;
     always @(posedge clk) begin
@@ -273,11 +275,17 @@ module sfap_core (
         tq <= tail[on[8:0]];
         ov1 <= ola; on1 <= on; tok1 <= tail_ok; p1_1 <= pass1;
     end
+    // o1b, o1c: two more clocks, the window arrives 2 clocks later than the RAM data (onw register + ROM output register)
+    reg [35:0] fqb, fqc; reg [39:0] tqb, tqc; reg ov1b, ov1c; reg [9:0] on1b, on1c; reg tok1b, tok1c, p1_1b, p1_1c;
+    always @(posedge clk) begin
+        fqb <= fq; tqb <= tq; ov1b <= ov1; on1b <= on1; tok1b <= tok1; p1_1b <= p1_1;
+        fqc <= fqb; tqc <= tqb; ov1c <= ov1b; on1c <= on1b; tok1c <= tok1b; p1_1c <= p1_1b;
+    end
     // o2: operands
     reg signed [17:0] cr2, ci2; reg [16:0] sw2; reg signed [19:0] tr2, ti2; reg ov2, p1_2; reg [9:0] on2;
     always @(posedge clk) begin
-        cr2 <= fq[17:0]; ci2 <= fq[35:18]; sw2 <= {1'b0, win_s};
-        tr2 <= tok1 ? tq[19:0] : 20'sd0; ti2 <= tok1 ? tq[39:20] : 20'sd0; ov2 <= ov1; on2 <= on1; p1_2 <= p1_1;
+        cr2 <= fqc[17:0]; ci2 <= fqc[35:18]; sw2 <= {1'b0, win_s};
+        tr2 <= tok1c ? tqc[19:0] : 20'sd0; ti2 <= tok1c ? tqc[39:20] : 20'sd0; ov2 <= ov1c; on2 <= on1c; p1_2 <= p1_1c;
     end
     // o3: products
     reg signed [34:0] pr3, pi3o; reg signed [19:0] tr3, ti3; reg ov3, p1_3; reg [9:0] on3;

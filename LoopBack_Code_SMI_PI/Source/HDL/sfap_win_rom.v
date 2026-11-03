@@ -1027,5 +1027,6 @@ module sfap_win_rom (input wire clk, input wire [9:0] a, output reg [15:0] d, in
     mem[1022] = 16'd402;
     mem[1023] = 16'd201;
   end
-  always @(posedge clk) begin d <= mem[a]; e <= mem[b]; end
+  reg [15:0] e0;                                   // port b has BRAM output register + a fabric register (latency 2)
+  always @(posedge clk) begin d <= mem[a]; e0 <= mem[b]; e <= e0; end
 endmodule

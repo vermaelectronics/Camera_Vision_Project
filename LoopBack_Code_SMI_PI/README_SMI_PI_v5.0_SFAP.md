@@ -202,3 +202,17 @@ Worst path: `u_sfap/xb_im_reg[0] -> u_sfap/fw_d_reg[31]`, i.e. the inverse-FFT o
 
 The frame RAM is now written 2 clocks later than in 5.1.1 and the output FIFO 1 clock later. This was checked against the read-out order of the overlap-add pass (the bit-reversed
 address that is read first is the one that was written first), so no data hazard appears; it adds 3 clocks (12 ns) to the filter latency, nothing else changes.
+
+## 11. 5.1.3: what the 5.1.2 build showed
+
+5.1.2 (Vivado 2023.2): **WNS -0.271 ns, TNS -3.042 ns, 48 failing endpoints of 111285** (5.1.1: -0.473 ns / 187), rx_clk group only, hold +0.010 ns, 25883 LUT (48.7 %), 28.5 BRAM tiles.
+Worst path: `u_sfap/on_reg[0]_rep__6 -> u_sfap/pr3b_reg_i_7_psdsp` - the overlap-add counter `on` (fan-out to the frame RAM, the tail RAM, the control logic and the synthesis-window ROM, so
+the tools replicated it) feeding the window multiplier. The previous clock fix (frame-RAM write, output saturation) moved the worst slack from -0.47 to -0.27 ns, so those paths are gone.
+
+| Change | Why |
+|---|---|
+| window ROM has its own address register `onw`, and its read port b now has a BRAM output register plus a fabric register (latency 2) | the ROM no longer hangs on the 10-bit counter with the large fan-out and its output no longer goes straight into the DSP input |
+| frame-RAM and tail-RAM read data go through two more registers (o1b, o1c) before the multiplier stage | keeps the window and the data aligned (verified: same RTL result) |
+
+Re-run in RTL after the change: statistics registers still equal the integer model, 50 dB barrage + echo 6.0 -> 2.7 dB, 60 dB 6.9 -> 2.0 dB, identical to 5.1.2.
+Latency +2 clocks. `CORE_VERSION` 0x00050103, firmware "5.1.3".

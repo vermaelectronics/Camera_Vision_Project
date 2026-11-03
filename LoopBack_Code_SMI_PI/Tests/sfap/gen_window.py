@@ -8,4 +8,4 @@ with open(out, "w") as f:
     f.write("  (* rom_style = \"block\" *) reg [15:0] mem [0:1023];\n  initial begin\n")
     for n in range(1024):
         f.write(f"    mem[{n}] = 16'd{min(65535, round(math.sin(math.pi * n / 1024) * 65536))};\n")
-    f.write("  end\n  always @(posedge clk) begin d <= mem[a]; e <= mem[b]; end\nendmodule\n")
+    f.write("  end\n  reg [15:0] e0;                                   // port b has BRAM output register + a fabric register (latency 2)\n  always @(posedge clk) begin d <= mem[a]; e0 <= mem[b]; e <= e0; end\nendmodule\n")
