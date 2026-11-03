@@ -25,7 +25,16 @@
 // ============================================================================
 `timescale 1ns/1ps
 
-// ---- one radix-2 SDF butterfly stage (latency 2) ---------------------------
+// ---- one radix-2 SDF butterfly stage ----------------------------------------
+//  D >= 8 (delay line in RAM): latency 4, every operator in its own clock
+//     edge 1  register the input, read the delay RAM
+//     edge 2  RAM output register (so the BRAM clock-to-out is not in the add)
+//     edge 3  sum and difference (one adder; -j on b is an add/sub select)
+//     edge 4  halve (wiring only), choose, register the output and the write data
+//     edge 5  write the RAM from registers
+//  The loop through the RAM is D slots long and the pipeline in it is 4, so D >= 8 is enough.
+//  D < 8 (1, 2, 4: shift register): latency 2, one add/sub and a mux in the loop (it cannot be pipelined).
+//  Scaling truncates (no +1): one adder less in the loop; the bias is 0.5 LSB per scaled stage.
 module sfap_bf #(
     parameter WD    = 25,
     parameter LOGD  = 9,            // delay D = 2^LOGD
@@ -40,76 +49,108 @@ module sfap_bf #(
 );
     localparam D = (1 << LOGD);
 
-    // stage 0: register the input (the delay memory is read with the same address)
-    reg signed [WD-1:0] x_re, x_im;
-    reg [9:0]           x_idx;
-    always @(posedge clk) begin x_re <= in_re; x_im <= in_im; x_idx <= in_idx; end
-
-    // stage 1: butterfly on (d = sample D slots ago, x = now)
-    wire signed [WD-1:0] d_re, d_im;
-    wire bf  = x_idx[LOGD];
-    wire rot = (ROT != 0) && !x_idx[LOGD+1];
-
-    // b' = x, or -j x = (x_im, -x_re); the sign is folded into the add/sub
-    wire signed [WD:0] sum_re = rot ? ({d_re[WD-1], d_re} + {x_im[WD-1], x_im}) : ({d_re[WD-1], d_re} + {x_re[WD-1], x_re});
-    wire signed [WD:0] sum_im = rot ? ({d_im[WD-1], d_im} - {x_re[WD-1], x_re}) : ({d_im[WD-1], d_im} + {x_im[WD-1], x_im});
-    wire signed [WD:0] dif_re = rot ? ({d_re[WD-1], d_re} - {x_im[WD-1], x_im}) : ({d_re[WD-1], d_re} - {x_re[WD-1], x_re});
-    wire signed [WD:0] dif_im = rot ? ({d_im[WD-1], d_im} + {x_re[WD-1], x_re}) : ({d_im[WD-1], d_im} - {x_im[WD-1], x_im});
-
     function signed [WD-1:0] fit(input signed [WD:0] v);
         begin
-            if (SCALE != 0) fit = (v + 1) >>> 1;
+            if (SCALE != 0) fit = v >>> 1;
             else            fit = v[WD-1:0];
         end
     endfunction
 
-    // what goes into the delay line: the difference while butterflying, the
-    // input while only filling
-    wire signed [WD-1:0] w_re = bf ? fit(dif_re) : x_re;
-    wire signed [WD-1:0] w_im = bf ? fit(dif_im) : x_im;
-
-    always @(posedge clk) begin
-        out_idx <= x_idx;
-        if (bf) begin out_re <= fit(sum_re); out_im <= fit(sum_im); end
-        else    begin out_re <= d_re;        out_im <= d_im;        end
-    end
-
     generate
-        if (LOGD >= 7) begin : g_bram
+    if (LOGD >= 3) begin : g_ram
+        if (LOGD >= 7) begin : g_b
             (* ram_style = "block" *) reg [2*WD-1:0] mem [0:D-1];
             reg [2*WD-1:0] rd;
-            reg [LOGD-1:0] addr_d;
+            always @(posedge clk) rd <= mem[in_idx[LOGD-1:0]];
+            reg [LOGD-1:0] wa;  reg [2*WD-1:0] wd;  reg we;
+            always @(posedge clk) if (we) mem[wa] <= wd;
+            // pipeline (shared code below drives wa/wd/we through these nets)
+            reg signed [WD-1:0] x1_re, x1_im, x_re, x_im; reg [9:0] x_idx, i1;
+            reg [2*WD-1:0] rd2;
             always @(posedge clk) begin
-                rd     <= mem[in_idx[LOGD-1:0]];
-                addr_d <= in_idx[LOGD-1:0];
-                mem[addr_d] <= {w_im, w_re};
+                x_re <= in_re; x_im <= in_im; x_idx <= in_idx;
+                x1_re <= x_re; x1_im <= x_im; i1 <= x_idx;
+                rd2 <= rd;
             end
-            assign d_re = rd[WD-1:0];
-            assign d_im = rd[2*WD-1:WD];
-        end else if (LOGD >= 3) begin : g_ram
+            wire signed [WD-1:0] d_re = rd2[WD-1:0];
+            wire signed [WD-1:0] d_im = rd2[2*WD-1:WD];
+            wire bf1  = i1[LOGD];
+            wire rot1 = (ROT != 0) && !i1[LOGD+1];
+            reg signed [WD:0] s_re, s_im, f_re, f_im;
+            reg signed [WD-1:0] d3_re, d3_im, x3_re, x3_im; reg bf3; reg [9:0] i3; reg [LOGD-1:0] a3;
+            always @(posedge clk) begin
+                s_re <= rot1 ? ({d_re[WD-1], d_re} + {x1_im[WD-1], x1_im}) : ({d_re[WD-1], d_re} + {x1_re[WD-1], x1_re});
+                s_im <= rot1 ? ({d_im[WD-1], d_im} - {x1_re[WD-1], x1_re}) : ({d_im[WD-1], d_im} + {x1_im[WD-1], x1_im});
+                f_re <= rot1 ? ({d_re[WD-1], d_re} - {x1_im[WD-1], x1_im}) : ({d_re[WD-1], d_re} - {x1_re[WD-1], x1_re});
+                f_im <= rot1 ? ({d_im[WD-1], d_im} + {x1_re[WD-1], x1_re}) : ({d_im[WD-1], d_im} - {x1_im[WD-1], x1_im});
+                d3_re <= d_re; d3_im <= d_im; x3_re <= x1_re; x3_im <= x1_im; bf3 <= bf1; i3 <= i1; a3 <= i1[LOGD-1:0];
+            end
+            always @(posedge clk) begin
+                out_idx <= i3;
+                if (bf3) begin out_re <= fit(s_re); out_im <= fit(s_im); wd <= {fit(f_im), fit(f_re)}; end
+                else     begin out_re <= d3_re;     out_im <= d3_im;     wd <= {x3_im, x3_re}; end
+                wa <= a3; we <= 1'b1;
+            end
+        end else begin : g_l
             (* ram_style = "distributed" *) reg [2*WD-1:0] mem [0:D-1];
             reg [2*WD-1:0] rd;
-            reg [LOGD-1:0] addr_d;
+            always @(posedge clk) rd <= mem[in_idx[LOGD-1:0]];
+            reg [LOGD-1:0] wa;  reg [2*WD-1:0] wd;  reg we;
+            always @(posedge clk) if (we) mem[wa] <= wd;
+            reg signed [WD-1:0] x1_re, x1_im, x_re, x_im; reg [9:0] x_idx, i1;
+            reg [2*WD-1:0] rd2;
             always @(posedge clk) begin
-                rd     <= mem[in_idx[LOGD-1:0]];
-                addr_d <= in_idx[LOGD-1:0];
-                mem[addr_d] <= {w_im, w_re};
+                x_re <= in_re; x_im <= in_im; x_idx <= in_idx;
+                x1_re <= x_re; x1_im <= x_im; i1 <= x_idx;
+                rd2 <= rd;
             end
-            assign d_re = rd[WD-1:0];
-            assign d_im = rd[2*WD-1:WD];
-        end else begin : g_sr
-            reg signed [WD-1:0] sr_re [0:D-1];
-            reg signed [WD-1:0] sr_im [0:D-1];
-            integer i;
-            assign d_re = sr_re[D-1];
-            assign d_im = sr_im[D-1];
+            wire signed [WD-1:0] d_re = rd2[WD-1:0];
+            wire signed [WD-1:0] d_im = rd2[2*WD-1:WD];
+            wire bf1  = i1[LOGD];
+            wire rot1 = (ROT != 0) && !i1[LOGD+1];
+            reg signed [WD:0] s_re, s_im, f_re, f_im;
+            reg signed [WD-1:0] d3_re, d3_im, x3_re, x3_im; reg bf3; reg [9:0] i3; reg [LOGD-1:0] a3;
             always @(posedge clk) begin
-                for (i = D-1; i > 0; i = i - 1) begin
-                    sr_re[i] <= sr_re[i-1]; sr_im[i] <= sr_im[i-1];
-                end
-                sr_re[0] <= w_re; sr_im[0] <= w_im;
+                s_re <= rot1 ? ({d_re[WD-1], d_re} + {x1_im[WD-1], x1_im}) : ({d_re[WD-1], d_re} + {x1_re[WD-1], x1_re});
+                s_im <= rot1 ? ({d_im[WD-1], d_im} - {x1_re[WD-1], x1_re}) : ({d_im[WD-1], d_im} + {x1_im[WD-1], x1_im});
+                f_re <= rot1 ? ({d_re[WD-1], d_re} - {x1_im[WD-1], x1_im}) : ({d_re[WD-1], d_re} - {x1_re[WD-1], x1_re});
+                f_im <= rot1 ? ({d_im[WD-1], d_im} + {x1_re[WD-1], x1_re}) : ({d_im[WD-1], d_im} - {x1_im[WD-1], x1_im});
+                d3_re <= d_re; d3_im <= d_im; x3_re <= x1_re; x3_im <= x1_im; bf3 <= bf1; i3 <= i1; a3 <= i1[LOGD-1:0];
+            end
+            always @(posedge clk) begin
+                out_idx <= i3;
+                if (bf3) begin out_re <= fit(s_re); out_im <= fit(s_im); wd <= {fit(f_im), fit(f_re)}; end
+                else     begin out_re <= d3_re;     out_im <= d3_im;     wd <= {x3_im, x3_re}; end
+                wa <= a3; we <= 1'b1;
             end
         end
+    end else begin : g_sr
+        // tiny delays (1, 2, 4): shift register of D entries, add/sub and mux in the loop
+        reg signed [WD-1:0] x_re, x_im; reg [9:0] x_idx;
+        always @(posedge clk) begin x_re <= in_re; x_im <= in_im; x_idx <= in_idx; end
+        reg signed [WD-1:0] sr_re [0:D-1];
+        reg signed [WD-1:0] sr_im [0:D-1];
+        wire signed [WD-1:0] d_re = sr_re[D-1];
+        wire signed [WD-1:0] d_im = sr_im[D-1];
+        wire bf  = x_idx[LOGD];
+        wire rot = (ROT != 0) && !x_idx[LOGD+1];
+        wire signed [WD:0] sum_re = rot ? ({d_re[WD-1], d_re} + {x_im[WD-1], x_im}) : ({d_re[WD-1], d_re} + {x_re[WD-1], x_re});
+        wire signed [WD:0] sum_im = rot ? ({d_im[WD-1], d_im} - {x_re[WD-1], x_re}) : ({d_im[WD-1], d_im} + {x_im[WD-1], x_im});
+        wire signed [WD:0] dif_re = rot ? ({d_re[WD-1], d_re} - {x_im[WD-1], x_im}) : ({d_re[WD-1], d_re} - {x_re[WD-1], x_re});
+        wire signed [WD:0] dif_im = rot ? ({d_im[WD-1], d_im} + {x_re[WD-1], x_re}) : ({d_im[WD-1], d_im} - {x_im[WD-1], x_im});
+        integer i;
+        always @(posedge clk) begin
+            out_idx <= x_idx;
+            for (i = D-1; i > 0; i = i - 1) begin sr_re[i] <= sr_re[i-1]; sr_im[i] <= sr_im[i-1]; end
+            if (bf) begin
+                out_re <= fit(sum_re); out_im <= fit(sum_im);
+                sr_re[0] <= fit(dif_re); sr_im[0] <= fit(dif_im);
+            end else begin
+                out_re <= d_re; out_im <= d_im;
+                sr_re[0] <= x_re; sr_im[0] <= x_im;
+            end
+        end
+    end
     endgenerate
 endmodule
 

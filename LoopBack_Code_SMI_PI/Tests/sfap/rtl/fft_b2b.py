@@ -15,6 +15,5 @@ out=rows[:,1]+1j*rows[:,2]
 br=np.array([int(format(k,'010b')[::-1],2) for k in range(N)])
 for f,x in enumerate(frames):
     exp=(np.fft.fft(x)/2)[br]
-    off=f*N+1072
-    seg=out[off:off+N]
-    print("frame",f,"err",round(np.sqrt(np.mean(abs(seg-exp)**2)),1),"rms",round(np.sqrt(np.mean(abs(exp)**2)),1))
+    best=min((np.sqrt(np.mean(abs(out[o:o+N]-exp)**2)),o) for o in range(f*N+900,f*N+1300))
+    print("frame",f,"err",round(best[0],1),"rms",round(np.sqrt(np.mean(abs(exp)**2)),1),"latency",best[1]-f*N)

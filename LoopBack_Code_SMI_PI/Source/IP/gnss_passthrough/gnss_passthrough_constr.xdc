@@ -78,3 +78,11 @@ set_max_delay -datapath_only \
   -from [get_cells -quiet -hier -filter {NAME =~ *sfap_iq?_act_reg*}] \
   -to   [get_cells -quiet -hier -filter {NAME =~ *sfap_iq?_c_reg*}] \
   8.000
+
+# --- 7. 5.1.1: the corrector coefficients may have been merged into the DSP input registers by the tools,
+# so the capture registers of the two crossings (sfap_iq?_c, sfap_ld_c) are DONT_TOUCH now. The same crossing
+# is also bounded onto every cell inside the corrector and the SFAP core, whatever the tools called it.
+set_max_delay -datapath_only \
+  -from [get_cells -quiet -hier -filter {NAME =~ *sfap_iq?_act_reg* || NAME =~ *sfap_ld_act_reg*}] \
+  -to   [get_cells -quiet -hier -filter {NAME =~ *u_sfap/*}] \
+  8.000

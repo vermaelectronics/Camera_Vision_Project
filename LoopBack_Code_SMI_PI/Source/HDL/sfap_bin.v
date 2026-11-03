@@ -11,7 +11,7 @@
 //  The current frame is part of the average, so the weights are ready for the
 //  frame they are applied to: nothing waits for the ARM.
 //
-//  One bin per clock, latency 31. Every stage is ONE operator (an add, a barrel
+//  One bin per clock, latency 32. Every stage is ONE operator (an add, a barrel
 //  shift, a compare or a multiply with its M and P registers), because the
 //  4.7.0 build failed 245.76 MHz timing by packing several operators into one
 //  step. Operands of every multiplier are registered, and every product has two
@@ -70,9 +70,9 @@ module sfap_bin #(
     wire [4:0]      ctl6;    sfap_dly #(.W(5),    .N(5))  u_dct (.clk(clk), .d(ctl1),  .q(ctl6));
     wire [31:0]     ld8;     sfap_dly #(.W(32),   .N(7))  u_dld (.clk(clk), .d(ld1),   .q(ld8));
     wire [10:0]     meta8;   sfap_dly #(.W(11),   .N(7))  u_dm8 (.clk(clk), .d(meta1), .q(meta8));
-    wire [10:0]     meta30;  sfap_dly #(.W(11),   .N(29)) u_dm30(.clk(clk), .d(meta1), .q(meta30));
-    wire [2*WD-1:0] x2_25;   sfap_dly #(.W(2*WD), .N(24)) u_dx2 (.clk(clk), .d({x2i1, x2r1}), .q(x2_25));
-    wire [2*WD-1:0] x1_29;   sfap_dly #(.W(2*WD), .N(28)) u_dx1 (.clk(clk), .d({x1i1, x1r1}), .q(x1_29));
+    wire [10:0]     meta30;  sfap_dly #(.W(11),   .N(30)) u_dm30(.clk(clk), .d(meta1), .q(meta30));
+    wire [2*WD-1:0] x2_25;   sfap_dly #(.W(2*WD), .N(25)) u_dx2 (.clk(clk), .d({x2i1, x2r1}), .q(x2_25));
+    wire [2*WD-1:0] x1_29;   sfap_dly #(.W(2*WD), .N(29)) u_dx1 (.clk(clk), .d({x1i1, x1r1}), .q(x1_29));
 
     // ---- stages 2..5: products and sums -------------------------------------
     reg signed [WD-1:0] a2, b2, c2, d2;
@@ -147,8 +147,27 @@ module sfap_bin #(
                 if (!f && d[i]) begin clz52 = 51 - i; f = 1'b1; end
         end
     endfunction
+    // stage 10a: per nibble (13 of them) non-zero flag and leading zeros inside the nibble
+    reg [12:0] nz10a; reg [25:0] nl10a; reg [RW-1:0] d10a; reg signed [RW-1:0] r12r_10a, r12i_10a;
+    integer ni;
+    always @(posedge clk) begin
+        for (ni = 0; ni < 13; ni = ni + 1) begin
+            nz10a[ni] <= |d9[4*ni +: 4];
+            nl10a[2*ni +: 2] <= d9[4*ni+3] ? 2'd0 : d9[4*ni+2] ? 2'd1 : d9[4*ni+1] ? 2'd2 : 2'd3;
+        end
+        d10a <= d9; r12r_10a <= r12r_9; r12i_10a <= r12i_9;
+    end
+    // stage 10b: the highest non-zero nibble gives the leading zero count
+    function [5:0] top_nib(input [12:0] nz, input [25:0] nl);
+        integer k; reg f;
+        begin
+            top_nib = 6'd52; f = 1'b0;
+            for (k = 12; k >= 0; k = k - 1)
+                if (!f && nz[k]) begin top_nib = (12 - k) * 4 + nl[2*k +: 2]; f = 1'b1; end
+        end
+    endfunction
     reg [5:0] lz10; reg [RW-1:0] d10; reg signed [RW-1:0] r12r_10, r12i_10;
-    always @(posedge clk) begin lz10 <= clz52(d9); d10 <= d9; r12r_10 <= r12r_9; r12i_10 <= r12i_9; end
+    always @(posedge clk) begin lz10 <= top_nib(nz10a, nl10a); d10 <= d10a; r12r_10 <= r12r_10a; r12i_10 <= r12i_10a; end
 
     // ---- stages 11, 12, 13: normalise D, scale R12 -----------------------------
     reg [RW-1:0] dn11; reg [5:0] lz11, sr11; reg signed [XW-1:0] x11r, x11i;

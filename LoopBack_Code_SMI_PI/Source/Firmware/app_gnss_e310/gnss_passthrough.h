@@ -124,7 +124,7 @@
  *       loading, no weight band.
  * 4.1 = adds AJ_CFG (bypass, output make-up shift), AJ_NORM (RX2 input
  *       normalisation) and the image taps AJ_WC (smi_pi_0 v2.1). */
-#define GNSS_PT_EXPECTED_VERSION    0x00050000U
+#define GNSS_PT_EXPECTED_VERSION    0x00050101U
 
 /* ---- CONTROL bits -------------------------------------------------------- */
 #define GNSS_PT_CTRL_PASS_EN        (1U << 0)  /* 1 = RX->TX passthrough      */

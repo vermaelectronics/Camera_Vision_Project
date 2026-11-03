@@ -181,7 +181,9 @@ module sfap_core (
     reg [2*WD-1:0] rbuf [0:2047];
     reg wb = 1'b0;                      // bank being written
     reg y_pend = 1'b0, y_bank = 1'b0;   // a complete block waits for the inverse FFT
-    always @(posedge clk) if (yv) rbuf[{wb, brev(yt)}] <= {-yi, yr};      // conjugate
+    reg yw_v = 1'b0; reg [10:0] yw_a; reg [2*WD-1:0] yw_d;                 // registered write (the negation is its own stage)
+    always @(posedge clk) begin yw_v <= yv; yw_a <= {wb, brev(yt)}; yw_d <= {-yi, yr}; end   // conjugate
+    always @(posedge clk) if (yw_v) rbuf[yw_a] <= yw_d;
     // inverse-side slot counter and read control
     reg [9:0] iidx = 10'd0;
     reg       rd_cur = 1'b0, rd_prev = 1'b0, rd_bank = 1'b0;
@@ -224,7 +226,9 @@ module sfap_core (
     reg [35:0] fram [0:2047];
     reg fb = 1'b0;                       // bank being written
     reg f_pend = 1'b0, f_bank = 1'b0;
-    always @(posedge clk) if (ik_now) fram[{fb, brev(xb_idx)}] <= {ci18, cr18};
+    reg fw_v = 1'b0; reg [10:0] fw_a; reg [35:0] fw_d;                    // registered write (clamping is its own stage)
+    always @(posedge clk) begin fw_v <= ik_now; fw_a <= {fb, brev(xb_idx)}; fw_d <= {ci18, cr18}; end
+    always @(posedge clk) if (fw_v) fram[fw_a] <= fw_d;
     // OLA pass
     reg        ola = 1'b0; reg ob = 1'b0;
     reg        tail_ok = 1'b0, pass1 = 1'b1;
