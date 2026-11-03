@@ -218,16 +218,37 @@ module sfap_core (
     reg ik_valid = 1'b0;
     wire ik_now = (xb_idx == 10'd0) ? rd_prev : ik_valid;
     always @(posedge clk) ik_valid <= ik_now;
-    localparam signed [17:0] FMAX = 18'sh1FFFF;
-    localparam signed [17:0] FMIN = 18'sh20000;
-    wire signed [17:0] cr18 = (xb_re > FMAX) ? FMAX : (xb_re < FMIN) ? FMIN : xb_re[17:0];
-    wire signed [WD-1:0] nim = -xb_im;                                   // conjugate back
-    wire signed [17:0] ci18 = (nim > FMAX) ? FMAX : (nim < FMIN) ? FMIN : nim[17:0];
+    localparam [17:0] FMAX = 18'h1FFFF;
+    localparam [17:0] FMIN = 18'h20000;
     reg [35:0] fram [0:2047];
     reg fb = 1'b0;                       // bank being written
     reg f_pend = 1'b0, f_bank = 1'b0;
-    reg fw_v = 1'b0; reg [10:0] fw_a; reg [35:0] fw_d;                    // registered write (clamping is its own stage)
-    always @(posedge clk) begin fw_v <= ik_now; fw_a <= {fb, brev(xb_idx)}; fw_d <= {ci18, cr18}; end
+    // three registered stages between the inverse FFT and the frame RAM (5.1.2: the negate, the
+    // range test and the clamp each get their own clock; one operator per stage)
+    // c1: conjugate back (negate in WD+1 bits so -FMIN-like values cannot wrap)
+    reg signed [WD:0] c1_re, c1_im; reg c1_v = 1'b0; reg [10:0] c1_a;
+    always @(posedge clk) begin
+        c1_re <= {xb_re[WD-1], xb_re};
+        c1_im <= -{xb_im[WD-1], xb_im};
+        c1_v  <= ik_now; c1_a <= {fb, brev(xb_idx)};
+    end
+    // c2: does the value fit 18 bits? (upper bits all equal to the sign)
+    wire [WD-17:0] c1r_up = c1_re[WD:17];
+    wire [WD-17:0] c1i_up = c1_im[WD:17];
+    reg c2_ore, c2_oim, c2_sre, c2_sim; reg [17:0] c2_re, c2_im; reg c2_v = 1'b0; reg [10:0] c2_a;
+    always @(posedge clk) begin
+        c2_ore <= !((&c1r_up) || !(|c1r_up)); c2_sre <= c1_re[WD];
+        c2_oim <= !((&c1i_up) || !(|c1i_up)); c2_sim <= c1_im[WD];
+        c2_re <= c1_re[17:0]; c2_im <= c1_im[17:0];
+        c2_v <= c1_v; c2_a <= c1_a;
+    end
+    // c3: clamp and register as the RAM write port
+    reg fw_v = 1'b0; reg [10:0] fw_a; reg [35:0] fw_d;
+    always @(posedge clk) begin
+        fw_v <= c2_v; fw_a <= c2_a;
+        fw_d <= { c2_oim ? (c2_sim ? FMIN : FMAX) : c2_im,
+                  c2_ore ? (c2_sre ? FMIN : FMAX) : c2_re };
+    end
     always @(posedge clk) if (fw_v) fram[fw_a] <= fw_d;
     // OLA pass
     reg        ola = 1'b0; reg ob = 1'b0;
@@ -286,14 +307,21 @@ module sfap_core (
         mi5 <= ($signed({{8{si4[19]}}, si4}) <<< mk) >>> 4;
         ov5 <= ov4 && !on4[9] && !p1_4; on5 <= on4;
     end
-    // o6: saturate, write the output FIFO
+    // o6a: does the value fit 16 bits? (bits 27:15 all equal to the sign); o6: clamp, write the output FIFO
+    reg [27:0] mr6a, mi6a; reg ovr6a, ovi6a, ov6a;
+    always @(posedge clk) begin
+        mr6a <= mr5; mi6a <= mi5;
+        ovr6a <= !((&mr5[27:15]) || !(|mr5[27:15]));
+        ovi6a <= !((&mi5[27:15]) || !(|mi5[27:15]));
+        ov6a <= ov5;
+    end
     reg [31:0] ofifo [0:1023];
     reg [9:0] ofw = 10'd0, ofr = 10'd0;
     reg signed [15:0] sat_r, sat_i; reg ov6;
     always @(posedge clk) begin
-        sat_r <= (mr5 > 28'sd32767) ? 16'sd32767 : (mr5 < -28'sd32768) ? -16'sd32768 : mr5[15:0];
-        sat_i <= (mi5 > 28'sd32767) ? 16'sd32767 : (mi5 < -28'sd32768) ? -16'sd32768 : mi5[15:0];
-        ov6 <= ov5;
+        sat_r <= ovr6a ? (mr6a[27] ? 16'sh8000 : 16'sh7FFF) : mr6a[15:0];
+        sat_i <= ovi6a ? (mi6a[27] ? 16'sh8000 : 16'sh7FFF) : mi6a[15:0];
+        ov6 <= ov6a;
     end
     always @(posedge clk) if (ov6) ofifo[ofw] <= {sat_i, sat_r};
     wire [9:0] level = ofw - ofr;

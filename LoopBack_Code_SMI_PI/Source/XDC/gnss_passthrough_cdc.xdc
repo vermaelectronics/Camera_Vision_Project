@@ -111,5 +111,5 @@ set_max_delay -datapath_only \
 # is also bounded onto every cell inside the corrector and the SFAP core, whatever the tools called it.
 set_max_delay -datapath_only \
   -from [get_cells -quiet -hier -filter {NAME =~ *sfap_iq?_act_reg* || NAME =~ *sfap_ld_act_reg*}] \
-  -to   [get_cells -quiet -hier -filter {NAME =~ *u_sfap/*}] \
+  -to   [get_cells -quiet -hier -filter {NAME =~ *u_sfap/* && IS_SEQUENTIAL}] \
   8.000

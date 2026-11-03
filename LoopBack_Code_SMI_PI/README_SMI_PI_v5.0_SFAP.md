@@ -187,3 +187,18 @@ Verified again in RTL after the changes: FFT (latency now 1086 clocks, same accu
 ```bash
 grep -E "Slack \(VIOLATED\)|Source:|Destination:" Build/Output/timing_impl.rpt | head -60
 ```
+
+## 10. 5.1.2: the last 0.47 ns
+
+The 5.1.1 build (Vivado 2023.2) came back with **WNS -0.473 ns, TNS -21.467 ns, 187 failing endpoints of 111247**, only in the 245.76 MHz group (everything else met, hold met).
+Worst path: `u_sfap/xb_im_reg[0] -> u_sfap/fw_d_reg[31]`, i.e. the inverse-FFT output going through a negation, two 25-bit range compares and a mux in a single clock before the frame RAM.
+
+| Change | Why |
+|---|---|
+| frame-RAM write path split into three registered stages: (c1) negate in WD+1 bits, (c2) "fits in 18 bits?" test on the upper bits only (all-equal reduction instead of a magnitude compare), (c3) clamp mux -> RAM write register | one operator per clock; the valid flag and the bit-reversed address (with the bank bit as it was at the original cycle) travel with the data |
+| output saturation split the same way: (o6a) 13-bit "fits in 16 bits?" test, (o6) clamp mux -> FIFO write | the same compare-plus-mux structure, would have been the next violating path |
+| `set_max_delay` of the corrector/load crossing now restricted to sequential cells inside `u_sfap` | removes the hundreds of "not a valid endpoint" warnings in the log, the constraint itself is unchanged |
+| `CORE_VERSION` 0x00050102, firmware string `5.1.2` | the firmware refuses a bitstream with another version |
+
+The frame RAM is now written 2 clocks later than in 5.1.1 and the output FIFO 1 clock later. This was checked against the read-out order of the overlap-add pass (the bit-reversed
+address that is read first is the one that was written first), so no data hazard appears; it adds 3 clocks (12 ns) to the filter latency, nothing else changes.
