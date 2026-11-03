@@ -30,7 +30,7 @@ set ip_name    "gnss_passthrough"
 set ip_dir     [file join $ip_repo_dir $ip_name]
 set rtl_file   [file join $src_dir "HDL" "${ip_name}.v"]
 set blank_file [file join $src_dir "HDL" "gnss_pulse_blank.v"]   ;# pulse blanker + RX peak hold (v4.6)
-set sfap_files [list sfap_core.v sfap_fft.v sfap_bin.v sfap_twiddle.v sfap_recip_rom.v sfap_win_rom.v]   ;# SFAP core (v5.0)
+set sfap_files [list sfap_core.v sfap_iq.v sfap_fft.v sfap_bin.v sfap_twiddle.v sfap_recip_rom.v sfap_win_rom.v]   ;# SFAP core (v5.0)
 set xdc_file   [file join $src_dir "IP" $ip_name "${ip_name}_constr.xdc"]
 
 set sfap_paths {}

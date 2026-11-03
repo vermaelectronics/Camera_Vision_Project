@@ -35,6 +35,8 @@ module sfap_core (
     input  wire [2:0]   mk,
     input  wire         in_v,
     input  wire signed [15:0] x1i, x1q, x2i, x2q,   // 12-bit samples, right aligned
+    input  wire signed [15:0] k1r, k1i, k2r, k2i,   // I/Q-image corrector coefficients, Q1.15 (0 = off)
+    output wire [191:0] iq_stat,                    // {P2,S2i2,S2r2,P1,S2i1,S2r1}: sums over 2^16 samples (>> 8)
     output reg          out_v,
     output reg  signed [15:0] out_i, out_q,
     output reg          ready,          // first frames delivered, output is live
@@ -54,9 +56,18 @@ module sfap_core (
     always @(posedge clk) en_s <= en;
 
     // ------------------------------------------------------------------ input capture
+    // blind I/Q-image corrector in front of the buffer (one per receiver), 6 clocks
+    wire iq_v1, iq_v2;
+    wire signed [15:0] c1i, c1q, c2i, c2q;
+    wire [31:0] s2r1, s2i1, p1, s2r2, s2i2, p2;
+    sfap_iq u_iq1 (.clk(clk), .v(in_v), .xi(x1i), .xq(x1q), .kr(k1r), .ki(k1i),
+                   .ov(iq_v1), .yi(c1i), .yq(c1q), .s2r_l(s2r1), .s2i_l(s2i1), .p_l(p1));
+    sfap_iq u_iq2 (.clk(clk), .v(in_v), .xi(x2i), .xq(x2q), .kr(k2r), .ki(k2i),
+                   .ov(iq_v2), .yi(c2i), .yq(c2q), .s2r_l(s2r2), .s2i_l(s2i2), .p_l(p2));
+    assign iq_stat = {p2, s2i2, s2r2, p1, s2i1, s2r1};
     reg [10:0] wp = 11'd0;
     reg [47:0] ibuf [0:2047];
-    always @(posedge clk) if (in_v) ibuf[wp] <= {x2q[11:0], x2i[11:0], x1q[11:0], x1i[11:0]};
+    always @(posedge clk) if (iq_v1) ibuf[wp] <= {c2q[11:0], c2i[11:0], c1q[11:0], c1i[11:0]};
 
     // samples that arrived beyond what the started frames consumed: frame f needs
     // 512 f + 1024 samples, i.e. acc >= 1024
@@ -76,7 +87,8 @@ module sfap_core (
             wp <= 11'd0; acc <= 13'd0; base_n <= 2'd0; ph <= 1'b0; kind_cur <= 2'd0; kind_prev <= 2'd0;
             frames <= 16'd0; overrun <= 1'b0;
         end else begin
-            if (in_v) begin wp <= wp + 11'd1; if (acc != 13'h1FFF) acc <= acc + 13'd1; end
+            if (iq_v1) wp <= wp + 11'd1;
+            if (in_v) begin if (acc != 13'h1FFF) acc <= acc + 13'd1; end
             if (in_v && acc > 13'd1792) overrun <= 1'b1;
             if (slot_end) begin
                 kind_prev <= kind_cur;

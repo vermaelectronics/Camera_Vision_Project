@@ -91,6 +91,10 @@
 #define GNSS_PT_REG_SFAP_IN         0x1BCU  /* RO mean |I|+|Q| of RX1, 32768 samples */
 #define GNSS_PT_REG_SFAP_OUT        0x1C0U  /* RO the same at the SFAP output          */
 #define GNSS_PT_REG_SFAP_INFO       0x1C4U  /* RO 0x5FA9vvvv: SFAP present            */
+#define GNSS_PT_REG_SFAP_IQ1        0x1C8U  /* RW I/Q-image corrector RX1: k = {ki[31:16], kr[15:0]} Q1.15, x' = x - k x*  */
+#define GNSS_PT_REG_SFAP_IQ2        0x1CCU  /* RW the same for RX2; this write applies both                              */
+#define GNSS_PT_REG_SFAP_IQS        0x1D0U  /* RO S2r1 S2i1 P1 S2r2 S2i2 P2 (six words): sums over 2^16 samples, >> 8       */
+#define GNSS_PT_SFAP_VER_IQ         0x0101U /* SFAP_INFO[15:0] from which the corrector exists                           */
 #define GNSS_PT_SFAP_ID_MASK        0xFFFF0000U
 #define GNSS_PT_SFAP_ID             0x5FA90000U
 
@@ -181,6 +185,9 @@ int      gnss_pt_sfap_present(void);                       /* 1 if the bitstream
 void     gnss_pt_sfap_ctrl(int en, int sel, int lam, int mk);  /* clr = 0 */
 void     gnss_pt_sfap_clear(int en, int sel, int lam, int mk); /* restart the covariance averages */
 void     gnss_pt_sfap_load(uint32_t load);
+int      gnss_pt_sfap_has_iq(void);
+void     gnss_pt_sfap_iq_set(int k1r, int k1i, int k2r, int k2i);   /* Q1.15 */
+void     gnss_pt_sfap_iq_stats(int32_t s[6]);
 void     gnss_pt_write_aj(const int16_t *re, const int16_t *im,
                           uint32_t cfg, int32_t g2_q13, uint32_t blk_thr);
 

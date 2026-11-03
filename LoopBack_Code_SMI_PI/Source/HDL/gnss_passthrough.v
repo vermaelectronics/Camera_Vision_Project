@@ -283,7 +283,7 @@ module gnss_passthrough #(
   // v4.7 -- smi_pi_0 v2.4: the RX1 reference tap is at delay 4 (was 8), so a reflection of the jammer
   //         up to 11 samples later can be cancelled (was 7). AJ_INFO byte 2 = 4, layout 6; the firmware
   //         refuses to start the filter if that byte differs from its own AJ_REF.
-  localparam [31:0] CORE_VERSION = 32'h00050000;   // v5.0 (adds the SFAP core, registers 0x1B0..0x1C4)
+  localparam [31:0] CORE_VERSION = 32'h00050100;   // v5.1 (SFAP core 0x1B0..0x1C4, I/Q-image corrector 0x1C8..0x1E4)
   localparam [31:0] AJ_INFO      = 32'h10040C06;
   localparam [31:0] AJ_CFG_RESET = 32'h00000001;   // bypass
   localparam [31:0] AJ_NRM_RESET = 32'h00002000;   // g2 = 1.0
@@ -435,17 +435,26 @@ module gnss_passthrough #(
   //   0x1B8 SFAP_STAT  RO  [0] ready [1] underrun [2] overrun [3] sel_seen  [31:16] frames
   //   0x1BC SFAP_IN    RO  mean |I|+|Q| of RX1 over 32768 samples (x 32768)
   //   0x1C0 SFAP_OUT   RO  same, of the SFAP output
-  //   0x1C4 SFAP_INFO  RO  0x5FA90100: ID 0x5FA9, version 1.0
+  //   0x1C4 SFAP_INFO  RO  0x5FA90101: ID 0x5FA9, version 1.1
+  //   0x1C8 SFAP_IQ1   RW  I/Q-image corrector of RX1, k = {ki[31:16], kr[15:0]} Q1.15 (x' = x - k x*); 0 = off
+  //   0x1CC SFAP_IQ2   RW  the same for RX2; this write applies both
+  //   0x1D0.. SFAP_IQS RO  statistics of the last 2^16 samples (>> 8): S2r1 S2i1 P1 S2r2 S2i2 P2 (k = S2 / 2P)
   reg  [31:0] sfap_ctl = 32'd0;
   reg  [31:0] sfap_ld_act = 32'd30000;
   reg         sfap_ld_tog = 1'b0;
+  reg  [31:0] sfap_iq1_act = 32'd0, sfap_iq2_act = 32'd0;
+  reg         sfap_iq_tog = 1'b0;
+  wire [191:0] v_sfap_iqs;
   wire [31:0] v_sfap_stat, v_sfap_in, v_sfap_out;
   always @(posedge s_axi_aclk) begin
     if (s_axi_aresetn == 1'b0) begin
       sfap_ctl <= 32'd0; sfap_ld_act <= 32'd30000; sfap_ld_tog <= 1'b0;
+      sfap_iq1_act <= 32'd0; sfap_iq2_act <= 32'd0; sfap_iq_tog <= 1'b0;
     end else if (reg_wr) begin
       if (reg_waddr == 12'h06C) sfap_ctl <= s_axi_wdata;                                  // 0x1B0
       if (reg_waddr == 12'h06D) begin sfap_ld_act <= s_axi_wdata; sfap_ld_tog <= ~sfap_ld_tog; end   // 0x1B4
+      if (reg_waddr == 12'h072) sfap_iq1_act <= s_axi_wdata;                                 // 0x1C8
+      if (reg_waddr == 12'h073) begin sfap_iq2_act <= s_axi_wdata; sfap_iq_tog <= ~sfap_iq_tog; end   // 0x1CC applies both
     end
   end
   assign aj_wts = aj_active;
@@ -506,7 +515,15 @@ module gnss_passthrough #(
       12'h06E: axi_rdata <= v_sfap_stat;           // 0x1B8
       12'h06F: axi_rdata <= v_sfap_in;             // 0x1BC
       12'h070: axi_rdata <= v_sfap_out;            // 0x1C0
-      12'h071: axi_rdata <= 32'h5FA90100;          // 0x1C4
+      12'h071: axi_rdata <= 32'h5FA90101;          // 0x1C4
+      12'h072: axi_rdata <= sfap_iq1_act;          // 0x1C8
+      12'h073: axi_rdata <= sfap_iq2_act;          // 0x1CC
+      12'h074: axi_rdata <= v_sfap_iqs[31:0];      // 0x1D0 S2r1
+      12'h075: axi_rdata <= v_sfap_iqs[63:32];     // 0x1D4 S2i1
+      12'h076: axi_rdata <= v_sfap_iqs[95:64];     // 0x1D8 P1
+      12'h077: axi_rdata <= v_sfap_iqs[127:96];    // 0x1DC S2r2
+      12'h078: axi_rdata <= v_sfap_iqs[159:128];   // 0x1E0 S2i2
+      12'h079: axi_rdata <= v_sfap_iqs[191:160];   // 0x1E4 P2
       12'h010, 12'h011, 12'h012, 12'h013,
       12'h014, 12'h015, 12'h016, 12'h017,
       12'h018, 12'h019, 12'h01A, 12'h01B,
@@ -557,10 +574,15 @@ module gnss_passthrough #(
   always @(posedge clk) sfap_sel_d <= sfap_sel_c;
   (* ASYNC_REG = "TRUE" *) reg sfap_ld_tog_meta = 1'b0, sfap_ld_tog_s = 1'b0;     // *tog_meta_reg*: false path
   reg        sfap_ld_tog_p = 1'b0;
+  (* ASYNC_REG = "TRUE" *) reg sfap_iq_tog_meta = 1'b0, sfap_iq_tog_s = 1'b0;     // *tog_meta_reg*: false path
+  reg        sfap_iq_tog_p = 1'b0;
+  reg [31:0] sfap_iq1_c = 32'd0, sfap_iq2_c = 32'd0;
   reg [31:0] sfap_ld_c = 32'd30000;
   always @(posedge clk) begin
     sfap_ld_tog_meta <= sfap_ld_tog; sfap_ld_tog_s <= sfap_ld_tog_meta; sfap_ld_tog_p <= sfap_ld_tog_s;
     if (sfap_ld_tog_s != sfap_ld_tog_p) sfap_ld_c <= sfap_ld_act;
+    sfap_iq_tog_meta <= sfap_iq_tog; sfap_iq_tog_s <= sfap_iq_tog_meta; sfap_iq_tog_p <= sfap_iq_tog_s;
+    if (sfap_iq_tog_s != sfap_iq_tog_p) begin sfap_iq1_c <= sfap_iq1_act; sfap_iq2_c <= sfap_iq2_act; end
   end
   wire smi_switch = (smi_en ^ smi_en_d) | (sfap_sel_c ^ sfap_sel_d);
 
@@ -675,10 +697,12 @@ module gnss_passthrough #(
   wire        sfap_ready, sfap_under, sfap_over;
   wire [15:0] sfap_frames;
   wire [31:0] sfap_inmag, sfap_outmag;
+  wire [191:0] sfap_iqstat;
   sfap_core u_sfap (
     .clk(clk), .en(sfap_en_c & smi_rst_n_r), .clr(sfap_clr_c), .sh_lam(sfap_lam_c), .load(sfap_ld_c), .mk(sfap_mk_c),
     .in_v(smi_in_valid),
     .x1i(adc_data_i0), .x1q(adc_data_q0), .x2i(adc_data_i1), .x2q(adc_data_q1),
+    .k1r(sfap_iq1_c[15:0]), .k1i(sfap_iq1_c[31:16]), .k2r(sfap_iq2_c[15:0]), .k2i(sfap_iq2_c[31:16]), .iq_stat(sfap_iqstat),
     .out_v(sfap_ov), .out_i(sfap_oi), .out_q(sfap_oq),
     .ready(sfap_ready), .underrun(sfap_under), .overrun(sfap_over), .frames(sfap_frames),
     .in_mag(sfap_inmag), .out_mag(sfap_outmag));
@@ -892,6 +916,7 @@ module gnss_passthrough #(
   reg  [31:0] cap_status, cap_rx0, cap_tx0, cap_ovf, cap_unf;
   reg  [31:0] cap_rxs0, cap_txs0, cap_lvl, cap_rx1, cap_tx1, cap_rxs1;
   reg  [31:0] cap_blk, cap_bursts, cap_peak, cap_sfap_stat, cap_sfap_in, cap_sfap_out;
+  reg  [191:0] cap_sfap_iqs;
 
   always @(posedge clk) begin
     cap_div <= cap_div + 1'b1;
@@ -913,6 +938,7 @@ module gnss_passthrough #(
       cap_sfap_stat <= {sfap_frames, 12'd0, sfap_sel_c, sfap_over, sfap_under, sfap_ready};
       cap_sfap_in  <= sfap_inmag;
       cap_sfap_out <= sfap_outmag;
+      cap_sfap_iqs <= sfap_iqstat;
       cap_toggle <= ~cap_toggle;
     end
   end
@@ -925,6 +951,7 @@ module gnss_passthrough #(
   reg [31:0] h_ovf = 32'd0, h_unf = 32'd0, h_rxs0 = 32'd0, h_txs0 = 32'd0;
   reg [31:0] h_lvl = 32'd0, h_rx1 = 32'd0, h_tx1 = 32'd0, h_rxs1 = 32'd0;
   reg [31:0] h_blk = 32'd0, h_bursts = 32'd0, h_peak = 32'd0, h_sfap_stat = 32'd0, h_sfap_in = 32'd0, h_sfap_out = 32'd0;
+  reg [191:0] h_sfap_iqs = 192'd0;
 
   always @(posedge s_axi_aclk) begin
     tog_meta <= cap_toggle;
@@ -948,6 +975,7 @@ module gnss_passthrough #(
       h_sfap_stat <= cap_sfap_stat;
       h_sfap_in   <= cap_sfap_in;
       h_sfap_out  <= cap_sfap_out;
+      h_sfap_iqs  <= cap_sfap_iqs;
     end
   end
 
@@ -968,5 +996,6 @@ module gnss_passthrough #(
   assign v_sfap_stat  = h_sfap_stat;
   assign v_sfap_in    = h_sfap_in;
   assign v_sfap_out   = h_sfap_out;
+  assign v_sfap_iqs   = h_sfap_iqs;
 
 endmodule

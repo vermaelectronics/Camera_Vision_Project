@@ -97,3 +97,11 @@ set_max_delay -datapath_only \
   -from [get_cells -quiet -hier -filter {NAME =~ *sfap_ld_act_reg*}] \
   -to   [get_cells -quiet -hier -filter {NAME =~ *sfap_ld_c_reg*}] \
   8.000
+
+# --- 6. SFAP I/Q-image corrector (v5.1) --------------------------------------------------------------
+set_false_path \
+  -to [get_cells -quiet -hier -filter {NAME =~ *sfap_iq_tog_meta_reg*}]
+set_max_delay -datapath_only \
+  -from [get_cells -quiet -hier -filter {NAME =~ *sfap_iq?_act_reg*}] \
+  -to   [get_cells -quiet -hier -filter {NAME =~ *sfap_iq?_c_reg*}] \
+  8.000

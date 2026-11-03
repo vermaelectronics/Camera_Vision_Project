@@ -150,6 +150,7 @@ static char *fmt(double v, int dec, int plus)
 #define f1u(v)  fmt((v), 1, 0)
 #define f2u(v)  fmt((v), 2, 0)
 #define f3u(v)  fmt((v), 3, 0)
+#define f3(v)   fmt((v), 3, 1)
 
 /* residual for display: below 0 dB just means "at the noise", show 0.0 */
 static double res_disp(double r) { return (r < 0.0) ? 0.0 : r; }
@@ -279,7 +280,9 @@ static int add_event(XTime now, int type, double v1, double v2, double v3)
 #define AJ_SFAP_LAM    5            /* averaging 1 - 2^-5 per frame: 32 frames = 270 us */
 static int      sfap_hw, sfap_mode = GNSS_SFAP_DEFAULT, sfap_sel_set = -1;
 static uint32_t sfap_load_set;
-static XTime    sfap_t0;
+static XTime    sfap_t0, iq_t0;
+static int      iq_hw, iq_on = 1, iq_n;
+static double   iq_kr[2], iq_ki[2];        /* corrector k of RX1, RX2 (smoothed) */
 
 static void sfap_apply(int jammed)
 {
@@ -293,8 +296,77 @@ static void sfap_apply(int jammed)
 
 /* The load is the noise power per FFT bin: noise (LSB^2, complex) x 16^2 (inputs are scaled by 16) x 512
  * (sum of the squared window) / 4 (the forward FFT halves). */
+/* Blind I/Q-image corrector. An AD9361 receiver with image rejection IRR turns a jammer a into a + k a* with
+ * |k| = 10^(-IRR/20); two antennas have one spatial null per frequency and the image takes it away. For a
+ * circular jammer or noise E[x^2] = 2 k E|x|^2, so k = S2 / (2 P) from the sums the FPGA keeps over 2^16 samples.
+ * Read while a jammer dominates, smoothed (a single window is about 35 % noisy), applied as x - k x*. The error of
+ * the receiver does not depend on the jammer, so k is kept when the jammer goes away. */
+#define AJ_IQ_POLL_US   50000U
+#define AJ_IQ_SMOOTH    0.1
+#define AJ_IQ_KMAX      0.05
+static void iq_write(void)
+{
+	int q[4], c;
+	double v[4];
+	v[0] = iq_kr[0]; v[1] = iq_ki[0]; v[2] = iq_kr[1]; v[3] = iq_ki[1];
+	for(c = 0; c < 4; c++) {
+		double t = v[c] * 32768.0;
+		if(t > 32000.0) t = 32000.0;
+		if(t < -32000.0) t = -32000.0;
+		q[c] = (int)(t < 0.0 ? t - 0.5 : t + 0.5);
+	}
+	gnss_pt_sfap_iq_set(q[0], q[1], q[2], q[3]);
+}
+
+static void iq_service(XTime now)
+{
+	int32_t s[6];
+	int c;
+	double nz, ok = 1.0;
+	if(!iq_hw || !iq_on || sfap_mode == 0 || !aj_on || state != ST_JAMMED) return;
+	if(now - iq_t0 < us(AJ_IQ_POLL_US)) return;
+	iq_t0 = now;
+	gnss_pt_sfap_iq_stats(s);
+	nz = noise_now();
+	if(nz <= 0.0) nz = 50.0 / 30.0;
+	for(c = 0; c < 2; c++) {
+		double p = (double)s[3 * c + 2];                 /* sum (xr^2 + xi^2) / 256 over 65536 samples */
+		if(p / 256.0 < 30.0 * nz) ok = 0.0;               /* the jammer must dominate the noise by 15 dB */
+	}
+	if(ok == 0.0) return;
+	for(c = 0; c < 2; c++) {
+		double p = (double)s[3 * c + 2];
+		double kr = (double)s[3 * c + 0] / (2.0 * p);
+		double ki = (double)s[3 * c + 1] / (2.0 * p);
+		double m;
+		kr = iq_kr[c] + AJ_IQ_SMOOTH * (kr - iq_kr[c]);
+		ki = iq_ki[c] + AJ_IQ_SMOOTH * (ki - iq_ki[c]);
+		m = kr * kr + ki * ki;
+		if(m > AJ_IQ_KMAX * AJ_IQ_KMAX) {               /* not an imbalance: a non-circular line (CW on DC) or a fault */
+			double f = AJ_IQ_KMAX * AJ_IQ_KMAX / m, g = 1.0;
+			g = (f + 1.0) * 0.5; g = (g + f / g) * 0.5; g = (g + f / g) * 0.5; g = (g + f / g) * 0.5;
+			kr *= g; ki *= g;
+		}
+		iq_kr[c] = kr; iq_ki[c] = ki;
+	}
+	iq_n++;
+	iq_write();
+}
+
+void gnss_aj_set_iqcorr(int on)
+{
+	iq_on = on ? 1 : 0;
+	if(!iq_hw) return;
+	if(!iq_on) {
+		iq_kr[0] = iq_ki[0] = iq_kr[1] = iq_ki[1] = 0.0;
+		iq_n = 0;
+		iq_write();
+	}
+}
+
 static void sfap_service(XTime now)
 {
+	iq_service(now);
 	double nz;
 	uint32_t ld;
 	if(!sfap_hw || sfap_mode == 0 || !aj_on) return;
@@ -1096,6 +1168,7 @@ void gnss_aj_init(void)
 	blk_hw = ((gnss_pt_read(GNSS_PT_REG_AJ_INFO) & 0xFFU) >= GNSS_PT_AJ_LAYOUT_BLANK);
 	blk_seeded = 0;
 	sfap_hw = gnss_pt_sfap_present();
+	iq_hw = sfap_hw && gnss_pt_sfap_has_iq();
 	if(!blk_hw)
 		console_print("[AJ] NOTE: the bitstream has no pulse blanker (AJ_INFO layout %d, needs 5 = bitstream 4.6): pulsed\n"
 			      "     jammers are only handled by the weights. Rebuild the whole project for it.\n",
@@ -1350,6 +1423,11 @@ void gnss_aj_report(void)
 	if(sfap_hw) {
 		uint32_t st = gnss_pt_read(GNSS_PT_REG_SFAP_STAT);
 		uint32_t mi = gnss_pt_read(GNSS_PT_REG_SFAP_IN), mo = gnss_pt_read(GNSS_PT_REG_SFAP_OUT);
+		if(iq_hw && sfap_mode)
+			console_print("I/Q corrector : %s; RX1 k = %s%s j, image rejection %s dB; RX2 k = %s%s j, %s dB (%d updates)\n",
+				      (char*)(iq_on ? "ON" : "OFF (gnss_aj_iqcorr=0)"), f3(iq_kr[0]), f3(iq_ki[0]),
+				      f1(-aj_db10(iq_kr[0] * iq_kr[0] + iq_ki[0] * iq_ki[0] + 1e-12)), f3(iq_kr[1]), f3(iq_ki[1]),
+				      f1(-aj_db10(iq_kr[1] * iq_kr[1] + iq_ki[1] * iq_ki[1] + 1e-12)), (long)iq_n);
 		console_print("SFAP          : %s (gnss_aj_sfap=%d); core %s, frames %lu, load %lu%s%s\n",
 			      (char*)(sfap_mode == 0 ? "OFF, STAP only" : sfap_sel_set > 0 ? "CARRYING TX1" : "running, STAP carries TX1"),
 			      (long)sfap_mode, (char*)((st & 1U) ? "ready" : "starting"), (unsigned long)(st >> 16),

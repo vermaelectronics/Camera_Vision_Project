@@ -313,3 +313,21 @@ void gnss_pt_sfap_load(uint32_t load)
 {
     gnss_pt_write(GNSS_PT_REG_SFAP_LOAD, load);
 }
+
+int gnss_pt_sfap_has_iq(void)
+{
+    uint32_t v = gnss_pt_read(GNSS_PT_REG_SFAP_INFO);
+    return ((v & GNSS_PT_SFAP_ID_MASK) == GNSS_PT_SFAP_ID) && ((v & 0xFFFFU) >= GNSS_PT_SFAP_VER_IQ);
+}
+
+void gnss_pt_sfap_iq_set(int k1r, int k1i, int k2r, int k2i)
+{
+    gnss_pt_write(GNSS_PT_REG_SFAP_IQ1, ((uint32_t)(uint16_t)(int16_t)k1i << 16) | (uint32_t)(uint16_t)(int16_t)k1r);
+    gnss_pt_write(GNSS_PT_REG_SFAP_IQ2, ((uint32_t)(uint16_t)(int16_t)k2i << 16) | (uint32_t)(uint16_t)(int16_t)k2r);
+}
+
+void gnss_pt_sfap_iq_stats(int32_t s[6])
+{
+    uint32_t k;
+    for (k = 0; k < 6U; k++) s[k] = (int32_t)gnss_pt_read(GNSS_PT_REG_SFAP_IQS + 4U * k);
+}
