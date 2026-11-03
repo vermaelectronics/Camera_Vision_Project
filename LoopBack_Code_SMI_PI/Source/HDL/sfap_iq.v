@@ -16,7 +16,7 @@
 //      S2r = sum (xr^2 - xi^2),  S2i = sum 2 xr xi,  P = sum (xr^2 + xi^2)
 //  latched (>> 8) at the end of each window. The ARM divides (k = S2 / 2P), averages and writes k
 //  back: it is a slow loop, and it only runs while a jammer is there.
-//  k is Q1.15 (kr, ki). k = 0 is a plain delay by 7 clocks.
+//  k is Q1.15 (kr, ki). k = 0 is a plain delay by 7 clocks. The output saturates at the 12-bit limits.
 // ============================================================================
 `timescale 1ns/1ps
 
@@ -60,11 +60,18 @@ module sfap_iq (
     // stage 5: rounding offset
     reg signed [28:0] cr5, ci5; reg signed [11:0] a5, b5; reg v5;
     always @(posedge clk) begin cr5 <= cr4 + 29'sd16384; ci5 <= ci4 + 29'sd16384; a5 <= a4; b5 <= b4; v5 <= v4; end
-    // stage 6: x - k x*
+    // stage 6: x - k x*  (13 bits: it can step past the 12-bit range)
+    reg signed [12:0] y6i, y6q; reg v6;
     always @(posedge clk) begin
-        yi <= $signed({{4{a5[11]}}, a5}) - (cr5 >>> 15);
-        yq <= $signed({{4{b5[11]}}, b5}) - (ci5 >>> 15);
-        ov <= v5;
+        y6i <= $signed({a5[11], a5}) - (cr5 >>> 15);
+        y6q <= $signed({b5[11], b5}) - (ci5 >>> 15);
+        v6 <= v5;
+    end
+    // stage 7: saturate to the 12-bit range (a wrap-around here is a full-scale error in the filter's input)
+    always @(posedge clk) begin
+        yi <= (y6i > 13'sd2047) ? 16'sd2047 : (y6i < -13'sd2048) ? -16'sd2048 : {{3{y6i[12]}}, y6i};
+        yq <= (y6q > 13'sd2047) ? 16'sd2047 : (y6q < -13'sd2048) ? -16'sd2048 : {{3{y6q[12]}}, y6q};
+        ov <= v6;
     end
     // statistics: accumulate at stage 4 -> 5 (one add per clock), window of 2^16 valid samples
     reg signed [47:0] sr = 48'sd0, si = 48'sd0, sp = 48'sd0;
