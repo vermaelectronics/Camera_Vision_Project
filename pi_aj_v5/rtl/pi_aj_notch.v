@@ -1,5 +1,5 @@
 // ============================================================================
-// pi_aj_notch.v  --  PI-AJ v5 adaptive complex notch, one stage, 2 channels
+// pi_aj_notch.v  --  WL-STAP-PI v5 adaptive complex notch, one stage, 2 channels
 //
 //   y[n] = x[n] - a*x[n-1] + rho*a*y[n-1]          (direct form I)
 //

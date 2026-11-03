@@ -1,5 +1,5 @@
 // ============================================================================
-// pi_aj_axis.v  --  PI-AJ v5 as a drop-in replacement for smi_pi_0
+// pi_aj_axis.v  --  WL-STAP-PI v5 as a drop-in replacement for smi_pi_0
 //                   (AntSDR E310 / LoopBack_Code block design)
 //
 // Same stream interfaces as the SMI-PI HLS core, so the block design keeps its

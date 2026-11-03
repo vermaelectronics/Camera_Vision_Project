@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Floating-point reference model of the PI-AJ v5 algorithm (used for tuning and
+Floating-point reference model of the WL-STAP-PI v5 algorithm (used for tuning and
 as the golden behaviour the RTL is checked against).
 
   stage 1 : 2 x cascaded adaptive complex notch (ANF), one coefficient shared

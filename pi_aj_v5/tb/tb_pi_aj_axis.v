@@ -1,5 +1,5 @@
 // ============================================================================
-// tb_pi_aj_axis.v  --  PI-AJ v5 AXI-Stream wrapper (smi_pi_0 replacement)
+// tb_pi_aj_axis.v  --  WL-STAP-PI v5 AXI-Stream wrapper (smi_pi_0 replacement)
 //
 // Drives pi_aj_axis the way the AntSDR block design does: samples arrive at a
 // fractional rate (+FS_MHZ, e.g. 30.72) against the 100 MHz sys_cpu_clk and

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Runs the PI-AJ v5 RTL (Icarus Verilog) on a set of jamming scenarios and
+Runs the WL-STAP-PI v5 RTL (Icarus Verilog) on a set of jamming scenarios and
 measures, from the RTL output, the RMS suppression and the GNSS C/N0 seen by
 a correlator (the number that decides if a receiver locks).
 
@@ -71,7 +71,7 @@ def main():
     build()
     with ThreadPoolExecutor(max_workers=os.cpu_count() or 2) as ex:
         res = list(ex.map(run, names))
-    lines = ["| scenario | RX1 C/N0 in (dB-Hz) | PI-AJ out C/N0 (dB-Hz) | RMS suppression (dB) |",
+    lines = ["| scenario | RX1 C/N0 in (dB-Hz) | WL-STAP-PI out C/N0 (dB-Hz) | RMS suppression (dB) |",
              "|---|---|---|---|"]
     for name, desc, rin, rout, flags in res:
         lines.append("| %s | %.1f | %.1f | %.1f |" % (

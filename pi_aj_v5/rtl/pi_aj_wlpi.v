@@ -1,5 +1,5 @@
 // ============================================================================
-// pi_aj_wlpi.v  --  PI-AJ v5 Widely-Linear Space-Time Power Inversion
+// pi_aj_wlpi.v  --  WL-STAP-PI v5 Widely-Linear Space-Time Power Inversion
 //
 // Power inversion (PI): minimise the array output power with the reference
 // element (RX1, centre tap) weight fixed to 1. Written in its generalised

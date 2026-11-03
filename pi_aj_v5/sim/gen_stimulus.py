@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Stimulus generator for the PI-AJ v5 anti-jam core.
+Stimulus generator for the WL-STAP-PI v5 anti-jam core.
 
 Models what the AD9361 (2R2T, LO = 1575.42 MHz, 18 MS/s, 12-bit ADC) delivers
 from a 2-element array (d = 9.52 cm = 0.5 lambda at L1):

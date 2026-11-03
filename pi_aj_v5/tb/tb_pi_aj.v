@@ -1,5 +1,5 @@
 // ============================================================================
-// tb_pi_aj.v  --  PI-AJ v5 testbench
+// tb_pi_aj.v  --  WL-STAP-PI v5 testbench
 //   +IN=<stimulus.hex>   lines "I0 Q0 I1 Q1" (16-bit hex, from gen_stimulus.py)
 //   +OUT=<prefix>        writes <prefix>_pi.txt  (PI output, pre-AGC)
 //                               <prefix>_dac.txt (TX1 DAC words)

@@ -1,4 +1,4 @@
-# Adds the PI-AJ v5 RTL to the open Vivado project (2023.2).
+# Adds the WL-STAP-PI v5 RTL to the open Vivado project (2023.2).
 #   source <path>/pi_aj_v5/vivado/add_pi_aj.tcl
 # Then instantiate pi_aj_top in the block design as an RTL module
 # (right-click canvas -> Add Module... -> pi_aj_top), or in your HDL top.
@@ -13,4 +13,4 @@ add_files -norecurse [list \
     [file join $rtl pi_aj_axil_regs.v] \
     [file join $rtl pi_aj_top.v] ]
 update_compile_order -fileset sources_1
-puts "PI-AJ v5 sources added. Top module: pi_aj_top"
+puts "WL-STAP-PI v5 sources added. Top module: pi_aj_top"

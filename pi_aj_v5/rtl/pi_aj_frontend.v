@@ -1,5 +1,5 @@
 // ============================================================================
-// pi_aj_frontend.v  --  PI-AJ v5 input conditioning (2 channels)
+// pi_aj_frontend.v  --  WL-STAP-PI v5 input conditioning (2 channels)
 //
 //  * takes the axi_ad9361 style 16-bit words (12-bit ADC, LSB aligned)
 //  * scales to the internal format: ADC LSB = 2^IN_SHIFT, i.e. a full-scale

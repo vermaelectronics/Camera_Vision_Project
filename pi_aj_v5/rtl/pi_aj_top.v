@@ -1,5 +1,5 @@
 // ============================================================================
-// pi_aj_top.v  --  PI-AJ v5 : 2-element GNSS anti-jam core (AD9361 / AntSDR)
+// pi_aj_top.v  --  WL-STAP-PI v5 : 2-element GNSS anti-jam core (AD9361 / AntSDR)
 //
 //   RX1,RX2 --> frontend --> CW notch #1 --> image notch --> CW notch #2 -->
 //               (scale,      (self-tuned,    (conj of #1,    (self-tuned,

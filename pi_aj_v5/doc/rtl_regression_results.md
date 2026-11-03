@@ -1,4 +1,4 @@
-| scenario | RX1 C/N0 in (dB-Hz) | PI-AJ out C/N0 (dB-Hz) | RMS suppression (dB) |
+| scenario | RX1 C/N0 in (dB-Hz) | WL-STAP-PI out C/N0 (dB-Hz) | RMS suppression (dB) |
 |---|---|---|---|
 | no jammer (reference) | 49.7 | 48.5 | -0.5 |
 | CW 1575.40 MHz, J/N 61 dB (~30 dB setting) | 16.6 | 46.4 | 61.6 |

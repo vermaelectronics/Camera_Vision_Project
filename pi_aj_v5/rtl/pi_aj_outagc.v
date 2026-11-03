@@ -1,5 +1,5 @@
 // ============================================================================
-// pi_aj_outagc.v  --  PI-AJ v5 output scaling for TX1 (DAC)
+// pi_aj_outagc.v  --  WL-STAP-PI v5 output scaling for TX1 (DAC)
 //
 // After a deep null the array output is only thermal noise + GNSS, i.e.
 // 50..70 dB below the jammer that set the ADC level. Re-transmitting it at

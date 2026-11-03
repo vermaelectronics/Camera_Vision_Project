@@ -1,5 +1,5 @@
 // ============================================================================
-// pi_aj_axil_regs.v  --  PI-AJ v5 AXI4-Lite register file (s_axi_aclk domain)
+// pi_aj_axil_regs.v  --  WL-STAP-PI v5 AXI4-Lite register file (s_axi_aclk domain)
 //
 //  off  name      acc  description
 //  0x00 ID        R    0x50494A35 "PIJ5"

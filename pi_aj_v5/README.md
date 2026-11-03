@@ -1,6 +1,6 @@
-# PI-AJ v5 — 2-element GNSS anti-jam core (power inversion) for AntSDR / AD9361
+# WL-STAP-PI v5 — 2-element GNSS anti-jam core (power inversion) for AntSDR / AD9361
 
-PI-AJ v5 is Verilog-2001 RTL for a **2-antenna anti-jam front end at 1575.42 MHz**. It is
+WL-STAP-PI v5 is Verilog-2001 RTL for a **2-antenna anti-jam front end at 1575.42 MHz**. It is
 built for a CW ("sharp") jammer at 1575.4 MHz and for barrage/noise jamming. The algorithm
 is still **power inversion**: RX1 is the reference element with its weight fixed to 1, and
 every other weight adapts to minimise the total output power. Two things are added around it:
@@ -110,7 +110,8 @@ Every 10 dB less attenuation adds 10 dB of J/N.
 ## 4. Integration (AntSDR / ADI `axi_ad9361` design)
 
 **Ready-made for your LoopBack_Code project:**
-- `deliverables/LoopBack_Code_PI_AJ_v5.0.3.zip` (hardware + firmware + build scripts);
+- `deliverables/LoopBack_Code_WL_STAP_PI_v5.0.3.zip` (the project under its algorithm name WL-STAP-PI: hardware + firmware + build scripts + `WL_STAP_PI.md`);
+- `deliverables/LoopBack_Code_PI_AJ_v5.0.3.zip` (the same 5.0.3 build in the earlier folder name);
 - `deliverables/PI_AJ_v5.0.3_timing_update.zip` (only the files changed for timing
   closure, to unzip over an existing LoopBack_Code_PI_AJ folder);
 - `deliverables/PI_AJ_v5.0.3_firmware_only.zip`;
