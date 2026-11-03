@@ -66,3 +66,19 @@ Register map (bitstream 4.6, `AJ_INFO` 0x10080C05): 0x19C `AJ_BLK_THR` (committe
    (about the duty cycle), `pulses SEEN`, `rx gain` stable (not stepping), `jammer-free blocks skipped`.
 3. Receiver: satellites in use and C/N0. If `blanked` is above 60 % the blanker switches off by itself: then the jammer is continuous or the filter does not null it.
 4. A/B: `gnss_aj_blank=0` against `gnss_aj_blank=1` at the same pulse settings.
+
+## Field radio setup: 50 MHz barrage and CW centred on 1575.42 MHz (simulation, testbench scenario 21)
+
+Band 1 (LO 1582.5 MHz, 61.44 MS/s, 56 MHz analog filter), jammer centred on 1575.42 MHz (-7.08 MHz from the LO), 50 MHz wide (the part inside the
+filter), satellite at -7.06 MHz, 12-bit, I/Q imbalance. `smi_pi_tb 21 <J/N barrage> <J/N CW>` (-99 = none). Suppression = what the anti-jam filter removes.
+
+| J/N | Barrage 50 MHz: suppression / residual / satellite loss | CW: suppression / satellite loss |
+|---:|---|---|
+| 30 | 42 dB / +0.2 dB / none | 63 dB / none |
+| 40 | 50 dB / +0.2 dB / none | 69 dB / none |
+| 50 | 56 dB / +0.3 dB / none | 71 dB / none |
+| 55 | 57 dB / +0.7 dB / none | 72 dB / none |
+| 60 | 57 dB / +2.3 dB / 1.8 dB | 72 dB / none |
+| 65 | 57 dB / +11.8 dB / 3.9 dB (12-bit ADC limit) | 72 dB / 0.5 dB gain |
+
+Both together (same direction): J/N 40+40: 53 dB, 50+50: 58 dB, 50+60: 62 dB, 60+60: 58 dB with +4.4 dB residual and 2.5 dB loss.

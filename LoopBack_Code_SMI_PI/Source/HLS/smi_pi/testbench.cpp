@@ -291,7 +291,8 @@ static int test_makeup() {
 // 3 pulsed noise (period k1 samples, on-fraction k2; J/N is the level inside the pulse),
 // 4 CW that hops from k1 x fs to k1+k2 x fs after the three training captures (stale weights)
 struct Scen { double jnr_db; bool cw; double echo; double rx2_db; bool iq; double cwf; double satf; double chip; double delay;
-              int kind = 0; double k1 = 0, k2 = 0; int nblk = 3; double avg = 0; int gate = 0; };
+              int kind = 0; double k1 = 0, k2 = 0; int nblk = 3; double avg = 0; int gate = 0;
+              double jc = 0, jbw = 0, cwjn = -99; };   // jc, jbw: centre and width of a band-limited barrage (x fs); cwjn: an extra CW (at .cwf) at this J/N
 
 // AD9361-like I/Q imbalance: gain error eps, phase error ph (degrees).
 static void iq_imbalance(cvec &x, double eps, double ph_deg) {
@@ -356,10 +357,20 @@ static int test_jammer(int id, Scen sc) {
         }
     } else if (sc.cw) {
         for (int i = 0; i < N; i++) J[i] = std::polar(1.0, 2 * M_PI * cwf * i);
+    } else if (sc.jbw > 0) {
+        // band-limited barrage inside the AD9361's analog filter (+-0.455 fs)
+        double lo = std::max(sc.jc - sc.jbw / 2, -0.455), hi = std::min(sc.jc + sc.jbw / 2, 0.455);
+        double ctr = (lo + hi) / 2, half = (hi - lo) / 2;
+        for (int i = 0; i < N; i++) J[i] = cd(grand(), grand());
+        J = fir(J, lowpass(half, 41), 20);
+        for (int i = 0; i < N; i++) J[i] *= std::polar(1.0, 2 * M_PI * ctr * i);
     } else {
         for (int i = 0; i < N; i++) J[i] = cd(grand(), grand());
         J = fir(J, lowpass(0.42, 41), 20);
     }
+    double pj0 = pwr(J, 0);
+    if (sc.cwjn > -90 && !sc.cw)      // plus a CW from the same direction, at its own J/N
+        for (int i = 0; i < N; i++) J[i] += std::sqrt(pj0) * std::pow(10.0, (sc.cwjn - sc.jnr_db) / 20.0) * std::polar(1.0, 2 * M_PI * cwf * i);
     // RX2 sees it through a different path: 0.15-sample delay, 0.8 dB, 40 deg,
     // and a slightly different filter.
     cvec h2 = frac_delay((sc.delay != 0) ? sc.delay : 0.15, 21);
@@ -372,7 +383,7 @@ static int test_jammer(int id, Scen sc) {
         for (int i = 3; i < N; i++) { e1[i] = sc.echo * std::polar(1.0, 1.3) * J[i - 3]; e2[i] = sc.echo * std::polar(1.0, 2.9) * J[i - 3]; }
         for (int i = 0; i < N; i++) { J[i] += e1[i]; J2[i] += e2[i]; }
     }
-    double pj = pwr(J, 0), pn = 2 * nrms * nrms;
+    double pj = (sc.cwjn > -90 && !sc.cw) ? pj0 : pwr(J, 0), pn = 2 * nrms * nrms;
     double js = (sc.jnr_db > -90) ? std::sqrt(pn * std::pow(10, sc.jnr_db / 10) / pj) : 0.0;
     for (int i = 0; i < N; i++) { J[i] *= js; J2[i] *= js; }
     if (sc.kind == 3)
@@ -571,6 +582,7 @@ static int test_jammer(int id, Scen sc) {
         std::printf("  bypass + blanker        : satellite SNR loss %.2f dB, %.0f %% blanked\n", m0b.loss, 100 * m0b.blf);
         ok = mb.loss <= 10 * std::log10(1.0 / (1.0 - sc.k2)) + 1.5 && m0b.loss <= 10 * std::log10(1.0 / (1.0 - sc.k2)) + 1.5 && m0b.loss + 6 < m0.loss;
         break; }
+    case 21: ok = m.supp >= 30 && m.loss <= 3.5; break;
     case 16: ok = m.supp >= 40 && m.loss <= 3 && sweep_blocks >= 40; break;   // 1 ms chirp, detector on
     case 17: ok = m.supp >= 60 && m.loss <= 3 && sweep_blocks == 0; break;    // steady CW: detector must stay off
     case 18: ok = m.supp >= 35 && m.loss <= 3 && sweep_blocks == 0; break;    // wideband (barrage) jammer: detector off
@@ -661,6 +673,16 @@ int main(int argc, char **argv) {
     case 16: { Scen sc = {40, false, 0, 0, true, 0, 0, 0, 0}; sc.kind = 2; sc.k1 = 61440; sc.k2 = 0.8; sc.nblk = 60; sc.avg = -1; ok = test_jammer(16, sc); break; }
     case 17: { Scen sc = {50, true, 0, 0, true, 0, 0, 0, 0}; sc.kind = 4; sc.k1 = -0.1; sc.k2 = 0.0; sc.nblk = 30; sc.avg = -1; ok = test_jammer(17, sc); break; }
     case 19: case 20: { Scen sc = {40, false, 0, 0, true, 0, 0, 0, 0}; sc.kind = 3; sc.k1 = (argc > 3) ? std::atof(argv[3]) : 20000; sc.k2 = (argc > 2) ? std::atof(argv[2]) : 0.3; sc.nblk = 30; sc.gate = (scen == 20); ok = test_jammer(scen, sc); break; }
+    // field radio setup, band 1: LO 1582.5 MHz, 61.44 MS/s, RF bandwidth 56 MHz. Jammer centred on 1575.42 MHz
+    // (-7.08 MHz from the LO), 50 MHz wide barrage and/or CW; argv: J/N barrage [dB, -99 = none], J/N CW [dB, -99 = none]
+    case 21: {
+        double jb = (argc > 2) ? std::atof(argv[2]) : 40, jc = (argc > 3) ? std::atof(argv[3]) : -99;
+        const double fs = 61.44, off = -7.08 / fs;
+        Scen sc = {jb, false, 0, 0, true, off, -7.06 / fs, 1.023 / fs, 0};
+        sc.nblk = 12;
+        if (jb < -90) { sc.jnr_db = jc; sc.cw = true; }               // CW only
+        else { sc.jc = off; sc.jbw = 50.0 / fs; sc.cwjn = jc; }       // barrage, plus CW when jc > -90
+        ok = test_jammer(21, sc); break; }
     case 18: { Scen sc = {40, false, 0, 0, true, 0, 0, 0, 0}; sc.nblk = 30; sc.avg = -1; ok = test_jammer(18, sc); break; }
     default: std::printf("unknown scenario %d\n", scen); ok = 0;
     }
