@@ -53,3 +53,20 @@ above J/N 60 the 12-bit ADC adds noise (barrage J/N 65: residual +11.8 dB). Deta
 
 At 30 dB and at 35 dB: jammer OFF for 10 s, then ON, wait 60 s, then `gnss_report?` twice, 10 s apart (look for `noise floor : learned`), plus the receiver photo.
 Compare once with `gnss_band=5` (18 MS/s) at the same jammer level.
+
+## 6. 4.8.1: timing fix (RTL only)
+
+The 4.7.0 build reported `BUILD_TIMING: VIOLATED` (bitstream still produced). Two causes in the code I added, both fixed:
+
+1. **Unconstrained clock crossings.** The blanker's enable and threshold cross from `s_axi_aclk` to the 245.76 MHz sample clock. The CDC constraints only cover the older
+   synchronisers (`*tog_meta_reg*`, `*ctrl_meta_reg*`, `cap_* -> h_*`), so the new paths were timed as ordinary synchronous paths between unrelated clocks. The new
+   synchronisers were renamed to match the existing false-path patterns, and `aj_thr_act -> blk_thr_c` got a `set_max_delay -datapath_only 8 ns` in both XDC files.
+2. **Too much arithmetic per 4 ns clock** in `gnss_pulse_blank.v` (a multiply plus add, a 36-bit add and a 36-bit compare in single steps) and in the peak hold (abs and three
+   compares in one step). Both are now pipelined one operator per stage (sums 32 bit). Output unchanged: the RTL check is still bit-exact against its model.
+
+Not synthesised here; if `BUILD_TIMING` is still VIOLATED, send:
+
+```bash
+grep -E "BUILD_WNS|BUILD_WHS" Build/Logs/build.log
+grep -m3 "Slack (VIOLATED)" -B3 -A28 Build/Output/timing_impl.rpt
+```

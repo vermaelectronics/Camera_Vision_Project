@@ -78,3 +78,11 @@ set_false_path \
 # s_axi_aclk -> rx_clk paths and could show up as failing inter-clock paths.
 set_false_path \
   -to [get_cells -quiet -hier -filter {NAME =~ *gnss_passthrough/inst/*ctrl_meta_reg*}]
+
+# --- 4. Pulse blanker threshold, s_axi_aclk -> clk (v4.6) -------------------------------------------
+# aj_thr_act is written once per AJ_COMMIT and is stable for far longer than the toggle needs to
+# cross; blk_thr_c copies it only when the toggle (thr_tog_meta, false path above) has arrived.
+set_max_delay -datapath_only \
+  -from [get_cells -quiet -hier -filter {NAME =~ *aj_thr_act_reg*}] \
+  -to   [get_cells -quiet -hier -filter {NAME =~ *blk_thr_c_reg*}] \
+  8.000

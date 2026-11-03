@@ -58,23 +58,19 @@ module gnss_pulse_blank #(
     output reg  [31:0] blk_cnt,       // samples blanked
     output reg  [31:0] burst_cnt      // bursts (rising edges of the blank flag)
 );
+    // Pipelined for the 4 ns sample clock: every stage is one multiplier, one adder or one
+    // comparator, advancing on its own copy of the strobe (the strobe comes at most every 2nd clock).
     localparam M = D + H + 1;
 
-    // stage 0: input register
-    reg               v0 = 1'b0;
-    reg signed [15:0] i0 = 16'sd0, q0 = 16'sd0;
-    // stage 1: power
-    reg               v1 = 1'b0;
-    reg signed [15:0] i1 = 16'sd0, q1 = 16'sd0;
-    reg        [31:0] p1 = 32'd0;
-    // stage 2: sliding sum
-    reg               v2 = 1'b0;
-    reg signed [15:0] i2 = 16'sd0, q2 = 16'sd0;
-    reg        [35:0] sum = 36'd0;
+    reg               v0 = 1'b0, v1 = 1'b0, v2 = 1'b0, v3 = 1'b0, v4 = 1'b0, v5 = 1'b0;
+    reg signed [15:0] i0 = 16'sd0, q0 = 16'sd0, i1 = 16'sd0, q1 = 16'sd0, i2 = 16'sd0, q2 = 16'sd0;
+    reg signed [15:0] i3 = 16'sd0, q3 = 16'sd0, i4 = 16'sd0, q4 = 16'sd0;
+    reg        [31:0] sqi = 32'd0, sqq = 32'd0;      // stage 1: I^2, Q^2
+    reg        [31:0] p2  = 32'd0;                   // stage 2: I^2 + Q^2   (<= 2^23)
+    reg signed [31:0] d3  = 32'sd0;                  // stage 3: p[n] - p[n-W]
+    reg        [31:0] sum = 32'd0;                   // stage 4: sliding sum (<= 2^26)
     reg        [31:0] pdl [0:W-1];
-    // stage 3: exceed flags and the delay line
-    reg               v3 = 1'b0;
-    reg  [M-1:0]      E  = {M{1'b0}};
+    reg  [M-1:0]      E  = {M{1'b0}};                // stage 5: exceed flags, E[0] = newest
     reg signed [15:0] di [0:D];
     reg signed [15:0] dq [0:D];
     reg               blk_prev = 1'b0;
@@ -88,47 +84,48 @@ module gnss_pulse_blank #(
 
     wire signed [31:0] pi_w = i0 * i0;
     wire signed [31:0] pq_w = q0 * q0;
-    wire [35:0] sum_new = sum + {4'd0, p1} - {4'd0, pdl[W-1]};
-    wire        ex_w    = (sum > {4'd0, thr});
-    wire        blk_w   = en & (|E[D+H:8]);
+    wire        blk_w = en & (|E[D+H:8]);
 
     always @(posedge clk) begin
         if (!rst_n) begin
-            v0 <= 1'b0; v1 <= 1'b0; v2 <= 1'b0; v3 <= 1'b0; out_valid <= 1'b0;
-            sum <= 36'd0; E <= {M{1'b0}}; blk_prev <= 1'b0;
+            v0 <= 1'b0; v1 <= 1'b0; v2 <= 1'b0; v3 <= 1'b0; v4 <= 1'b0; v5 <= 1'b0; out_valid <= 1'b0;
+            sum <= 32'd0; E <= {M{1'b0}}; blk_prev <= 1'b0;
             for (k = 0; k < W; k = k + 1) pdl[k] <= 32'd0;
             for (k = 0; k <= D; k = k + 1) begin di[k] <= 16'sd0; dq[k] <= 16'sd0; end
             out_i <= 16'd0; out_q <= 16'd0;
             blk_cnt <= 32'd0; burst_cnt <= 32'd0;
         end else begin
             if (clr) begin blk_cnt <= 32'd0; burst_cnt <= 32'd0; end
-            // stage 0
+            // stage 0: input register
             v0 <= in_valid;
             if (in_valid) begin i0 <= in_i; q0 <= in_q; end
-            // stage 1: p = I^2 + Q^2
+            // stage 1: squares
             v1 <= v0;
-            if (v0) begin
-                i1 <= i0; q1 <= q0;
-                p1 <= pi_w[31:0] + pq_w[31:0];
-            end
-            // stage 2: S[n] = S[n-1] + p[n] - p[n-W]
+            if (v0) begin sqi <= pi_w[31:0]; sqq <= pq_w[31:0]; i1 <= i0; q1 <= q0; end
+            // stage 2: p = I^2 + Q^2
             v2 <= v1;
-            if (v1) begin
-                sum <= sum_new;
-                pdl[0] <= p1;
-                for (k = 1; k < W; k = k + 1) pdl[k] <= pdl[k-1];
-                i2 <= i1; q2 <= q1;
-            end
-            // stage 3: exceed flag of sample n, delay line
+            if (v1) begin p2 <= sqi + sqq; i2 <= i1; q2 <= q1; end
+            // stage 3: d = p[n] - p[n-W]; the delay line takes p[n]
             v3 <= v2;
             if (v2) begin
-                E <= {E[M-2:0], ex_w};
-                di[0] <= i2; dq[0] <= q2;
+                d3 <= $signed(p2) - $signed(pdl[W-1]);
+                pdl[0] <= p2;
+                for (k = 1; k < W; k = k + 1) pdl[k] <= pdl[k-1];
+                i3 <= i2; q3 <= q2;
+            end
+            // stage 4: S[n] = S[n-1] + d
+            v4 <= v3;
+            if (v3) begin sum <= sum + d3; i4 <= i3; q4 <= q3; end
+            // stage 5: exceed flag of sample n, delay line
+            v5 <= v4;
+            if (v4) begin
+                E <= {E[M-2:0], (sum > thr)};
+                di[0] <= i4; dq[0] <= q4;
                 for (k = 1; k <= D; k = k + 1) begin di[k] <= di[k-1]; dq[k] <= dq[k-1]; end
             end
-            // stage 4: output (sample n-D), zero while a burst is near
-            out_valid <= v3;
-            if (v3) begin
+            // stage 6: output (sample n-D), zero while a burst is near
+            out_valid <= v5;
+            if (v5) begin
                 out_i <= blk_w ? 16'd0 : di[D];
                 out_q <= blk_w ? 16'd0 : dq[D];
                 blk_prev <= blk_w;
@@ -150,8 +147,11 @@ module gnss_peak_hold #(
     output reg  [15:0] peak_win = 16'd0,
     output reg  [15:0] win_idx  = 16'd0
 );
+    // pipelined: |x|, then two maxima, then the last maximum and the window
     reg [WIN_BITS-1:0] cnt = {WIN_BITS{1'b0}};
     reg [15:0]         run = 16'd0;
+    reg                v1 = 1'b0, v2 = 1'b0, v3 = 1'b0;
+    reg [15:0]         s0 = 16'd0, s1 = 16'd0, s2 = 16'd0, s3 = 16'd0, m0 = 16'd0, m1 = 16'd0, mx = 16'd0;
 
     function [15:0] absv(input [15:0] x);
         begin
@@ -160,22 +160,21 @@ module gnss_peak_hold #(
         end
     endfunction
 
-    wire [15:0] m0 = (absv(a0) > absv(b0)) ? absv(a0) : absv(b0);
-    wire [15:0] m1 = (absv(a1) > absv(b1)) ? absv(a1) : absv(b1);
-    wire [15:0] mx = (m0 > m1) ? m0 : m1;
-    wire [15:0] nr = (mx > run) ? mx : run;
-
     always @(posedge clk) begin
+        v1 <= valid; s0 <= absv(a0); s1 <= absv(b0); s2 <= absv(a1); s3 <= absv(b1);
+        v2 <= v1;    m0 <= (s0 > s1) ? s0 : s1;      m1 <= (s2 > s3) ? s2 : s3;
+        v3 <= v2;    mx <= (m0 > m1) ? m0 : m1;
         if (!rst_n) begin
+            v1 <= 1'b0; v2 <= 1'b0; v3 <= 1'b0;
             cnt <= {WIN_BITS{1'b0}}; run <= 16'd0; peak_win <= 16'd0; win_idx <= 16'd0;
-        end else if (valid) begin
+        end else if (v3) begin
             cnt <= cnt + 1'b1;
             if (&cnt) begin
-                peak_win <= nr;
+                peak_win <= (mx > run) ? mx : run;
                 win_idx  <= win_idx + 1'b1;
                 run <= 16'd0;
             end else begin
-                run <= nr;
+                run <= (mx > run) ? mx : run;
             end
         end
     end

@@ -629,14 +629,15 @@ module gnss_passthrough #(
   // committed AJ_CFG[15] / AJ_BLK_THR (s_axi_aclk) and are brought into clk here; the
   // threshold is copied only when the commit toggle has crossed (the value has been stable
   // for far longer than the synchroniser needs).
-  (* ASYNC_REG = "TRUE" *) reg [1:0] blk_en_s   = 2'b00;
-  (* ASYNC_REG = "TRUE" *) reg       thr_tog_m   = 1'b0, thr_tog_s = 1'b0;
+  (* ASYNC_REG = "TRUE" *) reg       blk_en_ctrl_meta = 1'b0, blk_en_ctrl_sync = 1'b0;   // *ctrl_meta_reg*: false path in the CDC xdc
+  (* ASYNC_REG = "TRUE" *) reg       thr_tog_meta = 1'b0, thr_tog_s = 1'b0;               // *tog_meta_reg*: false path
   reg                                thr_tog_p   = 1'b0;
   reg [31:0]                         blk_thr_c   = 32'hFFFFFFFF;
   always @(posedge clk) begin
-    blk_en_s  <= {blk_en_s[0], aj_cfg_act[15]};
-    thr_tog_m <= aj_thr_tog;
-    thr_tog_s <= thr_tog_m;
+    blk_en_ctrl_meta <= aj_cfg_act[15];
+    blk_en_ctrl_sync <= blk_en_ctrl_meta;
+    thr_tog_meta <= aj_thr_tog;
+    thr_tog_s <= thr_tog_meta;
     thr_tog_p <= thr_tog_s;
     if (thr_tog_s != thr_tog_p) blk_thr_c <= aj_thr_act;
   end
@@ -646,7 +647,7 @@ module gnss_passthrough #(
   gnss_pulse_blank u_blank (
     .clk(clk), .rst_n(smi_rst_n_r), .clr(cnt_clear),
     .in_valid(s_axis_smi_tvalid), .in_i(smi_pre_i), .in_q(smi_pre_q),
-    .en(blk_en_s[1]), .thr(blk_thr_c),
+    .en(blk_en_ctrl_sync), .thr(blk_thr_c),
     .out_valid(blk_out_valid), .out_i(blk_out_i), .out_q(blk_out_q),
     .blk_cnt(blk_cnt_w), .burst_cnt(blk_bursts_w));
   assign smi_out_valid = blk_out_valid;
