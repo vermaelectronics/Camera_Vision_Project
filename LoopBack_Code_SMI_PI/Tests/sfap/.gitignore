@@ -10,3 +10,4 @@ rtl/tb_fft
 rtl/tb_bin
 rtl/tb_core
 __pycache__/
+compare_wl.out

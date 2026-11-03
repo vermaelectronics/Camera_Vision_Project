@@ -47,8 +47,8 @@ def delay(x, d):
 def scene(kind, jn_db, multipath, adc_bits=12):
     n = NS
     # GNSS-like signal: BPSK, 2.046 Mchip/s
-    chips = rng.choice([-1.0, 1.0], size=n // 30 + 1)
-    s = np.repeat(chips, 30)[:n].astype(complex) * 10 ** (SNR_IN_DB / 20)
+    chips = rng.choice([-1.0, 1.0], size=n // int(round(FS / 2.046e6)) + 1)
+    s = np.repeat(chips, int(round(FS / 2.046e6)))[:n].astype(complex) * 10 ** (SNR_IN_DB / 20)
     n1, n2 = cg(n), cg(n)
     j = gen_jammer(kind, n)
     j = j * (np.arange(n) >= T_ON) * 10 ** (jn_db / 20)
