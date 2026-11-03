@@ -167,3 +167,23 @@ Command: `gnss_aj_iqcorr=1` (default, only active with `gnss_aj_sfap=1/2`) or `0
 
 Head-to-head with WL-STAP-PI's own reference model at 30.72 MS/s (`Tests/sfap/compare_wl.py`): WL-STAP-PI is bypassed at 61.44 / 50 MS/s, and its 5 taps do not
 cancel a 9-sample echo (barrage and chirp with echo: no suppression); it is better on CW and on the median of a pulsed barrage.
+
+## 9. 5.1.1: timing fixes after the first Vivado build of 5.1.0
+
+The first build of 5.1.0 (Vivado 2023.2, xc7z020) produced a bitstream and BOOT.BIN but **missed timing: WNS -3.007 ns, 12456 failing endpoints, all in the
+245.76 MHz sample-clock group**. Real numbers from that build: 183 DSP48 of 220, 27207 LUT (51 %), 36873 FF, 28.5 BRAM tiles of 140, hold met (+0.034 ns).
+The 4.x logic and the HLS core were not the problem (`clk_fpga_0` +0.341 ns).
+
+| Worst path | Cause | Fix in 5.1.1 |
+|---|---|---|
+| FFT delay-line BRAM read -> butterfly add -> rounding -> mux -> the same BRAM's write input (-3.0 ns) | one clock for BRAM clock-to-out, an add, a rounding add and a mux | pipelined: BRAM output register, add, then write from registers (latency 4 per RAM stage); scaling truncates (no +1 adder); the D < 8 stages keep one add/sub and a mux in the loop |
+| `sfap_iq2_act` (AXI clock) -> corrector DSP input (-0.565 ns, 211 endpoints) | the tools merged my capture register into the DSP, so the timing exception for the crossing no longer matched | capture registers `DONT_TOUCH`; the max-delay constraint now also covers every cell inside the SFAP core |
+| (not reported, same pattern) | reorder-RAM write data went through a negation, frame-RAM write data through a clamp, the leading-zero count of the divider was one 52-bit priority chain | registered write data for both RAMs; leading-zero count in two stages |
+
+Verified again in RTL after the changes: FFT (latency now 1086 clocks, same accuracy), bin processor (1.4 LSB), and the whole core with the corrector
+(statistics registers still equal the integer model; 50 dB barrage 6.0 -> 2.7 dB, 60 dB 6.9 -> 2.0 dB with the corrector on).
+
+**Not known yet:** I only saw the worst path of each clock group, so another violating structure may remain. If the next build still says `VIOLATED`, send
+```bash
+grep -E "Slack \(VIOLATED\)|Source:|Destination:" Build/Output/timing_impl.rpt | head -60
+```
