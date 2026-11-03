@@ -1,6 +1,6 @@
 # SMI-PI 5.0: SFAP, space-frequency adaptive processing
 
-Firmware 5.0.0, bitstream 5.0 (`CORE_VERSION` 0x00050000). STAP (the 16-tap space-time filter of 4.x) is still there and stays the default. SFAP is a
+Firmware 5.1.0, bitstream 5.1 (`CORE_VERSION` 0x00050100; 5.0 = SFAP, 5.1 adds the I/Q-image corrector, section 8). STAP (the 16-tap space-time filter of 4.x) is still there and stays the default. SFAP is a
 second filter that you switch on with one command, so the two can be compared on the same hardware with the same jammer.
 
 **Nothing in this release has run on the board.** The algorithm was simulated in floating point (`Tests/sfap/study.py`), the FPGA core was simulated
@@ -123,3 +123,47 @@ and firmware must match: the firmware prints `the bitstream has no SFAP core` ot
 * **Pulses.** The pulse blanker is behind SFAP, but SFAP's averages still see the pulses; mode 1 vs 2 and `gnss_aj_blank` will tell.
 * **Clipping.** A sample that clips the ADC is a non-linear error no weight can remove; the RTL runs showed one 5 to 8 dB burst for each clipped sample.
   Keep the AGC headroom.
+
+## 8. 5.1.0: blind I/Q-image corrector (WL-STAP-PI's idea, in a cheap form)
+
+Bitstream 5.1 (`CORE_VERSION` 0x00050100, `SFAP_INFO` 0x5FA90101), firmware 5.1.0.
+
+**Why.** An AD9361 receiver with I/Q gain/phase error turns a jammer `a` into `a + k a*`: a second copy at the mirror frequency with a different
+spatial signature. Two antennas have one null per frequency; the image takes it away, so the suppression stops at (J/N - image rejection).
+WL-STAP-PI attacks this with conjugate taps. The same thing per FFT bin needs a 3x3 solve per bin (`Tests/sfap/wl_study.py`: it works, 60 dB barrage
+7.5 -> 3.4 dB loss, but it would cost 100+ DSP48, which do not exist here).
+
+**What was built instead.** A correction per receiver in front of SFAP: `x' = x - k x*`, with `k = E[x^2] / (2 E|x|^2)` (a circular jammer or noise has
+`E[a^2] = 0`, so `E[x^2] = 2 k E|a|^2`). The FPGA (`sfap_iq.v`) applies k and keeps the three sums over 2^16 samples (registers 0x1D0..0x1E4); the ARM
+divides, smooths (10 % per 50 ms) and writes k back (0x1C8, 0x1CC) while a jammer dominates the noise by 15 dB. k belongs to the receiver, not to the
+jammer, so it is kept when the jammer goes away. Cost: 14 DSP48, no divider in the FPGA.
+
+**Float study** (`Tests/sfap/iq_study.py`, image rejection 42 dB on RX1 and 46 dB on RX2, SINR loss in dB, steady):
+
+| jammer | SFAP | SFAP + per-bin WL | SFAP + I/Q corrector |
+|---|---|---|---|
+| barrage + echo 50 dB | 1.4 | -0.6 | -0.9 |
+| barrage + echo 60 dB | 7.5 | 3.4 | 3.2 |
+| barrage + echo 70 dB | 9.5 | 5.0 | 6.6 |
+| barrage 60 dB, no echo | 6.6 | 1.0 | 0.8 |
+| CW + echo 60 dB | -2.1 | 1.2 | -2.1 |
+| chirp 100 us + echo 50 dB | 0.9 | -0.8 | -1.0 |
+
+**RTL** (`Tests/sfap/rtl/core_iq.py`, whole core, 60000 samples, barrage + echo, same image rejection, output power against the jammer-free run):
+
+| | k = 0 (median / mean-power) | k estimated from the statistics registers |
+|---|---|---|
+| 50 dB | 6.0 / 7.1 dB | **2.7 / 5.2 dB** |
+| 60 dB | 7.0 / 8.5 dB | **2.1 / 6.1 dB** |
+
+The statistics registers equal an exact integer model bit for bit. The first RTL run lost: a corrected sample near full scale wrapped around at 12 bits
+and made a full-scale error. The output now saturates (`sfap_iq.v`, stage 7).
+
+**What it does not do.** The AD9361's imbalance varies with frequency; the model is flat. A CW exactly on the LO (DC) is not circular: k is limited to
+|k| <= 0.05 and the firmware keeps it small. The CW notch of WL-STAP-PI was not taken over: SFAP has its own null on every bin, so a CW does not use up the
+barrage's null (CW 40 dB: 0.7 dB, 60 dB: -2.1 dB in the simulation).
+
+Command: `gnss_aj_iqcorr=1` (default, only active with `gnss_aj_sfap=1/2`) or `0`. `gnss_report?` shows `I/Q corrector : ON; RX1 k = ..., image rejection .. dB`.
+
+Head-to-head with WL-STAP-PI's own reference model at 30.72 MS/s (`Tests/sfap/compare_wl.py`): WL-STAP-PI is bypassed at 61.44 / 50 MS/s, and its 5 taps do not
+cancel a 9-sample echo (barrage and chirp with echo: no suppression); it is better on CW and on the median of a pulsed barrage.

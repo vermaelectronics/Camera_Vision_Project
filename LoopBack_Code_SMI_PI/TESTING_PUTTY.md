@@ -196,6 +196,8 @@ The same boot, the same jammer, two runs: STAP (`gnss_aj_sfap=0`, the default) a
    `|I|+|Q| in ... out ... dB` line: the jammer suppression as the hardware measures it.
 4. Send both `gnss_report?` blocks, the satellites and the times to the first fix of A and B, and the jammer type and level.
 
+With bitstream 5.1 the report also has an `I/Q corrector` line: after a few seconds of jammer `k` should settle at about 0.005 to 0.01 (image rejection 40 to 46 dB). Run B once more with `gnss_aj_iqcorr=0` to see its effect.
+
 If B is worse than A: `gnss_aj_sfap=0` returns to STAP at once. Please send the SFAP lines of the report either way.
 
 ---
