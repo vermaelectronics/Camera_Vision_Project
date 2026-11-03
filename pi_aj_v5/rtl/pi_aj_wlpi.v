@@ -289,8 +289,12 @@ module pi_aj_wlpi #(
             assign tac_im[gl] = ta_im[TW-1:0];
             assign tg_re[gl]  = (hi8 == 0) ? 1'b0 : t_re[hi8 - 1];
             assign tg_im[gl]  = (hi8 == 0) ? 1'b0 : t_im[hi8 - 1];
-            wire signed [TW-1:0] sh_re = pa_t_re[gl] >>> sh_lo;
-            wire signed [TW-1:0] sh_im = pa_t_im[gl] >>> sh_lo;
+            // array element -> plain wire first (Icarus 11 mis-compiles a
+            // shift or bit-select applied directly to an array element)
+            wire signed [TW-1:0] pt_re = pa_t_re[gl];
+            wire signed [TW-1:0] pt_im = pa_t_im[gl];
+            wire signed [TW-1:0] sh_re = pt_re >>> sh_lo;
+            wire signed [TW-1:0] sh_im = pt_im >>> sh_lo;
             wire [TW-WW:0]     hb_re = sh_re[TW-1:WW-1];   // must all equal the sign
             wire [TW-WW:0]     hb_im = sh_im[TW-1:WW-1];
             assign dov_re[gl] = ~sh_re[TW-1] & (|hb_re);
@@ -299,8 +303,8 @@ module pi_aj_wlpi #(
             assign dun_im[gl] =  sh_im[TW-1] & ~(&hb_im);
             assign dlc_re[gl] = dov_re[gl] ? WMAX : dun_re[gl] ? WMIN : sh_re[WW+1:0];
             assign dlc_im[gl] = dov_im[gl] ? WMAX : dun_im[gl] ? WMIN : sh_im[WW+1:0];
-            assign drb_re[gl] = (sh_lo == 0) ? pa_g_re[gl] : pa_t_re[gl][sh_lo - 1];
-            assign drb_im[gl] = (sh_lo == 0) ? pa_g_im[gl] : pa_t_im[gl][sh_lo - 1];
+            assign drb_re[gl] = (sh_lo == 0) ? pa_g_re[gl] : pt_re[sh_lo - 1];
+            assign drb_im[gl] = (sh_lo == 0) ? pa_g_im[gl] : pt_im[sh_lo - 1];
             // PD -> P2: w + update + rounding carry, saturated (sign-bit check)
             wire signed [WW+1:0] s_re = $signed(pd_w_re[gl]) + pd_dl_re[gl] + $signed({1'b0, pd_rb_re[gl]});
             wire signed [WW+1:0] s_im = $signed(pd_w_im[gl]) + pd_dl_im[gl] + $signed({1'b0, pd_rb_im[gl]});
