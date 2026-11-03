@@ -536,10 +536,13 @@ module gnss_passthrough #(
   reg  [AW:0] wptr1 = 0, rptr1 = 0;
 
   wire [AW:0] level0 = wptr0 - rptr0;
-  wire [AW:0] level1 = wptr1 - rptr1;
+  // ch1 occupancy is a counter updated beside the pointers (same value as
+  // wptr1 - rptr1 every cycle) so full1/empty1 do not need a subtract and a
+  // compare in front of the distributed-RAM write enable (4.8.2 timing fix).
+  reg  [AW:0] level1 = 0;
   wire        full0  = (level0 == (1<<AW));
   wire        empty0 = (level0 == 0);
-  wire        full1  = (level1 == (1<<AW));
+  wire        full1  = level1[AW];
   wire        empty1 = (level1 == 0);
 
   // Prime the buffer to half depth before the first read, so that a small
@@ -673,7 +676,7 @@ module gnss_passthrough #(
   always @(posedge clk) begin
     if (rst) begin
       wptr0 <= 0; rptr0 <= 0;
-      wptr1 <= 0; rptr1 <= 0;
+      wptr1 <= 0; rptr1 <= 0; level1 <= 0;
     end else begin
       if (smi_switch) begin
         rptr0 <= wptr0;                 // flush ch0; re-primed above
@@ -695,6 +698,11 @@ module gnss_passthrough #(
         rd_data1 <= fifo1[rptr1[AW-1:0]];
         rptr1 <= rptr1 + 1'b1;
       end
+      case ({(wr_en1 && !full1), (rd_en1 && !empty1)})
+        2'b10:   level1 <= level1 + 1'b1;
+        2'b01:   level1 <= level1 - 1'b1;
+        default: ;
+      endcase
     end
   end
 

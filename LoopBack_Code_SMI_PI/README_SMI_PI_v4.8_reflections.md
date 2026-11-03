@@ -70,3 +70,11 @@ Not synthesised here; if `BUILD_TIMING` is still VIOLATED, send:
 grep -E "BUILD_WNS|BUILD_WHS" Build/Logs/build.log
 grep -m3 "Slack (VIOLATED)" -B3 -A28 Build/Output/timing_impl.rpt
 ```
+
+## 7. 4.8.2: last 0.03 ns (RTL only)
+
+The 4.8.1 build on the board PC went from WNS −3.884 ns to **−0.032 ns** (TNS −0.486 ns, WHS +0.056 ns, `rx_clk` group). The blanker and peak hold are no longer the problem. The
+remaining endpoints are the older channel-1 FIFO (`fifo1`, `full1`, `wptr1`): its occupancy was computed as `wptr1 - rptr1` and compared with 32 in front of the
+distributed-RAM write enable. 4.8.2 keeps the occupancy as a counter next to the pointers (`full1 = level1[5]`). Behaviour is identical: an iverilog check of 200 000 random
+write/read cycles shows the counter equals `wptr1 - rptr1` every cycle (0 mismatches). Firmware string is now "4.8.2"; `CORE_VERSION`/`AJ_INFO` are unchanged, so 4.8.1 and 4.8.2
+firmware and bitstream are interchangeable. Not synthesised here.
