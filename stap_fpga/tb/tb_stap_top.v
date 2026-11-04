@@ -13,13 +13,17 @@
 `include "tb_params.vh"
 
 `ifndef FOLD_VAL
-`define FOLD_VAL 1
+`define FOLD_VAL 2
+`endif
+`ifndef LAGP_VAL
+`define LAGP_VAL 8
 `endif
 
 module tb_stap_top;
     localparam M = 7, N = 16;
     localparam DW = `TB_DW, WW = `TB_WW, OW = `TB_OW, LM = `TB_LMAX_LOG2;
     localparam FOLD = `FOLD_VAL;
+    localparam LAGP = `LAGP_VAL;
     localparam NS = `TB_SL + `TB_K;
 
     reg clk = 0, aresetn = 0;
@@ -38,7 +42,7 @@ module tb_stap_top;
     wire [1:0]  bresp, rresp;
     wire [31:0] rdata;
 
-    stap_top #(.M(M), .N(N), .DW(DW), .WW(WW), .OW(OW), .FOLD(FOLD), .LMAX_LOG2(LM)) dut (
+    stap_top #(.M(M), .N(N), .DW(DW), .WW(WW), .OW(OW), .FOLD(FOLD), .LMAX_LOG2(LM), .LAGP(LAGP)) dut (
         .clk(clk), .aresetn(aresetn),
         .s_valid(s_valid), .s_re(s_re), .s_im(s_im),
         .y_valid(y_valid), .y_re(y_re), .y_im(y_im), .irq(irq),
@@ -144,7 +148,8 @@ module tb_stap_top;
         axi_read(16'h0000, r0);
         axi_read(16'h0004, r1);
         axi_read(16'h0008, r2);
-        $display("ID=%h CONFIG=%h CONFIG2=%h (FOLD=%0d)", r0, r1, r2, FOLD);
+        axi_read(16'h000C, r3);
+        $display("ID=%h CONFIG=%h CONFIG2=%h CONFIG3=%h (FOLD=%0d LAGP=%0d)", r0, r1, r2, r3, FOLD, LAGP);
         if (r0 !== 32'h53544150) begin $display("FAIL: bad ID"); $finish; end
 
         // ---- 1. training capture
@@ -211,14 +216,14 @@ module tb_stap_top;
         $display("filter outputs     : %0d checked, %0d mismatches", out_cnt, out_err);
         $display("overrun flag       : %0d", r0[3]);
         if (corr_err == 0 && raw_err == 0 && out_err == 0 && out_cnt == `TB_K && !r0[3])
-            $display("*** PASS (FOLD=%0d) ***", FOLD);
+            $display("*** PASS (FOLD=%0d LAGP=%0d) ***", FOLD, LAGP);
         else
-            $display("*** FAIL (FOLD=%0d) ***", FOLD);
+            $display("*** FAIL (FOLD=%0d LAGP=%0d) ***", FOLD, LAGP);
         $finish;
     end
 
     initial begin
-        #400_000_000;
+        #2_000_000_000;
         $display("*** FAIL: timeout ***");
         $finish;
     end

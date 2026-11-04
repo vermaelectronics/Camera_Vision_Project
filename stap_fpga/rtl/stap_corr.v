@@ -24,11 +24,13 @@
 // Result entry index:  e = pair*NL + q,  q = tau + (N-1),
 // pairs enumerated as  for a in 0..M-1: for b in a..M-1.
 //
-// Architecture: one pass per channel pair, NL complex MACs (4*NL multipliers)
-// working in parallel on a 2N-1 deep shift register -> one snapshot per clock.
-// Cycles per update ~= NP * (L + 2N-2 + NL + 8)   (28*5099 = 143k for L=5000,
-// i.e. 0.7 ms at 200 MHz).  The filter keeps running with the old weights
-// while this runs.
+// Architecture: LAGP complex MACs (3 real multipliers each, Gauss form) work
+// on an LAGP-deep shift register, one snapshot per clock. The NL lags are done
+// in NG = ceil(NL/LAGP) passes per channel pair; for pass g the channel-a read
+// address is advanced by q0 = g*LAGP, so no lag multiplexer is needed.
+//   LAGP = 31 -> 93 multipliers, NP*1*(L+~50)  clocks (143k for L=5000)
+//   LAGP =  8 -> 24 multipliers, NP*4*(L+~25)  clocks (563k = 4.7 ms @120 MHz)
+// The filter keeps running with the old weights while this runs.
 // -----------------------------------------------------------------------------
 `timescale 1ns/1ps
 module stap_corr #(
@@ -36,7 +38,8 @@ module stap_corr #(
     parameter N         = 16,
     parameter DW        = 16,
     parameter LMAX_LOG2 = 13,                          // capture buffer depth 2^LMAX_LOG2
-    parameter CW        = 2*DW + 2 + LMAX_LOG2         // result width per component
+    parameter CW        = 2*DW + 2 + LMAX_LOG2,        // result width per component
+    parameter LAGP      = 8                            // lags computed in parallel (1..2N-1)
 )(
     input  wire                  clk,
     input  wire                  rst,
@@ -59,21 +62,23 @@ module stap_corr #(
     output wire [2*DW-1:0]       raw_sample   // {re, im}
 );
     localparam NL   = 2*N - 1;
-    localparam NP   = M*(M+1)/2;
-    localparam NRES = NP*NL;
+    localparam NG   = (NL + LAGP - 1) / LAGP;      // passes per channel pair
     localparam AWID = LMAX_LOG2;
     localparam DEPTH= 1 << LMAX_LOG2;
-    localparam PW   = 2*DW;           // real product width
-    localparam SW   = 2*DW + 1;       // complex product component width
+    localparam PW   = 2*DW;                        // packed {re,im} width
+    localparam KW   = 2*DW + 1;                    // Gauss product width
+    localparam SW   = 2*DW + 2;                    // complex product component width
     localparam [LMAX_LOG2:0] MAXL = DEPTH - (2*N - 2);
 
     localparam S_IDLE = 3'd0, S_CAP = 3'd1, S_RUN = 3'd2, S_DRAIN = 3'd3, S_DUMP = 3'd4;
 
     reg  [2:0]      state;
-    reg  [AWID:0]   sl;              // stream length L + 2N-2
+    reg  [AWID:0]   sl;              // capture length  L + 2N-2
+    reg  [AWID:0]   sr_len;          // stream length per pass  L + LAGP-1
     reg  [AWID:0]   cnt;             // capture address / stream index
     reg  [2:0]      ch_a, ch_b;
-    reg  [9:0]      res_base;
+    reg  [5:0]      q0;              // first lag of the current pass
+    reg  [9:0]      res_base;        // pair*NL
     reg  [4:0]      dcnt;            // drain counter
     reg  [5:0]      qcnt;            // dump counter
 
@@ -82,9 +87,12 @@ module stap_corr #(
     integer i, q;
 
     // ------------------------------------------------------------------ sample buffers
+    // port A: capture write / channel-a read (x_a[i+q0]) / raw read in IDLE
+    // port B: channel-b read  x_b[i + N - LAGP]
     wire             cap_we = (state == S_CAP) & in_valid;
-    wire [AWID-1:0]  addr_a = (state == S_IDLE) ? raw_addr : cnt[AWID-1:0];
-    wire [AWID-1:0]  addr_b = cnt[AWID-1:0] - (N-1);   // only used when cnt >= N-1
+    wire [AWID-1:0]  addr_a = (state == S_IDLE) ? raw_addr :
+                              (state == S_CAP)  ? cnt[AWID-1:0] : cnt[AWID-1:0] + q0;
+    wire [AWID-1:0]  addr_b = cnt[AWID-1:0] + (N - LAGP);
     wire [M*PW-1:0]  qa_flat, qb_flat;
 
     genvar g;
@@ -92,11 +100,11 @@ module stap_corr #(
         for (g = 0; g < M; g = g + 1) begin : g_buf
             reg [PW-1:0] mem [0:DEPTH-1];
             reg [PW-1:0] qa, qb;
-            always @(posedge clk) begin                 // port A: write / read
+            always @(posedge clk) begin
                 if (cap_we) mem[addr_a] <= {in_re[g*DW +: DW], in_im[g*DW +: DW]};
                 qa <= mem[addr_a];
             end
-            always @(posedge clk) begin                 // port B: read
+            always @(posedge clk) begin
                 qb <= mem[addr_b];
             end
             assign qa_flat[g*PW +: PW] = qa;
@@ -107,16 +115,18 @@ module stap_corr #(
     assign raw_sample = qa_flat[raw_ch*PW +: PW];
 
     // ------------------------------------------------------------------ control FSM
-    reg run_issue;                                       // a read is issued this cycle
-    always @(*) run_issue = (state == S_RUN);
+    wire last_pass = (q0 + LAGP >= NL);
+    wire [5:0] dump_n = last_pass ? (NL - q0) : LAGP;     // results written this pass
 
     always @(posedge clk) begin
         if (rst) begin
             state    <= S_IDLE;
             cnt      <= 0;
             sl       <= 0;
+            sr_len   <= 0;
             ch_a     <= 0;
             ch_b     <= 0;
+            q0       <= 0;
             res_base <= 0;
             dcnt     <= 0;
             qcnt     <= 0;
@@ -125,20 +135,22 @@ module stap_corr #(
             done <= 1'b0;
             case (state)
             S_IDLE: if (start) begin
-                        sl    <= ((len > MAXL) ? MAXL : (len == 0) ? 1 : len) + (2*N - 2);
-                        cnt   <= 0;
-                        state <= S_CAP;
+                        sl     <= ((len > MAXL) ? MAXL : (len == 0) ? 1 : len) + (2*N - 2);
+                        sr_len <= ((len > MAXL) ? MAXL : (len == 0) ? 1 : len) + (LAGP - 1);
+                        cnt    <= 0;
+                        state  <= S_CAP;
                     end
             S_CAP:  if (in_valid) begin
                         if (cnt == sl - 1) begin
                             cnt      <= 0;
                             ch_a     <= 0;
                             ch_b     <= 0;
+                            q0       <= 0;
                             res_base <= 0;
                             state    <= S_RUN;
                         end else cnt <= cnt + 1'b1;
                     end
-            S_RUN:  if (cnt == sl - 1) begin
+            S_RUN:  if (cnt == sr_len - 1) begin
                         dcnt  <= 0;
                         state <= S_DRAIN;
                     end else cnt <= cnt + 1'b1;
@@ -146,21 +158,27 @@ module stap_corr #(
                         qcnt  <= 0;
                         state <= S_DUMP;
                     end else dcnt <= dcnt + 1'b1;
-            S_DUMP: if (qcnt == NL-1) begin
-                        res_base <= res_base + NL;
-                        cnt      <= 0;
-                        if (ch_b == M-1) begin
-                            if (ch_a == M-1) begin
-                                state <= S_IDLE;
-                                done  <= 1'b1;
+            S_DUMP: if (qcnt == LAGP-1) begin
+                        cnt <= 0;
+                        if (!last_pass) begin
+                            q0    <= q0 + LAGP;
+                            state <= S_RUN;
+                        end else begin
+                            q0       <= 0;
+                            res_base <= res_base + NL;
+                            if (ch_b == M-1) begin
+                                if (ch_a == M-1) begin
+                                    state <= S_IDLE;
+                                    done  <= 1'b1;
+                                end else begin
+                                    ch_a  <= ch_a + 1'b1;
+                                    ch_b  <= ch_a + 1'b1;
+                                    state <= S_RUN;
+                                end
                             end else begin
-                                ch_a  <= ch_a + 1'b1;
-                                ch_b  <= ch_a + 1'b1;
+                                ch_b  <= ch_b + 1'b1;
                                 state <= S_RUN;
                             end
-                        end else begin
-                            ch_b  <= ch_b + 1'b1;
-                            state <= S_RUN;
                         end
                     end else qcnt <= qcnt + 1'b1;
             default: state <= S_IDLE;
@@ -169,20 +187,21 @@ module stap_corr #(
     end
 
     // ------------------------------------------------------------------ data pipeline
-    // s1: RAM output valid   s2: channel mux   s3: shift register   s4: products
-    // s5: complex sums       s6: accumulators
+    // s1: RAM output   s2: channel mux   s3: shift register + reference pre-adds
+    // s4: 3 products per lag   s5: complex sums   s6: accumulators
     reg              v1, v2, en3, en4, en5;
     reg  [AWID:0]    i1, i2;
     reg  signed [DW-1:0] xa_re, xa_im, xb_re, xb_im;
-    reg  signed [DW-1:0] sr_re [0:NL-1];
-    reg  signed [DW-1:0] sr_im [0:NL-1];
-    reg  signed [DW-1:0] rf_re, rf_im;
+    reg  signed [DW-1:0] sr_re [0:LAGP-1];
+    reg  signed [DW-1:0] sr_im [0:LAGP-1];
+    reg  signed [DW-1:0] rf_re;
+    reg  signed [DW:0]   rf_d, rf_e;               // -bi-br,  br-bi
 
     always @(posedge clk) begin
         if (rst) begin
             v1 <= 1'b0; v2 <= 1'b0; en3 <= 1'b0; en4 <= 1'b0; en5 <= 1'b0;
         end else begin
-            v1  <= run_issue;
+            v1  <= (state == S_RUN);
             i1  <= cnt;
             v2  <= v1;
             i2  <= i1;
@@ -190,7 +209,7 @@ module stap_corr #(
             xa_im <= qa_flat[ch_a*PW      +: DW];
             xb_re <= qb_flat[ch_b*PW + DW +: DW];
             xb_im <= qb_flat[ch_b*PW      +: DW];
-            en3 <= v2 & (i2 >= (2*N - 2));
+            en3 <= v2 & (i2 >= (LAGP - 1));
             en4 <= en3;
             en5 <= en4;
         end
@@ -200,28 +219,31 @@ module stap_corr #(
         if (v2) begin
             sr_re[0] <= xa_re;
             sr_im[0] <= xa_im;
-            for (i = 1; i < NL; i = i + 1) begin
+            for (i = 1; i < LAGP; i = i + 1) begin
                 sr_re[i] <= sr_re[i-1];
                 sr_im[i] <= sr_im[i-1];
             end
             rf_re <= xb_re;
-            rf_im <= xb_im;
+            rf_d  <= -xb_im - xb_re;
+            rf_e  <=  xb_re - xb_im;
         end
     end
 
-    // NL parallel complex multipliers: lag q uses sr[NL-1-q] * conj(ref)
-    wire [NL*SW-1:0] s_re_flat, s_im_flat;
+    // LAGP parallel complex multipliers: lag q0+u uses a = sr[LAGP-1-u], b = ref
+    //   a*conj(b): k1 = br(ar+ai), k2 = ar(-bi-br), k3 = ai(br-bi)
+    //              re = k1 - k3,   im = k1 + k2
+    wire [LAGP*SW-1:0] s_re_flat, s_im_flat;
     generate
-        for (g = 0; g < NL; g = g + 1) begin : g_lag
-            reg signed [PW-1:0] p_rr, p_ii, p_ir, p_ri;
+        for (g = 0; g < LAGP; g = g + 1) begin : g_lag
+            reg signed [KW:0]   k1, k2, k3;
             reg signed [SW-1:0] c_re, c_im;
+            wire signed [DW:0]  as = sr_re[LAGP-1-g] + sr_im[LAGP-1-g];
             always @(posedge clk) begin
-                p_rr <= sr_re[NL-1-g] * rf_re;
-                p_ii <= sr_im[NL-1-g] * rf_im;
-                p_ir <= sr_im[NL-1-g] * rf_re;
-                p_ri <= sr_re[NL-1-g] * rf_im;
-                c_re <= p_rr + p_ii;                 // Re{a * conj(b)}
-                c_im <= p_ir - p_ri;                 // Im{a * conj(b)}
+                k1   <= rf_re * as;
+                k2   <= sr_re[LAGP-1-g] * rf_d;
+                k3   <= sr_im[LAGP-1-g] * rf_e;
+                c_re <= k1 - k3;
+                c_im <= k1 + k2;
             end
             assign s_re_flat[g*SW +: SW] = c_re;
             assign s_im_flat[g*SW +: SW] = c_im;
@@ -229,25 +251,25 @@ module stap_corr #(
     endgenerate
 
     // accumulators: accumulate during RUN/DRAIN, shift out (zero fill) during DUMP
-    reg signed [CW-1:0] acc_re [0:NL-1];
-    reg signed [CW-1:0] acc_im [0:NL-1];
+    reg signed [CW-1:0] acc_re [0:LAGP-1];
+    reg signed [CW-1:0] acc_im [0:LAGP-1];
     wire dump = (state == S_DUMP);
 
     always @(posedge clk) begin
         if (rst || (state == S_IDLE)) begin
-            for (q = 0; q < NL; q = q + 1) begin
+            for (q = 0; q < LAGP; q = q + 1) begin
                 acc_re[q] <= {CW{1'b0}};
                 acc_im[q] <= {CW{1'b0}};
             end
         end else if (dump) begin
-            for (q = 0; q < NL-1; q = q + 1) begin
+            for (q = 0; q < LAGP-1; q = q + 1) begin
                 acc_re[q] <= acc_re[q+1];
                 acc_im[q] <= acc_im[q+1];
             end
-            acc_re[NL-1] <= {CW{1'b0}};
-            acc_im[NL-1] <= {CW{1'b0}};
+            acc_re[LAGP-1] <= {CW{1'b0}};
+            acc_im[LAGP-1] <= {CW{1'b0}};
         end else if (en5) begin
-            for (q = 0; q < NL; q = q + 1) begin
+            for (q = 0; q < LAGP; q = q + 1) begin
                 acc_re[q] <= acc_re[q] + $signed(s_re_flat[q*SW +: SW]);
                 acc_im[q] <= acc_im[q] + $signed(s_im_flat[q*SW +: SW]);
             end
@@ -257,7 +279,7 @@ module stap_corr #(
     // ------------------------------------------------------------------ result RAM
     reg [2*CW-1:0] res_mem [0:1023];
     always @(posedge clk) begin
-        if (dump) res_mem[res_base + qcnt] <= {acc_re[0], acc_im[0]};
+        if (dump && (qcnt < dump_n)) res_mem[res_base + q0 + qcnt] <= {acc_re[0], acc_im[0]};
         {res_re, res_im} <= res_mem[res_addr];
     end
 

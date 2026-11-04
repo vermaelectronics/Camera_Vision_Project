@@ -13,6 +13,7 @@
 //   0x0000  ID          RO  0x53544150 ("STAP")
 //   0x0004  CONFIG      RO  [7:0] M  [15:8] N  [23:16] DW  [31:24] WW
 //   0x0008  CONFIG2     RO  [7:0] FOLD  [15:8] OW  [23:16] CW  [31:24] LMAX_LOG2
+//   0x000C  CONFIG3     RO  [7:0] LAGP (correlator lags per pass)
 //   0x0010  CTRL        WO  bit0 CORR_START, bit1 W_COMMIT, bit2 CLR_OVERRUN (self clearing)
 //   0x0014  STATUS      RO  bit0 corr_busy, bit1 corr_done (sticky, cleared by CORR_START),
 //                           bit2 commit_pending, bit3 overrun
@@ -35,8 +36,11 @@ module stap_top #(
     parameter DW        = 16,
     parameter WW        = 18,
     parameter OW        = 16,
-    parameter FOLD      = 1,
-    parameter LMAX_LOG2 = 13
+    // Defaults = Zynq-7020 configuration: 120 MHz clock, 60 MSPS,
+    // 168 (filter) + 24 (correlator) = 192 of 220 DSP48E1.
+    parameter FOLD      = 2,
+    parameter LMAX_LOG2 = 13,
+    parameter LAGP      = 8
 )(
     input  wire              clk,
     input  wire              aresetn,
@@ -70,7 +74,7 @@ module stap_top #(
 );
     localparam CW = 2*DW + 2 + LMAX_LOG2;
     localparam [7:0] P_M = M, P_N = N, P_DW = DW, P_WW = WW, P_FOLD = FOLD,
-                     P_OW = OW, P_CW = CW, P_LM = LMAX_LOG2;
+                     P_OW = OW, P_CW = CW, P_LM = LMAX_LOG2, P_LAGP = LAGP;
     wire rst = ~aresetn;
 
     // ------------------------------------------------------------------ registers
@@ -101,7 +105,7 @@ module stap_top #(
         .overrun(overrun_raw), .overrun_clr(ovr_clr_mask)
     );
 
-    stap_corr #(.M(M), .N(N), .DW(DW), .LMAX_LOG2(LMAX_LOG2), .CW(CW)) u_corr (
+    stap_corr #(.M(M), .N(N), .DW(DW), .LMAX_LOG2(LMAX_LOG2), .CW(CW), .LAGP(LAGP)) u_corr (
         .clk(clk), .rst(rst),
         .in_valid(s_valid), .in_re(s_re), .in_im(s_im),
         .start(corr_start), .len(corr_len),
@@ -228,6 +232,7 @@ module stap_top #(
                     12'h000: s_axi_rdata <= 32'h53544150;
                     12'h004: s_axi_rdata <= {P_WW, P_DW, P_N, P_M};
                     12'h008: s_axi_rdata <= {P_LM, P_CW, P_OW, P_FOLD};
+                    12'h00C: s_axi_rdata <= {24'd0, P_LAGP};
                     12'h014: s_axi_rdata <= {28'd0, overrun_raw, commit_pending, corr_done, corr_busy};
                     12'h018: s_axi_rdata <= corr_len;
                     12'h01C: s_axi_rdata <= {26'd0, out_shift};

@@ -11,14 +11,16 @@
 //  * Complex weights, WW-bit signed per component (18 bit -> one DSP48 port)
 //  * FOLD : time-multiplexing factor. Clock must be >= FOLD * sample rate and
 //           in_valid may be asserted at most once every FOLD clocks.
-//           P = ceil(T/FOLD) complex MACs (4 real multipliers each) are built.
-//             FOLD=1  -> 112 cMAC = 448 multipliers, 1 sample/clock
-//             FOLD=4  ->  28 cMAC = 112 multipliers, e.g. 240 MHz clk / 60 MSPS
+//           P = ceil(T/FOLD) complex MACs are built, each with 3 real
+//           multipliers (Gauss/Karatsuba form, bit-exact with the 4-mult form):
+//             FOLD=1  -> 112 cMAC = 336 multipliers, 1 sample/clock
+//             FOLD=2  ->  56 cMAC = 168 multipliers, 120 MHz clk / 60 MSPS (Zynq-7020)
+//             FOLD=4  ->  28 cMAC =  84 multipliers, 240 MHz clk / 60 MSPS
 //  * Weights are double buffered: write the shadow bank at any time, pulse
 //    w_commit, the new bank becomes active on a sample boundary (no tearing).
 //  * Output = saturate( (sum) >>> out_shift , OW bits )   (arithmetic shift, floor)
 //
-// Latency (in_valid -> out_valid): FOLD + 4 + clog2(P) + 1 clocks.
+// Latency (in_valid -> out_valid): FOLD + 6 + clog2(P) clocks.
 // Verilog-2005, vendor neutral (multipliers are inferred -> DSP48 / DSP blocks).
 // -----------------------------------------------------------------------------
 `timescale 1ns/1ps
@@ -143,15 +145,16 @@ module stap_fir #(
     end
 
     // ------------------------------------------------------------------ control pipeline
-    reg vA, fA, lA, vB, fB, lB, vC, fC, lC;
+    reg vA, fA, lA, vA2, fA2, lA2, vB, fB, lB, vC, fC, lC;
     always @(posedge clk) begin
         if (rst) begin
-            vA <= 1'b0; vB <= 1'b0; vC <= 1'b0;
-            fA <= 1'b0; fB <= 1'b0; fC <= 1'b0;
-            lA <= 1'b0; lB <= 1'b0; lC <= 1'b0;
+            vA <= 1'b0; vA2 <= 1'b0; vB <= 1'b0; vC <= 1'b0;
+            fA <= 1'b0; fA2 <= 1'b0; fB <= 1'b0; fC <= 1'b0;
+            lA <= 1'b0; lA2 <= 1'b0; lB <= 1'b0; lC <= 1'b0;
         end else begin
             vA <= rd_act; fA <= (ph == 0); lA <= (ph == FOLD-1);
-            vB <= vA;     fB <= fA;        lB <= lA;
+            vA2 <= vA;    fA2 <= fA;       lA2 <= lA;
+            vB <= vA2;    fB <= fA2;       lB <= lA2;
             vC <= vB;     fC <= fB;        lC <= lB;
         end
     end
@@ -166,8 +169,12 @@ module stap_fir #(
             if (p < P) begin : g_unit
                 reg signed [DW-1:0] xr, xi;          // stage A : operand select
                 reg signed [WW-1:0] wr, wi;
-                reg signed [PW-1:0] rr, ii, ri, ir;  // stage B : products (DSP M-reg)
-                reg signed [SW-1:0] cr, ci;          // stage C : conj(w)*x
+                reg signed [DW:0]   xs;              // stage A2: pre-adds
+                reg signed [DW-1:0] xr2, xi2;
+                reg signed [WW-1:0] wr2;
+                reg signed [WW:0]   wd, we;
+                reg signed [PW:0]   k1, k2, k3;      // stage B : 3 products (DSP M-reg)
+                reg signed [PW+1:0] cr, ci;          // stage C : conj(w)*x
                 reg signed [AW-1:0] ar, ai;          // stage D : accumulate over FOLD phases
                 integer f;
 
@@ -181,14 +188,20 @@ module stap_fir #(
                             wr <= wa_re[p*FOLD+f]; wi <= wa_im[p*FOLD+f];
                         end
                     end
-                    // stage B: 4 real multiplies
-                    rr <= wr * xr;
-                    ii <= wi * xi;
-                    ri <= wr * xi;
-                    ir <= wi * xr;
+                    // stage A2: pre-adders (17-bit and 19-bit, fabric carry chains)
+                    xs  <= xr + xi;
+                    wd  <= -wr - wi;
+                    we  <= wr - wi;
+                    xr2 <= xr; xi2 <= xi; wr2 <= wr;
+                    // stage B: 3 real multiplies (each fits one DSP48E1 25x18)
+                    //   k1 = wr(xr+xi), k2 = xr(-wr-wi), k3 = xi(wr-wi)
+                    k1 <= wr2 * xs;
+                    k2 <= xr2 * wd;
+                    k3 <= xi2 * we;
                     // stage C: conj(w)*x = (wr*xr + wi*xi) + j(wr*xi - wi*xr)
-                    cr <= rr + ii;
-                    ci <= ri - ir;
+                    //                    = (k1 - k3)       + j(k1 + k2)
+                    cr <= k1 - k3;
+                    ci <= k1 + k2;
                     // stage D: accumulate the FOLD partial products
                     if (vC) begin
                         if (fC) begin ar <= cr;      ai <= ci;      end

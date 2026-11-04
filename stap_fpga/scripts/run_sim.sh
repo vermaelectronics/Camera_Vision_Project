@@ -13,9 +13,11 @@ gcc -O2 -std=c99 -Wall -Wextra -c -o "$B/stap_driver.o" "$ROOT/sw/stap_driver.c"
 echo "== golden model + test vectors"
 python3 "$ROOT/model/stap_golden.py" --out "$B" "$@"
 
-for F in ${FOLDS:-1 4}; do
-  echo "== RTL simulation FOLD=$F"
-  iverilog -g2005 -Wall -DFOLD_VAL=$F -I "$B" -o "$B/tb_fold$F.vvp" \
+# configurations "FOLD:LAGP"   (2:8 = Zynq-7020 default, 4:31 = high-clock variant)
+for CFG in ${CONFIGS:-2:8 4:31}; do
+  F=${CFG%%:*}; G=${CFG##*:}
+  echo "== RTL simulation FOLD=$F LAGP=$G"
+  iverilog -g2005 -Wall -DFOLD_VAL=$F -DLAGP_VAL=$G -I "$B" -o "$B/tb_fold$F.vvp" \
       "$ROOT/tb/tb_stap_top.v" "$ROOT/rtl/stap_top.v" "$ROOT/rtl/stap_fir.v" "$ROOT/rtl/stap_corr.v" 2>&1 | grep -v timescale || true
   (cd "$B" && vvp -n "tb_fold$F.vvp") | tee "$B/sim_fold$F.txt"
   grep -q "\*\*\* PASS" "$B/sim_fold$F.txt"
