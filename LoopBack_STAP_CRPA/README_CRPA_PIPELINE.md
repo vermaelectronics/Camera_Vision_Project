@@ -181,17 +181,84 @@ E: l_clk stopped: STAP ID read deadc10c, WRAP_STATUS 00010000, GSTP 47535450
 The TX safety rules of the loopback are unchanged: conducted, attenuated coax
 only. `gnss_tx=0` still silences TX1 immediately.
 
-## Build
+## Build on Ubuntu: sources to `.bin`
 
-Unchanged from `README_LOOPBACK_PIPELINE.md`:
+`Automation/Linux/build_bin.sh` builds everything in one command and stops at the first problem.
+
+**One-time setup (Ubuntu 22.04):**
+
+1. Install Vivado and Vitis 2023.2, for example under `/tools/Xilinx`.
+2. Install the build tools:
+
+   ```bash
+   sudo apt install make python3 python3-numpy iverilog gcc
+   ```
+
+   iverilog, python3-numpy and gcc are only needed for the pre-build simulation.
+
+**Build:**
 
 ```bash
-source /tools/Xilinx/Vivado/2023.2/settings64.sh
-source /tools/Xilinx/Vitis/2023.2/settings64.sh
-./Automation/Linux/build_all.sh --jobs 16 --to boot 2>&1 | tee build_crpa.log
+cd ~/LoopBack_STAP_CRPA
+chmod +x Automation/Linux/*.sh
+./Automation/Linux/build_bin.sh
 ```
 
-To run the simulation without Xilinx tools:
+The script finds `/tools/Xilinx/Vivado/2023.2/settings64.sh` and the Vitis one by itself. For another install location, pass `--xilinx /opt/Xilinx`.
+
+| Step | What it does |
+|---|---|
+| 0 preflight | Checks the project tree, the Xilinx 2023.2 tools, free disk space and RAM. |
+| 1 sim | RTL simulation of the CRPA datapath (about 30 s). It stops before Vivado if the RTL is broken. |
+| 2 build | `build_all.sh` stages 1-8: vendor, libip, ip, project, build, sw, fsbl, boot. |
+| 3 checks | Timing MET; `gnss_stap` and `gnss_passthrough` are in the XSA; the ELF contains the CRPA driver and is the variant that was asked for. |
+| 4 bit.bin | `bootgen -process_bitstream bin` produces `system_top.bit.bin`. |
+| 5 release | Collects the outputs, `MANIFEST.txt` and `SHA256SUMS`. |
+
+**Output** goes to `Build/Release/LoopBack_STAP_CRPA_<variant>_<timestamp>/`:
+
+| File | Use |
+|---|---|
+| `BOOT.BIN` | SD card (FAT32, root). Contains FSBL + bitstream + application. |
+| `system_top.bit.bin` | The bitstream alone in `.bin` form, for FPGA manager or QSPI tools. |
+| `system_top.bit`, `system.xsa`, `e310_gnss_app.elf`, `fsbl.elf` | JTAG and Vitis. |
+| `MANIFEST.txt`, `SHA256SUMS`, `logs/` | What was built and how. |
+
+**Common variants:**
+
+```bash
+./Automation/Linux/build_bin.sh --variant deploy --sd
+```
+
+SD-card build. TX1 transmits at power-on with the anti-jam ON. Read `SD_Image/README_SD_CARD.md` first. `--sd` also copies the image to `SD_Image/BOOT.BIN`.
+
+```bash
+./Automation/Linux/build_bin.sh --variant deploy-nocrpa
+```
+
+SD-card build of the plain loopback, with the CRPA stage in bypass.
+
+```bash
+./Automation/Linux/build_bin.sh --from sw
+```
+
+After a firmware-only change: rebuilds the ELF, FSBL and BOOT.BIN only.
+
+```bash
+./Automation/Linux/build_bin.sh --jobs 4 --clean
+```
+
+Fewer parallel jobs, and starts from a clean Build tree.
+
+The default variant is `dev`. A dev image never transmits at power-on, and the script refuses to package one whose ELF does. The script also refuses a bitstream that misses timing. Pass `--allow-timing-violation` only for bench experiments. A full build takes roughly an hour and about 15 GB of disk. Follow the long Vivado step with:
+
+```bash
+tail -f Build/Logs/build.log
+```
+
+`build_all.sh` still works on its own for running individual stages, with the same `--from`, `--to`, `--jobs` and `--defines` options.
+
+Run the simulation alone, without Xilinx tools:
 
 ```bash
 ./Automation/Linux/run_sim.sh
