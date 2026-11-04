@@ -90,3 +90,18 @@ Simulation, 32 taps: all 20 scenarios still PASS; suppression is about 1 dB lowe
 In the 4.9.1 board test the blanker blanked 100 % of the output (the jammer remnant stays above its threshold), switched itself off for 10 s, came back, and blanked again: a dropout of about 1 s every 11.2 s that blocks the decoding of the navigation message.
 `blk_mode` now starts at 0 (off). `gnss_aj_blank=1` (automatic) or `=2` (always on) turns it on again; a pulsed jammer needs it. The bitstream is unchanged. Version string "4.9.3".
 (Typed on the console at run time the same effect is `gnss_aj_blank=0`; the command `set pulse_blanker 0` does not exist in this firmware.)
+
+## 4.9.4: 8192 samples per snapshot (firmware only)
+
+Suggestion followed: with 65 weights, lengthen the integration of the covariance. There is **no Verilog accumulator** (`ACCUM_SAMPLES` / `CNT_WIDTH`) in this project: the statistics are built by the ARM from a DMA capture, and the length is `AJ_NSAMP` in `gnss_aj_math.h` (it was 4096).
+By the Reed-Mallett-Brennan rule 65 weights need only about 130 samples for a 3 dB loss; with 4096 samples averaged over two blocks the estimation loss is already about 0.07 dB, so this is not expected to improve the null by itself.
+Tested in the C simulation (32 taps, scenarios 1-14, 16-21):
+
+| AJ_NSAMP | result |
+|---|---|
+| 4096 | 20 of 20 PASS |
+| **8192 (chosen)** | **20 of 20 PASS**; suppression within 0.5 dB, satellite loss within 0.7 dB of 4096; the chirp detector still works (long memory on for 58 of 60 blocks) |
+| 16384 | 17 of 20: **scenario 16 (1 ms chirp) fails** (the detector sees 0 of 60 blocks: the centre moves too far within a longer block) and scenarios 11 and 12 (J/N 61 and 51 dB) lose more satellite SNR (5.2 dB at J/N 61) |
+
+Cost: the ARM needs about twice as long per solve (the statistics are proportional to the block length): expect roughly 20 solves/s instead of 40, an estimate not measured on the board. DDR buffer 64 KiB at 0x11000000 (no overlap with the boot captures at 0x10000000 / 0x10800000). `-DAJ_NSAMP=n` overrides it.
+Firmware only; the bitstream of 4.9.1 stays. Version string "4.9.4".

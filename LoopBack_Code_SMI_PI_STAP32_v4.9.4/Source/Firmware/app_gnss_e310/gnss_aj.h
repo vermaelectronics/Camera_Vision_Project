@@ -29,13 +29,13 @@
 
 #include <stdint.h>
 
-/* DDR buffer for the captures: 4096 samples x 2 channels x 4 bytes = 32 KiB.
+/* DDR buffer for the captures: AJ_NSAMP (8192) samples x 2 channels x 4 bytes = 64 KiB.
  * Away from the boot captures (0x10000000, 0x10800000; gnss_capture.h). */
 #ifndef GNSS_AJ_BUF_ADDR
 #define GNSS_AJ_BUF_ADDR   0x11000000U
 #endif
 
-#define GNSS_AJ_VERSION_STR  "4.9.3"
+#define GNSS_AJ_VERSION_STR  "4.9.4"
 
 /* RF profiles (gnss_band=). RX and TX are always set together, so the
  * retransmitted signal comes out on the frequency it came in on and the

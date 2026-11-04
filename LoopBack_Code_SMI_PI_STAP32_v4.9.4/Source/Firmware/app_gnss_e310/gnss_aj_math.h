@@ -64,7 +64,9 @@ extern "C" {
 #define AJ_MAXWS      5     /* weight scale: words hold w * 2^ws (SMI-PI 4.4)  */
 #define AJ_MAXSH      7     /* output make-up shift, 6 dB per step (4.5; the 4.1-4.4 core stops at 4) */
 #define AJ_OUT_HEADROOM_DB  3.0   /* output may be this far above the clean level      */
-#define AJ_NSAMP   4096     /* samples per block (one DMA capture)            */
+#ifndef AJ_NSAMP
+#define AJ_NSAMP   8192     /* samples per block (one DMA capture). 4.9.4: 8192 (was 4096); 16384 broke the chirp detector and 2 tests */
+#endif
 
 #define AJ_MODE_STAP  0     /* RX1 31 + RX2 32 + 2 image taps (default)       */
 #define AJ_MODE_RX2   1     /* RX2 16 + 2 image taps                          */
