@@ -1,4 +1,4 @@
-# SMI-PI 4.9.1 - STAP with 32 taps per antenna (based on 4.8.2)
+# SMI-PI 4.9.2 - STAP with 32 taps per antenna (based on 4.8.2)
 
 One change against 4.8.2: the space-time filter has **32 taps per antenna** (it had 16). Everything else of 4.8.2 is kept: bypass when there is no jammer,
 RX2 normalisation, the two image taps, the pulse blanker, the reference tap at delay 4, the ARM weight solver (now 65 adaptive weights + 2 image taps),
@@ -68,3 +68,19 @@ Fix: the RX1 samples are only 12 bits wide, so the RX1 taps are cheap to build f
 (88 %) and about 55 % LUT. The filter is mathematically the same: the HLS C simulation (scenarios 1-14, 16-21) still passes 20 of 20.
 **Not synthesised:** the saving is my estimate from the log. If the next build still overflows, raise `SMI_NFAB` (up to 31; each tap saves 3 DSP48) in `smi_pi.h`; if the LUT use or the timing of the LUT multipliers is the problem, lower it.
 Firmware string 4.9.1; the bitstream version (0x00040900) is unchanged because no HDL changed.
+
+## 4.9.2: diagonal loading alpha tuned to 2 to 5 sigma^2 (firmware only)
+
+Question from the board test of 4.9.1 (residual +15 to +25 dB, blanker cycling): is the loading tuned as "alpha = 2 to 5 sigma^2, clamped just above the thermal noise"? It was **not**:
+
+| | 4.9.1 and 4.8.2 | 4.9.2 |
+|---|---|---|
+| alpha on the RX2 taps | 1 x s2 | **2 x s2** |
+| alpha on the RX1 taps | 4 x s2 | **5 x s2** |
+| s2 (sigma^2) | the canceller's own estimate Pout/(1+\|w\|^2), limited only to 0.25 LSB^2 .. input power; it **contains the jammer residual** | with a learned noise floor, **held within 1.25 x of the learned floor** (`AJ_SIG2_BAND`); the old estimate is used only while no floor is learned |
+
+So with a learned floor alpha stays between 2 and 5 times the thermal noise (RX2 taps 2x, RX1 reflection taps 5x) and no longer follows the jammer residual. Before, a poor null raised s2, which raised the loading, which weakened the null: this can
+keep a residual of +15 to +25 dB and make it fluctuate. I have **not proven** that this is what happened on the board; the C simulation does not show the problem (residual +0.2 dB in all scenarios, with or without the change).
+Simulation, 32 taps: all 20 scenarios still PASS; suppression is about 1 dB lower on clean jammers (50.6 against 51.8 dB, scenario 21) and 0.9 dB lower on the long-echo cases, satellite loss unchanged. Constants: `AJ_RX2_LOAD`, `AJ_RX1_LOAD`, `AJ_SIG2_BAND` in `gnss_aj_math.h`.
+**Firmware only: the bitstream of 4.9.1 stays.** Files: `gnss_aj_math.c`, `gnss_aj_math.h`, `gnss_aj.h` (version "4.9.2").
+**The noise floor must be learned** (jammer OFF for 10 s after `gnss_tx=1`), otherwise the old self-estimate is still what sets the loading.

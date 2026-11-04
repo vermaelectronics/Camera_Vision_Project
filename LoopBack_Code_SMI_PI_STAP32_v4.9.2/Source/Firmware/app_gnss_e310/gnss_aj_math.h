@@ -77,9 +77,19 @@ extern "C" {
 #define AJ_AVG       0.5
 #endif
 
-/* Extra diagonal loading on RX1's own taps (see gnss_aj_math.c). */
+/* Diagonal loading alpha, in units of the thermal noise power sigma^2 (4.9.2).
+ * RX1's own taps (the reflection taps) get more than the RX2 taps (see gnss_aj_math.c).
+ * With a learned noise floor alpha is held at AJ_RX2_LOAD .. AJ_RX1_LOAD x sigma^2 whatever the jammer
+ * residual does ("alpha 2 to 5 sigma^2, clamped just above the thermal noise"). */
 #ifndef AJ_RX1_LOAD
-#define AJ_RX1_LOAD  4.0
+#define AJ_RX1_LOAD  5.0
+#endif
+#ifndef AJ_RX2_LOAD
+#define AJ_RX2_LOAD  2.0
+#endif
+/* With a learned floor the canceller's noise estimate is held within this factor of it (linear). */
+#ifndef AJ_SIG2_BAND
+#define AJ_SIG2_BAND 1.25
 #endif
 
 /* Lowest noise estimate allowed [LSB^2]: 12-bit quantisation of I and Q. */

@@ -592,7 +592,7 @@ int aj_compute(const uint32_t *buf, int nsamp, aj_result_t *r)
 		/* Each tap is loaded with ITS noise: RX2's normalised noise is
 		 * nr2 x RX1's when g2 could not equalise them (|g2| < 4). */
 		nr[i] = is_rx2(idx[i]) ? nr2 : 1.0;
-		ld[i] = ((idx[i] < AJ_NT) ? AJ_RX1_LOAD : 1.0) * nr[i];
+		ld[i] = ((idx[i] < AJ_NT) ? AJ_RX1_LOAD : AJ_RX2_LOAD) * nr[i];
 	}
 	p1 = FR[AJ_REF][AJ_REF];
 	p2 = FR[AJ_NT + AJ_REF][AJ_NT + AJ_REF] / (g2 * g2);
@@ -616,6 +616,16 @@ int aj_compute(const uint32_t *buf, int nsamp, aj_result_t *r)
 	 * last estimate (or the input power), solve, take Pout/(1+|w|^2), repeat
 	 * until it stops moving. Converges in 1-2 passes once tracking, in
 	 * ~5 from a cold start into a 40 dB jammer. */
+	/* 4.9.2: with a learned thermal floor the noise estimate that sets the loading is held within AJ_SIG2_BAND of
+	 * it. The estimate Pout/(1+|w|^2) contains the jammer residual the filter cannot remove, so without the
+	 * clamp a poor null raised the loading, which weakened the null (a loop). The loading is then
+	 * alpha = AJ_RX2_LOAD (RX2 taps) .. AJ_RX1_LOAD (RX1 taps) x the floor, i.e. 2 to 5 sigma^2. */
+	if(r->noise_ref > 0.0) {
+		double nlo = r->noise_ref / AJ_SIG2_BAND, nhi = r->noise_ref * AJ_SIG2_BAND;
+		if(nlo > lo) lo = nlo;
+		if(nhi < hi) hi = nhi;
+		if(hi < lo) hi = lo;
+	}
 	s2 = r->sig2_prev;
 	if(s2 < lo || s2 > hi) s2 = hi;
 	for(it = 0; it < 10; it++) {
