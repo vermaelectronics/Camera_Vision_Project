@@ -74,10 +74,11 @@ module tb_stap_top;
         begin
             @(posedge clk);
             awaddr <= a; awvalid <= 1; wdata <= d; wvalid <= 1; bready <= 1;
+            @(posedge clk);                  // valids now visible
             while (awvalid || wvalid) begin
-                @(posedge clk);
-                if (awready && awvalid) awvalid <= 0;
+                if (awready && awvalid) awvalid <= 0;   // handshake at this edge
                 if (wready  && wvalid)  wvalid  <= 0;
+                @(posedge clk);
             end
             while (!bvalid) @(posedge clk);
             @(posedge clk); bready <= 0;

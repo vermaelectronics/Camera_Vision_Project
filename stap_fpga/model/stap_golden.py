@@ -30,6 +30,13 @@ NL, NP = 2 * N - 1, M * (M + 1) // 2
 D = LAM / 2
 
 
+def configure(m=7, n=16, fs=60e6, fif=10e6):
+    """Set the array size and sampling of the scenario (module-level globals)."""
+    global M, N, T, NL, NP, FS, TS, IF
+    M, N, FS, IF = m, n, fs, fif
+    T, NL, NP, TS = M * N, 2 * N - 1, M * (M + 1) // 2, 1 / FS
+
+
 def ca_code(prn=1):
     g2s = [5, 6, 7, 8, 17, 18, 139, 140, 141, 251, 252, 254, 255, 256, 257, 258, 469, 470,
            471, 472, 473, 474, 509, 512, 513, 514, 515, 516, 859, 860, 861, 862]
@@ -73,7 +80,7 @@ def scenario(seed, jam_db=50.0, snr_db=-31.37, jam_type="rpm",
     xs = ca_code(1)[np.floor(t * CODE_F).astype(int) % 1023] * np.exp(2j * np.pi * IF * t)
     J = len(jam_theta)
     pj = 10 ** (jam_db / 10)
-    wbif = np.array([8e6, 10e6, 12e6, 9e6, 11e6, 7e6])[:J]
+    wbif = IF + np.array([-2e6, 0.0, 2e6, -1e6, 1e6, -3e6])[:J]   # MATLAB: 8/10/12 MHz around a 10 MHz IF
     if jam_type == "rpm":                                   # GenWBInterSig2.m
         un = np.sqrt(0.1) * rng.standard_normal((J, SN))
         jam = np.exp(1j * (2 * np.pi * wbif[:, None] * TS * np.arange(SN) + 100 * un))
@@ -91,7 +98,11 @@ def scenario(seed, jam_db=50.0, snr_db=-31.37, jam_type="rpm",
 
 
 # ----------------------------------------------------------------------------- bit-true models
-def adc(x_scaled, dw, adc_bits):
+def adc(x_scaled, dw, adc_bits, align="left"):
+    if align == "right":           # AD9361/axi_ad9361 RX format: 12-bit value, sign-extended into 16
+        hi = 2 ** (adc_bits - 1)
+        q = lambda v: np.clip(np.round(v), -hi, hi - 1).astype(np.int64)
+        return q(x_scaled.real), q(x_scaled.imag)
     step = 2 ** (dw - adc_bits)
     lim_hi, lim_lo = 2 ** (dw - 1) - step, -2 ** (dw - 1)
     q = lambda v: np.clip(np.round(v / step) * step, lim_lo, lim_hi).astype(np.int64)
@@ -150,7 +161,9 @@ def cov_from_corr(cre, cim, xr, xi, L):
     return R
 
 
-def steering(theta, f_if=IF, frf=FC):
+def steering(theta, f_if=None, frf=None):
+    f_if = IF if f_if is None else f_if
+    frf = FC + f_if if frf is None else frf
     ss = np.exp(-2j * np.pi * D * frf / C * np.sin(np.deg2rad(theta)) * np.arange(M))
     st = np.exp(2j * np.pi * f_if * TS * np.arange(N))
     return np.kron(ss, st)
@@ -178,21 +191,29 @@ def main():
     ap.add_argument("--jam", choices=["rpm", "lfm"], default="rpm")
     ap.add_argument("--mode", choices=["mvdr", "pi"], default="mvdr")
     ap.add_argument("--solver", default=None, help="path to stap_solve_cli")
+    ap.add_argument("--M", type=int, default=7, help="antenna elements (solver must be built with the same STAP_M)")
+    ap.add_argument("--fs", type=float, default=60e6, help="sample rate [Hz]")
+    ap.add_argument("--fif", type=float, default=10e6, help="signal IF [Hz] (0 = complex baseband)")
+    ap.add_argument("--jam-theta", default="-20,30,50", help="jammer angles [deg], comma separated")
+    ap.add_argument("--adc-align", choices=["left", "right"], default="left",
+                    help="left: ADC_BITS left-aligned in DW (default); right: AD9361 12-bit right-aligned")
     a = ap.parse_args()
+    configure(a.M, 16, a.fs, a.fif)
+    jth = tuple(float(v) for v in a.jam_theta.split(","))
     os.makedirs(a.out, exist_ok=True)
     here = os.path.dirname(os.path.abspath(__file__))
     solver = a.solver or os.path.join(a.out, "stap_solve_cli")
     L, SL = a.L, a.L + 2 * N - 2
     CW = 2 * a.dw + 2 + a.lmax_log2
 
-    s_in, j_in, n_in = scenario(a.seed, a.jam_db, jam_type=a.jam)
+    s_in, j_in, n_in = scenario(a.seed, a.jam_db, jam_type=a.jam, jam_theta=jth)
     tot = s_in + j_in + n_in
     rms = np.sqrt(np.mean(np.abs(tot) ** 2) / 2)               # per I/Q component
-    g = (2 ** (a.dw - 1)) * 10 ** (-a.backoff_db / 20) / rms
-    xr, xi = adc(g * tot, a.dw, a.adc_bits)
+    fsc = 2 ** (a.adc_bits - 1) if a.adc_align == "right" else 2 ** (a.dw - 1)
+    g = fsc * 10 ** (-a.backoff_db / 20) / rms
+    xr, xi = adc(g * tot, a.dw, a.adc_bits, a.adc_align)
     S, J, Nn = g * s_in, g * j_in, g * n_in                     # analysis components (ADC LSB units)
-    clip = np.mean((np.abs(xr) >= 2 ** (a.dw - 1) - 2 ** (a.dw - a.adc_bits)) |
-                   (np.abs(xi) >= 2 ** (a.dw - 1) - 2 ** (a.dw - a.adc_bits)))
+    clip = np.mean((np.abs(xr) >= fsc - 1) | (np.abs(xi) >= fsc - 1))
 
     # ---- covariance engine (bit exact) + C solver
     cre, cim = corr_golden(xr, xi, L)
@@ -268,7 +289,8 @@ def main():
     rep = {
         "adc_bits": a.adc_bits, "adc_clip_fraction": float(clip),
         "SINR_in_dB": 10 * np.log10(Ps_in / (Pi_in + Pn_in)),
-        "INR_per_jammer_dB": 10 * np.log10(Pi_in / Pn_in / 3),
+        "M": M, "fs_Hz": FS, "IF_Hz": IF, "mode": a.mode, "jammers_deg": list(jth),
+        "INR_per_jammer_dB": 10 * np.log10(Pi_in / Pn_in / len(jth)),
         "float_ref": {
             "JRI_dB": 10 * np.log10(Pi_in / pwr(through(wf, J)[ev])),
             "SINR_out_dB": 10 * np.log10(pwr(through(wf, S)[ev]) /
@@ -284,13 +306,13 @@ def main():
         },
         "null_depth_dB": {},
     }
-    fband = np.linspace(0, 20e6, 41)
+    fband = np.linspace(IF - 10e6, IF + 10e6, 41)          # +-10 MHz around the signal
     look = np.mean([abs(np.conj(wq) @ steering(0.0, f, FC + f)) ** 2 for f in fband])
-    for th in (-20, 30, 50):
+    for th in jth:
         gq = np.mean([abs(np.conj(wq) @ steering(th, f, FC + f)) ** 2 for f in fband])
         gf = np.mean([abs(np.conj(wf) @ steering(th, f, FC + f)) ** 2 for f in fband])
         lf = np.mean([abs(np.conj(wf) @ steering(0.0, f, FC + f)) ** 2 for f in fband])
-        rep["null_depth_dB"][f"{th:+d}deg"] = {"fixed": 10 * np.log10(gq / look),
+        rep["null_depth_dB"][f"{th:+.0f}deg"] = {"fixed": 10 * np.log10(gq / look),
                                                "float": 10 * np.log10(gf / lf)}
     with open(os.path.join(a.out, "report.json"), "w") as f:
         json.dump(rep, f, indent=2)

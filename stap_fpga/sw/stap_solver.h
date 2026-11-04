@@ -13,8 +13,20 @@
 
 #include <stdint.h>
 
+/* Array size. Override per target with a "stap_config.h" next to this file
+ * (or -DSTAP_M=.. -DSTAP_N=..). Must match the M/N parameters of the RTL;
+ * the driver checks this against the CONFIG register at start-up.          */
+#if defined(__has_include)
+#  if __has_include("stap_config.h")
+#    include "stap_config.h"
+#  endif
+#endif
+#ifndef STAP_M
 #define STAP_M   7                              /* antenna elements           */
+#endif
+#ifndef STAP_N
 #define STAP_N   16                             /* taps per element           */
+#endif
 #define STAP_T   (STAP_M * STAP_N)              /* 112 adaptive weights       */
 #define STAP_NL  (2 * STAP_N - 1)               /* lags per channel pair (31) */
 #define STAP_NP  (STAP_M * (STAP_M + 1) / 2)    /* channel pairs (28)         */

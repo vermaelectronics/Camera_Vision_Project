@@ -59,6 +59,18 @@ per channel. It uses 192 of 220 DSP48E1, 59 of 140 RAMB36 and about 50 % of the 
 ./scripts/synth_yosys.sh 2 8 xc7     # FOLD, LAGP, family
 ```
 
+The model can also describe other arrays and front ends. This is the E310 CRPA case (2 elements,
+30.72 MSPS complex baseband, 12-bit right-aligned AD9361 samples, 12-bit output). Build the
+solver with `-DSTAP_M=2` first:
+
+```bash
+python3 model/stap_golden.py --M 2 --fs 30.72e6 --fif 0 --jam-theta 30 --adc-bits 12 --adc-align right --ow 12 --mode pi --solver <cli built with -DSTAP_M=2>
+```
+
+The array size of the C solver is set by `STAP_M`/`STAP_N`, or by a `stap_config.h` placed next to `stap_solver.h`.
+
+**Integration example:** `../LoopBack_Pipeline_CRPA` puts this core (M=2) into the ANTSDR E310 AD9361 loopback design as a CRPA anti-jam stage.
+
 ## Parameters
 
 | Parameter   | Default | Meaning |
@@ -84,6 +96,7 @@ per channel. It uses 192 of 220 DSP48E1, 59 of 140 RAMB36 and about 50 % of the 
 | 0x0018 | CORR_LEN | RW | snapshots L (default 5000) |
 | 0x001C | OUT_SHIFT | RW | output arithmetic right shift (the solver recommends a value) |
 | 0x0020 | RAW_BASE | RW | first sample of the raw window |
+| 0x0024 | USER_CTRL | RW | free control word, exported on port `user_ctrl`; integration wrappers use it (the E310 CRPA uses bit0 = anti-jam/bypass, bit1 = TX2 copy) |
 | 0x0100 + 4·(64m+i) | RAW | RO | captured sample `RAW_BASE+i` of channel m, `{re16, im16}` |
 | 0x1000 + 8t / +4 | W_RE / W_IM | WO | shadow weight t (t = m·16 + k), two's complement |
 | 0x8000 + 16e + {0,4,8,C} | CORR | RO | correlation e: re lo, re hi, im lo, im hi (64-bit sign-extended) |

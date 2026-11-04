@@ -20,6 +20,8 @@
 //   0x0018  CORR_LEN    RW  number of snapshots L
 //   0x001C  OUT_SHIFT   RW  [5:0] output right shift
 //   0x0020  RAW_BASE    RW  first sample index for the raw-sample window
+//   0x0024  USER_CTRL   RW  free control word, exported on port user_ctrl
+//                           (used by integration wrappers, e.g. bypass select)
 //   0x0100 + 4*(64*m+i) RO  captured sample RAW_BASE+i of channel m (i < 64),
 //                           {re[15:0], im[15:0]}  (valid when corr engine idle)
 //   0x1000 + 8*t        WO  weight t real part  (WW LSBs, two's complement)
@@ -53,6 +55,7 @@ module stap_top #(
     output wire [OW-1:0]     y_re,
     output wire [OW-1:0]     y_im,
     output wire              irq,          // level: corr_done
+    output reg  [31:0]       user_ctrl,    // register 0x0024
     // AXI4-Lite slave
     input  wire [15:0]       s_axi_awaddr,
     input  wire              s_axi_awvalid,
@@ -129,6 +132,7 @@ module stap_top #(
             w_have        <= 1'b0;
             corr_len      <= 5000;
             raw_base      <= {LMAX_LOG2{1'b0}};
+            user_ctrl     <= 32'd0;
             out_shift     <= 6'd0;
             corr_start    <= 1'b0;
             w_commit      <= 1'b0;
@@ -172,6 +176,7 @@ module stap_top #(
                     12'h018: corr_len  <= w_wdata[LMAX_LOG2:0];
                     12'h01C: out_shift <= w_wdata[5:0];
                     12'h020: raw_base  <= w_wdata[LMAX_LOG2-1:0];
+                    12'h024: user_ctrl <= w_wdata;
                     default: ;
                     endcase
                 end
@@ -237,6 +242,7 @@ module stap_top #(
                     12'h018: s_axi_rdata <= corr_len;
                     12'h01C: s_axi_rdata <= {26'd0, out_shift};
                     12'h020: s_axi_rdata <= raw_base;
+                    12'h024: s_axi_rdata <= user_ctrl;
                     default: s_axi_rdata <= 32'd0;
                     endcase
                 end

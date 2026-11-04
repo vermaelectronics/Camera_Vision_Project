@@ -1,0 +1,198 @@
+# ANTSDR E310 V1: GNSS L1 loopback pipeline with CRPA anti-jam
+
+```
+RX1 ─┐                          ┌─────────────── PL (l_clk) ───────────────┐
+     ├─ AD9361 ─ axi_ad9361 ────┤ gnss_stap ──────► gnss_passthrough ──────┼─ axi_ad9361 ─ AD9361 ─ TX1
+RX2 ─┘        (2R2T, 12 bit)  │ │ 2 el × 16 taps    (unchanged: elastic    │                         TX2
+                              │ │ STAP beamformer    buffer, [11:0]→[15:4])│
+                              │ └───────▲──────────────────────────────────┘
+                              │         │ AXI4-Lite 0x43C1_0000 (CDC bridge)
+                              │   ARM (sys_cpu_clk): gnss_stap.c + stap_solver.c
+                              │   covariance → Cholesky → weights → commit
+                              └─► util_wfifo → DMA (raw RX capture, untouched)
+```
+
+This is `LoopBack_Pipeline_noCRPA` with the STAP core from `stap_fpga` added as
+a **CRPA (controlled-reception-pattern antenna) anti-jam stage**. RX1 and RX2 of the
+AD9361 form a 2-element array. Both channels share one LO, so the array is
+phase-coherent. The stage sits between the AD9361 RX outputs and the existing
+`gnss_passthrough`. Everything downstream (elastic buffers, RX→TX alignment,
+DAC mux, TX safety interlocks, DMA capture) is unchanged.
+
+**At reset the stage is a bypass.** The output is bit-for-bit the RX samples,
+so a board with this bitstream behaves exactly like the plain loopback until
+software turns the beamformer on.
+
+## What a 2-element array can do
+
+| Scenario (model: 30.72 MSPS, 12-bit ADC, wideband noise jammer) | Jammer suppression | Null depth | SINR in → out |
+|---|---|---|---|
+| 1 jammer, JSR 50 dB, power inversion (default) | 35.1 dB | −39 dB | −50.1 → −31.3 dB |
+| 1 jammer, JSR 70 dB, power inversion | 45.3 dB | −52 dB | −70.0 → −31.5 dB |
+| 1 jammer, JSR 50 dB, MVDR (look 0°, λ/2 spacing known) | 49.2 dB | −37 dB | −50.1 → −20.2 dB |
+| **2 jammers**, power inversion | **0.2 dB** | – | no improvement |
+
+- **Two elements can null one jammer.** Nulling N wideband jammers needs at
+  least N+1 antennas, which is a property of the array, not of this
+  implementation. The second case in the table shows that more jammers than
+  degrees of freedom get through untouched. For more jammers you need more
+  phase-coherent receive channels, for example two synchronised AD9361s or a
+  4-channel transceiver, with `M` raised in `gnss_stap.v` and `stap_config.h`.
+- The fixed-point FPGA results match floating point to within 0.1 dB in every case.
+- Power inversion needs no antenna geometry or calibration. MVDR needs the
+  antenna spacing and look direction, and works properly only after RX1/RX2
+  phase calibration.
+- These are simulation numbers. On the bench, expect less because of RX1/RX2
+  mismatch and the independent AGC loops of the two channels. See
+  [Bring-up](#bring-up-on-the-board).
+
+## What was added or changed
+
+| File | Change |
+|---|---|
+| `Source/HDL/gnss_stap.v` | **New.** CRPA stage wrapper: same `adc_*` interface in and out, bypass mux, AXI split (local registers at 0xF000, the rest through the CDC bridge), status capture. |
+| `Source/HDL/stap/stap_fir.v`, `stap_corr.v`, `stap_top.v` | **New**, copied from `stap_fpga/rtl`. Instantiated with M=2, N=16, FOLD=2, LAGP=8, OW=12. |
+| `Source/HDL/stap/axil_cdc.v` | **New.** AXI4-Lite bridge from `sys_cpu_clk` to `l_clk`, toggle handshake. It times out after 4096 cycles and returns `0xDEADC10C` when `l_clk` is not running, so a CPU access cannot hang GP0. |
+| `Source/IP/gnss_stap/gnss_stap_ip.tcl` | **New.** IP packaging, VLNV `antsdr:gnss:gnss_stap:1.0`, 64 kB aperture. |
+| `Source/XDC/gnss_stap_cdc.xdc` | **New.** CDC constraints, added at project level with PROCESSING_ORDER LATE, same scheme as `gnss_passthrough_cdc.xdc`. |
+| `Source/BlockDesign/system_bd.tcl` | **CRPA MOD-3**: `gnss_stap` inserted between `axi_ad9361/adc_*` and `gnss_passthrough/adc_*`, AXI at **0x43C1_0000**, catalog check. |
+| `Automation/Linux/build_all.sh` | Stage 3 also packages `gnss_stap`. Stage 4 checks it is there. |
+| `Vivado/Scripts/create_project.tcl` | Adds `gnss_stap_cdc.xdc` (LATE). |
+| `Vitis/Scripts/build_software.tcl` | Links `libm`, which the solver needs. |
+| `Source/Firmware/app_gnss_e310/gnss_stap.[ch]` | **New.** Driver: probe, adaptation (capture → read → solve → commit), background service, console commands, diagnostics. |
+| `…/stap_solver.[ch]`, `stap_config.h` | **New.** Weight solver from `stap_fpga/sw`, compiled for M=2 by `stap_config.h`. |
+| `…/console.c` | `uart_read_char()` polls the UART and runs `gnss_stap_service()` while waiting, so adaptation continues in the background. |
+| `…/command.c` | `stap_*` console commands. |
+| `…/gnss_l1.c` | Self-test probes the CRPA stage. This check is not fatal, because bypass is the plain loopback. |
+| `…/main.c` | Deployment build (`GNSS_DEPLOY_AUTO_TX`): after TX starts, one adaptation runs, then the anti-jam output is enabled with 100 ms background adaptation. Disable with `GNSS_DEPLOY_NO_CRPA`. |
+| `…/gnss_info.c` | Menu shows the CRPA state and commands. |
+| `Source/Config/board_e310_v1.json` | `gnss_stap` address and `crpa_register_map`. |
+| `Source/Sim/`, `Automation/Linux/run_sim.sh` | **New.** Bit-true model and integration testbench (below). |
+
+`gnss_passthrough.v`, `system_top.v`, `system.xdc`, the PS7 configuration and
+the vendor tree are unchanged.
+
+## Datapath details
+
+- **Input:** `adc_data_*[11:0]` of RX1 and RX2, re-sign-extended in the wrapper.
+  `in_valid = adc_valid_i0 & adc_enable_i0`. `axi_ad9361_lvds_if` asserts
+  `adc_valid` at most every 2nd `l_clk` (1R1T and 2R2T). That is the rate
+  FOLD=2 requires, so the filter needs only 16 complex MACs (48 DSP48).
+  If the strobes ever come faster, `STATUS.overrun` flags it.
+- **Filter:** `y[n] = Σ_m Σ_k conj(w[m·16+k]) · x_m[n+k]`, 18-bit weights, exact
+  43-bit accumulation, `>>> OUT_SHIFT`, **saturated to 12 bits**, so the
+  passthrough's `[11:0]→[15:4]` alignment can never wrap.
+- **Covariance:** 5000 snapshots, 3 channel pairs × 31 lags, 8 lags per pass.
+  That takes about 60k `l_clk` cycles, ≈ 1 ms at 30.72 MSPS. The ARM rebuilds
+  the exact 32×32 `R = Xm·Xm'/L` with the edge-sample correction, then solves
+  with Cholesky in double precision. The solve is microseconds for T=32.
+- **Weight switch:** the weights are double-buffered and switch on a sample
+  boundary, so background updates do not glitch the TX stream.
+- **Outputs:** channel 0 carries the beamformer. Channel 1 carries raw RX2,
+  or a copy of the beamformer when `stap_ch1=1`.
+
+## Console
+
+```
+stap_status?        state, element powers, predicted output power, power removed
+stap_update=1       one adaptation now (blocking, ~ms)
+stap_en=1 / =0      TX carries the anti-jam output / bypass (raw RX1)
+stap_auto=100       adapt every 100 ms in the background (0 = off)
+stap_mode=0 / =1    power inversion (default) / MVDR
+stap_theta=0        MVDR look direction [deg]
+stap_len=5000       snapshots per estimate (64..8162)
+stap_ch1=0 / =1     TX2 = raw RX2 / TX2 = beamformer
+```
+
+`stap_en=1` is refused until the first successful update, so TX never carries
+an empty beamformer (all-zero weights mean silence). Typical session, after
+the self-test and with the conducted TX path set up as before:
+
+```
+gnss_tx=1          (unchanged loopback start, attenuation interlock as before)
+stap_update=1
+stap_en=1
+stap_auto=100
+stap_status?
+```
+
+The register map is in the headers of `Source/HDL/gnss_stap.v` and
+`Source/HDL/stap/stap_top.v`, and in `Source/Config/board_e310_v1.json`.
+
+## Verification
+
+### Done here, without Xilinx tools
+
+`Automation/Linux/run_sim.sh` needs gcc, python3 + numpy and iverilog. It builds the
+host copy of the firmware solver, generates the E310 scenario (2 elements,
+30.72 MSPS baseband, 12-bit samples, 50 dB JSR jammer at 30°), and runs
+`Source/Sim/tb_gnss_stap.v`. The testbench runs **`gnss_stap` → `gnss_passthrough`** with two
+asynchronous clocks (61.44 MHz `l_clk`, valid on every 2nd clock; 100 MHz AXI):
+
+```
+A: GSTP=47535450 STAP=53544150 CONFIG=12101002 GCP1=47435031
+B: bypass DAC samples matched 360, mismatched 0
+C: correlations 0/93 mismatches, edge samples 0/120 mismatches
+D: STAP outputs 2000 checked, 0 mismatches; DAC matched 1960, mismatched 0; overrun=0
+E: l_clk stopped: STAP ID read deadc10c, WRAP_STATUS 00010000, GSTP 47535450
+*** PASS tb_gnss_stap ***
+```
+
+- **A:** registers respond: the local wrapper, the STAP core through the CDC bridge, and the passthrough.
+- **B:** bypass delivers TX = RX << 4, as in the original design.
+- **C:** covariance results and edge samples are bit-exact.
+- **D:** every anti-jam output sample is bit-exact, and the DAC stream carries those samples left-aligned.
+- **E:** with `l_clk` stopped, the bridge times out, returns `0xDEADC10C`, and the bus stays usable.
+
+- **Firmware:** `gnss_stap.c`, `stap_solver.c` and `console.c` compile warning-free
+  with host gcc against stub BSP headers. `command.c`, `gnss_info.c`, `gnss_l1.c` and
+  `main.c` show no errors from the new code; only BSP symbols were missing on the host.
+- **Resources:** Yosys (`synth_xilinx -family xc7`) estimate for
+  `gnss_stap` alone: 72 DSP48E1, 19 RAMB36, ~9.6k LUT, ~10k FF. The XC7Z020
+  has 220 / 140 / 53.2k / 106k, and the vendor E310 design uses part of that.
+
+### Not done
+
+- **Not built in Vivado/Vitis 2023.2, and not run on the board.** The IP
+  packaging, block design, constraint and XSCT changes follow the existing
+  scripts line for line, but they have not been executed.
+- **Not timing-closed.** `rx_clk` is constrained at 8 ns. The STAP datapath is
+  fully pipelined, but check `BUILD_TIMING` in `Build/Logs/build.log`.
+- No RF test.
+
+## Bring-up on the board
+
+1. Build as before. Stage 3 now packages two IPs:
+   `./Automation/Linux/build_all.sh --jobs 16 --to boot`.
+2. The console should print `gnss_stap: CRPA stage present at 0x43c10000: 2 elements x 16 taps`
+   after `SELFTEST: PASS`. If it reports the stage absent, the IP did not make
+   it into the bitstream.
+3. **Connect RX2.** Both elements need an antenna, or for a conducted test a
+   splitter with different cable lengths, plus a jammer source combined in.
+   With RX2 empty the array has nothing to work with.
+4. **Gain control:** the vendor configuration runs a slow-attack AGC on RX1 and
+   RX2 independently. For the deepest nulls, set both channels to the same
+   manual gain (vendor commands `rx1_gc_mode=0`, `rx2_gc_mode=0`, then
+   `rx1_rf_gain=N`, `rx2_rf_gain=N`). Otherwise the
+   weights have to follow the AGC; `stap_auto=100` does that.
+5. Compare `stap_status?` "power removed" with the jammer on and off. With a
+   strong jammer on, it approximates the suppression.
+
+The TX safety rules of the loopback are unchanged: conducted, attenuated coax
+only. `gnss_tx=0` still silences TX1 immediately.
+
+## Build
+
+Unchanged from `README_LOOPBACK_PIPELINE.md`:
+
+```bash
+source /tools/Xilinx/Vivado/2023.2/settings64.sh
+source /tools/Xilinx/Vitis/2023.2/settings64.sh
+./Automation/Linux/build_all.sh --jobs 16 --to boot 2>&1 | tee build_crpa.log
+```
+
+To run the simulation without Xilinx tools:
+
+```bash
+./Automation/Linux/run_sim.sh
+```
