@@ -277,9 +277,10 @@ static int add_event(XTime now, int type, double v1, double v2, double v3)
 #ifndef GNSS_SFAP_DEFAULT
 #define GNSS_SFAP_DEFAULT 0
 #endif
-#define AJ_SFAP_LAM    5            /* averaging 1 - 2^-5 per frame: 32 frames = 270 us */
+#define AJ_SFAP_LAM    5            /* averaging 1 - 2^-5 per frame: 32 frames (hop = N/2 samples; 530 us at N = 2048) */
 static int      sfap_hw, sfap_mode = GNSS_SFAP_DEFAULT, sfap_sel_set = -1;
 static uint32_t sfap_load_set;
+static uint32_t sfap_n = 1024U;           /* SFAP transform size, read from the bitstream */
 static XTime    sfap_t0, iq_t0;
 static int      iq_hw, iq_on = 1, iq_n;
 static double   iq_kr[2], iq_ki[2];        /* corrector k of RX1, RX2 (smoothed) */
@@ -374,7 +375,7 @@ static void sfap_service(XTime now)
 	sfap_t0 = now;
 	nz = noise_now();
 	if(nz <= 0.0) nz = 2.0;                  /* not learned yet: about 1 LSB per component */
-	ld = (uint32_t)(nz * 256.0 * 512.0 / 4.0);
+	ld = (uint32_t)(nz * 256.0 * (double)sfap_n / 2.0 / 4.0);   /* noise per bin = noise * 16^2 * sum(w^2) = N/2, halved once (/4) */
 	if(ld < 64U) ld = 64U;
 	if(sfap_load_set == 0U || (double)ld > 1.3 * (double)sfap_load_set || (double)ld < 0.77 * (double)sfap_load_set) {
 		gnss_pt_sfap_load(ld);
@@ -1168,6 +1169,10 @@ void gnss_aj_init(void)
 	blk_hw = ((gnss_pt_read(GNSS_PT_REG_AJ_INFO) & 0xFFU) >= GNSS_PT_AJ_LAYOUT_BLANK);
 	blk_seeded = 0;
 	sfap_hw = gnss_pt_sfap_present();
+	{	/* transform size from SFAP_INFO: 0x5FA9020B = 2^11; the 5.0 to 5.1.3 bitstreams (0x5FA90101) have 1024 points */
+		uint32_t v = gnss_pt_read(GNSS_PT_REG_SFAP_INFO);
+		sfap_n = (((v >> 8) & 0xFFU) >= 2U) ? (1U << (v & 0xFFU)) : 1024U;
+	}
 	iq_hw = sfap_hw && gnss_pt_sfap_has_iq();
 	if(!blk_hw)
 		console_print("[AJ] NOTE: the bitstream has no pulse blanker (AJ_INFO layout %d, needs 5 = bitstream 4.6): pulsed\n"

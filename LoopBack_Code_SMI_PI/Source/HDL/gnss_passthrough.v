@@ -283,7 +283,8 @@ module gnss_passthrough #(
   // v4.7 -- smi_pi_0 v2.4: the RX1 reference tap is at delay 4 (was 8), so a reflection of the jammer
   //         up to 11 samples later can be cancelled (was 7). AJ_INFO byte 2 = 4, layout 6; the firmware
   //         refuses to start the filter if that byte differs from its own AJ_REF.
-  localparam [31:0] CORE_VERSION = 32'h00050103;   // v5.1.3 (SFAP core 0x1B0..0x1C4, I/Q-image corrector 0x1C8..0x1E4, timing fixes)
+  localparam [31:0] CORE_VERSION = 32'h00050200;   // v5.2.0 (SFAP 2048-point; SFAP core 0x1B0..0x1C4, I/Q-image corrector 0x1C8..0x1E4)
+  localparam SFAP_LN = 11;                         // SFAP transform size 2^11 = 2048 (10 = 1024 as in 5.0 to 5.1.3)
   localparam [31:0] AJ_INFO      = 32'h10040C06;
   localparam [31:0] AJ_CFG_RESET = 32'h00000001;   // bypass
   localparam [31:0] AJ_NRM_RESET = 32'h00002000;   // g2 = 1.0
@@ -435,7 +436,7 @@ module gnss_passthrough #(
   //   0x1B8 SFAP_STAT  RO  [0] ready [1] underrun [2] overrun [3] sel_seen  [31:16] frames
   //   0x1BC SFAP_IN    RO  mean |I|+|Q| of RX1 over 32768 samples (x 32768)
   //   0x1C0 SFAP_OUT   RO  same, of the SFAP output
-  //   0x1C4 SFAP_INFO  RO  0x5FA90101: ID 0x5FA9, version 1.1
+  //   0x1C4 SFAP_INFO  RO  0x5FA9020B: ID 0x5FA9, version 2 (5.2), [7:0] = log2 of the transform size (11 = 2048 points; older bitstreams: 0x5FA90101 = 1024 points)
   //   0x1C8 SFAP_IQ1   RW  I/Q-image corrector of RX1, k = {ki[31:16], kr[15:0]} Q1.15 (x' = x - k x*); 0 = off
   //   0x1CC SFAP_IQ2   RW  the same for RX2; this write applies both
   //   0x1D0.. SFAP_IQS RO  statistics of the last 2^16 samples (>> 8): S2r1 S2i1 P1 S2r2 S2i2 P2 (k = S2 / 2P)
@@ -515,7 +516,7 @@ module gnss_passthrough #(
       12'h06E: axi_rdata <= v_sfap_stat;           // 0x1B8
       12'h06F: axi_rdata <= v_sfap_in;             // 0x1BC
       12'h070: axi_rdata <= v_sfap_out;            // 0x1C0
-      12'h071: axi_rdata <= 32'h5FA90101;          // 0x1C4
+      12'h071: axi_rdata <= {16'h5FA9, 8'h02, 8'(SFAP_LN)};   // 0x1C4
       12'h072: axi_rdata <= sfap_iq1_act;          // 0x1C8
       12'h073: axi_rdata <= sfap_iq2_act;          // 0x1CC
       12'h074: axi_rdata <= v_sfap_iqs[31:0];      // 0x1D0 S2r1
@@ -699,7 +700,7 @@ module gnss_passthrough #(
   wire [15:0] sfap_frames;
   wire [31:0] sfap_inmag, sfap_outmag;
   wire [191:0] sfap_iqstat;
-  sfap_core u_sfap (
+  sfap_core #(.LN(SFAP_LN)) u_sfap (
     .clk(clk), .en(sfap_en_c & smi_rst_n_r), .clr(sfap_clr_c), .sh_lam(sfap_lam_c), .load(sfap_ld_c), .mk(sfap_mk_c),
     .in_v(smi_in_valid),
     .x1i(adc_data_i0), .x1q(adc_data_q0), .x2i(adc_data_i1), .x2q(adc_data_q1),

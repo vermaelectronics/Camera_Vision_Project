@@ -216,3 +216,40 @@ the tools replicated it) feeding the window multiplier. The previous clock fix (
 
 Re-run in RTL after the change: statistics registers still equal the integer model, 50 dB barrage + echo 6.0 -> 2.7 dB, 60 dB 6.9 -> 2.0 dB, identical to 5.1.2.
 Latency +2 clocks. `CORE_VERSION` 0x00050103, firmware "5.1.3".
+
+## 12. 5.2.0: SFAP with a 2048-point transform (based on 5.1.3)
+
+One change against 5.1.3: the SFAP transform is **2048 points** (it was 1024): 30 kHz bins instead of 60 kHz, a frame of 2048 samples (33.3 us at 61.44 MS/s), a new frame every
+1024 samples (16.7 us), echoes up to about 200 samples instead of 100. STAP (the 16-tap filter), the I/Q corrector, the registers and the commands are unchanged.
+The size is the parameter `LN` of `sfap_core` (and `SFAP_LN` in `gnss_passthrough.v`); `LN = 10` gives the 5.1.3 design back.
+
+| Change | Detail |
+|---|---|
+| FFT | `sfap_fft` has a parameter `LN`. 2048 = one radix-2 stage (delay 1024, twiddle W_2048^j on the difference half, new ROM `sfap_tw_rom_2048`) followed by the five radix-2^2 pairs of the 1024-point transform. Latency 2121 clocks (1086 for 1024) |
+| Window | one ROM of 2048 entries, sin(pi m / 2048); the 1024-point transform reads every second entry |
+| Memories | input buffer 4096, reorder RAM 4096, frame RAM 4096, X1 buffer 2048, tail 1024, output FIFO 2048 (prime level N/4 = 512), covariance RAM 2048 bins: about twice the BRAM (28.5 tiles in the 5.1.x build, so roughly 55 of 140: an estimate) |
+| Averaging | `AJ_SFAP_LAM` is still 5: 32 frames, but a frame hop is now 1024 samples, so the memory is 530 us (270 us before). The number of averages per bin is kept, the settling time doubles |
+| Load | the ARM's diagonal load follows N/2 (`sfap_n` is read from the new `SFAP_INFO`, 0x5FA9020B; a 5.0 to 5.1.3 bitstream (0x5FA90101) is taken as 1024) |
+| Versions | `CORE_VERSION` 0x00050200, firmware "5.2.0" |
+
+Checked in RTL (iverilog): the 2048-point FFT against numpy, 81.5 dB signal-to-error on full-scale noise and 78.6 dB on a tone with noise (1024 points: 83.2 and 81.6 dB), latency 2121 clocks; the whole core with the I/Q corrector:
+barrage with echo, J/N 50 dB: 7.1 -> 2.8 dB excess over the jammer-free noise floor with the corrector, J/N 60 dB: 8.6 -> 1.5 dB (1024 points, same test: 6.3 -> 2.9 and 7.1 -> 2.2 dB; these
+differ by up to 0.3 dB from the numbers in section 8 because the test now feeds more zero samples at the end); the corrector statistics registers equal the integer model exactly for both sizes.
+`Tests/sfap/rtl/fft_check.py 11`, `SFAP_LN=11 python3 core_iq.py barrage 50`.
+
+Float model, same scene (`Tests/sfap/study.py`, 122880 samples, steady loss in dB, negative = gain; ideal STAP = a solve every block, with the 2 image taps):
+
+| jammer | STAP 16 taps | STAP 32 taps | SFAP 1024 + corrector | SFAP 2048 + corrector |
+|---|---|---|---|---|
+| barrage J/N 40 | -1.8 | -1.6 | -2.9 | -2.9 |
+| barrage + echo J/N 40 | -1.9 | -1.6 | -3.9 | -3.9 |
+| barrage + echo J/N 50 | -0.8 | -0.7 | -1.1 | -1.4 |
+| barrage + echo J/N 60 | 3.2 | 2.3 | 5.0 | 4.3 |
+| CW + echo J/N 40 | 0.2 | 0.9 | -0.5 | -1.2 |
+| chirp 100 us + echo J/N 40 | -1.8 | -1.4 | -4.5 | -4.6 |
+
+**Correction of an earlier table in this conversation:** a float comparison I gave before (STAP losing 5 to 12 dB, "STAP as built" failing everywhere) came from a run that was too short (61440 samples): the steady value
+averaged over the start-up, and the as-built STAP never got its first solve. It is withdrawn. With the run long enough, STAP and SFAP are within about 1 to 3 dB of each other in steady state in this scene, and
+neither the 32 taps nor the 2048 points change the steady value much; what they change is the longest echo that can be handled (STAP: 11 -> 27 samples, SFAP: about 100 -> 200 samples), which this scene (a 9-sample echo) does not exercise.
+
+**Not checked:** not synthesised (timing at 245.76 MHz is open: the 5.1.3 build was short by 0.034 ns and the new stage adds a 2048-entry covariance RAM, a window ROM twice the size and one more FFT stage); not run on the board.

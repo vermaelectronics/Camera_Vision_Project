@@ -1,6 +1,8 @@
 `timescale 1ns/1ps
 module tb_core;
+  parameter LN = 10;
   parameter NS = 40000;                 // samples
+  parameter PAD = 14000;                // zero samples fed after the data
   parameter MK = 0;
   parameter SH = 3'd5;
   parameter LOAD = 32'd30000;
@@ -12,7 +14,7 @@ module tb_core;
   reg signed [15:0] x1i, x1q, x2i, x2q;
   wire out_v; wire signed [15:0] out_i, out_q;
   wire ready, underrun, overrun; wire [15:0] frames; wire [31:0] in_mag, out_mag;
-  sfap_core dut (.clk(clk), .en(en), .clr(clr), .sh_lam(SH), .load(LOAD), .mk(MK[2:0]),
+  sfap_core #(.LN(LN)) dut (.clk(clk), .en(en), .clr(clr), .sh_lam(SH), .load(LOAD), .mk(MK[2:0]),
       .in_v(in_v), .x1i(x1i), .x1q(x1q), .x2i(x2i), .x2q(x2q), .k1r(K1R), .k1i(K1I), .k2r(K2R), .k2i(K2I), .iq_stat(iq_stat),
       .out_v(out_v), .out_i(out_i), .out_q(out_q), .ready(ready), .underrun(underrun),
       .overrun(overrun), .frames(frames), .in_mag(in_mag), .out_mag(out_mag));
@@ -24,7 +26,7 @@ module tb_core;
     repeat (10) @(negedge clk);
     en = 1;
     repeat (10) @(negedge clk);
-    for (n = 0; n < NS + 9000; n = n + 1) begin
+    for (n = 0; n < NS + PAD; n = n + 1) begin
       // one sample every 4 clocks
       @(negedge clk);
       if (n < NS) begin {x2q, x2i, x1q, x1i} = {mem[n][47:36] , mem[n][35:24], mem[n][23:12], mem[n][11:0]};

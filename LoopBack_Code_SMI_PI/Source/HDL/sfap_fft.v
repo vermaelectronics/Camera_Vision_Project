@@ -1,5 +1,5 @@
 // ============================================================================
-//  sfap_fft.v  --  1024-point radix-2^2 single-path-delay-feedback FFT (DIF)
+//  sfap_fft.v  --  2^LN-point (1024 or 2048) radix-2^2 single-path-delay-feedback FFT (DIF)
 //
 //  One complex sample per clock, natural order in, BIT-REVERSED order out.
 //
@@ -39,13 +39,14 @@ module sfap_bf #(
     parameter WD    = 25,
     parameter LOGD  = 9,            // delay D = 2^LOGD
     parameter ROT   = 0,            // 1: -j on b while idx[LOGD+1] == 0 (BF2 of a pair)
-    parameter SCALE = 0
+    parameter SCALE = 0,
+    parameter IW    = 10            // width of the slot index
 ) (
     input  wire                 clk,
     input  wire signed [WD-1:0] in_re, in_im,
-    input  wire [9:0]           in_idx,
+    input  wire [IW-1:0]        in_idx,
     output reg  signed [WD-1:0] out_re, out_im,
-    output reg  [9:0]           out_idx
+    output reg  [IW-1:0]        out_idx
 );
     localparam D = (1 << LOGD);
 
@@ -65,7 +66,7 @@ module sfap_bf #(
             reg [LOGD-1:0] wa;  reg [2*WD-1:0] wd;  reg we;
             always @(posedge clk) if (we) mem[wa] <= wd;
             // pipeline (shared code below drives wa/wd/we through these nets)
-            reg signed [WD-1:0] x1_re, x1_im, x_re, x_im; reg [9:0] x_idx, i1;
+            reg signed [WD-1:0] x1_re, x1_im, x_re, x_im; reg [IW-1:0] x_idx, i1;
             reg [2*WD-1:0] rd2;
             always @(posedge clk) begin
                 x_re <= in_re; x_im <= in_im; x_idx <= in_idx;
@@ -77,7 +78,7 @@ module sfap_bf #(
             wire bf1  = i1[LOGD];
             wire rot1 = (ROT != 0) && !i1[LOGD+1];
             reg signed [WD:0] s_re, s_im, f_re, f_im;
-            reg signed [WD-1:0] d3_re, d3_im, x3_re, x3_im; reg bf3; reg [9:0] i3; reg [LOGD-1:0] a3;
+            reg signed [WD-1:0] d3_re, d3_im, x3_re, x3_im; reg bf3; reg [IW-1:0] i3; reg [LOGD-1:0] a3;
             always @(posedge clk) begin
                 s_re <= rot1 ? ({d_re[WD-1], d_re} + {x1_im[WD-1], x1_im}) : ({d_re[WD-1], d_re} + {x1_re[WD-1], x1_re});
                 s_im <= rot1 ? ({d_im[WD-1], d_im} - {x1_re[WD-1], x1_re}) : ({d_im[WD-1], d_im} + {x1_im[WD-1], x1_im});
@@ -97,7 +98,7 @@ module sfap_bf #(
             always @(posedge clk) rd <= mem[in_idx[LOGD-1:0]];
             reg [LOGD-1:0] wa;  reg [2*WD-1:0] wd;  reg we;
             always @(posedge clk) if (we) mem[wa] <= wd;
-            reg signed [WD-1:0] x1_re, x1_im, x_re, x_im; reg [9:0] x_idx, i1;
+            reg signed [WD-1:0] x1_re, x1_im, x_re, x_im; reg [IW-1:0] x_idx, i1;
             reg [2*WD-1:0] rd2;
             always @(posedge clk) begin
                 x_re <= in_re; x_im <= in_im; x_idx <= in_idx;
@@ -109,7 +110,7 @@ module sfap_bf #(
             wire bf1  = i1[LOGD];
             wire rot1 = (ROT != 0) && !i1[LOGD+1];
             reg signed [WD:0] s_re, s_im, f_re, f_im;
-            reg signed [WD-1:0] d3_re, d3_im, x3_re, x3_im; reg bf3; reg [9:0] i3; reg [LOGD-1:0] a3;
+            reg signed [WD-1:0] d3_re, d3_im, x3_re, x3_im; reg bf3; reg [IW-1:0] i3; reg [LOGD-1:0] a3;
             always @(posedge clk) begin
                 s_re <= rot1 ? ({d_re[WD-1], d_re} + {x1_im[WD-1], x1_im}) : ({d_re[WD-1], d_re} + {x1_re[WD-1], x1_re});
                 s_im <= rot1 ? ({d_im[WD-1], d_im} - {x1_re[WD-1], x1_re}) : ({d_im[WD-1], d_im} + {x1_im[WD-1], x1_im});
@@ -126,7 +127,7 @@ module sfap_bf #(
         end
     end else begin : g_sr
         // tiny delays (1, 2, 4): shift register of D entries, add/sub and mux in the loop
-        reg signed [WD-1:0] x_re, x_im; reg [9:0] x_idx;
+        reg signed [WD-1:0] x_re, x_im; reg [IW-1:0] x_idx;
         always @(posedge clk) begin x_re <= in_re; x_im <= in_im; x_idx <= in_idx; end
         reg signed [WD-1:0] sr_re [0:D-1];
         reg signed [WD-1:0] sr_im [0:D-1];
@@ -157,56 +158,63 @@ endmodule
 // ---- twiddle multiplier W_M^(r*j) (latency TWLAT = 7) ----------------------
 module sfap_tw #(
     parameter WD = 25,
-    parameter LM = 10                 // M = 2^LM
+    parameter LM = 10,                // M = 2^LM
+    parameter IW = 10,
+    parameter HALF = 0                // 1: radix-2 stage twiddle W_M^j on the difference half (bit LM-1 of the tag = 0), 1 on the sum half
 ) (
     input  wire                 clk,
     input  wire signed [WD-1:0] in_re, in_im,
-    input  wire [9:0]           in_idx,
+    input  wire [IW-1:0]        in_idx,
     output reg  signed [WD-1:0] out_re, out_im,
-    output reg  [9:0]           out_idx
+    output reg  [IW-1:0]        out_idx
 );
     localparam M = (1 << LM);
     // stage 0: quarter -> r, exponent e = r*j
     wire [1:0]    q = in_idx[LM-1:LM-2];
     wire [LM-3:0] j = in_idx[LM-3:0];
-    reg  [LM-1:0] e0;
-    reg signed [WD-1:0] a0_re, a0_im; reg [9:0] i0;
+    reg  [LM-1:0] e0;      // (HALF: only LM-1 bits are used, the ROM has 2^(LM-1) entries)
+    reg signed [WD-1:0] a0_re, a0_im; reg [IW-1:0] i0;
     always @(posedge clk) begin
-        case (q)
-            2'd0: e0 <= {1'b0, j, 1'b0};            // r = 2
-            2'd1: e0 <= {2'b00, j};                  // r = 1
-            2'd2: e0 <= {1'b0, j, 1'b0} + {2'b00, j}; // r = 3
-            default: e0 <= {LM{1'b0}};              // r = 0
-        endcase
+        if (HALF != 0) begin
+            e0 <= in_idx[LM-1] ? {LM{1'b0}} : {1'b0, in_idx[LM-2:0]};      // sum half: W^0 = 1; difference half: W_M^j
+        end else begin
+            case (q)
+                2'd0: e0 <= {1'b0, j, 1'b0};            // r = 2
+                2'd1: e0 <= {2'b00, j};                  // r = 1
+                2'd2: e0 <= {1'b0, j, 1'b0} + {2'b00, j}; // r = 3
+                default: e0 <= {LM{1'b0}};              // r = 0
+            endcase
+        end
         a0_re <= in_re; a0_im <= in_im; i0 <= in_idx;
     end
     // stage 1: ROM read
     wire [35:0] tw;
     generate
-        if (LM == 10)      sfap_tw_rom_1024 u_rom (.clk(clk), .a(e0), .d(tw));
+        if (HALF != 0 && LM == 11) sfap_tw_rom_2048 u_rom (.clk(clk), .a(e0[9:0]), .d(tw));
+        else if (LM == 10) sfap_tw_rom_1024 u_rom (.clk(clk), .a(e0), .d(tw));
         else if (LM == 8)  sfap_tw_rom_256  u_rom (.clk(clk), .a(e0), .d(tw));
         else if (LM == 6)  sfap_tw_rom_64   u_rom (.clk(clk), .a(e0), .d(tw));
         else               sfap_tw_rom_16   u_rom (.clk(clk), .a(e0), .d(tw));
     endgenerate
-    reg signed [WD-1:0] a1_re, a1_im; reg [9:0] i1;
+    reg signed [WD-1:0] a1_re, a1_im; reg [IW-1:0] i1;
     always @(posedge clk) begin a1_re <= a0_re; a1_im <= a0_im; i1 <= i0; end
     // stage 2: operand registers
-    reg signed [WD-1:0] a2_re, a2_im; reg signed [17:0] c2, s2; reg [9:0] i2;
+    reg signed [WD-1:0] a2_re, a2_im; reg signed [17:0] c2, s2; reg [IW-1:0] i2;
     always @(posedge clk) begin
         a2_re <= a1_re; a2_im <= a1_im; c2 <= tw[35:18]; s2 <= tw[17:0]; i2 <= i1;
     end
     // stage 3: four products (DSP48E1, 25 x 18)
-    reg signed [WD+17:0] m_rc, m_is, m_rs, m_ic; reg [9:0] i3;
+    reg signed [WD+17:0] m_rc, m_is, m_rs, m_ic; reg [IW-1:0] i3;
     always @(posedge clk) begin
         m_rc <= a2_re * c2; m_is <= a2_im * s2;
         m_rs <= a2_re * s2; m_ic <= a2_im * c2;
         i3 <= i2;
     end
     // stage 3b: second register behind the multipliers (MREG and PREG)
-    reg signed [WD+17:0] n_rc, n_is, n_rs, n_ic; reg [9:0] i3b;
+    reg signed [WD+17:0] n_rc, n_is, n_rs, n_ic; reg [IW-1:0] i3b;
     always @(posedge clk) begin n_rc <= m_rc; n_is <= m_is; n_rs <= m_rs; n_ic <= m_ic; i3b <= i3; end
     // stage 4: combine
-    reg signed [WD+18:0] p_re, p_im; reg [9:0] i4;
+    reg signed [WD+18:0] p_re, p_im; reg [IW-1:0] i4;
     always @(posedge clk) begin
         p_re <= n_rc - n_is; p_im <= n_rs + n_ic; i4 <= i3b;
     end
@@ -223,33 +231,47 @@ module sfap_tw #(
 endmodule
 
 // ---- the transform ----------------------------------------------------------
+//  LN even: LN/2 radix-2^2 pairs. LN odd (2048): one radix-2 stage with its twiddle W_N^j, then (LN-1)/2 pairs.
 module sfap_fft #(
     parameter WD    = 25,
-    parameter SCALE = 10'b0000011111    // halve after the first 5 butterflies (bit s = butterfly s)
+    parameter LN    = 10,                // transform size 2^LN (10 or 11)
+    parameter [LN-1:0] SCALE = 10'b0000011111   // halve after butterfly s (bit s = butterfly s, s = 0 .. LN-1)
 ) (
     input  wire                 clk,
     input  wire signed [WD-1:0] in_re, in_im,
-    input  wire [9:0]           in_idx,      // free-running slot counter, 0 .. 1023
+    input  wire [LN-1:0]        in_idx,      // free-running slot counter, 0 .. 2^LN-1
     output wire signed [WD-1:0] out_re, out_im,
-    output wire [9:0]           out_idx
+    output wire [LN-1:0]        out_idx
 );
-    // pair p: M = 1024 >> (2p); BF1 delay M/2 = 2^(9-2p), BF2 delay M/4 = 2^(8-2p)
-    wire signed [WD-1:0] r0 [0:5], i0 [0:5];
-    wire [9:0]           t0 [0:5];
-    assign r0[0] = in_re; assign i0[0] = in_im; assign t0[0] = in_idx;
+    localparam ODD = LN % 2;
+    localparam NP  = LN / 2;             // radix-2^2 pairs
+    localparam LP  = LN - ODD;           // log2 of the size the pairs work on
+    wire signed [WD-1:0] r0 [0:NP], i0 [0:NP];
+    wire [LN-1:0]        t0 [0:NP];
     genvar p;
     generate
-        for (p = 0; p < 5; p = p + 1) begin : g_pair
+        if (ODD != 0) begin : g_first
+            wire signed [WD-1:0] fr, fi; wire [LN-1:0] ft;
+            sfap_bf #(.WD(WD), .LOGD(LN-1), .ROT(0), .SCALE(SCALE[0]), .IW(LN))
+                u_bf0 (.clk(clk), .in_re(in_re), .in_im(in_im), .in_idx(in_idx),
+                       .out_re(fr), .out_im(fi), .out_idx(ft));
+            sfap_tw #(.WD(WD), .LM(LN), .IW(LN), .HALF(1))
+                u_tw0 (.clk(clk), .in_re(fr), .in_im(fi), .in_idx(ft),
+                       .out_re(r0[0]), .out_im(i0[0]), .out_idx(t0[0]));
+        end else begin : g_nofirst
+            assign r0[0] = in_re; assign i0[0] = in_im; assign t0[0] = in_idx;
+        end
+        for (p = 0; p < NP; p = p + 1) begin : g_pair
             wire signed [WD-1:0] ar, ai, br, bi;
-            wire [9:0] at, bt;
-            sfap_bf #(.WD(WD), .LOGD(9-2*p), .ROT(0), .SCALE(SCALE[2*p]))
+            wire [LN-1:0] at, bt;
+            sfap_bf #(.WD(WD), .LOGD(LP-1-2*p), .ROT(0), .SCALE(SCALE[ODD+2*p]), .IW(LN))
                 u_bf1 (.clk(clk), .in_re(r0[p]), .in_im(i0[p]), .in_idx(t0[p]),
                        .out_re(ar), .out_im(ai), .out_idx(at));
-            sfap_bf #(.WD(WD), .LOGD(8-2*p), .ROT(1), .SCALE(SCALE[2*p+1]))
+            sfap_bf #(.WD(WD), .LOGD(LP-2-2*p), .ROT(1), .SCALE(SCALE[ODD+2*p+1]), .IW(LN))
                 u_bf2 (.clk(clk), .in_re(ar), .in_im(ai), .in_idx(at),
                        .out_re(br), .out_im(bi), .out_idx(bt));
-            if (p < 4) begin : g_tw
-                sfap_tw #(.WD(WD), .LM(10-2*p))
+            if (p < NP-1) begin : g_tw
+                sfap_tw #(.WD(WD), .LM(LP-2*p), .IW(LN))
                     u_tw (.clk(clk), .in_re(br), .in_im(bi), .in_idx(bt),
                           .out_re(r0[p+1]), .out_im(i0[p+1]), .out_idx(t0[p+1]));
             end else begin : g_nt
@@ -257,5 +279,5 @@ module sfap_fft #(
             end
         end
     endgenerate
-    assign out_re = r0[5]; assign out_im = i0[5]; assign out_idx = t0[5];
+    assign out_re = r0[NP]; assign out_im = i0[NP]; assign out_idx = t0[NP];
 endmodule

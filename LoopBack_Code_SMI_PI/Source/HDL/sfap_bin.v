@@ -39,26 +39,27 @@ endmodule
 
 module sfap_bin #(
     parameter WD = 25,
-    parameter RW = 52
+    parameter RW = 52,
+    parameter LN = 10               // log2 of the transform size
 ) (
     input  wire                 clk,
     input  wire                 v0,
-    input  wire [9:0]           t0,          // bin position (any order, visited once per frame)
+    input  wire [LN-1:0]        t0,          // bin position (any order, visited once per frame)
     input  wire signed [WD-1:0] x1r0, x1i0, x2r0, x2i0,
     input  wire                 init0,       // 1: R <- instantaneous value (first frame)
     input  wire [2:0]           sh0,         // averaging shift (1 .. 7)
     input  wire [31:0]          load0,       // diagonal load, same units as |X2|^2
     output reg                  ov,
-    output reg  [9:0]           ot,
+    output reg  [LN-1:0]        ot,
     output reg  signed [WD-1:0] yr, yi
 );
     localparam XW = RW + 20;
 
     // ---- stage 1: registers, covariance memory read ------------------------
     reg signed [WD-1:0] x1r1, x1i1, x2r1, x2i1;
-    reg [3*RW-1:0] rmem [0:1023];
+    reg [3*RW-1:0] rmem [0:(1<<LN)-1];
     reg [3*RW-1:0] rd;
-    reg [4:0] ctl1; reg [31:0] ld1; reg [10:0] meta1;
+    reg [4:0] ctl1; reg [31:0] ld1; reg [LN:0] meta1;
     always @(posedge clk) begin
         x1r1 <= x1r0; x1i1 <= x1i0; x2r1 <= x2r0; x2i1 <= x2i0;
         ctl1 <= {init0, sh0, 1'b0}; ld1 <= load0; meta1 <= {v0, t0};
@@ -69,8 +70,8 @@ module sfap_bin #(
     wire [3*RW-1:0] rd5;     sfap_dly #(.W(3*RW), .N(4))  u_drd (.clk(clk), .d(rd),    .q(rd5));
     wire [4:0]      ctl6;    sfap_dly #(.W(5),    .N(5))  u_dct (.clk(clk), .d(ctl1),  .q(ctl6));
     wire [31:0]     ld8;     sfap_dly #(.W(32),   .N(7))  u_dld (.clk(clk), .d(ld1),   .q(ld8));
-    wire [10:0]     meta8;   sfap_dly #(.W(11),   .N(7))  u_dm8 (.clk(clk), .d(meta1), .q(meta8));
-    wire [10:0]     meta30;  sfap_dly #(.W(11),   .N(30)) u_dm30(.clk(clk), .d(meta1), .q(meta30));
+    wire [LN:0]      meta8;   sfap_dly #(.W(LN+1),   .N(7))  u_dm8 (.clk(clk), .d(meta1), .q(meta8));
+    wire [LN:0]      meta30;  sfap_dly #(.W(LN+1),   .N(30)) u_dm30(.clk(clk), .d(meta1), .q(meta30));
     wire [2*WD-1:0] x2_25;   sfap_dly #(.W(2*WD), .N(25)) u_dx2 (.clk(clk), .d({x2i1, x2r1}), .q(x2_25));
     wire [2*WD-1:0] x1_29;   sfap_dly #(.W(2*WD), .N(29)) u_dx1 (.clk(clk), .d({x1i1, x1r1}), .q(x1_29));
 
@@ -129,10 +130,10 @@ module sfap_bin #(
     end
 
     // ---- stage 9: write back, add the diagonal load -------------------------
-    reg we9; reg [9:0] wa9; reg [3*RW-1:0] wd9;
+    reg we9; reg [LN-1:0] wa9; reg [3*RW-1:0] wd9;
     reg [RW-1:0] d9; reg signed [RW-1:0] r12r_9, r12i_9;
     always @(posedge clk) begin
-        we9 <= meta8[10]; wa9 <= meta8[9:0]; wd9 <= {r12i_8, r12r_8, r22_8};
+        we9 <= meta8[LN]; wa9 <= meta8[LN-1:0]; wd9 <= {r12i_8, r12r_8, r22_8};
         d9 <= r22_8 + {{(RW-32){1'b0}}, ld8};
         r12r_9 <= r12r_8; r12i_9 <= r12i_8;
     end
@@ -265,6 +266,6 @@ module sfap_bin #(
     always @(posedge clk) begin
         yr <= (y30r > TMAX) ? TMAX : (y30r < TMIN) ? TMIN : y30r[WD-1:0];
         yi <= (y30i > TMAX) ? TMAX : (y30i < TMIN) ? TMIN : y30i[WD-1:0];
-        ov <= meta30[10]; ot <= meta30[9:0];
+        ov <= meta30[LN]; ot <= meta30[LN-1:0];
     end
 endmodule
