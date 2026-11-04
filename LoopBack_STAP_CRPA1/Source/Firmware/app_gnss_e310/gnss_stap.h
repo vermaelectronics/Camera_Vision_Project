@@ -118,6 +118,9 @@ void     gnss_stap_service(void);
 /* 1 = TX gets the beamformer output, 0 = bypass (raw RX1). */
 int32_t  gnss_stap_set_enable(int enable);
 int      gnss_stap_get_enable(void);
+/* Clears the sticky STATUS.overrun flag (set e.g. while the AD9361 interface
+ * is being tuned at boot or retuned by gnss_mode=). */
+void     gnss_stap_clear_overrun(void);
 void     gnss_stap_print_state(void);
 
 /* console commands (command.c table) */

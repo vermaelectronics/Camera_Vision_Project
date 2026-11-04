@@ -15,6 +15,7 @@
 #include "gnss_l1.h"
 #include "gnss_passthrough.h"
 #include "gnss_stap.h"      /* CRPA MOD */
+#include "gnss_mode.h"      /* CRPA MOD */
 #include "gnss_txdma.h"
 
 #ifdef XILINX_PLATFORM
@@ -177,7 +178,7 @@ static void info_hardware(struct ad9361_rf_phy *phy)
     console_print("   base address    : 0x43C00000, 4 kB aperture\n");
     console_print("   ID register     : 0x%08x  (expect 0x47435031, ASCII 'GCP1')\n",
                   (long)gnss_pt_read(GNSS_PT_REG_ID));
-    console_print("   VERSION         : 0x%08x  (expect 0x00010001 = v1.1)\n",
+    console_print("   VERSION         : 0x%08x  (expect 0x00010002 = v1.2)\n",
                   (long)gnss_pt_read(GNSS_PT_REG_VERSION));
     console_print("     v1.0 is the original identity passthrough and transmits\n");
     console_print("     24 dB LOW. v1.1 adds the RX->TX sample alignment stage.\n");
@@ -509,7 +510,7 @@ static void info_registers(void)
     head("6  gnss_passthrough REGISTER MAP  (base 0x43C00000, 4 kB)");
 
     console_print("   0x00  ID              RO  0x47435031, ASCII 'GCP1'\n");
-    console_print("   0x04  VERSION         RO  0x00010001 = v1.1\n");
+    console_print("   0x04  VERSION         RO  0x00010002 = v1.2\n");
     console_print("   0x08  SCRATCH         RW  read/write test\n");
     console_print("   0x0C  CONTROL         RW  [0] pass_en  [1] mute\n");
     console_print("                             [2] swap_iq  [3] ch1_copy\n");
@@ -768,6 +769,11 @@ void gnss_info_menu(void)
     console_print("    tx1_attenuation=N          mdB. BIGGER = QUIETER.\n");
     console_print("                               89750 quietest, 70000 known good\n");
     console_print("    gnss_tx? gnss_ddr_tx? gnss_status?   read back from hardware\n");
+    console_print("\n");
+    console_print("  RADIO MODES (centre freq, rate, bandwidth, RX1/RX2 gain, TX att)\n");
+    console_print("    gnss_mode?                 list the 5 modes      now: %d\n",
+                  (long)gnss_mode_current());
+    console_print("    gnss_mode=1 .. gnss_mode=5 apply one (edit gnss_mode.c to change)\n");
     console_print("\n");
     console_print("  CRPA ANTI-JAM (RX1 + RX2 array, nulls 1 jammer)   now: %s\n",
                   (char *)(gnss_stap_get_enable() ? "ANTI-JAM" : "bypass"));

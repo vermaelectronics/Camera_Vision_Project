@@ -51,6 +51,7 @@
 #include "gnss_l1.h"
 #include "gnss_passthrough.h"
 #include "gnss_stap.h"      /* CRPA MOD */
+#include "gnss_mode.h"      /* CRPA MOD: preset radio modes */
 /* LOOPBACK MOD-7 */
 #include "gnss_txdma.h"
 #include "axi_dmac.h"
@@ -137,6 +138,10 @@ command cmd_list[] = {
 	{"gnss_ddr_tx=", "1 = capture RX to DDR and replay it cyclically on TX1, 0 = stop.", "gnss_ddr_tx=0", set_gnss_ddr_tx},
 	/* CRPA MOD: 2-element anti-jam stage (gnss_stap) between RX and the
 	 * passthrough. See gnss_stap.h. */
+	/* CRPA MOD: five preset radio modes (centre frequency, sample rate,
+	 * bandwidth, RX1/RX2 gain, TX attenuation in one command). gnss_mode.c. */
+	{"gnss_mode?", "Lists the 5 preset radio modes and the one in use.", "", get_gnss_mode},
+	{"gnss_mode=", "Applies preset mode 1..5 (LO, rate, bandwidth, gain, attenuation).", "gnss_mode=1", set_gnss_mode},
 	{"stap_status?", "Prints the CRPA anti-jam state (weights, powers, suppression).", "", get_stap_status},
 	{"stap_en?", "Gets the CRPA output state (1 = anti-jam, 0 = bypass).", "", get_stap_en},
 	{"stap_en=", "1 = TX carries the anti-jam beamformer output, 0 = bypass (raw RX1).", "stap_en=1", set_stap_en},
@@ -480,7 +485,20 @@ void get_tx_lo_freq(double* param, char param_no) // "tx_lo_freq?" command
 	console_print("tx_lo_freq=%d\n", (uint32_t)lo_freq_hz);
 }
 
-/**************************************************************************//***
+/**************************************************************************//* CRPA MOD: print the LOs actually set, in Hz, and warn when RX and TX differ:
+ * the loopback then comes out shifted by the difference. */
+static void lo_report(const char *what)
+{
+	uint64_t rx = 0, tx = 0;
+	ad9361_get_rx_lo_freq(ad9361_phy, &rx);
+	ad9361_get_tx_lo_freq(ad9361_phy, &tx);
+	console_print("%s: RX LO = %d kHz, TX LO = %d kHz\n", what,
+		      (int32_t)(rx / 1000), (int32_t)(tx / 1000));
+	if ((rx > tx ? rx - tx : tx - rx) > 1000)
+		console_print("WARNING: RX and TX LO differ - the retransmitted signal is shifted by that amount. Set both, or use gnss_mode=N.\n");
+}
+
+/***
  * @brief Sets the TX LO frequency [MHz].
  *
  * @return None.
@@ -491,8 +509,8 @@ void set_tx_lo_freq(double* param, char param_no) // "tx_lo_freq=" command
 
 	if(param_no >= 1)
 	{
-		lo_freq_hz = param[0];
-		lo_freq_hz *= 1000000;
+		/* CRPA MOD: round instead of truncating, so 1575.42 means 1575.420 MHz */
+		lo_freq_hz = (uint64_t)(param[0] * 1000000.0 + 0.5);
 #ifdef ANTSDR_E310
 		/* set tx rf switch */
 		if(lo_freq_hz <= 3000000000){
@@ -514,8 +532,7 @@ void set_tx_lo_freq(double* param, char param_no) // "tx_lo_freq=" command
 #endif
 
 		ad9361_set_tx_lo_freq(ad9361_phy, lo_freq_hz);
-		lo_freq_hz /= 1000000;
-		console_print("tx_lo_freq=%d\n", (uint32_t)lo_freq_hz);
+		lo_report("tx_lo_freq");
 	}
 }
 
@@ -544,6 +561,13 @@ void set_tx_samp_freq(double* param, char param_no) // "tx_samp_freq=" command
 	if(param_no >= 1)
 	{
 		sampling_freq_hz = (uint32_t)param[0];
+		/* CRPA MOD: 2R2T LVDS runs DATA_CLK = 4 x fs; the FPGA is timed for
+		 * 125 MHz, i.e. at most 30.72 MSPS. Above that samples are lost. */
+		if (sampling_freq_hz > GNSS_MODE_MAX_FS_HZ) {
+			console_print("REFUSED: %d Hz. This bitstream supports at most 30720000 Hz with both RX channels.\n",
+				      sampling_freq_hz);
+			return;
+		}
 		ad9361_set_tx_sampling_freq(ad9361_phy, sampling_freq_hz);
 		ad9361_get_tx_sampling_freq(ad9361_phy, &sampling_freq_hz);
 //		dds_update(ad9361_phy);
@@ -705,8 +729,8 @@ void set_rx_lo_freq(double* param, char param_no) // "rx_lo_freq=" command
 
 	if(param_no >= 1)
 	{
-		lo_freq_hz = param[0];
-		lo_freq_hz *= 1000000;
+		/* CRPA MOD: round instead of truncating, so 1575.42 means 1575.420 MHz */
+		lo_freq_hz = (uint64_t)(param[0] * 1000000.0 + 0.5);
 #ifdef ANTSDR_E310
 		/* set rx rf swicth */
 		if(lo_freq_hz <= 3000000000){
@@ -728,8 +752,7 @@ void set_rx_lo_freq(double* param, char param_no) // "rx_lo_freq=" command
 		ad9361_set_rx_rf_port_input(ad9361_phy, A_BALANCED);
 #endif
 		ad9361_set_rx_lo_freq(ad9361_phy, lo_freq_hz);
-		lo_freq_hz /= 1000000;
-		console_print("rx_lo_freq=%d\n", (uint32_t)lo_freq_hz);
+		lo_report("rx_lo_freq");
 	}
 }
 
@@ -758,6 +781,13 @@ void set_rx_samp_freq(double* param, char param_no) // "rx_samp_freq=" command
 	if(param_no >= 1)
 	{
 		sampling_freq_hz = (uint32_t)param[0];
+		/* CRPA MOD: 2R2T LVDS runs DATA_CLK = 4 x fs; the FPGA is timed for
+		 * 125 MHz, i.e. at most 30.72 MSPS. Above that samples are lost. */
+		if (sampling_freq_hz > GNSS_MODE_MAX_FS_HZ) {
+			console_print("REFUSED: %d Hz. This bitstream supports at most 30720000 Hz with both RX channels.\n",
+				      sampling_freq_hz);
+			return;
+		}
 		ad9361_set_rx_sampling_freq(ad9361_phy, sampling_freq_hz);
 		ad9361_get_rx_sampling_freq(ad9361_phy, &sampling_freq_hz);
 //		dds_update(ad9361_phy);
@@ -887,8 +917,18 @@ void set_rx1_rf_gain(double* param, char param_no) // "rx1_rf_gain=" command
 
 	if(param_no >= 1)
 	{
+		uint8_t gc_mode = 0;
 		gain_db = param[0];
+		/* CRPA MOD: the AD9361 accepts a gain only in manual (MGC) mode and
+		 * silently ignores it under AGC. */
+		ad9361_get_rx_gain_control_mode(ad9361_phy, 0, &gc_mode);
+		if (gc_mode != RF_GAIN_MGC) {
+			console_print("rx1_rf_gain: RX1 is in AGC mode (rx1_gc_mode=%d). Set rx1_gc_mode=0 first.\n",
+				      gc_mode);
+			return;
+		}
 		ad9361_set_rx_rf_gain (ad9361_phy, 0, gain_db);
+		ad9361_get_rx_rf_gain (ad9361_phy, 0, &gain_db);
 		console_print("rx1_rf_gain=%d\n", gain_db);
 	}
 	else
@@ -919,8 +959,18 @@ void set_rx2_rf_gain(double* param, char param_no) // "rx2_rf_gain=" command
 
 	if(param_no >= 1)
 	{
+		uint8_t gc_mode = 0;
 		gain_db = param[0];
+		/* CRPA MOD: the AD9361 accepts a gain only in manual (MGC) mode and
+		 * silently ignores it under AGC. */
+		ad9361_get_rx_gain_control_mode(ad9361_phy, 1, &gc_mode);
+		if (gc_mode != RF_GAIN_MGC) {
+			console_print("rx2_rf_gain: RX2 is in AGC mode (rx2_gc_mode=%d). Set rx2_gc_mode=0 first.\n",
+				      gc_mode);
+			return;
+		}
 		ad9361_set_rx_rf_gain (ad9361_phy, 1, gain_db);
+		ad9361_get_rx_rf_gain (ad9361_phy, 1, &gain_db);
 		console_print("rx2_rf_gain=%d\n", gain_db);
 	}
 	else

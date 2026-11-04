@@ -76,7 +76,8 @@
  * 1.1 = adds the RX->TX sample alignment stage (RX is right-aligned 12-in-16,
  *       the AD9361 DAC consumes [15:4]). A board reporting 1.0 is running a
  *       bitstream whose TX output is 24 dB low with 4 bits discarded. */
-#define GNSS_PT_EXPECTED_VERSION    0x00010001U
+/* 1.2 = (CRPA pipeline) elastic buffer flushed while pass_en = 0. */
+#define GNSS_PT_EXPECTED_VERSION    0x00010002U
 
 /* ---- CONTROL bits -------------------------------------------------------- */
 #define GNSS_PT_CTRL_PASS_EN        (1U << 0)  /* 1 = RX->TX passthrough      */

@@ -140,6 +140,9 @@ int32_t gnss_stap_probe(void)
     }
     gnss_stap_write(GNSS_STAP_REG_CORR_LEN, gnss_stap_st.corr_len);
     write_user_ctrl(0);                                 /* start in bypass */
+    /* the boot-time AD9361 interface tuning can pulse adc_valid irregularly;
+     * clear the sticky overrun so a later '1' means a real problem */
+    gnss_stap_write(GNSS_STAP_REG_CTRL, GNSS_STAP_CTRL_CLR_OVERRUN);
     gnss_stap_st.present      = 1;
     gnss_stap_st.have_weights = 0;
     printf("gnss_stap: CRPA stage present at 0x%08lx: %lu elements x %lu taps,\n"
@@ -268,6 +271,12 @@ int32_t gnss_stap_set_enable(int enable)
     if (enable && !gnss_stap_st.have_weights) return GNSS_STAP_ERR_NO_WEIGHTS;
     write_user_ctrl(enable);
     return GNSS_STAP_OK;
+}
+
+void gnss_stap_clear_overrun(void)
+{
+    if (gnss_stap_st.present)
+        gnss_stap_write(GNSS_STAP_REG_CTRL, GNSS_STAP_CTRL_CLR_OVERRUN);
 }
 
 int gnss_stap_get_enable(void)

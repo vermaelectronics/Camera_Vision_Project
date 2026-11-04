@@ -115,6 +115,55 @@ The `gnss_passthrough` IP itself is unchanged. If you hit this error, re-package
 - **Outputs:** channel 0 carries the beamformer. Channel 1 carries raw RX2,
   or a copy of the beamformer when `stap_ch1=1`.
 
+## Radio modes: `gnss_mode=1` … `gnss_mode=5`
+
+A single command sets the RX and TX centre frequency (always equal), the sample rate (RX = TX), the RX/TX
+RF bandwidth, the RX1 and RX2 gain control and gain (equal on both CRPA elements), and the TX1 attenuation:
+
+| N | Centre | Rate | RX / TX BW | Gain | TX att | Name |
+|---|---|---|---|---|---|---|
+| 1 | 1575.420 MHz | 30.72 MSPS | 18 / 18 MHz | slow AGC | 70000 | GPS L1 wide (boot default) |
+| 2 | 1575.420 MHz | 15.36 MSPS | 4 / 4 MHz | manual 50 dB | 70000 | GPS L1 C/A narrow |
+| 3 | 1575.420 MHz | 30.72 MSPS | 18 / 18 MHz | manual 30 dB | 70000 | GPS L1 strong jammer, low gain |
+| 4 | 1561.098 MHz | 15.36 MSPS | 4 / 4 MHz | manual 50 dB | 70000 | BeiDou B1I |
+| 5 | 1602.000 MHz | 15.36 MSPS | 10 / 10 MHz | manual 50 dB | 70000 | GLONASS L1 |
+
+```
+gnss_mode?          list the modes, * marks the active one
+gnss_tx=1           start TX (always starts at 89750 mdB, by design)
+gnss_mode=2         apply mode 2; also sets its TX attenuation
+gnss_status?        read back: LOs, rate, bandwidths, RX1/RX2 gain + mode, attenuation
+```
+
+**Order of operations.** The mode first sets TX attenuation to its maximum, mutes the DAC and turns the
+loopback buffer off. It then sets the LOs (verified by readback), the sample rate (RX and TX verified
+equal), the bandwidths, and the gain mode and gain on both channels (verified). Next it re-primes the
+loopback buffer and clears the CRPA overrun flag; if the anti-jam was on or `stap_auto` is running, it
+re-adapts the weights for the new configuration. The mode's TX attenuation is set last.
+
+**Limits.** A mode is refused, with nothing touched, if any value is outside these limits:
+
+- centre frequency 1100–1700 MHz (the L band, where the boot RF switch setting stays valid)
+- sample rate 2.083–30.72 MSPS
+- bandwidth 0.2 MHz to the sample rate
+- manual gain 0–71 dB
+- attenuation 40000–89750 mdB
+
+**To change a mode,** edit the `gnss_modes[]` table at the top of
+`Source/Firmware/app_gnss_e310/gnss_mode.c`, then rebuild the firmware only:
+`./Automation/Linux/build_bin.sh --from sw`.
+
+### Related fixes in this version
+
+| Where | Fix |
+|---|---|
+| `rx_lo_freq=` / `tx_lo_freq=` | Accept decimal MHz (`1575.42` now means 1575.420 MHz; the vendor code truncated it to 1575). Both LOs are read back in kHz, with a warning when RX ≠ TX. |
+| `rx_samp_freq=` / `tx_samp_freq=` | Rates above 30.72 MSPS are refused. In 2R2T LVDS mode the interface clock is 4 × fs, and the FPGA is timed for 125 MHz. |
+| `rx1_rf_gain=` / `rx2_rf_gain=` | Refused, with a message, while that channel is in AGC mode; previously the AD9361 ignored the value silently. The gain is read back. |
+| `gnss_status?` | Shows the RX2 gain, both gain-control modes and the active `gnss_mode`. |
+| `gnss_passthrough` v1.2 | The elastic buffer is flushed while `pass_en = 0`, so re-enabling always re-primes from empty. A sample-rate change can no longer leave it stuck full (the `overflow` / `fifo level 31` state). |
+| CRPA | The `overrun` flag is cleared after the boot-time interface tuning and after each `gnss_mode=`, so a `1` in `stap_status?` now means a real problem. |
+
 ## Console
 
 ```
@@ -158,6 +207,7 @@ A: GSTP=47535450 STAP=53544150 CONFIG=12101002 GCP1=47435031
 B: bypass DAC samples matched 360, mismatched 0
 C: correlations 0/93 mismatches, edge samples 0/120 mismatches
 D: STAP outputs 2000 checked, 0 mismatches; DAC matched 1960, mismatched 0; overrun=0
+F: passthrough v1.2: FIFO level after pass_en=0: 0, after re-enable: 16
 E: l_clk stopped: STAP ID read deadc10c, WRAP_STATUS 00010000, GSTP 47535450
 *** PASS tb_gnss_stap ***
 ```
@@ -166,6 +216,7 @@ E: l_clk stopped: STAP ID read deadc10c, WRAP_STATUS 00010000, GSTP 47535450
 - **B:** bypass delivers TX = RX << 4, as in the original design.
 - **C:** covariance results and edge samples are bit-exact.
 - **D:** every anti-jam output sample is bit-exact, and the DAC stream carries those samples left-aligned.
+- **F:** with `pass_en=0` the passthrough's elastic buffer is flushed, and it re-primes to half full when re-enabled.
 - **E:** with `l_clk` stopped, the bridge times out, returns `0xDEADC10C`, and the bus stays usable.
 
 - **Firmware:** `gnss_stap.c`, `stap_solver.c` and `console.c` compile warning-free

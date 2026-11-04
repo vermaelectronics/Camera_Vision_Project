@@ -58,7 +58,7 @@ plain RX to TX loopback (no anti-jam processing).
 ## What you should see on the console
 
     ad9361_init : AD936x Rev 2 successfully initialized
-    gnss_pt: present at 0x43c00000, version 1.1
+    gnss_pt: present at 0x43c00000, version 1.2
     gnss_l1: RF band = LOW (5 MHz - 3 GHz). AD9361 RX port B_BALANCED, TX port TXB
     gnss_l1: RX LO = 1575419998 Hz (-2 Hz from target)
     SELFTEST: PASS - RX samples reach the TX datapath AND the AD9361

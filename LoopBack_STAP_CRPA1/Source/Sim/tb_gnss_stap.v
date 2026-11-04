@@ -12,6 +12,7 @@
 //  D. weights from the C solver, commit, aj_en = 1: every gnss_stap output
 //     compared bit-exactly with the golden model, and the DAC stream checked
 //     to carry the same samples (<< 4)
+//  F. gnss_passthrough v1.2 flushes its elastic buffer while pass_en = 0
 //  E. bridge timeout: with l_clk stopped, a STAP read returns 0xDEADC10C and
 //     does not hang the bus; the local registers still answer
 //
@@ -201,6 +202,7 @@ module tb_gnss_stap;
   integer i, m, p, fails, corr_err, raw_err;
   reg [31:0] r0, r1, r2, r3;
   reg [15:0] t_re, t_im;
+  reg [31:0] lvl_off, lvl_on;
   initial begin
     fails = 0;
     repeat (20) @(posedge s_clk);
@@ -281,6 +283,27 @@ module tb_gnss_stap;
              aj_cnt, aj_err, dac_ok, dac_err, r0[3]);
     if (aj_err || aj_cnt != `TB_K || dac_err || dac_ok < `TB_K - 60 || r0[3]) begin
       $display("D: FAIL"); fails = fails + 1;
+    end
+
+    // ---- F. gnss_passthrough v1.2: pass_en = 0 flushes the elastic buffer
+    //        (a rate change made while disabled cannot leave it stuck full)
+    fork
+      stream(0, 1600);
+      begin
+        repeat (800) @(posedge l_clk);
+        axi_wr(1, 16'h000C, 32'h0);           // pass_en = 0 while samples flow
+        repeat (700) @(posedge l_clk);        // > one 256-clk status capture
+        axi_rd(1, 16'h002C, lvl_off);
+        axi_wr(1, 16'h000C, 32'h1);           // re-enable: must re-prime from empty
+        repeat (700) @(posedge l_clk);
+        axi_rd(1, 16'h002C, lvl_on);
+      end
+    join
+    axi_rd(1, 16'h0004, r0);
+    $display("F: passthrough v%0d.%0d: FIFO level after pass_en=0: %0d, after re-enable: %0d",
+             r0[31:16], r0[15:0], lvl_off[5:0], lvl_on[5:0]);
+    if (lvl_off[5:0] != 0 || lvl_on[5:0] < 12 || lvl_on[5:0] > 20 || r0 !== 32'h00010002) begin
+      $display("F: FAIL"); fails = fails + 1;
     end
 
     // ---- E. bridge timeout with l_clk stopped

@@ -168,7 +168,10 @@ module gnss_passthrough #(
   localparam [31:0] CORE_ID      = 32'h47435031;   // "GCP1"
   // v1.1 -- adds the RX->TX sample alignment stage. Bumped so a running board
   // reports which of the two behaviours its bitstream actually has.
-  localparam [31:0] CORE_VERSION = 32'h00010001;   // v1.1
+  // v1.2 -- (CRPA pipeline) the elastic buffer is flushed while pass_en = 0,
+  // so re-enabling always re-primes from empty. A sample-rate change made
+  // with pass_en = 0 can therefore no longer leave the buffer stuck full.
+  localparam [31:0] CORE_VERSION = 32'h00010002;   // v1.2
   localparam        AW           = FIFO_ADDR_WIDTH;
 
   // ==========================================================================
@@ -362,7 +365,7 @@ module gnss_passthrough #(
   reg  [31:0] rd_data1 = 32'd0;
 
   always @(posedge clk) begin
-    if (rst) begin
+    if (rst || !pass_en) begin          // v1.2: flush while disabled
       wptr0 <= 0; rptr0 <= 0;
       wptr1 <= 0; rptr1 <= 0;
     end else begin
