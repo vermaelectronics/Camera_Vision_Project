@@ -538,15 +538,61 @@ ad_cpu_interconnect 0x79020000 axi_ad9361
 ad_cpu_interconnect 0x7C400000 axi_ad9361_adc_dma
 ad_cpu_interconnect 0x7C420000 axi_ad9361_dac_dma
 
+# CRPA MOD-3 (continued): anti-jam stage, 64 kB aperture at 0x43C1_0000.
+# Recorded in Source/Config/board_e310_v1.json.
+#
+# ORDER MATTERS: gnss_stap is mapped BEFORE gnss_passthrough.
+# The gnss_passthrough IP carries two slave segments (the packager's inferred
+# "reg0" plus its own "axi_lite"). ad_cpu_interconnect puts the first at the
+# requested address and lets Vivado auto-assign the second to the next FREE
+# 64 kB slot. Mapped first, gnss_passthrough's extra segment took 0x43C1_0000
+# and gnss_stap then failed with [BD 41-1075] (overlap). With gnss_stap placed
+# first, the extra segment lands in another free slot. It is an alias of the
+# same registers and harmless, exactly as in the original loopback design.
+#
+# gnss_stap must expose exactly ONE slave segment (gnss_stap_ip.tcl removes
+# the packager's inferred block). An extra segment would be auto-assigned to a
+# free slot that gnss_passthrough may need. Same lookup as ad_cpu_interconnect.
+set lb_stap_segs [get_bd_addr_segs -quiet -of [get_bd_addr_spaces -quiet -of \
+  [get_bd_intf_pins -filter "NAME=~ *s_axi*" -of [get_bd_cells gnss_stap]]]]
+if {[llength $lb_stap_segs] > 1} {
+  error "ERROR: gnss_stap has [llength $lb_stap_segs] address segments ($lb_stap_segs),\
+         expected 1. Build/ip_repo/gnss_stap is an old package: re-run stage 3,\
+         e.g. ./Automation/Linux/build_all.sh --from ip"
+}
+ad_cpu_interconnect 0x43C10000 gnss_stap
+
 # LOOPBACK MOD-2 (continued): control/status aperture for the custom block.
 # 0x43C0_0000 is the conventional free Zynq-7000 GP0 slot and is not used by
 # any peripheral in the official E310 V1 design.  Recorded in
 # Source/Config/board_e310_v1.json so software and scripts agree.
 ad_cpu_interconnect 0x43C00000 gnss_passthrough
 
-# CRPA MOD-3 (continued): anti-jam stage, 64 kB aperture directly above the
-# passthrough. Recorded in Source/Config/board_e310_v1.json.
-ad_cpu_interconnect 0x43C10000 gnss_stap
+# CRPA MOD-3: verify the addresses the firmware relies on, here, where a
+# mistake is cheap to diagnose.
+# A failed lookup only warns; a segment found at the WRONG address is an error.
+foreach {lb_inst lb_addr} {gnss_stap 0x43C10000 gnss_passthrough 0x43C00000} {
+  set lb_seg [get_bd_addr_segs -quiet /sys_ps7/Data/SEG_data_${lb_inst}]
+  if {[llength $lb_seg] != 1} {
+    set lb_seg [get_bd_addr_segs -quiet -of_objects [get_bd_addr_spaces -quiet /sys_ps7/Data] \
+                  -filter "NAME == SEG_data_${lb_inst}"]
+  }
+  if {[llength $lb_seg] != 1} {
+    puts "CRPA: WARNING - could not look up SEG_data_${lb_inst}; address not verified here"
+    continue
+  }
+  set lb_off [get_property OFFSET $lb_seg]
+  if {[expr {$lb_off}] != [expr {$lb_addr}]} {
+    error "ERROR: ${lb_inst} mapped at $lb_off, expected $lb_addr (firmware and board_e310_v1.json use $lb_addr)"
+  }
+  puts "CRPA: ${lb_inst} at $lb_off range [get_property RANGE $lb_seg]"
+}
+# informational only: print the whole GP0 map into the project log
+catch {
+  foreach lb_seg [get_bd_addr_segs -quiet -of_objects [get_bd_addr_spaces -quiet /sys_ps7/Data]] {
+    puts "CRPA: address map: [get_property NAME $lb_seg] [get_property OFFSET $lb_seg] [get_property RANGE $lb_seg]"
+  }
+}
 
 ad_mem_hp1_interconnect sys_cpu_clk sys_ps7/S_AXI_HP1
 ad_mem_hp1_interconnect sys_cpu_clk axi_ad9361_adc_dma/m_dest_axi

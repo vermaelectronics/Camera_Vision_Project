@@ -119,8 +119,28 @@ set_bus_param $sclk_if ASSOCIATED_BUSIF ""
 #  wrapper registers at 0xF000).  The actual base address is assigned by the
 #  block design (Source/BlockDesign/system_bd.tcl), not here.
 # ---------------------------------------------------------------------------
+#
+#  EXACTLY ONE address block. ipx::package_project already infers a memory map
+#  for s_axi with an address block "reg0". Adding "axi_lite" next to it (as
+#  gnss_passthrough_ip.tcl does) gives the IP TWO slave segments, and
+#  ad_cpu_interconnect then auto-assigns the second one to the next free 64 kB
+#  slot -- which is how gnss_passthrough's extra segment came to occupy
+#  0x43C1_0000 and collide with gnss_stap ([BD 41-1075]). So: remove whatever
+#  was inferred, then create the one block we want.
+foreach mm [ipx::get_memory_maps -quiet -of_objects $core] {
+  set mm_name [get_property name $mm]
+  if {[catch {ipx::remove_memory_map $mm_name $core} err]} {
+    puts "IP_PACKAGE_NOTE: could not remove inferred memory map '$mm_name': $err"
+  } else {
+    puts "IP_PACKAGE_NOTE: removed inferred memory map '$mm_name'"
+  }
+}
 ipx::add_memory_map s_axi $core
 set mmap [ipx::get_memory_maps s_axi -of_objects $core]
+# if the inferred map could not be removed, at least drop its blocks
+foreach ab [ipx::get_address_blocks -quiet -of_objects $mmap] {
+  ipx::remove_address_block [get_property name $ab] $mmap
+}
 set_property slave_memory_map_ref s_axi [ipx::get_bus_interfaces s_axi -of_objects $core]
 ipx::add_address_block axi_lite $mmap
 set ablk [ipx::get_address_blocks axi_lite -of_objects $mmap]
@@ -128,6 +148,23 @@ set_property base_address 0            $ablk
 set_property range        65536        $ablk
 set_property width        32           $ablk
 set_property usage        register     $ablk
+
+# Self-check: one memory map, one address block, 64 kB.
+set n_blocks 0
+foreach mm [ipx::get_memory_maps -quiet -of_objects $core] {
+  foreach ab [ipx::get_address_blocks -quiet -of_objects $mm] {
+    incr n_blocks
+    puts "IP_PACKAGE_NOTE: address block [get_property name $mm]/[get_property name $ab]\
+          range [get_property range $ab]"
+  }
+}
+if {$n_blocks != 1} {
+  puts "IP_PACKAGE_SELFCHECK: FAIL - expected exactly 1 address block, found $n_blocks.\
+        More than one becomes extra slave segments that collide in the address map."
+  close_project
+  exit 2
+}
+puts "IP_PACKAGE_SELFCHECK: OK - exactly one address block (axi_lite, 64 kB)"
 
 ipx::create_xgui_files $core
 ipx::update_checksums  $core

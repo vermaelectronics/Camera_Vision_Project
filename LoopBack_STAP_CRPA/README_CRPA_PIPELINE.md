@@ -55,7 +55,7 @@ software turns the beamformer on.
 | `Source/HDL/stap/axil_cdc.v` | **New.** AXI4-Lite bridge from `sys_cpu_clk` to `l_clk`, toggle handshake. It times out after 4096 cycles and returns `0xDEADC10C` when `l_clk` is not running, so a CPU access cannot hang GP0. |
 | `Source/IP/gnss_stap/gnss_stap_ip.tcl` | **New.** IP packaging, VLNV `antsdr:gnss:gnss_stap:1.0`, 64 kB aperture. |
 | `Source/XDC/gnss_stap_cdc.xdc` | **New.** CDC constraints, added at project level with PROCESSING_ORDER LATE, same scheme as `gnss_passthrough_cdc.xdc`. |
-| `Source/BlockDesign/system_bd.tcl` | **CRPA MOD-3**: `gnss_stap` inserted between `axi_ad9361/adc_*` and `gnss_passthrough/adc_*`, AXI at **0x43C1_0000**, catalog check. |
+| `Source/BlockDesign/system_bd.tcl` | **CRPA MOD-3**: `gnss_stap` inserted between `axi_ad9361/adc_*` and `gnss_passthrough/adc_*`, AXI at **0x43C1_0000**, catalog check. `gnss_stap` is mapped **before** `gnss_passthrough` (see the address-map note below), and both addresses are verified. |
 | `Automation/Linux/build_all.sh` | Stage 3 also packages `gnss_stap`. Stage 4 checks it is there. |
 | `Vivado/Scripts/create_project.tcl` | Adds `gnss_stap_cdc.xdc` (LATE). |
 | `Vitis/Scripts/build_software.tcl` | Links `libm`, which the solver needs. |
@@ -71,6 +71,30 @@ software turns the beamformer on.
 
 `gnss_passthrough.v`, `system_top.v`, `system.xdc`, the PS7 configuration and
 the vendor tree are unchanged.
+
+## Address map note ([BD 41-1075] fix)
+
+The original `gnss_passthrough` IP has **two** slave segments: the packager infers `reg0`, and the
+packaging script adds its own `axi_lite`. `ad_cpu_interconnect` puts the first at 0x43C0_0000 and
+auto-assigns the second to the next free 64 kB slot, which was 0x43C1_0000. This was harmless in the
+plain loopback, but `gnss_stap` needs that address, so project creation failed with
+`[BD 41-1075] ... overlaps with slave segment '/gnss_passthrough/s_axi/axi_lite'`.
+
+The fix:
+
+- `gnss_stap_ip.tcl` removes the inferred block, so `gnss_stap` has exactly one address block, and
+  the packaging self-check enforces this.
+- `system_bd.tcl` maps `gnss_stap` first, so the passthrough's extra segment (an alias of the same
+  registers) lands in some other free slot.
+- `system_bd.tcl` stops with a clear message if an old two-segment `gnss_stap` package is still in
+  `Build/ip_repo`.
+- After mapping, it verifies 0x43C1_0000 for `gnss_stap` and 0x43C0_0000 for `gnss_passthrough`.
+
+The `gnss_passthrough` IP itself is unchanged. If you hit this error, re-package the IP:
+
+```bash
+./Automation/Linux/build_bin.sh --from ip
+```
 
 ## Datapath details
 
