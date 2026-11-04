@@ -21,6 +21,11 @@
 #ifndef SMI_REF
 #define SMI_REF    4
 #endif
+// RX1 taps (the highest delays) whose multipliers are built from LUTs, not DSP48 (4.9.1: the 32-tap build needed 229 DSP48 of 220).
+// 12 taps = 36 multipliers = about 36 DSP48 saved, about 8000 LUT spent. 0 = all DSP48.
+#ifndef SMI_NFAB
+#define SMI_NFAB  12
+#endif
 #define SMI_WFRAC 12          // weights are signed Q3.12 (1.0 = 4096)
 #define SMI_GFRAC 13          // RX2 normalisation gain, signed Q3.13 (1.0 = 8192)
 #define SMI_XFRAC  2          // fractional bits kept on the normalised RX2

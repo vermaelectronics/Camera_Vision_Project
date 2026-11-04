@@ -1,4 +1,4 @@
-# SMI-PI 4.9.0 - STAP with 32 taps per antenna (based on 4.8.2)
+# SMI-PI 4.9.1 - STAP with 32 taps per antenna (based on 4.8.2)
 
 One change against 4.8.2: the space-time filter has **32 taps per antenna** (it had 16). Everything else of 4.8.2 is kept: bypass when there is no jammer,
 RX2 normalisation, the two image taps, the pulse blanker, the reference tap at delay 4, the ARM weight solver (now 65 adaptive weights + 2 image taps),
@@ -41,8 +41,8 @@ the gated detection, the make-up gain. No SFAP in this build.
 
 ## What was NOT checked
 
-* **Not synthesised.** The HLS core now has about 195 complex-multiplier DSP48 (65 complex taps x 3) plus 4 for g2 and the blanker: **roughly 205 to 215 of the 220 DSP48.**
-  That is very tight; the place-and-route may fail on DSP count or timing. This is an estimate, not a report. If step 3 (HLS) or the Vivado build fails on DSP, send the log.
+* **Not synthesised.** The HLS core now has about 195 complex-multiplier DSP48 (65 complex taps x 3) plus 4 for g2 and the blanker: **roughly 205 to 215 of the 220 DSP48** (my estimate for 4.9.0).
+  See section 4.9.1 below: that estimate was too low.
 * Not on the board. The firmware was not compiled for the ARM (only the solver, which is shared with the C simulation, was compiled and run on the PC).
 * The ARM solve rate with 65 weights was not measured.
 
@@ -57,3 +57,14 @@ cd ~/LoopBack_Code_SMI_PI_STAP32_v4.9.0 && chmod +x Automation/Linux/*.sh Automa
 
 ## Vendor
 The zip contains Vendor/. In git it is not duplicated: copy it from `LoopBack_Code_SMI_PI/Vendor` before building.
+
+## 4.9.1: the DSP48 overflow of 4.9.0
+
+The first build of 4.9.0 (Vivado 2023.2) stopped in `place_design`: **`DRC UTLZ-1`, 229 DSP48 required, 220 available** (synthesis: 205 DSP48E1, plus 24 DSP48E inside the HLS core's netlist).
+My estimate of 205 to 215 was too low (the 65 complex taps cost 3 DSP48 each, and the blanker and the g2 normalisation come on top).
+
+Fix: the RX1 samples are only 12 bits wide, so the RX1 taps are cheap to build from LUTs. `smi_pi.h` has a new `SMI_NFAB` (default **12**): the 12 RX1 taps with the highest delays
+(k = 20..31) use LUT multipliers (`cmul3_fab`, `BIND_OP ... impl=fabric`) instead of DSP48. That is 36 multipliers: **about 36 DSP48 saved, about 8000 LUT spent**, so I expect about 193 DSP48 of 220
+(88 %) and about 55 % LUT. The filter is mathematically the same: the HLS C simulation (scenarios 1-14, 16-21) still passes 20 of 20.
+**Not synthesised:** the saving is my estimate from the log. If the next build still overflows, raise `SMI_NFAB` (up to 31; each tap saves 3 DSP48) in `smi_pi.h`; if the LUT use or the timing of the LUT multipliers is the problem, lower it.
+Firmware string 4.9.1; the bitstream version (0x00040900) is unchanged because no HDL changed.

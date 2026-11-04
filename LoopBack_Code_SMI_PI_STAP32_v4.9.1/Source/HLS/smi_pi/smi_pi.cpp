@@ -69,7 +69,7 @@
 //    x2n     : 18-bit signed, Q2 (g2 x2, |g2| < 4)
 //    weights : 16-bit signed Q3.12, complex multiply with 3 real multipliers
 //              (k1 = wr (xr + xi), k2 = xr (wi - wr), k3 = xi (wr + wi);
-//               re = k1 - k3, im = k1 + k2): 195 multipliers + 4 for g2 (4.9, 32 taps)
+//               re = k1 - k3, im = k1 + k2): 195 multipliers + 4 for g2 (4.9, 32 taps); SMI_NFAB = 12 RX1 taps (36 multipliers) are built from LUTs
 //    sum     : 48 bits, Q14; the weighted taps are summed first, divided by
 //              2^ws (weight scale, v4.4), then subtracted from the reference;
 //              rounded to nearest after the make-up shift, saturated to 16 bits.
@@ -101,6 +101,24 @@ static void cmul3(w16_t wr, w16_t wi, ap_int<XW> xr, ap_int<XW> xi,
     ap_int<XW + 18> k3 = xi * d2;
     pr = ap_int<XW + 19>(k1) - ap_int<XW + 19>(k3);
     pi = ap_int<XW + 19>(k1) + ap_int<XW + 19>(k2);
+}
+
+// The same for an RX1 tap (12-bit data), with the three multipliers built from LUTs instead of DSP48
+// (SMI_NFAB taps use this, see smi_pi.h). The pragmas are at function scope, next to the variables.
+static void cmul3_fab(w16_t wr, w16_t wi, ap_int<12> xr, ap_int<12> xi,
+                      ap_int<31> &pr, ap_int<31> &pi) {
+#pragma HLS INLINE
+    ap_int<13> xs = ap_int<13>(xr) + ap_int<13>(xi);
+    ap_int<17> d1 = ap_int<17>(wi) - ap_int<17>(wr);
+    ap_int<17> d2 = ap_int<17>(wr) + ap_int<17>(wi);
+    ap_int<30> k1 = wr * xs;
+    ap_int<30> k2 = xr * d1;
+    ap_int<30> k3 = xi * d2;
+#pragma HLS BIND_OP variable=k1 op=mul impl=fabric
+#pragma HLS BIND_OP variable=k2 op=mul impl=fabric
+#pragma HLS BIND_OP variable=k3 op=mul impl=fabric
+    pr = ap_int<31>(k1) - ap_int<31>(k3);
+    pi = ap_int<31>(k1) + ap_int<31>(k2);
 }
 
 void smi_pi(hls::stream<ap_uint<64> > &s_axis_x,
@@ -166,7 +184,8 @@ void smi_pi(hls::stream<ap_uint<64> > &s_axis_x,
             ap_int<31> pr, pi;
             w16_t wr = (w16_t)wts(32 * k + 15, 32 * k);
             w16_t wi = (w16_t)wts(32 * k + 31, 32 * k + 16);
-            cmul3<12>(wr, wi, h1r[k], h1i[k], pr, pi);   // Q12
+            if (k >= SMI_NT - SMI_NFAB) cmul3_fab(wr, wi, h1r[k], h1i[k], pr, pi);   // Q12, LUT multipliers (saves DSP48)
+            else                        cmul3<12>(wr, wi, h1r[k], h1i[k], pr, pi);   // Q12
             sr += acc_t(pr) << SMI_XFRAC;
             si += acc_t(pi) << SMI_XFRAC;
         }
