@@ -69,7 +69,7 @@ python3 model/stap_golden.py --M 2 --fs 30.72e6 --fif 0 --jam-theta 30 --adc-bit
 
 The array size of the C solver is set by `STAP_M`/`STAP_N`, or by a `stap_config.h` placed next to `stap_solver.h`.
 
-**Integration example:** `../LoopBack_Pipeline_CRPA` puts this core (M=2) into the ANTSDR E310 AD9361 loopback design as a CRPA anti-jam stage.
+**Integration example:** `../LoopBack_STAP_CRPA` puts this core (M=2) into the ANTSDR E310 AD9361 loopback design as a CRPA anti-jam stage.
 
 ## Parameters
 

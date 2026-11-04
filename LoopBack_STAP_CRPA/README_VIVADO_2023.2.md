@@ -9,7 +9,7 @@ Ubuntu 22.04.
 ```bash
 source /tools/Xilinx/Vivado/2023.2/settings64.sh
 source /tools/Xilinx/Vitis/2023.2/settings64.sh
-cd LoopBack_Code
+cd LoopBack_STAP_CRPA
 ./Automation/Linux/build_all.sh --jobs 16
 ```
 

@@ -17,7 +17,7 @@
 #  (requirement 67).
 #
 #  REQUIRED ENVIRONMENT (set by Automation/Linux/build_all.sh)
-#    LB_ROOT           absolute path of LoopBack_Code
+#    LB_ROOT           absolute path of the project root (LoopBack_STAP_CRPA)
 #    LB_IP_REPO        absolute path of the packaged custom IP repo
 #    ADI_HDL_DIR              absolute path of the working copy of the ADI tree
 #                             (Build/VendorWork/hdl, copied from
