@@ -253,3 +253,9 @@ averaged over the start-up, and the as-built STAP never got its first solve. It 
 neither the 32 taps nor the 2048 points change the steady value much; what they change is the longest echo that can be handled (STAP: 11 -> 27 samples, SFAP: about 100 -> 200 samples), which this scene (a 9-sample echo) does not exercise.
 
 **Not checked:** not synthesised (timing at 245.76 MHz is open: the 5.1.3 build was short by 0.034 ns and the new stage adds a 2048-entry covariance RAM, a window ROM twice the size and one more FFT stage); not run on the board.
+
+## 13. 5.2.1: IP packaging error of 5.2.0
+
+The first 5.2.0 build stopped in stage 4 (`ip`): `HDL 9-1206 Syntax error near '''` at `gnss_passthrough.v:519`. The SFAP_INFO read used the SystemVerilog size cast `8'(SFAP_LN)`, which the IP
+packager's Verilog parser does not accept (iverilog with `-g2012` did, which is why my tests did not show it). It is now a plain 8-bit localparam. All HDL now also compiles with `iverilog -g2005`
+(strict Verilog-2005); the `SFAP_INFO` read gives 0x5FA9020B. Firmware string 5.2.1, bitstream version word unchanged (0x00050200). Stage 3 (HLS) of that build passed (estimated 8.442 ns, II 1).

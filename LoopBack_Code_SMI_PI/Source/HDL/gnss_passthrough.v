@@ -283,8 +283,8 @@ module gnss_passthrough #(
   // v4.7 -- smi_pi_0 v2.4: the RX1 reference tap is at delay 4 (was 8), so a reflection of the jammer
   //         up to 11 samples later can be cancelled (was 7). AJ_INFO byte 2 = 4, layout 6; the firmware
   //         refuses to start the filter if that byte differs from its own AJ_REF.
-  localparam [31:0] CORE_VERSION = 32'h00050200;   // v5.2.0 (SFAP 2048-point; SFAP core 0x1B0..0x1C4, I/Q-image corrector 0x1C8..0x1E4)
-  localparam SFAP_LN = 11;                         // SFAP transform size 2^11 = 2048 (10 = 1024 as in 5.0 to 5.1.3)
+  localparam [31:0] CORE_VERSION = 32'h00050200;   // v5.2.1 (5.2.0 + parser fix; same version word) (SFAP 2048-point; SFAP core 0x1B0..0x1C4, I/Q-image corrector 0x1C8..0x1E4)
+  localparam [7:0] SFAP_LN = 8'd11;                         // SFAP transform size 2^11 = 2048 (10 = 1024 as in 5.0 to 5.1.3)
   localparam [31:0] AJ_INFO      = 32'h10040C06;
   localparam [31:0] AJ_CFG_RESET = 32'h00000001;   // bypass
   localparam [31:0] AJ_NRM_RESET = 32'h00002000;   // g2 = 1.0
@@ -516,7 +516,7 @@ module gnss_passthrough #(
       12'h06E: axi_rdata <= v_sfap_stat;           // 0x1B8
       12'h06F: axi_rdata <= v_sfap_in;             // 0x1BC
       12'h070: axi_rdata <= v_sfap_out;            // 0x1C0
-      12'h071: axi_rdata <= {16'h5FA9, 8'h02, 8'(SFAP_LN)};   // 0x1C4
+      12'h071: axi_rdata <= {16'h5FA9, 8'h02, SFAP_LN};   // 0x1C4
       12'h072: axi_rdata <= sfap_iq1_act;          // 0x1C8
       12'h073: axi_rdata <= sfap_iq2_act;          // 0x1CC
       12'h074: axi_rdata <= v_sfap_iqs[31:0];      // 0x1D0 S2r1
