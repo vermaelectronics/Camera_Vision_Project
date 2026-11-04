@@ -30,4 +30,4 @@ iverilog -g2005 -Wall -I "$B" -o "$B/tb_gnss_stap.vvp" \
     "$ROOT/Source/Sim/tb_gnss_stap.v" "$ROOT/Source/HDL/gnss_stap.v" \
     "$ROOT/Source/HDL/gnss_passthrough.v" "$ROOT/Source/HDL/stap/"*.v 2>&1 | grep -v timescale || true
 (cd "$B" && vvp -n tb_gnss_stap.vvp) | tee "$B/sim.log"
-grep -q "\*\*\* PASS" "$B/sim.log" && echo "RUN_SIM: PASS" || { echo "RUN_SIM: FAIL"; exit 1; }
+if grep -q "\*\*\* PASS" "$B/sim.log"; then echo "RUN_SIM: PASS"; else echo "RUN_SIM: FAIL"; exit 1; fi

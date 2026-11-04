@@ -15,7 +15,7 @@
 #include "gnss_l1.h"
 #include "gnss_passthrough.h"
 #include "gnss_stap.h"      /* CRPA MOD */
-#include "gnss_mode.h"      /* CRPA MOD */
+#include "gnss_band.h"      /* CRPA MOD */
 #include "gnss_txdma.h"
 
 #ifdef XILINX_PLATFORM
@@ -767,13 +767,14 @@ void gnss_info_menu(void)
     console_print("    gnss_tx=1 / gnss_tx=0       live retransmit / ABORT\n");
     console_print("    gnss_ddr_tx=1 / =0         DDR round trip / stop\n");
     console_print("    tx1_attenuation=N          mdB. BIGGER = QUIETER.\n");
-    console_print("                               89750 quietest, 70000 known good\n");
+    console_print("                               89750 quietest; bands use 20000\n");
     console_print("    gnss_tx? gnss_ddr_tx? gnss_status?   read back from hardware\n");
     console_print("\n");
-    console_print("  RADIO MODES (centre freq, rate, bandwidth, RX1/RX2 gain, TX att)\n");
-    console_print("    gnss_mode?                 list the 5 modes      now: %d\n",
-                  (long)gnss_mode_current());
-    console_print("    gnss_mode=1 .. gnss_mode=5 apply one (edit gnss_mode.c to change)\n");
+    console_print("  GNSS BANDS (centre freq, rate, bandwidth, RX1/RX2 gain, TX att)\n");
+    console_print("    gnss_band?                 list the 5 bands      now: %d\n",
+                  (long)gnss_band_current());
+    console_print("    gnss_band=1 .. gnss_band=5 apply one (edit gnss_band.c to change)\n");
+    console_print("    gnss_loop?                 TX1 -> RX leakage check\n");
     console_print("\n");
     console_print("  CRPA ANTI-JAM (RX1 + RX2 array, nulls 1 jammer)   now: %s\n",
                   (char *)(gnss_stap_get_enable() ? "ANTI-JAM" : "bypass"));

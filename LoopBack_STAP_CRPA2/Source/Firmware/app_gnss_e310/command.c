@@ -51,7 +51,7 @@
 #include "gnss_l1.h"
 #include "gnss_passthrough.h"
 #include "gnss_stap.h"      /* CRPA MOD */
-#include "gnss_mode.h"      /* CRPA MOD: preset radio modes */
+#include "gnss_band.h"      /* CRPA MOD: preset GNSS bands */
 /* LOOPBACK MOD-7 */
 #include "gnss_txdma.h"
 #include "axi_dmac.h"
@@ -138,10 +138,14 @@ command cmd_list[] = {
 	{"gnss_ddr_tx=", "1 = capture RX to DDR and replay it cyclically on TX1, 0 = stop.", "gnss_ddr_tx=0", set_gnss_ddr_tx},
 	/* CRPA MOD: 2-element anti-jam stage (gnss_stap) between RX and the
 	 * passthrough. See gnss_stap.h. */
-	/* CRPA MOD: five preset radio modes (centre frequency, sample rate,
-	 * bandwidth, RX1/RX2 gain, TX attenuation in one command). gnss_mode.c. */
-	{"gnss_mode?", "Lists the 5 preset radio modes and the one in use.", "", get_gnss_mode},
-	{"gnss_mode=", "Applies preset mode 1..5 (LO, rate, bandwidth, gain, attenuation).", "gnss_mode=1", set_gnss_mode},
+	/* CRPA MOD: five preset GNSS bands (centre frequency, sample rate,
+	 * bandwidth, RX1/RX2 gain, TX attenuation in one command). gnss_band.c.
+	 * gnss_mode=/? are kept as aliases of gnss_band=/?. */
+	{"gnss_band?", "Lists the 5 preset GNSS bands and the one in use.", "", get_gnss_band},
+	{"gnss_band=", "Applies band 1..5 (centre freq, rate, bandwidth, gain, TX attenuation).", "gnss_band=1", set_gnss_band},
+	{"gnss_mode?", "Same as gnss_band?.", "", get_gnss_band},
+	{"gnss_mode=", "Same as gnss_band=.", "gnss_mode=1", set_gnss_band},
+	{"gnss_loop?", "Measures TX1 -> RX leakage (DAC muted vs running).", "", get_gnss_loop},
 	{"stap_status?", "Prints the CRPA anti-jam state (weights, powers, suppression).", "", get_stap_status},
 	{"stap_en?", "Gets the CRPA output state (1 = anti-jam, 0 = bypass).", "", get_stap_en},
 	{"stap_en=", "1 = TX carries the anti-jam beamformer output, 0 = bypass (raw RX1).", "stap_en=1", set_stap_en},
@@ -495,7 +499,7 @@ static void lo_report(const char *what)
 	console_print("%s: RX LO = %d kHz, TX LO = %d kHz\n", what,
 		      (int32_t)(rx / 1000), (int32_t)(tx / 1000));
 	if ((rx > tx ? rx - tx : tx - rx) > 1000)
-		console_print("WARNING: RX and TX LO differ - the retransmitted signal is shifted by that amount. Set both, or use gnss_mode=N.\n");
+		console_print("WARNING: RX and TX LO differ - the retransmitted signal is shifted by that amount. Set both, or use gnss_band=N.\n");
 }
 
 /***
@@ -563,7 +567,7 @@ void set_tx_samp_freq(double* param, char param_no) // "tx_samp_freq=" command
 		sampling_freq_hz = (uint32_t)param[0];
 		/* CRPA MOD: 2R2T LVDS runs DATA_CLK = 4 x fs; the FPGA is timed for
 		 * 125 MHz, i.e. at most 30.72 MSPS. Above that samples are lost. */
-		if (sampling_freq_hz > GNSS_MODE_MAX_FS_HZ) {
+		if (sampling_freq_hz > GNSS_BAND_MAX_FS_HZ) {
 			console_print("REFUSED: %d Hz. This bitstream supports at most 30720000 Hz with both RX channels.\n",
 				      sampling_freq_hz);
 			return;
@@ -783,7 +787,7 @@ void set_rx_samp_freq(double* param, char param_no) // "rx_samp_freq=" command
 		sampling_freq_hz = (uint32_t)param[0];
 		/* CRPA MOD: 2R2T LVDS runs DATA_CLK = 4 x fs; the FPGA is timed for
 		 * 125 MHz, i.e. at most 30.72 MSPS. Above that samples are lost. */
-		if (sampling_freq_hz > GNSS_MODE_MAX_FS_HZ) {
+		if (sampling_freq_hz > GNSS_BAND_MAX_FS_HZ) {
 			console_print("REFUSED: %d Hz. This bitstream supports at most 30720000 Hz with both RX channels.\n",
 				      sampling_freq_hz);
 			return;

@@ -7,7 +7,7 @@
 #include "gnss_l1.h"
 #include "gnss_passthrough.h"
 #include "gnss_stap.h"      /* CRPA MOD */
-#include "gnss_mode.h"      /* CRPA MOD */
+#include "gnss_band.h"      /* CRPA MOD */
 #include "no_os_delay.h"
 #include "no_os_gpio.h"
 #include <stdio.h>
@@ -401,11 +401,11 @@ void gnss_l1_print_status(struct ad9361_rf_phy *phy)
                        gc < 4 ? gc_names[gc] : "?");
             }
         }
-        if (gnss_mode_current() > 0)
-            printf("  gnss_mode      : %d - %s\n", gnss_mode_current(),
-                   gnss_modes[gnss_mode_current() - 1].name);
+        if (gnss_band_current() > 0)
+            printf("  gnss_band      : %d - %s\n", gnss_band_current(),
+                   gnss_bands[gnss_band_current() - 1].name);
         else
-            printf("  gnss_mode      : none (boot configuration)\n");
+            printf("  gnss_band      : none (boot configuration)\n");
     }
     if (ad9361_get_rx_rssi(phy, 0, &rssi) == 0) {
         if (rssi.multiplier > 0) {

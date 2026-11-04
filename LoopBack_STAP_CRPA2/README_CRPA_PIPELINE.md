@@ -115,43 +115,89 @@ The `gnss_passthrough` IP itself is unchanged. If you hit this error, re-package
 - **Outputs:** channel 0 carries the beamformer. Channel 1 carries raw RX2,
   or a copy of the beamformer when `stap_ch1=1`.
 
-## Radio modes: `gnss_mode=1` … `gnss_mode=5`
+## SD card: anti-jam straight from power-on
+
+The default build is the SD-card build. Copy `BOOT.BIN` to the card and power on; no console input is
+needed. The board then does this by itself:
+
+1. Initialises the AD9361 and runs the self-test.
+2. Starts TX1 on the loopback path.
+3. Applies the **power-on band** (chosen with `--band N` when building, default 1): centre frequency,
+   sample rate, bandwidths, RX1/RX2 gain and TX attenuation (**20000 mdB**).
+4. Runs the **TX → RX leakage check** (below) and prints the result.
+5. Computes the CRPA weights and switches TX to the **anti-jam output**.
+6. Keeps **updating the weights every 100 ms** in the background.
+
+```bash
+./Automation/Linux/build_bin.sh --band 1
+```
+
+The console (PuTTY, 115200 8N1) stays usable for changes while it runs: `gnss_band=N`,
+`tx1_attenuation=N`, `gnss_loop?`, `stap_status?`.
+
+## GNSS bands: `gnss_band=1` … `gnss_band=5`
 
 A single command sets the RX and TX centre frequency (always equal), the sample rate (RX = TX), the RX/TX
-RF bandwidth, the RX1 and RX2 gain control and gain (equal on both CRPA elements), and the TX1 attenuation:
+RF bandwidth, the RX1 and RX2 gain (manual and equal on both CRPA elements), and the TX1 attenuation:
 
 | N | Centre | Rate | RX / TX BW | Gain | TX att | Name |
 |---|---|---|---|---|---|---|
-| 1 | 1575.420 MHz | 30.72 MSPS | 18 / 18 MHz | slow AGC | 70000 | GPS L1 wide (boot default) |
-| 2 | 1575.420 MHz | 15.36 MSPS | 4 / 4 MHz | manual 50 dB | 70000 | GPS L1 C/A narrow |
-| 3 | 1575.420 MHz | 30.72 MSPS | 18 / 18 MHz | manual 30 dB | 70000 | GPS L1 strong jammer, low gain |
-| 4 | 1561.098 MHz | 15.36 MSPS | 4 / 4 MHz | manual 50 dB | 70000 | BeiDou B1I |
-| 5 | 1602.000 MHz | 15.36 MSPS | 10 / 10 MHz | manual 50 dB | 70000 | GLONASS L1 |
+| 1 | 1575.420 MHz | 30.72 MSPS | 18 / 18 MHz | manual 40 dB | 20000 | GPS L1 / Galileo E1 wide (power-on default) |
+| 2 | 1575.420 MHz | 15.36 MSPS | 4 / 4 MHz | manual 40 dB | 20000 | GPS L1 C/A narrow |
+| 3 | 1575.420 MHz | 30.72 MSPS | 18 / 18 MHz | manual 25 dB | 20000 | GPS L1 low gain (strong jammer) |
+| 4 | 1561.098 MHz | 15.36 MSPS | 4 / 4 MHz | manual 40 dB | 20000 | BeiDou B1I |
+| 5 | 1602.000 MHz | 15.36 MSPS | 10 / 10 MHz | manual 40 dB | 20000 | GLONASS L1 |
 
 ```
-gnss_mode?          list the modes, * marks the active one
-gnss_tx=1           start TX (always starts at 89750 mdB, by design)
-gnss_mode=2         apply mode 2; also sets its TX attenuation
-gnss_status?        read back: LOs, rate, bandwidths, RX1/RX2 gain + mode, attenuation
+gnss_band?          list the bands, * marks the active one, and the power-on band
+gnss_band=2         apply band 2 (the CRPA weights re-adapt automatically)
+tx1_attenuation=15000   change the TX level (10000..20000 as planned; up to 89750 allowed)
+gnss_loop?          TX -> RX leakage check at the current level
+gnss_status?        read back: LOs, rate, bandwidths, RX1/RX2 gain, attenuation, band
 ```
 
-**Order of operations.** The mode first sets TX attenuation to its maximum, mutes the DAC and turns the
+`gnss_mode=` / `gnss_mode?` still work as aliases.
+
+**Order of operations.** The band first sets TX attenuation to its maximum, mutes the DAC and turns the
 loopback buffer off. It then sets the LOs (verified by readback), the sample rate (RX and TX verified
-equal), the bandwidths, and the gain mode and gain on both channels (verified). Next it re-primes the
-loopback buffer and clears the CRPA overrun flag; if the anti-jam was on or `stap_auto` is running, it
-re-adapts the weights for the new configuration. The mode's TX attenuation is set last.
+equal), the bandwidths, and the gain on both channels (verified). Next it re-primes the loopback buffer
+and clears the CRPA overrun flag; if the anti-jam is on, it re-adapts the weights for the new band. The
+band's TX attenuation is set last.
 
-**Limits.** A mode is refused, with nothing touched, if any value is outside these limits:
+**Limits.** A band is refused, with nothing touched, if any value is outside these limits:
 
 - centre frequency 1100–1700 MHz (the L band, where the boot RF switch setting stays valid)
 - sample rate 2.083–30.72 MSPS
 - bandwidth 0.2 MHz to the sample rate
 - manual gain 0–71 dB
-- attenuation 40000–89750 mdB
+- attenuation 10000–89750 mdB
 
-**To change a mode,** edit the `gnss_modes[]` table at the top of
-`Source/Firmware/app_gnss_e310/gnss_mode.c`, then rebuild the firmware only:
-`./Automation/Linux/build_bin.sh --from sw`.
+**To change a band,** edit the `gnss_bands[]` table at the top of
+`Source/Firmware/app_gnss_e310/gnss_band.c`, then rebuild the firmware only:
+
+```bash
+./Automation/Linux/build_bin.sh --from sw
+```
+
+## TX → RX leakage check (`gnss_loop?`)
+
+The E310 retransmits on **the same frequency it receives**, on the same board, so part of TX1 always
+couples back into RX1/RX2. At 10–20 dB attenuation TX1 puts out roughly −3 to −13 dBm. If the board's
+TX→RX isolation is not large enough, that leaked signal sits above the receiver noise. The loopback then
+feeds its own output back into itself, the satellites are buried, and the CRPA sees the leakage as a
+jammer.
+
+The check measures the RX1/RX2 input power with the DAC muted and with it running:
+
+```
+---- TX -> RX leakage check (TX1 attenuation 20000 mdB) ----
+  RX1 input: TX muted -30.00 dBFS, TX on -29.80 dBFS, rise +0.20 dB
+  RX2 input: TX muted -29.50 dBFS, TX on -30.30 dBFS, rise -0.80 dB
+  OK: no significant TX -> RX leakage at this attenuation
+```
+
+A rise of more than 3 dB prints a WARNING with the next attenuation to try. Raising `tx1_attenuation` by
+10000 lowers the leakage by 10 dB. It runs automatically at power-on and can be repeated with `gnss_loop?`.
 
 ### Related fixes in this version
 
@@ -160,9 +206,9 @@ re-adapts the weights for the new configuration. The mode's TX attenuation is se
 | `rx_lo_freq=` / `tx_lo_freq=` | Accept decimal MHz (`1575.42` now means 1575.420 MHz; the vendor code truncated it to 1575). Both LOs are read back in kHz, with a warning when RX ≠ TX. |
 | `rx_samp_freq=` / `tx_samp_freq=` | Rates above 30.72 MSPS are refused. In 2R2T LVDS mode the interface clock is 4 × fs, and the FPGA is timed for 125 MHz. |
 | `rx1_rf_gain=` / `rx2_rf_gain=` | Refused, with a message, while that channel is in AGC mode; previously the AD9361 ignored the value silently. The gain is read back. |
-| `gnss_status?` | Shows the RX2 gain, both gain-control modes and the active `gnss_mode`. |
+| `gnss_status?` | Shows the RX2 gain, both gain-control modes and the active `gnss_band`. |
 | `gnss_passthrough` v1.2 | The elastic buffer is flushed while `pass_en = 0`, so re-enabling always re-primes from empty. A sample-rate change can no longer leave it stuck full (the `overflow` / `fifo level 31` state). |
-| CRPA | The `overrun` flag is cleared after the boot-time interface tuning and after each `gnss_mode=`, so a `1` in `stap_status?` now means a real problem. |
+| CRPA | The `overrun` flag is cleared after the boot-time interface tuning and after each `gnss_band=`, so a `1` in `stap_status?` now means a real problem. |
 
 ## Console
 
@@ -302,10 +348,16 @@ The script finds `/tools/Xilinx/Vivado/2023.2/settings64.sh` and the Vitis one b
 **Common variants:**
 
 ```bash
-./Automation/Linux/build_bin.sh --variant deploy --sd
+./Automation/Linux/build_bin.sh --band 2 --sd
 ```
 
-SD-card build. TX1 transmits at power-on with the anti-jam ON. Read `SD_Image/README_SD_CARD.md` first. `--sd` also copies the image to `SD_Image/BOOT.BIN`.
+SD-card build (the default) with power-on band 2. TX1 transmits at power-on with the anti-jam ON. Read `SD_Image/README_SD_CARD.md` first. `--sd` also copies the image to `SD_Image/BOOT.BIN`.
+
+```bash
+./Automation/Linux/build_bin.sh --variant dev
+```
+
+Console/JTAG build: TX silent at power-on, everything by hand.
 
 ```bash
 ./Automation/Linux/build_bin.sh --variant deploy-nocrpa
@@ -325,7 +377,7 @@ After a firmware-only change: rebuilds the ELF, FSBL and BOOT.BIN only.
 
 Fewer parallel jobs, and starts from a clean Build tree.
 
-The default variant is `dev`. A dev image never transmits at power-on, and the script refuses to package one whose ELF does. The script also refuses a bitstream that misses timing. Pass `--allow-timing-violation` only for bench experiments. A full build takes roughly an hour and about 15 GB of disk. Follow the long Vivado step with:
+The default variant is `deploy` (SD card, transmits at power-on). A `dev` image never transmits at power-on, and the script refuses to package one whose ELF does. The script also refuses a bitstream that misses timing. Pass `--allow-timing-violation` only for bench experiments. A full build takes roughly an hour and about 15 GB of disk. Follow the long Vivado step with:
 
 ```bash
 tail -f Build/Logs/build.log

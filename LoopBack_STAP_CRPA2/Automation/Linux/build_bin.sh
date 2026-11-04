@@ -29,13 +29,17 @@
 #    ./Automation/Linux/build_bin.sh [options]
 #
 #  OPTIONS
-#    --variant V      dev            JTAG/console build. TX silent at power-on;
-#                                    gnss_tx=1, stap_update=1, stap_en=1 by hand.
-#                                    (default)
-#                     deploy         SD-card build: TX1 starts at power-on with
-#                                    the CRPA anti-jam ON (GNSS_DEPLOY_AUTO_TX).
+#    --variant V      deploy         SD-card build (DEFAULT): at power-on the
+#                                    band from --band is applied, TX1 starts,
+#                                    the CRPA anti-jam is ON and its weights
+#                                    update every 100 ms. No console needed.
 #                                    READ SD_Image/README_SD_CARD.md FIRST.
 #                     deploy-nocrpa  SD-card build, plain loopback (CRPA bypass)
+#                     dev            JTAG/console build. TX silent at power-on;
+#                                    gnss_tx=1, gnss_band=N, stap_en=1 by hand.
+#    --band N         power-on band 1..5 (default 1), see gnss_band.c:
+#                       1 GPS L1/Galileo E1 wide  2 GPS L1 C/A narrow
+#                       3 GPS L1 low gain         4 BeiDou B1I   5 GLONASS L1
 #    --defines LIST   extra comma-separated firmware defines
 #    --jobs N         parallel Vivado jobs (default: number of CPUs, max 16)
 #    --xilinx DIR     Xilinx install root holding Vivado/2023.2 and Vitis/2023.2
@@ -58,7 +62,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TARGET_VERSION="2023.2"
 PROJECT_NAME="LoopBack_STAP_CRPA2"
 
-VARIANT="dev"
+VARIANT="deploy"
+BAND="1"
 EXTRA_DEFINES=""
 JOBS=""
 XILINX_ROOT=""
@@ -68,11 +73,12 @@ SKIP_SIM=0
 ALLOW_TIMING=0
 COPY_SD=0
 
-usage() { sed -n '2,52p' "$0"; }
+usage() { awk 'NR>1 && /^#/ {sub(/^# ?/, ""); print; next} NR>1 {exit}' "$0"; }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --variant)  VARIANT="$2"; shift 2 ;;
+    --band)     BAND="$2"; shift 2 ;;
     --defines)  EXTRA_DEFINES="$2"; shift 2 ;;
     --jobs)     JOBS="$2"; shift 2 ;;
     --xilinx)   XILINX_ROOT="$2"; shift 2 ;;
@@ -111,6 +117,11 @@ case "$VARIANT" in
   deploy-nocrpa) DEFINES="GNSS_DEPLOY_AUTO_TX,GNSS_DEPLOY_NO_CRPA" ;;
   *) die "--variant must be dev, deploy or deploy-nocrpa (got '$VARIANT')" ;;
 esac
+case "$BAND" in
+  1|2|3|4|5) ;;
+  *) die "--band must be 1..5 (got '$BAND')" ;;
+esac
+DEFINES="${DEFINES:+$DEFINES,}GNSS_DEFAULT_BAND=$BAND"
 if [[ -n "$EXTRA_DEFINES" ]]; then
   DEFINES="${DEFINES:+$DEFINES,}$EXTRA_DEFINES"
 fi
@@ -141,7 +152,8 @@ for f in Vendor/ADI_hdl_2023_r2/library Source/BlockDesign/system_bd.tcl \
   [[ -e "$ROOT/$f" ]] || die "missing $f - is this the complete $PROJECT_NAME tree?"
 done
 say "project root $ROOT"
-say "variant $VARIANT, firmware defines: ${DEFINES:-(none)}, jobs $JOBS"
+say "variant $VARIANT, power-on band $BAND, firmware defines: ${DEFINES:-(none)}, jobs $JOBS"
+[[ "$VARIANT" != "dev" ]] && warn "SD-card build: the board TRANSMITS on power-on (band $BAND). Conducted coax only."
 
 # Xilinx tools: use what is on PATH, otherwise find and source settings64.sh
 have() { command -v "$1" >/dev/null 2>&1; }
@@ -292,7 +304,7 @@ say "BOOT.BIN: FSBL + bitstream + application ($(stat -c %s "$BOOT_BIN") bytes)"
 step "4 bitstream .bin"
 # =============================================================================
 STAMP="$(date +%Y%m%d_%H%M%S)"
-REL="$ROOT/Build/Release/${PROJECT_NAME}_${VARIANT}_${STAMP}"
+REL="$ROOT/Build/Release/${PROJECT_NAME}_${VARIANT}_band${BAND}_${STAMP}"
 mkdir -p "$REL"
 cp "$BIT" "$REL/system_top.bit"
 cat > "$REL/bitstream.bif" <<'EOF'
@@ -323,6 +335,7 @@ GIT_DIRTY="$(git -C "$ROOT" status --porcelain 2>/dev/null | grep -v '^??' | hea
   echo "$PROJECT_NAME release"
   echo "built        : $(date -Iseconds) on $(hostname)"
   echo "variant      : $VARIANT"
+  echo "power-on band: $BAND (deploy variants)"
   echo "defines      : ${DEFINES:-(none)}"
   echo "source rev   : $GIT_REV${GIT_DIRTY:+ (with uncommitted changes)}"
   echo "vivado       : ${VIV_VER:-unknown}"
@@ -337,9 +350,11 @@ GIT_DIRTY="$(git -C "$ROOT" status --porcelain 2>/dev/null | grep -v '^??' | hea
   echo
   case "$VARIANT" in
     dev)    echo "DEV BUILD: TX silent at power-on. Console 115200 8N1:"
-            echo "  gnss_tx=1, stap_update=1, stap_en=1, stap_auto=100, stap_status?" ;;
-    deploy) echo "DEPLOY BUILD: TX1 TRANSMITS AT POWER-ON, CRPA anti-jam ON."
-            echo "  CONDUCTED, ATTENUATED COAX ONLY. Read SD_Image/README_SD_CARD.md." ;;
+            echo "  gnss_tx=1, gnss_band=$BAND, stap_update=1, stap_en=1, stap_auto=100" ;;
+    deploy) echo "DEPLOY BUILD: at power-on band $BAND, TX1 TRANSMITS (20000 mdB),"
+            echo "  CRPA anti-jam ON, weights updated every 100 ms. Console optional:"
+            echo "  gnss_band=N, tx1_attenuation=N, gnss_loop?, stap_status?"
+            echo "  CONDUCTED COAX ONLY. Read SD_Image/README_SD_CARD.md." ;;
     deploy-nocrpa)
             echo "DEPLOY BUILD (no CRPA): TX1 TRANSMITS AT POWER-ON, plain loopback."
             echo "  CONDUCTED, ATTENUATED COAX ONLY. Read SD_Image/README_SD_CARD.md." ;;

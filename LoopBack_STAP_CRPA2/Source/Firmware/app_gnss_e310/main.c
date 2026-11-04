@@ -70,6 +70,7 @@
 #include "gnss_l1.h"
 #include "gnss_passthrough.h"
 #include "gnss_stap.h"      /* CRPA MOD */
+#include "gnss_band.h"      /* CRPA MOD */
 #include "gnss_capture.h"
 #include "gnss_info.h"   /* LOOPBACK MOD-10 */
 
@@ -1169,24 +1170,13 @@ int main(void)
 				       "%ld mdB attenuation\n\r",
 				       (long)GNSS_DEPLOY_TX_ATTEN_MDB);
 				printf("DEPLOY_RESULT: PASS - transmitting\n\r");
-#ifndef GNSS_DEPLOY_NO_CRPA
-				/* CRPA MOD: the deployment build turns the anti-jam stage on.
-				 * One blocking adaptation first, so TX never carries the
-				 * beamformer with empty weights; then background adaptation
-				 * from the console loop. Build with GNSS_DEPLOY_NO_CRPA for
-				 * the plain loopback. */
-				if (gnss_stap_st.present &&
-				    gnss_stap_update() == GNSS_STAP_OK &&
-				    gnss_stap_set_enable(1) == GNSS_STAP_OK) {
-					gnss_stap_st.auto_period_ms = GNSS_DEPLOY_STAP_PERIOD_MS;
-					printf("gnss_deploy: CRPA anti-jam ON (power inversion, "
-					       "adapting every %lu ms)\n\r",
-					       (unsigned long)GNSS_DEPLOY_STAP_PERIOD_MS);
-				} else {
-					printf("gnss_deploy: CRPA not started; TX carries raw RX1 "
-					       "(bypass)\n\r");
-				}
-#endif
+				/* CRPA MOD: everything the SD card needs, no console input:
+				 * band GNSS_DEFAULT_BAND (centre freq, rate, bandwidth, gain,
+				 * TX attenuation), TX -> RX leakage check, CRPA weights,
+				 * anti-jam ON, background weight updates every
+				 * GNSS_DEPLOY_STAP_PERIOD_MS from the console loop.
+				 * GNSS_DEPLOY_NO_CRPA keeps the plain loopback. gnss_band.c */
+				(void)gnss_band_autostart();
 			}
 		}
 	}

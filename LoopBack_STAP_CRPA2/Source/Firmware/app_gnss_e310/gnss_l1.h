@@ -94,7 +94,9 @@
  *  receiver is pointlessly loud and should be justified first.
  * -------------------------------------------------------------------------- */
 #ifndef GNSS_DEPLOY_TX_ATTEN_MDB
-#define GNSS_DEPLOY_TX_ATTEN_MDB         70000U    /* 70 dB, measured working  */
+/* LoopBack_STAP_CRPA2: the TX path is started at this level, then the
+ * power-on band (gnss_band.c) sets its own attenuation, 20000 by default. */
+#define GNSS_DEPLOY_TX_ATTEN_MDB         20000U    /* 20 dB                     */
 #endif
 
 typedef enum {
