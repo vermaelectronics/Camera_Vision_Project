@@ -1,4 +1,4 @@
-# LoopBack_STAP_CRPA: ANTSDR E310 V1 GNSS L1 loopback pipeline with CRPA anti-jam
+# LoopBack_STAP_CRPA1: ANTSDR E310 V1 GNSS L1 loopback pipeline with CRPA anti-jam
 
 ```
 RX1 ─┐                          ┌─────────────── PL (l_clk) ───────────────┐
@@ -12,7 +12,7 @@ RX2 ─┘        (2R2T, 12 bit)  │ │ 2 el × 16 taps    (unchanged: elastic
                               └─► util_wfifo → DMA (raw RX capture, untouched)
 ```
 
-`LoopBack_STAP_CRPA` is `LoopBack_Pipeline_noCRPA` with the STAP core from `stap_fpga` added as
+`LoopBack_STAP_CRPA1` is `LoopBack_Pipeline_noCRPA` with the STAP core from `stap_fpga` added as
 a **CRPA (controlled-reception-pattern antenna) anti-jam stage**. RX1 and RX2 of the
 AD9361 form a 2-element array. Both channels share one LO, so the array is
 phase-coherent. The stage sits between the AD9361 RX outputs and the existing
@@ -223,7 +223,7 @@ only. `gnss_tx=0` still silences TX1 immediately.
 **Build:**
 
 ```bash
-cd ~/LoopBack_STAP_CRPA
+cd ~/LoopBack_STAP_CRPA1
 chmod +x Automation/Linux/*.sh
 ./Automation/Linux/build_bin.sh
 ```

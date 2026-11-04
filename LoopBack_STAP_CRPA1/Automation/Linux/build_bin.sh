@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================================
-#  build_bin.sh  --  LoopBack_STAP_CRPA: one command from sources to .bin
+#  build_bin.sh  --  LoopBack_STAP_CRPA1: one command from sources to .bin
 #
 #  Produces, for the ANTSDR E310 V1 (xc7z020clg400-2):
 #    BOOT.BIN             FSBL + bitstream + application, for the SD card
@@ -56,7 +56,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TARGET_VERSION="2023.2"
-PROJECT_NAME="LoopBack_STAP_CRPA"
+PROJECT_NAME="LoopBack_STAP_CRPA1"
 
 VARIANT="dev"
 EXTRA_DEFINES=""

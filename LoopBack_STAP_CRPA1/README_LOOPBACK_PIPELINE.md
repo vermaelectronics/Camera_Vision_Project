@@ -1,4 +1,4 @@
-> **This folder (`LoopBack_STAP_CRPA`) is the CRPA version.** The `gnss_stap` anti-jam stage is inserted in front of
+> **This folder (`LoopBack_STAP_CRPA1`) is the CRPA version.** The `gnss_stap` anti-jam stage is inserted in front of
 > `gnss_passthrough`. Read **README_CRPA_PIPELINE.md** first. The text below describes the base loopback,
 > which is still what the board does while the CRPA stage is in bypass (its reset state).
 
@@ -30,7 +30,7 @@ global synthesis) were copied in.
 ```bash
 source /tools/Xilinx/Vivado/2023.2/settings64.sh
 source /tools/Xilinx/Vitis/2023.2/settings64.sh
-cd ~/LoopBack_STAP_CRPA
+cd ~/LoopBack_STAP_CRPA1
 chmod +x Automation/Linux/*.sh
 ./Automation/Linux/build_all.sh --jobs 16 --to boot 2>&1 | tee build_loopback.log
 ```
