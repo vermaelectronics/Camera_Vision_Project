@@ -217,7 +217,7 @@ static int32_t g2_q13(void) { return (int32_t)(g2 * 8192.0 + 0.5); }
 #define AJ_PULSE_HOLD_US    3000000U    /* pulses seen this recently: pulsed jammer            */
 #define AJ_OFF_PULSE_US     3000000U    /* JAMMER OFF delay while it is pulsed                 */
 
-static int      blk_hw, blk_mode = 1, blk_seeded, blk_guard_on;
+static int      blk_hw, blk_mode = 0, blk_seeded, blk_guard_on;   /* 4.9.3: the pulse blanker is OFF by default (gnss_aj_blank=1 turns it on) */
 static double   blk_db = AJ_BLK_DB_DEFAULT, blk_duty;
 static uint32_t blk_thr_set = GNSS_PT_BLK_THR_OFF, blk_c0, blk_b0, blk_r0, n_gate;
 static XTime    blk_t0, blk_guard_t0, blk_off_until, blk_ref_t, pulse_t;

@@ -84,3 +84,9 @@ keep a residual of +15 to +25 dB and make it fluctuate. I have **not proven** th
 Simulation, 32 taps: all 20 scenarios still PASS; suppression is about 1 dB lower on clean jammers (50.6 against 51.8 dB, scenario 21) and 0.9 dB lower on the long-echo cases, satellite loss unchanged. Constants: `AJ_RX2_LOAD`, `AJ_RX1_LOAD`, `AJ_SIG2_BAND` in `gnss_aj_math.h`.
 **Firmware only: the bitstream of 4.9.1 stays.** Files: `gnss_aj_math.c`, `gnss_aj_math.h`, `gnss_aj.h` (version "4.9.2").
 **The noise floor must be learned** (jammer OFF for 10 s after `gnss_tx=1`), otherwise the old self-estimate is still what sets the loading.
+
+## 4.9.3: pulse blanker OFF by default (firmware only)
+
+In the 4.9.1 board test the blanker blanked 100 % of the output (the jammer remnant stays above its threshold), switched itself off for 10 s, came back, and blanked again: a dropout of about 1 s every 11.2 s that blocks the decoding of the navigation message.
+`blk_mode` now starts at 0 (off). `gnss_aj_blank=1` (automatic) or `=2` (always on) turns it on again; a pulsed jammer needs it. The bitstream is unchanged. Version string "4.9.3".
+(Typed on the console at run time the same effect is `gnss_aj_blank=0`; the command `set pulse_blanker 0` does not exist in this firmware.)
