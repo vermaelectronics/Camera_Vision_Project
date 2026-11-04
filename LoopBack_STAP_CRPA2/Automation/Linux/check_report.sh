@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================================
-#  check_report.sh  --  LoopBack_STAP_CRPA1: check a finished (or failed) build
+#  check_report.sh  --  LoopBack_STAP_CRPA2: check a finished (or failed) build
 #
 #  Reads Build/Logs/*.log, Build/Output/*.rpt and the outputs, and prints one
 #  summary:
@@ -36,7 +36,7 @@ wrn()  { p "  [WARN] $*"; NWARN=$((NWARN+1)); }
 none() { p "  [ -- ] $*"; }
 hdr()  { p ""; p "== $* =="; }
 
-p "LoopBack_STAP_CRPA1 build report  ($(date -Iseconds))"
+p "LoopBack_STAP_CRPA2 build report  ($(date -Iseconds))"
 p "project: $ROOT"
 
 # ---------------------------------------------------------------- 1 stages

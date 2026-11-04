@@ -1,6 +1,6 @@
 /******************************************************************************
  *  gnss_mode.h -- five preset radio modes, selected with  gnss_mode=N
- *  ANTSDR E310 V1 GNSS CRPA pipeline (LoopBack_STAP_CRPA1).
+ *  ANTSDR E310 V1 GNSS CRPA pipeline (LoopBack_STAP_CRPA2).
  *
  *  One command sets, together and in a safe order:
  *    RX + TX centre frequency (always the SAME, so the loopback comes out on
