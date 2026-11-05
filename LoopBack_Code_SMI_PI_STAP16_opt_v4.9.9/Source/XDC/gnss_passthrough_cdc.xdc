@@ -85,4 +85,4 @@ set_multicycle_path -hold 1 -from [get_cells -quiet -hier -filter {NAME =~ *aj_t
 
 # 4.9.9 (Vivado TIMING-6/7/54): the sample clock (rx_clk, clk_div_sel_*) and the AXI/PS clock (clk_fpga_0)
 # are unrelated: asynchronous clock groups instead of scoped datapath-only max-delay between clocks.
-set_clock_groups -asynchronous -group [get_clocks -quiet clk_fpga_0] -group [get_clocks -quiet rx_clk]
+set_clock_groups -asynchronous -group [get_clocks -quiet clk_fpga_0] -group [get_clocks -quiet {rx_clk clk_div_sel_*}]

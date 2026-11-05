@@ -43,3 +43,9 @@ Per your request the optimised build uses **7 taps per antenna, 14 taps in total
 * Not verified in Vivado or on the board.
 
 If you meant 14 taps **per antenna** (28 in total), that is a one-line change to `SMI_NT` and `AJ_NT`; it reaches about 9 samples of echo.
+
+## Redo notes (critical warnings, DSP)
+
+* **Critical warnings:** the TIMING-54 constraints are scoped ones from the ADI library (up_xfer, up_clock_mon, util_clkdiv) on the `clk_div_sel_0_s/1_s` clocks, not only from this project. The asynchronous clock group in `gnss_passthrough_cdc.xdc` (processed LATE) now covers `rx_clk` and `clk_div_sel_*` against `clk_fpga_0`. Not verified in Vivado: if TIMING-54 remains after the build, send `report_methodology` and the XDC read order.
+* **DSP:** the 24 legacy `DSP48E` cells come from the ADI `axi_ad9361` core (DAC DDS, IQ correction). They are NOT removed by default, because the firmware has DDS commands and uses `CHAN_CNTRL_7` to select DMA or DDS. If you do not need DDS or ADI IQ correction, set `DAC_DDS_DISABLE 1`, `ADC_IQCORRECTION_DISABLE 1`, `DAC_IQCORRECTION_DISABLE 1` in `Source/BlockDesign/system_bd.tcl` (about line 598-603) and remove the `dds_*` firmware commands. Expect up to about 24 DSP48 saved. Untested.
+* **Power:** the PS7 (1.54 W) is not controllable from the PL, so the junction temperature gain is small (about 1 C).
