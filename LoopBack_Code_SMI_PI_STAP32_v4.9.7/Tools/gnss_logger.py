@@ -1,21 +1,27 @@
 #!/usr/bin/env python3
-"""
+r"""
 gnss_logger.py -- one PC logger for the two things you read by eye:
   * the E310 console (what PuTTY / your serial terminal shows), and
   * the GNSS receiver (what GNSS Viewer shows: the NMEA the Venus 8 sends on its COM port),
-both with the PC clock on every line, in a NEW FOLDER EVERY HOUR:
+both with the PC clock on every line. Saved on THIS computer:
 
-    <out>/<YYYYMMDD>/H<hh>/e310_console.txt    every line of the E310 console, "[hh:mm:ss.mmm] text"
-    <out>/<YYYYMMDD>/H<hh>/gnss_nmea.txt       every NMEA line of the receiver, "[hh:mm:ss.mmm] $GNGGA,..."
-    <out>/<YYYYMMDD>/H<hh>/gnss_summary.csv    one row per second: fix, satellites used, HDOP, position, C/N0 per satellite
-    <out>/<YYYYMMDD>/H<hh>/session.txt         what was started, with which ports
+    <out>\<YYYYMMDD>\H<hh>\             a NEW FOLDER EVERY HOUR
+        <hhmm>.txt     a NEW FILE EVERY MINUTE, named by its time (1430.txt = 14:30 to 14:30:59). Time-ordered, one
+                       line each:   [14:30:05.123] E310 | <console line>
+                                    [14:30:05.200] NMEA | $GNGGA,...
+                                    [14:30:06.000] SUM  | <the same per-second summary row as in the csv>
+        <hhmm>.csv     the per-second summary of the same minute (one row per RMC): fix, satellites used, HDOP, position,
+                       C/N0 per satellite
+        session.txt    what was started, with which ports (once per hour folder)
+
+Default <out> = gnss_logs in your user folder (C:\Users\<you>\gnss_logs).
 
 NOTE: a serial port can be opened by ONE program. Close GNSS Viewer (and your terminal) before starting this;
 this logger then also works as the E310 terminal: what you type here goes to the E310.
 (If you must keep GNSS Viewer open, use its menu DataLog to save its own file, and give --gnss none here.)
 
     pip install pyserial
-    python gnss_logger.py --e310 COM20 --gnss COM11 --out C:\\gnss_logs
+    python gnss_logger.py --e310 COM20 --gnss COM11
 """
 import argparse, datetime, os, queue, sys, threading, time
 
@@ -26,32 +32,36 @@ except ImportError:
 
 # ------------------------------------------------------------------ hourly folders
 class Hourly:
-    """Owns the output files; every call checks the hour and, when it changed, closes the old files and opens a
-    new folder <out>/<YYYYMMDD>/H<hh>/ (the 'new folder every hour')."""
+    """Owns the output files. Folder: <out>/<YYYYMMDD>/H<hh>/ (new every hour). Files: <hhmm>.txt and <hhmm>.csv
+    (new every minute, named by the time). Every write checks the clock and rolls over by itself."""
     CSV_HEAD = ("pc_time,nmea_utc,status,fix_quality,fix_mode,sats_used,sats_in_view,hdop,pdop,vdop,lat,lon,alt_m,"
                 "speed_kn,n_gps,n_glo,n_gal,n_bds,n_qzss,n_tracked,cn0_mean,cn0_max,first_fix_s,sats(sys_prn:cn0:elev:az)\n")
     def __init__(self, out):
-        self.out, self.key, self.files, self.dir = out, None, {}, None
+        self.out, self.hkey, self.mkey, self.files, self.dir = out, None, None, {}, None
         self.lock = threading.Lock()
-    def _open(self, now):
-        key = now.strftime("%Y%m%d/H%H")
-        if key == self.key: return
-        for f in self.files.values(): f.close()
-        self.files = {}
-        self.key = key
-        self.dir = os.path.join(self.out, now.strftime("%Y%m%d"), now.strftime("H%H"))
-        os.makedirs(self.dir, exist_ok=True)
-    def write(self, name, text, now=None):
+    def _roll(self, now):
+        hkey = now.strftime("%Y%m%d/H%H")
+        mkey = now.strftime("%H%M")
+        if hkey != self.hkey or mkey != self.mkey:
+            for f in self.files.values(): f.close()
+            self.files = {}
+        if hkey != self.hkey:
+            self.dir = os.path.join(self.out, now.strftime("%Y%m%d"), now.strftime("H%H"))
+            os.makedirs(self.dir, exist_ok=True)
+        self.hkey, self.mkey = hkey, mkey
+    def write(self, kind, text, now=None):
+        """kind: 'txt' (the minute's text file), 'csv' (its summary csv) or 'session' (session.txt of the hour)."""
         now = now or datetime.datetime.now()
         with self.lock:
-            self._open(now)
+            self._roll(now)
+            name = "session.txt" if kind == "session" else now.strftime("%H%M") + "." + kind
             f = self.files.get(name)
             if f is None:
                 path = os.path.join(self.dir, name)
                 new = not os.path.exists(path)
                 f = open(path, "a", encoding="utf-8", newline="\n")
                 self.files[name] = f
-                if new and name == "gnss_summary.csv": f.write(self.CSV_HEAD)
+                if new and kind == "csv": f.write(self.CSV_HEAD)
             f.write(text); f.flush()
     def close(self):
         with self.lock:
@@ -124,7 +134,9 @@ class Gnss:
                g.get("lon", ""), g.get("alt", ""), spd, str(cnt("G")), str(cnt("R")), str(cnt("E")), str(cnt("C")),
                str(cnt("Q")), str(len(cn)), "%.1f" % (sum(cn) / len(cn)) if cn else "", "%.0f" % max(cn) if cn else "", fs,
                ";".join("%s%s:%s:%s:%s" % s for s in allsats)]
-        self.h.write("gnss_summary.csv", ",".join(row) + "\n", now)
+        line = ",".join(row)
+        self.h.write("csv", line + "\n", now)
+        self.h.write("txt", stamp(now) + " SUM  | " + line + "\n", now)
 
 # ------------------------------------------------------------------ readers
 def reader(port, name, handler, stop):
@@ -146,7 +158,7 @@ def main():
     ap.add_argument("--gnss", default="none", help="GNSS receiver NMEA port (the one GNSS Viewer uses), e.g. COM11, or none")
     ap.add_argument("--gnss-baud", type=int, default=115200)
     ap.add_argument("--e310-baud", type=int, default=115200)
-    ap.add_argument("--out", default="gnss_logs")
+    ap.add_argument("--out", default=os.path.join(os.path.expanduser("~"), "gnss_logs"), help="folder on this computer (default: gnss_logs in your user folder)")
     ap.add_argument("--poll", type=int, default=0, help="send gnss_report? to the E310 every N seconds (0 = rely on the firmware's own gnss_log)")
     ap.add_argument("--no-set-clock", action="store_true", help="do not send gnss_time= to the E310 at start")
     a = ap.parse_args()
@@ -156,15 +168,15 @@ def main():
     e = serial.Serial(a.e310, a.e310_baud, timeout=0.2)
     g = serial.Serial(a.gnss, a.gnss_baud, timeout=0.2) if a.gnss.lower() != "none" else None
     t0 = datetime.datetime.now()
-    hourly.write("session.txt", "%s started: e310=%s gnss=%s out=%s poll=%ds\n" % (t0.isoformat(" ", "seconds"), a.e310, a.gnss, a.out, a.poll), t0)
+    hourly.write("session", "%s started: e310=%s gnss=%s out=%s poll=%ds\n" % (t0.isoformat(" ", "seconds"), a.e310, a.gnss, a.out, a.poll), t0)
 
-    def on_e310(line, now): hourly.write("e310_console.txt", stamp(now) + " " + line + "\n", now); print(stamp(now), line)
+    def on_e310(line, now): hourly.write("txt", stamp(now) + " E310 | " + line + "\n", now); print(stamp(now), line)
     def on_gnss(line, now):
-        hourly.write("gnss_nmea.txt", stamp(now) + " " + line + "\n", now); gnss.line(line, now)
+        hourly.write("txt", stamp(now) + " NMEA | " + line + "\n", now); gnss.line(line, now)
     threading.Thread(target=reader, args=(e, "e310", on_e310, stop), daemon=True).start()
     if g: threading.Thread(target=reader, args=(g, "gnss", on_gnss, stop), daemon=True).start()
 
-    def send(cmd): e.write((cmd + "\r").encode("ascii")); hourly.write("e310_console.txt", stamp(datetime.datetime.now()) + " >>> " + cmd + "\n")
+    def send(cmd): e.write((cmd + "\r").encode("ascii")); hourly.write("txt", stamp(datetime.datetime.now()) + " E310 | >>> " + cmd + "\n")
     if not a.no_set_clock:
         n = datetime.datetime.now(); time.sleep(0.5)
         send("gnss_time=%d %d %d %d %d %d" % (n.year, n.month, n.day, n.hour, n.minute, n.second))
