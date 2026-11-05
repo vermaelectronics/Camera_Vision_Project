@@ -17,7 +17,7 @@
 
 // Taps per channel (delays 0..31, 4.9: was 16) and the RX1 reference delay. Must match
 // AJ_NT / AJ_REF in Source/Firmware/app_gnss_e310/gnss_aj_math.h.
-#define SMI_NT    7    /* 4.9.10: 7 taps per antenna (7 + 7 = 14 taps); was 16 (4.9.9), 32 (4.9.7) */
+#define SMI_NT    6    /* 4.9.11: 6 taps per antenna (6 + 6 = 12 taps); was 7 (4.9.10), 16 (4.9.9), 32 (4.9.7) */
 #ifndef SMI_REF
 #define SMI_REF    4
 #endif

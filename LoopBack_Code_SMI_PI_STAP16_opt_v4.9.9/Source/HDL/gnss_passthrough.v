@@ -283,8 +283,8 @@ module gnss_passthrough #(
   // v4.7 -- smi_pi_0 v2.4: the RX1 reference tap is at delay 4 (was 8), so a reflection of the jammer
   //         up to 11 samples later can be cancelled (was 7). AJ_INFO byte 2 = 4, layout 6; the firmware
   //         refuses to start the filter if that byte differs from its own AJ_REF.
-  localparam [31:0] CORE_VERSION = 32'h0004090A;   // v4.9 (32 taps per channel)
-  localparam [31:0] AJ_INFO      = 32'h07040C07;   // 4.9.10: 7 taps per channel   // 32 taps per channel, reference delay 4, layout 7 (4.9: 64 weight words at 0x400)
+  localparam [31:0] CORE_VERSION = 32'h0004090B;   // v4.9 (32 taps per channel)
+  localparam [31:0] AJ_INFO      = 32'h06040C07;   // 4.9.11: 6 taps per channel   // 32 taps per channel, reference delay 4, layout 7 (4.9: 64 weight words at 0x400)
   localparam [31:0] AJ_CFG_RESET = 32'h00000001;   // bypass
   localparam [31:0] AJ_NRM_RESET = 32'h00002000;   // g2 = 1.0
   localparam        AW           = FIFO_ADDR_WIDTH;

@@ -87,7 +87,7 @@
 #define GNSS_PT_REG_AJ_BLK_COUNT    0x1A4U  /* RO samples blanked since the counter clear */
 #define GNSS_PT_REG_AJ_BLK_BURSTS   0x1A8U  /* RO bursts blanked since the counter clear  */
 #define GNSS_PT_REG_AJ_RX_PEAK      0x1ACU  /* RO [15:0] largest |I|,|Q| of RX1/RX2 in the last window, [31:16] window counter */
-#define GNSS_PT_AJ_INFO_EXPECTED    0x07040C07U   /* 4.9.10: 7 taps per channel */   /* layout 6 = v4.7 (reference delay 4); 5 = v4.6 (pulse blanker, peak hold); 4 = v4.5 */
+#define GNSS_PT_AJ_INFO_EXPECTED    0x06040C07U   /* 4.9.11: 6 taps per channel */   /* layout 6 = v4.7 (reference delay 4); 5 = v4.6 (pulse blanker, peak hold); 4 = v4.5 */
 #define GNSS_PT_AJ_LAYOUT_BLANK     5U            /* first layout with the blanker and the peak hold */
 #define GNSS_PT_AJ_CFG_BLANK        0x8000U       /* AJ_CFG[15]: blanker enable (layout 5) */
 #define GNSS_PT_BLK_THR_OFF         0xFFFFFFFFU   /* threshold that never triggers */
@@ -110,7 +110,7 @@
  *       loading, no weight band.
  * 4.1 = adds AJ_CFG (bypass, output make-up shift), AJ_NORM (RX2 input
  *       normalisation) and the image taps AJ_WC (smi_pi_0 v2.1). */
-#define GNSS_PT_EXPECTED_VERSION    0x0004090AU
+#define GNSS_PT_EXPECTED_VERSION    0x0004090BU
 
 /* ---- CONTROL bits -------------------------------------------------------- */
 #define GNSS_PT_CTRL_PASS_EN        (1U << 0)  /* 1 = RX->TX passthrough      */
