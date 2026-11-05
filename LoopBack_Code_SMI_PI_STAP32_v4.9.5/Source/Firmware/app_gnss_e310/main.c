@@ -1200,7 +1200,9 @@ int main(void)
 		      "  Jammer events are printed as [AJ] lines with a time stamp. gnss_aj? = state,\n"
 		      "  gnss_report? = everything (copy it into a report), gnss_aj_csv=500 = CSV log,\n"
 		      "  Only jammer events are printed (gnss_aj_log=30 adds a status line every 30 s).\n"
-		      "  Start retransmitting with gnss_tx=1 (goes straight to the working level).\n");
+		      "  TX1 is switched on by itself (4.9.5: gnss_tx=1 always, also after every gnss_band=).\n"
+		      "  CONDUCTED, ATTENUATED COAX ONLY. gnss_tx=0 silences it.\n");
+	gnss_tx_always();
 #ifdef GNSS_DEPLOY_AUTO_TX
 	if((gnss_pt_read(GNSS_PT_REG_STATUS) & GNSS_PT_ST_PASS_EN_SYNCED) &&
 	   (gnss_pt_read(GNSS_PT_REG_STATUS) & GNSS_PT_ST_DAC_EN_I0))

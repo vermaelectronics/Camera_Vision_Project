@@ -35,19 +35,13 @@
 #define GNSS_AJ_BUF_ADDR   0x11000000U
 #endif
 
-#define GNSS_AJ_VERSION_STR  "4.9.4"
+#define GNSS_AJ_VERSION_STR  "4.9.5"
 
 /* RF profiles (gnss_band=). RX and TX are always set together, so the
  * retransmitted signal comes out on the frequency it came in on and the
  * board's clock error cancels between down- and up-conversion. */
-#define GNSS_BAND_L1          0   /* 1575.42 MHz, 30.72 MS/s, 18 MHz: L1 only      */
-#define GNSS_BAND_ALL         1   /* 1582.5 MHz, 61.44 MS/s, 56 MHz: GPS, Galileo, */
-                                  /*   QZSS, SBAS, BeiDou B1I+B1C, GLONASS G1      */
-#define GNSS_BAND_NO_BDS      2   /* 1589.5 MHz, 50 MS/s: GPS, Galileo, GLONASS    */
-#define GNSS_BAND_NO_GLO      3   /* 1568.25 MHz, 50 MS/s: GPS, Galileo, BeiDou    */
-#define GNSS_BAND_COUNT       6
-#define GNSS_BAND_CUSTOM      5     /* your own values: gnss_band=5 <LO> <rate> [bw] [txAtt] [rxGain] */
-#define GNSS_BAND_DEFAULT     GNSS_BAND_ALL
+#define GNSS_BAND_COUNT       7   /* seven fixed presets 0..6 (4.9.5); no custom band: see gnss_aj.c */
+#define GNSS_BAND_DEFAULT     0   /* 1569.42 MHz, 61.44 MS/s, 56 MHz, TX att 30 dB, RX gain 50 dB */
 
 void gnss_aj_init(void);            /* once, after the radio and DMA are up  */
 void gnss_aj_enable(int on);        /* filter in the TX1 path + engine       */
@@ -78,7 +72,7 @@ void gnss_aj_dma_release(void);
 /* RF profile; returns 0 on success. */
 int  gnss_band_set(int band);
 int  gnss_band_get(void);
-int  gnss_band_custom(double *p, char n);   /* store the CUSTOM profile; 0 = ok, -1 = refused */
+void gnss_band_levels(void);                 /* the current band's TX attenuation (TX1, TX2) and RX gain */
 void gnss_band_print(void);
 void gnss_radio_cmd(double *p, char n);   /* radio=: LO, rate, attenuation, gain, bandwidth by hand */
 char *gnss_fmt(double v, int dec);        /* "1575.4200" without printf's %f */

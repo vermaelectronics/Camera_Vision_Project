@@ -105,3 +105,26 @@ Tested in the C simulation (32 taps, scenarios 1-14, 16-21):
 
 Cost: the ARM needs about twice as long per solve (the statistics are proportional to the block length): expect roughly 20 solves/s instead of 40, an estimate not measured on the board. DDR buffer 64 KiB at 0x11000000 (no overlap with the boot captures at 0x10000000 / 0x10800000). `-DAJ_NSAMP=n` overrides it.
 Firmware only; the bitstream of 4.9.1 stays. Version string "4.9.4".
+
+## 4.9.5: seven fixed bands, TX always on (firmware only)
+
+`gnss_band=N` now has **seven fixed presets** and nothing else; the old bands (L1 only, ALL 1582.5, no-BeiDou, no-GLONASS, GLONASS only) and the custom band `gnss_band=5 <LO> ...` are gone.
+Each preset sets LO, sample rate, RF bandwidth and, for both TX channels and both RX channels, the TX attenuation and the RX gain:
+
+| gnss_band | LO MHz | MS/s | bandwidth MHz | TX att dB | RX gain dB |
+|---|---|---|---|---|---|
+| **0 (default)** | 1569.42 | 61.44 | 56 | 30 | 50 |
+| 1 | 1575.42 | 61.44 | 56 | 30 | 50 |
+| 2 | 1575.42 | 61.44 | 56 | 20 | 40 |
+| 3 | 1575.42 | **30.22** | 18 | 30 | 50 |
+| 4 | 1575.42 | 61.44 | 56 | 10 | 40 |
+| 5 | 1582.50 | 61.44 | 56 | 20 | 40 |
+| 6 | 1575.42 | 61.44 | 56 | 30 | 50 |
+
+(Band 6 is the same as band 1. Band 3 uses 30.22 MS/s as written; 30.72 would be the usual rate: tell me if that was a typo.)
+
+**TX is always on.** `gnss_tx=1` is done by itself at start-up and again after every `gnss_band=` (`gnss_tx_always()` in `command.c`): TX is switched on through the normal safe sequence (maximum attenuation, data path, then the 70 dB start level), and then the band's TX attenuation and RX gain are applied.
+`gnss_tx=0` still silences TX until the next boot or `gnss_band=`. **TX1 radiates the GNSS band: conducted, attenuated coax only, never an antenna.** Band 4 (10 dB) and band 2/5 (20 dB) are loud; the firmware cannot see what is attached to TX1.
+
+Checked: the touched files pass `gcc -fsyntax-only` with stubs for the Xilinx headers (gnss_aj.c, command.c, gnss_passthrough.c, gnss_smi_agc.c, gnss_info.c; main.c only fails on board GPIO macros that the stubs do not define). **Not compiled for the ARM and not run on the board.** The bitstream of 4.9.1 stays.
+Version string "4.9.5".

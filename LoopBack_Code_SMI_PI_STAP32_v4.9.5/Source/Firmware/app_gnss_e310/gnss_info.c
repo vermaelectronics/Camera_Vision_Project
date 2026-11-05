@@ -786,8 +786,7 @@ static void info_quickstart(void)
     console_print("   gnss_aj_mode=0 / 1 / 2 / 3  63+2 taps (default) / RX2 / one / no image\n");
     console_print("   gnss_aj_sweep=1 / 0         long memory for a moving (chirp) jammer, default on\n");
     console_print("   gnss_aj_blank=1 / 0 / 2     pulse blanker (bitstream 4.6): auto (default) / off / on; gnss_aj_blank_db=7\n");
-    console_print("   gnss_band=1 / 0 / 2 / 3 / 4 RF profile (1 = ALL incl. BeiDou, default)\n");
-    console_print("   gnss_band=5 <LO> <rate> [bw] [txAtt] [rxGain]   CUSTOM profile, your own values\n");
+    console_print("   gnss_band=0..6   fixed RF preset: LO, rate, bandwidth, TX att, RX gain (0 = default)\n");
     console_print("   gnss_band?                  which GNSS signals the profile carries\n");
     console_print("   gnss_smi_freeze=1 / =0      hold the filter / automatic\n");
     console_print("   gnss_rx_gain?               RX1/RX2 gain, mode, TX level hold\n");
@@ -843,7 +842,7 @@ void gnss_info_menu(void)
     console_print("    gnss_aj?   gnss_aj_log=N   anti-jam status / status line period\n");
     console_print("    gnss_report?               everything in one block (copy it)\n");
     console_print("    gnss_aj_csv=500            CSV line every 500 ms, =0 off\n");
-    console_print("    gnss_band=1 (default)      ALL: GPS, Galileo, BeiDou, GLONASS; gnss_band?\n");
+    console_print("    gnss_band=0..6 (0 default) fixed preset incl. TX att and RX gain; gnss_band?\n");
     console_print("    gnss_tx? gnss_ddr_tx? gnss_status? gnss_smi?   read back\n");
     console_print("\n");
     console_print("    ?        this menu            help?    every command (long)\n");

@@ -149,7 +149,7 @@ command cmd_list[] = {
 	{"gnss_aj_sweep=", "1 = detect a moving (chirping) jammer and average over about 50 solves (default), 0 = off.", "gnss_aj_sweep=1", set_gnss_aj_sweep},
 	{"gnss_aj_mode=", "0 = space-time 63 + 2 image taps (default), 1 = RX2 taps, 2 = one weight (v3), 3 = no image taps (v4.0).", "gnss_aj_mode=0", set_gnss_aj_mode},
 	{"gnss_band?", "RF profile and which GNSS signals it carries (GPS, Galileo, BeiDou, GLONASS).", "", get_gnss_band},
-	{"gnss_band=", "1 = ALL incl. BeiDou + GLONASS 1582.5 MHz/61.44 MS/s (default), 0 = L1 only, 2 = no BeiDou B1I, 3 = no GLONASS (2, 3: 50 MS/s), 4 = GLONASS only 20.48 MS/s, 5 = CUSTOM: gnss_band=5 <LO MHz> <rate MS/s> [bw MHz] [txAtt dB] [rxGain dB].", "gnss_band=1", set_gnss_band},
+	{"gnss_band=", "0..6 = fixed preset (LO, rate, bandwidth, TX attenuation, RX gain), 0 = default 1569.42 MHz / 61.44 / 56 / 30 / 50; gnss_band? lists them. TX is switched on (gnss_tx=1) every time.", "gnss_band=0", set_gnss_band},
 	{"gnss_rx_gain?", "Gets RX1/RX2 gain mode and gain [dB].", "", get_gnss_rx_gain},
 	{"gnss_rx_gain=", "Sets RX1 AND RX2 to the same gain [dB] (also the auto reference).", "gnss_rx_gain=40", set_gnss_rx_gain},
 	{"gnss_rx_agc=", "0 = manual locked, 1 = AD9361 AGC per channel, 2 = matched auto (SMI-PI).", "gnss_rx_agc=2", set_gnss_rx_agc},
@@ -460,22 +460,27 @@ void get_gnss_band(double* param, char param_no)
 void set_gnss_band(double* param, char param_no)
 {
 	if(param_no < 1 || param[0] < 0.0 || param[0] > (double)(GNSS_BAND_COUNT - 1)) {
-		console_print("gnss_band= needs 0, 1, 2, 3, 4 or 5 (gnss_band? lists them)\n");
+		console_print("gnss_band= needs 0, 1, 2, 3, 4, 5 or 6 (gnss_band? lists them)\n");
 		return;
 	}
-	if((int)param[0] == GNSS_BAND_CUSTOM && param_no > 1) {
-		/* gnss_band=5 <LO> <rate> [bw] [txAtt dB] [rxGain dB] */
-		if(gnss_band_custom(&param[1], param_no - 1) != 0) {
-			console_print("gnss_band=5 <LO> <rate> [bandwidth] [txAtt dB] [rxGain dB]: a value is missing or outside the\n"
-				      "     AD9361 range (LO 70-6000 MHz, rate 2.083333-61.44 MS/s, bandwidth 0.2-56 MHz,\n"
-				      "     attenuation 0-89.75 dB, gain 1-76 dB). Nothing was changed. Bandwidth 0 = automatic.\n"
-				      "     Example: gnss_band=5 1575.42 30.72 18 70 40\n");
-			return;
-		}
-	}
+	if(param_no > 1)
+		console_print("gnss_band: the presets are fixed (4.9.5): any value after the number is ignored.\n");
 	if(gnss_band_set((int)param[0]) != 0)
 		console_print("gnss_band: the AD9361 refused part of the setting; check gnss_status?\n");
 	gnss_band_print();
+	gnss_tx_always();
+}
+
+/* 4.9.5: gnss_tx=1 always. Called at start-up and after every gnss_band=: switches TX on if it is not on, then
+ * applies the band's TX attenuation and RX gain. gnss_tx=0 still silences TX until the next boot or gnss_band=.
+ * CONDUCTED, ATTENUATED COAX ONLY: the firmware cannot see what is attached to TX1. */
+void gnss_tx_always(void)
+{
+	double one = 1.0;
+	if(!gnss_tx_on)
+		set_gnss_tx(&one, 1);
+	if(gnss_tx_on)
+		gnss_band_levels();
 }
 
 /**************************************************************************//***
