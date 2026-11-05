@@ -423,11 +423,13 @@ static int chol_solve(int n, double s2, const double *ld, const double *gr,
 /* Weights of the previous block, for the out-of-sample check (they are the
  * weights the FPGA was actually running while this block was captured). */
 static int    prev_n = 0, prev_idx[AJ_MAXDIM];
+static double av_adapt = AJ_AVG;      /* 4.9.9: the adaptive averaging factor (AJ_AVG when not adapting) */
 static double prev_wr[AJ_MAXDIM], prev_wi[AJ_MAXDIM], prev_nr[AJ_MAXDIM];
 
 void aj_reset(void)
 {
 	prev_n = 0;
+	av_adapt = AJ_AVG;
 	avg_valid = 0;
 }
 
@@ -554,7 +556,7 @@ int aj_compute(const uint32_t *buf, int nsamp, aj_result_t *r)
 	}
 
 	/* statistics for the solve: this block, averaged with the last ones */
-	av = (r->avg > 0.0) ? r->avg : AJ_AVG;
+	av = (r->avg > 0.0) ? r->avg : av_adapt;
 	if(av > 0.995) av = 0.995;
 	if(avg_valid && av > 0.0) {
 		for(i = 0; i < AJ_NW; i++)
@@ -678,8 +680,30 @@ int aj_compute(const uint32_t *buf, int nsamp, aj_result_t *r)
 		prev_wi[i] = (double)r->wim[idx[i]] / (double)(1 << AJ_WFRAC) / (double)(1 << r->ws);
 		prev_nr[i] = nr[i];
 	}
-	prev_n = n;
 	aj_metrics(r, r->noise_ref);
+	/* 4.9.9: adapt the averaging factor. Jitter = how much this solve moved the weights, relative to their size,
+	 * against the previous solve (same taps). Only when no sweep is seen (a sweep sets r->avg itself). */
+	if(AJ_AV_ADAPT && r->avg <= 0.0) {
+		double jit = 1.0, num = 0.0, den = 0.0;
+		if(prev_n == n) {
+			int same = 1;
+			for(i = 0; i < n; i++) if(prev_idx[i] != idx[i]) { same = 0; break; }
+			if(same) {
+				for(i = 0; i < n; i++) {
+					double dr = wr[i] - prev_wr[i], di = wi[i] - prev_wi[i];
+					num += dr * dr + di * di;
+					den += wr[i] * wr[i] + wi[i] * wi[i];
+				}
+				jit = den > 0.0 ? num / den : 1.0;
+			}
+		}
+		if(r->res_db > AJ_RES_TRACK && jit < AJ_JIT_HI) av_adapt -= AJ_AV_STEP;     /* stable but not nulled: track faster */
+		else if(jit > AJ_JIT_HI)                       av_adapt += AJ_AV_STEP;     /* jittering: smooth more */
+		else                                           av_adapt += 0.1 * (AJ_AVG - av_adapt);   /* drift back to AJ_AVG */
+		if(av_adapt < AJ_AV_MIN) av_adapt = AJ_AV_MIN;
+		if(av_adapt > AJ_AV_MAX) av_adapt = AJ_AV_MAX;
+	}
+	prev_n = n;
 
 	/* Spectrum of what is above the noise, from RX1's lag correlations. */
 	spectrum(r, cnt, p1, r->noise);

@@ -94,6 +94,31 @@ extern "C" {
 #define AJ_SIG2_BAND 1.25
 #endif
 
+/* Adaptive averaging (4.9.9): AJ_AVG is adjusted from the solver's own results instead of being fixed.
+ *   AJ_AV_ADAPT  1 = adapt (default), 0 = fixed at AJ_AVG
+ *   AJ_AV_MIN/MAX  limits of the factor (more = more memory, smoother; less = faster, noisier)
+ *   AJ_AV_STEP   change per solve
+ *   AJ_JIT_HI    relative change of the weights between two solves above which they count as jittering
+ *   AJ_RES_TRACK residual [dB] above which, with stable weights, the filter is not following the jammer */
+#ifndef AJ_AV_ADAPT
+#define AJ_AV_ADAPT  1
+#endif
+#ifndef AJ_AV_MIN
+#define AJ_AV_MIN    0.30
+#endif
+#ifndef AJ_AV_MAX
+#define AJ_AV_MAX    0.90
+#endif
+#ifndef AJ_AV_STEP
+#define AJ_AV_STEP   0.05
+#endif
+#ifndef AJ_JIT_HI
+#define AJ_JIT_HI    0.15
+#endif
+#ifndef AJ_RES_TRACK
+#define AJ_RES_TRACK 6.0
+#endif
+
 /* Lowest noise estimate allowed [LSB^2]: 12-bit quantisation of I and Q. */
 #define AJ_QFLOOR    0.25
 

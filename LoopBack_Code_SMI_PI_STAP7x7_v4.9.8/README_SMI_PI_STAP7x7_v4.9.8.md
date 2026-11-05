@@ -26,3 +26,13 @@ Same design as 4.9.7 with **7 taps per antenna** (14 taps + 2 image taps, 16 wei
 * **Not synthesised.** The HLS core, the IP packaging, the Vivado build and the board are untested for this version.
 * **Firmware compiled only as far as the syntax checks** (the ARM build is not run here). The version checks match the bitstream: the firmware refuses to start the filter unless `AJ_INFO` shows 7 taps and the reference is 4.
 * The HDL compiles with iverilog, strict Verilog-2005. The SFAP files are not part of this folder.
+
+## Adaptive averaging (AJ_AV_ADAPT, in the firmware solver)
+
+`AJ_AVG` is no longer fixed. After each solve the firmware adjusts it:
+- **Weights jittering** (relative change between two solves above `AJ_JIT_HI = 0.15`): raise the factor by 0.05, so the weights are smoothed.
+- **Stable weights but residual above `AJ_RES_TRACK = 6 dB`:** lower the factor by 0.05, so the filter tracks the jammer faster.
+- **Otherwise:** drift back to 0.5.
+- Limits 0.3 to 0.9. A sweep (chirp) still sets its own 0.98. `AJ_AV_ADAPT 0` restores the fixed 0.5.
+
+Simulation: 17 of 20 scenarios pass, the same as the fixed version. The rule's thresholds are my first guess; they have not been tuned on hardware.
