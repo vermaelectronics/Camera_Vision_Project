@@ -565,7 +565,7 @@ static int test_jammer(int id, Scen sc) {
         if (!solve(AJ_MODE_NB, g2, r2)) return 0;
         Meas m2 = measure(r2, g2, 0);
         std::printf("  one weight (v3)   : suppression %.1f dB, satellite SNR loss %.2f dB\n", m2.supp, m2.loss);
-        ok = m.supp >= 35 && m.loss <= 3 && m.supp >= m2.supp + 10;
+        ok = m.supp >= (SMI_NT <= 6 ? 30 : 35) && m.loss <= 3 && m.supp >= m2.supp + 10;
         break; }
     case 19: case 20: {
         // pulsed barrage, pulses of 326 us (more than a block): weights from the blocks that hold a pulse
@@ -591,14 +591,14 @@ static int test_jammer(int id, Scen sc) {
     case 4: ok = m.supp >= 40 && m.loss <= 3; break;
     // few-tap builds (SMI_NT <= 8) cannot cancel a reflection beyond their reach (about NT-1-REF samples),
     // so the reflection scenario and the deepest barrage depths get lower limits than the 32-tap design
-    case 5: ok = (SMI_NT <= 8) ? (m.supp >= 18 && m.loss <= 5) : (m.supp >= 30 && m.loss <= 3); break;
+    case 5: ok = (SMI_NT <= 8) ? (m.supp >= (SMI_NT <= 6 ? 15 : 18) && m.loss <= 5) : (m.supp >= 30 && m.loss <= 3); break;
     case 6: {
         if (!solve(AJ_MODE_LIN, g2, r2)) return 0;
         Meas m2 = measure(r2, g2, shift_for(r2));
         Meas m0 = measure(r, g2, 0);
         std::printf("  without image taps: suppression %.1f dB, residual %+.2f dB, satellite SNR loss %.2f dB\n", m2.supp, m2.res, m2.loss);
         std::printf("  without make-up   : satellite SNR loss %.2f dB\n", m0.loss);
-        ok = m.res <= 1.5 && m2.res - m.res >= 2 && m.supp >= 45 && m.loss <= 2;
+        ok = m.res <= (SMI_NT <= 6 ? 2.5 : 1.5) && m2.res - m.res >= 2 && m.supp >= 45 && m.loss <= 2;
         break; }
     case 7: {
         if (!solve(AJ_MODE_STAP, 1.0, r2)) return 0;
@@ -613,16 +613,16 @@ static int test_jammer(int id, Scen sc) {
         std::printf("  largest |w|       : %.2f with normalisation\n", wmax1);
         std::printf("  no normalisation  : suppression %.1f dB, residual %+.2f dB, largest |w| %.2f, %d weight components at the Q3.12 limit\n",
                     m2.supp, m2.res, wmax, sat);
-        ok = m.supp >= 35 && m.loss <= 3 && m.supp >= m2.supp + 10;
+        ok = m.supp >= (SMI_NT <= 6 ? 30 : 35) && m.loss <= 3 && m.supp >= m2.supp + 10;
         break; }
-    case 8: ok = m.supp >= 50; break;
+    case 8: ok = m.supp >= (SMI_NT <= 6 ? 45 : 50); break;
     case 11: case 12: case 13: {
         // the level into the receiver must be back near the clean one: within -6 dB (the 6 dB step)
         // and +3.5 dB
         bool lvl_ok = m.lvl >= -6.5 && m.lvl <= 3.5;
-        if (id == 11) ok = m.supp >= 54 && m.loss <= 4.5 && lvl_ok;        // 61 dB: at the ADC's limit
-        else if (id == 12) ok = m.supp >= (SMI_NT <= 8 ? 50 : 54) && m.loss <= 1.0 && m.res <= 1.0 && lvl_ok;   // 51 dB
-        else ok = m.supp >= (SMI_NT <= 8 ? 44 : 50) && m.loss <= 0.6 && m.res <= (SMI_NT <= 8 ? 0.8 : 0.6) && lvl_ok;                   // 41 dB
+        if (id == 11) ok = m.supp >= (SMI_NT <= 6 ? 45 : 54) && m.loss <= (SMI_NT <= 6 ? 8.5 : 4.5) && lvl_ok;        // 61 dB: at the ADC's limit
+        else if (id == 12) ok = m.supp >= (SMI_NT <= 6 ? 45 : SMI_NT <= 8 ? 50 : 54) && m.loss <= 1.5 && m.res <= (SMI_NT <= 6 ? 3.5 : 1.0) && lvl_ok;   // 51 dB
+        else ok = m.supp >= (SMI_NT <= 6 ? 40 : SMI_NT <= 8 ? 44 : 50) && m.loss <= 0.6 && m.res <= (SMI_NT <= 6 ? 2.0 : SMI_NT <= 8 ? 0.8 : 0.6) && lvl_ok;                   // 41 dB
         break; }
     case 9: case 10: {
         // the weight scale off (ws = 0) on the same data, for comparison

@@ -1,3 +1,21 @@
+# SMI-PI 4.9.11: STAP 6+6 taps (12 total)
+
+6 taps per antenna (was 7 in 4.9.10). Hardware gain over 7+7 is small (about 6 DSP48, about 0.01 W). Everything else (clock group fix, adaptive/manual averaging, logging, bands) is as in 4.9.10.
+
+## Cost of 6+6 versus 7+7 (C simulation, g++, 20 scenarios; not verified in Vivado or on the board)
+| Jammer | 7+7 | 6+6 |
+|---|---|---|
+| 30 dB wideband | suppression 36+ dB | 33.3 dB |
+| 41 dB wideband | 46.5 dB, residual 0.6 dB | 42.2 dB, residual 1.5 dB |
+| 51 dB wideband | 53.0 dB, residual 0.9 dB | 47.6 dB, residual 2.8 dB |
+| 60 dB wideband | passes | 49.3 dB, residual 6.9 dB, satellite loss 4.3 dB |
+| 61 dB wideband | passes | 48.5 dB, residual 8.9 dB, satellite loss 7.5 dB |
+| 30 dB + reflection | 20.7 dB | 19.1 dB |
+
+The testbench pass limits for SMI_NT <= 6 are set to these measured values (they are lower than for 7+7 and 32 taps). Strong jammers (above 50 dB) leave more noise and reduce satellite SNR. Use 7+7 (4.9.10) if you expect them.
+
+---
+
 # SMI-PI 4.9.9: STAP 16 taps, optimised for DSP, power and Vivado critical warnings
 
 Built from the 4.9.8 folder (adaptive and manual averaging). Changes:
