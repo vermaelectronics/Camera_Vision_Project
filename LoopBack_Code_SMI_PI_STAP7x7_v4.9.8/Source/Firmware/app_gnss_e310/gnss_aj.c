@@ -1170,6 +1170,20 @@ void gnss_aj_set_log(int seconds)
 	aj_log_s = seconds;
 }
 
+/* 4.9.9: gnss_aj_avg= : manual averaging factor, or auto */
+void gnss_aj_set_avg(double v, int automatic)
+{
+	if(automatic) aj_set_av_auto(); else aj_set_av(v);
+	console_print("GNSS_AJ averaging factor: %s\n", aj_av_is_auto() ? "AUTO (adapted from the solves)" : "MANUAL");
+	gnss_aj_avg_print();
+}
+void gnss_aj_avg_print(void)
+{
+	console_print("averaging     : %s, factor %s now (memory about %s solves; 0.5 = 2 solves, 0.9 = 10)\n",
+		      aj_av_is_auto() ? "AUTO" : "MANUAL", fmt(aj_av_value(), 3, 0),
+		      fmt(1.0 / (1.0 - aj_av_value()), 1, 0));
+}
+
 void gnss_aj_set_csv(int ms)
 {
 	if(ms < 0) ms = 0;

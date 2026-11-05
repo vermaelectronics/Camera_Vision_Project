@@ -423,13 +423,29 @@ static int chol_solve(int n, double s2, const double *ld, const double *gr,
 /* Weights of the previous block, for the out-of-sample check (they are the
  * weights the FPGA was actually running while this block was captured). */
 static int    prev_n = 0, prev_idx[AJ_MAXDIM];
-static double av_adapt = AJ_AVG;      /* 4.9.9: the adaptive averaging factor (AJ_AVG when not adapting) */
+static double av_adapt = AJ_AVG;      /* 4.9.9: the averaging factor in use (AJ_AVG when not adapting) */
+static int    av_auto = AJ_AV_ADAPT;  /* 1 = adapt it, 0 = keep the manual value */
+static double av_manual = AJ_AVG;     /* the value set by hand (gnss_aj_avg=) */
+
+/* Set the averaging factor by hand (0.05 .. 0.995): adaptation off until aj_set_av_auto(1). */
+void aj_set_av(double v)
+{
+	if(v < 0.05) v = 0.05;
+	if(v > 0.995) v = 0.995;
+	av_manual = v; av_adapt = v; av_auto = 0;
+}
+void aj_set_av_auto(void)
+{
+	av_auto = 1; av_adapt = AJ_AVG;
+}
+int    aj_av_is_auto(void) { return av_auto; }
+double aj_av_value(void)   { return av_adapt; }
 static double prev_wr[AJ_MAXDIM], prev_wi[AJ_MAXDIM], prev_nr[AJ_MAXDIM];
 
 void aj_reset(void)
 {
 	prev_n = 0;
-	av_adapt = AJ_AVG;
+	av_adapt = av_auto ? AJ_AVG : av_manual;
 	avg_valid = 0;
 }
 
@@ -683,7 +699,7 @@ int aj_compute(const uint32_t *buf, int nsamp, aj_result_t *r)
 	aj_metrics(r, r->noise_ref);
 	/* 4.9.9: adapt the averaging factor. Jitter = how much this solve moved the weights, relative to their size,
 	 * against the previous solve (same taps). Only when no sweep is seen (a sweep sets r->avg itself). */
-	if(AJ_AV_ADAPT && r->avg <= 0.0) {
+	if(av_auto && r->avg <= 0.0) {
 		double jit = 1.0, num = 0.0, den = 0.0;
 		if(prev_n == n) {
 			int same = 1;

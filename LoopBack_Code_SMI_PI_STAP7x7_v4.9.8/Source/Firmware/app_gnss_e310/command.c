@@ -144,6 +144,8 @@ command cmd_list[] = {
 	{"gnss_report?", "EVERYTHING in one block (radio, gains, g2, jammer, events) to copy into a report.", "", get_gnss_report},
 	{"gnss_aj_log=", "Status line every N s on the console (default 0 = off: only JAMMER ON/OFF events; held back while you type).", "gnss_aj_log=30", set_gnss_aj_log},
 	{"gnss_aj_events=", "1 = print JAMMER ON/NULLED/OFF events (default), 0 = console silent (gnss_report? still lists them).", "gnss_aj_events=0", set_gnss_aj_events},
+	{"gnss_aj_avg=", "Averaging factor of the STAP solver by hand: 0.05 .. 0.99 (0.5 = 2 solves of memory, 0.9 = 10); 0 = automatic (adapted from the solves).", "gnss_aj_avg=0.5", set_gnss_aj_avg},
+	{"gnss_aj_avg?", "Shows whether the averaging factor is manual or automatic, and its value.", "", get_gnss_aj_avg},
 	{"gnss_aj_csv=", "CSV line (AJCSV,...) every N ms, 100 to 60000; 0 = off (default).", "gnss_aj_csv=0", set_gnss_aj_csv},
 	{"gnss_aj_blank=", "Pulse blanker (bitstream 4.6): 0 = off (default since 4.9.3), 1 = automatic, 2 = always on.", "gnss_aj_blank=0", set_gnss_aj_blank},
 	{"gnss_aj_blank_db=", "Pulse blanker threshold above the output noise [dB], 3..30, default 7.", "gnss_aj_blank_db=7", set_gnss_aj_blank_db},
@@ -374,6 +376,21 @@ void get_gnss_report(double* param, char param_no)
 {
 	(void)param; (void)param_no;
 	gnss_aj_report();
+}
+
+void set_gnss_aj_avg(double* param, char param_no)
+{
+	if(param_no < 1 || param[0] < 0.0 || param[0] > 0.99 || (param[0] > 0.0 && param[0] < 0.05)) {
+		console_print("gnss_aj_avg= needs 0 (automatic), or a factor 0.05 to 0.99. Example: gnss_aj_avg=0.5\n");
+		return;
+	}
+	gnss_aj_set_avg(param[0], param[0] == 0.0);
+}
+
+void get_gnss_aj_avg(double* param, char param_no)
+{
+	(void)param; (void)param_no;
+	gnss_aj_avg_print();
 }
 
 void set_gnss_aj_csv(double* param, char param_no)

@@ -36,3 +36,11 @@ Same design as 4.9.7 with **7 taps per antenna** (14 taps + 2 image taps, 16 wei
 - Limits 0.3 to 0.9. A sweep (chirp) still sets its own 0.98. `AJ_AV_ADAPT 0` restores the fixed 0.5.
 
 Simulation: 17 of 20 scenarios pass, the same as the fixed version. The rule's thresholds are my first guess; they have not been tuned on hardware.
+
+## Averaging factor by hand (console)
+
+* `gnss_aj_avg=0.5`: sets the factor by hand (0.05 to 0.99). This turns the automatic adjustment off, and the value survives the firmware's own resets.
+* `gnss_aj_avg=0`: automatic again (adapted from the solves, as above).
+* `gnss_aj_avg?`: shows AUTO or MANUAL, the current factor, and the memory in solves.
+
+A chirp (moving jammer) still uses its own 0.98 setting while it is seen. Checked: the setter, the clamp (0.01 becomes 0.05) and the reset behaviour in a small test; 17 of 20 C-sim scenarios with the default (automatic) setting.

@@ -57,7 +57,9 @@ int  gnss_aj_sweep_active(void);          /* 1 while a moving jammer is being av
 void gnss_aj_set_mode(int mode);    /* AJ_MODE_STAP / _RX2 / _NB / _LIN      */
 void gnss_aj_set_log(int seconds);  /* periodic status line, 0 = events only */
 void gnss_aj_set_events(int on);  /* 0 = no event lines (gnss_report? keeps them) */
-void gnss_aj_set_csv(int ms);       /* CSV line period, 0 = off              */
+void gnss_aj_set_csv(int ms);
+void gnss_aj_set_avg(double v, int automatic);   /* 4.9.9: gnss_aj_avg= (manual value, or auto) */
+void gnss_aj_avg_print(void);                    /* gnss_aj_avg? */       /* CSV line period, 0 = off              */
 int  gnss_aj_jammer_on(void);
 void gnss_aj_poll(void);
 void gnss_aj_print(void);           /* gnss_aj? / gnss_smi?                  */

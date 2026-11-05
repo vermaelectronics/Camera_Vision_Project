@@ -119,6 +119,12 @@ extern "C" {
 #define AJ_RES_TRACK 6.0
 #endif
 
+/* 4.9.9: the averaging factor set from the console (gnss_aj_avg=): a value turns the adaptation off. */
+void   aj_set_av(double v);
+void   aj_set_av_auto(void);
+int    aj_av_is_auto(void);
+double aj_av_value(void);
+
 /* Lowest noise estimate allowed [LSB^2]: 12-bit quantisation of I and Q. */
 #define AJ_QFLOOR    0.25
 
