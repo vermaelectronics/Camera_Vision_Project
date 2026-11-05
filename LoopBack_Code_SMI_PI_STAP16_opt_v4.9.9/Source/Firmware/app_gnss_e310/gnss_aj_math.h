@@ -50,15 +50,15 @@
 extern "C" {
 #endif
 
-#define AJ_NT        16   /* 4.9.9: 16 taps per antenna */     /* taps per channel, delays 0..31 (4.9; 16 before) */
+#define AJ_NT        7    /* 4.9.10: 7 taps per antenna (7 + 7 = 14 taps) */     /* taps per channel, delays 0..31 (4.9; 16 before) */
 #ifndef AJ_REF
 #define AJ_REF        4     /* RX1 reference delay (4.8: was 8; echoes up to 11 samples can be cancelled) */
 #endif
-#define AJ_NSPT      32     /* space-time weight words (RX1 32 + RX2 32)      */
-#define AJ_IMG1      32     /* image tap c1: conj(x1[n-REF])                  */
-#define AJ_IMG2      33     /* image tap c2: conj(x2n[n-REF])                 */
-#define AJ_NW        34     /* weight words                                   */
-#define AJ_MAXDIM    33     /* adaptive weights                               */
+#define AJ_NSPT      14     /* space-time weight words (RX1 32 + RX2 32)      */
+#define AJ_IMG1      14     /* image tap c1: conj(x1[n-REF])                  */
+#define AJ_IMG2      15     /* image tap c2: conj(x2n[n-REF])                 */
+#define AJ_NW        16     /* weight words                                   */
+#define AJ_MAXDIM    15     /* adaptive weights                               */
 #define AJ_WFRAC     12     /* Q3.12                                          */
 #define AJ_GFRAC     13     /* RX2 normalisation g2, Q3.13                    */
 #define AJ_MAXWS      5     /* weight scale: words hold w * 2^ws (SMI-PI 4.4)  */

@@ -32,3 +32,14 @@ Junction temperature = 25 C + 11.5 C/W x total power (the report's 3.16 W gives 
 * Wideband 45 dB with an echo at 3 samples: 53.3 dB suppression, −0.2 dB satellite loss; at 8 samples: 51.1 dB, −1.7 dB; at 11 samples: 51.2 dB, 5.9 dB loss; at 14 samples: 44.3 dB, 18.8 dB loss (beyond the reach).
 * HDL compiles (iverilog, strict Verilog-2005). Firmware file passes the syntax check.
 * **Not verified:** the Vivado build, the DSP count, the timing and the board.
+
+## 4.9.10: changed to 14 taps (7 + 7)
+
+Per your request the optimised build uses **7 taps per antenna, 14 taps in total** (instead of 16 per antenna in 4.9.9).
+
+* Simulation: 17 of 20 scenarios pass (the same three fail as in 4.9.8: wideband with a 3-sample reflection, and J/N 41 and 51 dB).
+* Echo reach is only about 2 samples with the reference at delay 4: echo 1 gives 53.7 dB with 1.7 dB satellite loss; echo 3 gives 38.5 dB with 9.6 dB loss; echo 8 gives 32.5 dB with 18.6 dB loss.
+* DSP48 expected about 45 (estimate until Vivado runs). Power and Vivado changes are the same as in 4.9.9.
+* Not verified in Vivado or on the board.
+
+If you meant 14 taps **per antenna** (28 in total), that is a one-line change to `SMI_NT` and `AJ_NT`; it reaches about 9 samples of echo.
