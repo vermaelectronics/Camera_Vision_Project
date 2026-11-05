@@ -54,6 +54,7 @@
 char console_init(unsigned long baud_rate);
 /* Run hook() while waiting for console input (NULL = plain blocking read). */
 void console_set_idle_hook(void (*hook)(void));
+void console_set_tee(void (*fn)(char), int quiet);   /* 4.9.6: copy the console output to fn (quiet = not to the UART) */
 /* Keys received so far, and 1 while a command is half typed. */
 unsigned int console_key_count(void);
 int console_typing(void);

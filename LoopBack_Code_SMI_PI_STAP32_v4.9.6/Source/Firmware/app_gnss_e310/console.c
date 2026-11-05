@@ -92,9 +92,19 @@ char uart_init(unsigned long baudRate)
  *
  * @return None.
 *******************************************************************************/
+/* 4.9.6: optional tee for gnss_log.c: every character the console prints also goes to fn; quiet = not to the UART. */
+static void (*console_tee_fn)(char) = 0;
+static int console_tee_quiet = 0;
+void console_set_tee(void (*fn)(char), int quiet)
+{
+	console_tee_fn = fn;
+	console_tee_quiet = quiet;
+}
+
 void uart_write_char(char data)
 {
-	putchar(data);
+	if(console_tee_fn) console_tee_fn(data);
+	if(!(console_tee_fn && console_tee_quiet)) putchar(data);
 }
 
 /***************************************************************************//**

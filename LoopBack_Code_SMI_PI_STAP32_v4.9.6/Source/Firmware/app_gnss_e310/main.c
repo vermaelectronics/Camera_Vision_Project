@@ -71,6 +71,7 @@
 #include "gnss_passthrough.h"
 #include "gnss_smi_agc.h"
 #include "gnss_aj.h"
+#include "gnss_log.h"
 #include "gnss_capture.h"
 #include "gnss_info.h"   /* GNSS-CRPA MOD-10 */
 
@@ -1203,6 +1204,7 @@ int main(void)
 		      "  TX1 is switched on by itself (4.9.5: gnss_tx=1 always, also after every gnss_band=).\n"
 		      "  CONDUCTED, ATTENUATED COAX ONLY. gnss_tx=0 silences it.\n");
 	gnss_tx_always();
+	gnss_log_init();
 #ifdef GNSS_DEPLOY_AUTO_TX
 	if((gnss_pt_read(GNSS_PT_REG_STATUS) & GNSS_PT_ST_PASS_EN_SYNCED) &&
 	   (gnss_pt_read(GNSS_PT_REG_STATUS) & GNSS_PT_ST_DAC_EN_I0))

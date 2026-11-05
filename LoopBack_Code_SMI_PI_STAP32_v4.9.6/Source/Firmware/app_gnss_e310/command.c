@@ -41,6 +41,7 @@
 /***************************** Include Files **********************************/
 /******************************************************************************/
 #include "command.h"
+#include "gnss_log.h"
 #include "console.h"
 #include "ad9361_api.h"
 #include "axi_dac_core.h"
@@ -148,6 +149,10 @@ command cmd_list[] = {
 	{"gnss_aj_blank_db=", "Pulse blanker threshold above the output noise [dB], 3..30, default 7.", "gnss_aj_blank_db=7", set_gnss_aj_blank_db},
 	{"gnss_aj_sweep=", "1 = detect a moving (chirping) jammer and average over about 50 solves (default), 0 = off.", "gnss_aj_sweep=1", set_gnss_aj_sweep},
 	{"gnss_aj_mode=", "0 = space-time 63 + 2 image taps (default), 1 = RX2 taps, 2 = one weight (v3), 3 = no image taps (v4.0).", "gnss_aj_mode=0", set_gnss_aj_mode},
+	{"gnss_log=", "Snapshot of status, band, rx gain, report, ... every N seconds (default 60; 0 = off; 300 = 5 min), saved with a time stamp (SD build) or printed between GNSS_LOG BEGIN/END lines.", "gnss_log=60", set_gnss_log},
+	{"gnss_log?", "Snapshot logger state: period, target, count, last file, clock.", "", get_gnss_log},
+	{"gnss_log_now=", "1 = write one snapshot right now.", "gnss_log_now=1", set_gnss_log_now},
+	{"gnss_time=", "Set the clock used for the log time stamps (no real-time clock on the board): gnss_time=2026 11 5 14 30 0", "gnss_time=2026 11 5 14 30 0", set_gnss_time},
 	{"gnss_band?", "RF profile and which GNSS signals it carries (GPS, Galileo, BeiDou, GLONASS).", "", get_gnss_band},
 	{"gnss_band=", "0..6 = fixed preset (LO, rate, bandwidth, TX attenuation, RX gain), 0 = default 1569.42 MHz / 61.44 / 56 / 30 / 50; gnss_band? lists them. TX is switched on (gnss_tx=1) every time.", "gnss_band=0", set_gnss_band},
 	{"gnss_rx_gain?", "Gets RX1/RX2 gain mode and gain [dB].", "", get_gnss_rx_gain},
@@ -469,6 +474,41 @@ void set_gnss_band(double* param, char param_no)
 		console_print("gnss_band: the AD9361 refused part of the setting; check gnss_status?\n");
 	gnss_band_print();
 	gnss_tx_always();
+}
+
+void set_gnss_log(double* param, char param_no)
+{
+	if(param_no < 1 || param[0] < 0.0 || param[0] > 86400.0) {
+		console_print("gnss_log= needs a period in seconds, 0 (off) to 86400, e.g. gnss_log=60 or gnss_log=300\n");
+		return;
+	}
+	gnss_log_set_period((unsigned)param[0]);
+	gnss_log_print_state();
+}
+
+void get_gnss_log(double* param, char param_no)
+{
+	(void)param; (void)param_no;
+	gnss_log_print_state();
+}
+
+void set_gnss_log_now(double* param, char param_no)
+{
+	(void)param; (void)param_no;
+	gnss_log_now();
+}
+
+void set_gnss_time(double* param, char param_no)
+{
+	if(param_no < 6 || param[0] < 2000.0 || param[0] > 2099.0 || param[1] < 1.0 || param[1] > 12.0 ||
+	   param[2] < 1.0 || param[2] > 31.0 || param[3] < 0.0 || param[3] > 23.0 || param[4] < 0.0 || param[4] > 59.0 ||
+	   param[5] < 0.0 || param[5] > 59.0) {
+		console_print("gnss_time= needs year month day hour minute second, e.g. gnss_time=2026 11 5 14 30 0\n");
+		return;
+	}
+	gnss_log_set_clock((int)param[0], (int)param[1], (int)param[2], (int)param[3], (int)param[4], (int)param[5]);
+	console_print("GNSS_LOG: clock set\n");
+	gnss_log_print_state();
 }
 
 /* 4.9.5: gnss_tx=1 always. Called at start-up and after every gnss_band=: switches TX on if it is not on, then

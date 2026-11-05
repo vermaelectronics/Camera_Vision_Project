@@ -7,6 +7,7 @@
 #include "gnss_smi_agc.h"
 #include "gnss_passthrough.h"
 #include "gnss_txdma.h"
+#include "gnss_log.h"
 #include "ad9361_api.h"
 #include "axi_dmac.h"
 #include "console.h"
@@ -417,6 +418,17 @@ static void print_csv(XTime now)
 		      f2u(tx_att_db()), fmt(aj_db10(g2 * g2), 1, 0),
 		      (long)(state == ST_JAMMED ? upd_rate : det_rate),
 		      fmt(res.bw * (double)fs / 1e6, 1, 0), fmt(res.foff * (double)fs / 1e6, 1, 0));
+}
+
+/* 4.9.6: the CSV header and one line, whatever gnss_aj_csv= says (for gnss_log.c); leaves the periodic CSV alone. */
+void gnss_aj_csv_once(void)
+{
+	XTime now;
+	int keep = csv_hdr;
+	XTime_GetTime(&now);
+	csv_hdr = 0;
+	print_csv(now);
+	csv_hdr = keep;
 }
 
 /* ---- learning ------------------------------------------------------------------ */
@@ -1804,4 +1816,5 @@ void gnss_idle(void)
 	gnss_rxg_poll();
 	gnss_aj_poll();
 	radio_guard();
+	gnss_log_poll();
 }

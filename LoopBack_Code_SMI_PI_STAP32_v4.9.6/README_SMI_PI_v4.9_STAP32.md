@@ -128,3 +128,24 @@ Each preset sets LO, sample rate, RF bandwidth and, for both TX channels and bot
 
 Checked: the touched files pass `gcc -fsyntax-only` with stubs for the Xilinx headers (gnss_aj.c, command.c, gnss_passthrough.c, gnss_smi_agc.c, gnss_info.c; main.c only fails on board GPIO macros that the stubs do not define). **Not compiled for the ARM and not run on the board.** The bitstream of 4.9.1 stays.
 Version string "4.9.5".
+
+## 4.9.6: automatic snapshot log (firmware, optional SD file saving)
+
+Every **60 s** (`gnss_log=N` seconds, 0 = off, 300 = 5 min) the firmware runs `gnss_status?`, `gnss_tx?`, `gnss_band?`, `gnss_rx_gain?`, `gnss_smi?`, `tx1_attenuation?`, `radio?`, `gnss_aj?` and `gnss_report?`
+with their output captured, and adds a header and an `AJCSV` row. The block is **self-describing** so that it can be read by a person, a script, or an assistant that then changes the code from it:
+
+```
+===== GNSS_LOG BEGIN =====
+# GNSS_LOG format 1: lines 'key=value', then sections '----- name -----'
+fw=4.9.6   core_version=0x40900   aj_info=0x20040c07   band=0   uptime_s=...   period_s=60
+time=2026-11-5 14:30:0   (or: not_set, uptime only)
+----- gnss_status? -----  ...  ----- gnss_report? -----  ...
+===== GNSS_LOG END =====
+```
+
+* **Default build (no extra define):** the block is printed on the console between the BEGIN / END lines, and your serial terminal's own log ("Start log...") keeps it.
+* **SD build: `build_all.sh --from sw --to boot --defines GNSS_LOG_SD`.** The BSP gets the FatFs library (xilffs) and every snapshot is written as a text file `0:/LOG/<YYYYMMDD>/<HHMMSS>.TXT` (8.3 names, one folder per day). Without a clock the folder is `0:/LOG/UPTIME/` and the name `T<seconds>.TXT`. With a file the UART stays quiet: only `[LOG] saved ...` is printed.
+* **No real-time clock on the board:** set the time after each boot, `gnss_time=2026 11 5 14 30 0`.
+* Commands: `gnss_log=N`, `gnss_log?` (state, last file), `gnss_log_now=1` (one snapshot now), `gnss_time=Y M D h m s`.
+
+**Checked:** the C files pass `gcc -fsyntax-only` with stubs, with and without `GNSS_LOG_SD`; the date arithmetic was tested on the PC (leap year, rollover). **Not checked:** the xilffs library addition in `build_software.tcl` (Vitis 2023.2 XSCT; if it fails the script prints `SW_NOTE: xilffs could NOT be added` and the compile stops at `ff.h`: build without the define), the SD mount and file writes on the board. A snapshot takes a few milliseconds to a few tens of ms, during which the anti-jam loop waits (once a minute).

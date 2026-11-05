@@ -71,6 +71,21 @@ puts "SW_STAGE: creating platform from [file tail $xsa]"
 if {[catch {
   platform create -name $plat_name -hw $xsa -proc ps7_cortexa9_0 \
                   -os standalone -out $ws -no-boot-bsp
+  # 4.9.6: --defines GNSS_LOG_SD saves the periodic snapshot log on the SD card with FatFs (xilffs library).
+  # Not added otherwise, so a normal build is unchanged. If the library cannot be added the build goes on and
+  # the compile of gnss_log.c then fails on ff.h: build without GNSS_LOG_SD in that case.
+  if {[lsearch -glob $defines "GNSS_LOG_SD*"] >= 0} {
+    set sd_added 0
+    foreach dom $domain_candidates {
+      if {![catch {
+        platform active $plat_name
+        domain active $dom
+        bsp setlib -name xilffs
+      } sd_err]} { set sd_added 1; break }
+    }
+    if {$sd_added} { puts "SW_NOTE: xilffs added to the BSP (GNSS_LOG_SD)" } \
+    else { puts "SW_NOTE: xilffs could NOT be added: $sd_err" }
+  }
   platform write
   platform generate
 } err]} {

@@ -236,6 +236,10 @@ void get_gnss_tx(double* param, char param_no);
 /* 1 = retransmit RX1 on TX1 at MAXIMUM attenuation, 0 = silence TX1.
  * gnss_tx=0 is the abort path and is safe to issue at any time. */
 void set_gnss_tx(double* param, char param_no);
+void set_gnss_log(double* param, char param_no);
+void get_gnss_log(double* param, char param_no);
+void set_gnss_log_now(double* param, char param_no);
+void set_gnss_time(double* param, char param_no);
 void gnss_tx_always(void);   /* 4.9.5: TX on at start-up and after every gnss_band=, then the band's TX attenuation and RX gain */
 
 /* Prints AD9361 and gnss_passthrough runtime state. */
