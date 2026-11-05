@@ -1,0 +1,904 @@
+// ============================================================================
+//  gnss_passthrough.v
+//  ANTSDR E310 V1 / GNSS CRPA project  --  Phase 1 custom processing block
+// ----------------------------------------------------------------------------
+//  PURPOSE
+//    This module is the single, stable insertion point for custom FPGA
+//    processing between the AD9361 RX datapath and the AD9361 TX datapath
+//    (project requirements 41, 43, 44).
+//
+//    Phase 1 behaviour is transparent (requirement 42):
+//        Iout = Iin
+//        Qout = Qin
+//    No scaling, no filtering, no rotation is applied.  The sample values that
+//    leave this block are bit-for-bit the sample values that entered it.
+//
+//    A future CRPA (Controlled Reception Pattern Antenna) algorithm replaces
+//    the body of the "PROCESSING CORE" section below.  Everything outside that
+//    section -- the port list, the AXI4-Lite register map, the elastic buffer
+//    and the status counters -- is intended to stay unchanged, so that CRPA can
+//    be dropped in without redesigning the radio datapath (requirement 44).
+//
+//  DATAPATH POSITION  (requirement 45)
+//    axi_ad9361 (ADC) --> gnss_passthrough --> axi_ad9361 (DAC)
+//    The path is entirely in programmable logic.  The ARM PS is NOT in the
+//    per-sample loop (requirement 46); the PS only reads/writes the registers
+//    below.  The vendor AXI DMA capture path is preserved untouched and stays
+//    available for diagnostics (requirements 47, 48).
+//
+//  CLOCK DOMAINS
+//    clk          : axi_ad9361/l_clk   -- the AD9361 sample-interface clock.
+//                                         All datapath logic lives here.
+//    s_axi_aclk   : sys_cpu_clk        -- PS7 FCLK_CLK0, 100.0 MHz in the
+//                                         official E310 V1 design.
+//    These are asynchronous.  Status/counters cross clk -> s_axi_aclk through
+//    a capture-and-toggle handshake; control bits cross s_axi_aclk -> clk
+//    through two-flop synchronisers.  See the CDC section.
+//
+//  REGISTER MAP  (AXI4-Lite, 4 kB aperture)
+//    Base address is assigned by the block design, not by this file.
+//    This project assigns 0x43C0_0000 (see Source/Config/board_e310_v1.json).
+//
+//    Offset  Name            Access  Description
+//    0x00    ID              RO      0x47435031 = "GCP1"
+//    0x04    VERSION         RO      {16'h major, 16'h minor}
+//    0x08    SCRATCH         RW      read/write test register
+//    0x0C    CONTROL         RW      [0]  pass_en    1 = RX->TX passthrough
+//                                         0 = vendor DMA/DDS drives the DAC
+//                                    [1]  mute       1 = drive 0x0000 to DAC
+//                                    [2]  swap_iq    1 = exchange I and Q
+//                                    [3]  ch1_copy   1 = ch1 DAC fed from ch0
+//                                    [4]  reserved (reads back what was written)
+//                                    [5]  smi_en     1 = ch0 TX carries the
+//                                                        SMI-PI space-time filter
+//                                                        output (RX1 and RX2
+//                                                        combined, see AJ_W)
+//                                                    0 = ch0 TX carries RX1
+//                                    [6]  reserved (reads back; the v3 weight
+//                                         freeze is done in firmware in v4)
+//                                    [8]  cnt_clear  1 = hold counters cleared
+//    0x10    STATUS          RO      [0]  adc_enable_i0   [1]  adc_enable_q0
+//                                    [2]  dac_enable_i0   [3]  dac_enable_q0
+//                                    [4]  fifo0_empty     [5]  fifo0_full
+//                                    [6]  fifo1_empty     [7]  fifo1_full
+//                                    [8]  overflow_sticky [9]  underflow_sticky
+//                                    [10] smi_drop_sticky: an RX sample pair
+//                                         arrived while the previous one was
+//                                         still waiting for smi_pi_0 (never
+//                                         expected; cleared with cnt_clear)
+//                                    [16] pass_en (as seen in the clk domain)
+//                                    [18] smi_en  (as seen in the clk domain)
+//
+//            READ [2]/[3] CAREFULLY. dac_enable_* is NOT an enable this block
+//            drives, and it is NOT derived from the valid strobes. It is a
+//            read-back of the AD9361 DAC channel's data-source select:
+//                axi_ad9361_tx_channel.v:272
+//                  dac_enable_int <= (dac_data_sel_s == 4'h2) ? 1'b1 : 1'b0;
+//            and 4'h2 is the ONLY source select for which that channel's mux
+//            takes dma_data -- the port this block drives:
+//                axi_ad9361_tx_channel.v:297-305
+//                  4'h2:    dac_data_out_int <= dma_data[15:4];
+//                  default: dac_data_out_int <= dac_dds_data_s;   // DDS tone
+//            So [2]/[3] reading 0 means the DAC core is IGNORING everything
+//            this block outputs and emitting its DDS tone instead, even while
+//            dac_valid keeps pulsing and TX_COUNT keeps advancing. Firmware
+//            must write CHAN_CNTRL_7 (0x0418 + c*0x40) = 2 on the channels
+//            before anything here can reach the AD9361. See
+//            gnss_l1_set_dac_source() in Source/Firmware/app_gnss_e310.
+//    0x14    RX_COUNT_CH0    RO      adc_valid_i0 pulses observed
+//    0x18    TX_COUNT_CH0    RO      dac_valid_i0 pulses served
+//    0x1C    OVERFLOW_COUNT  RO      writes attempted into a full buffer
+//    0x20    UNDERFLOW_COUNT RO      reads attempted from an empty buffer
+//    0x24    RX_SNAPSHOT_CH0 RO      {adc_data_q0, adc_data_i0} last accepted
+//                                    RX format: 12-bit sample RIGHT-aligned in
+//                                    16 bits, sign-extended into [15:12].
+//    0x28    TX_SNAPSHOT_CH0 RO      {dac_data_q0, dac_data_i0} last driven
+//                                    TX format: 12-bit sample LEFT-aligned,
+//                                    [15:4]. In passthrough this reads 16x the
+//                                    RX snapshot -- see OUTPUT SAMPLE ALIGNMENT
+//                                    below. A TX snapshot equal to the RX one
+//                                    means the alignment stage is missing.
+//    0x2C    FIFO_LEVEL      RO      [5:0] ch0 occupancy, [13:8] ch1 occupancy
+//    0x30    RX_COUNT_CH1    RO      adc_valid_i1 pulses observed
+//    0x34    TX_COUNT_CH1    RO      dac_valid_i1 pulses served
+//    0x38    RX_SNAPSHOT_CH1 RO      {adc_data_q1, adc_data_i1} last accepted
+//    0x3C    RESERVED        RO      reads 0
+//    0x40..  CRPA_COEF[0..15] RW     reserved; stored and returned, no logic
+//                                    consumes them. (0x48 was the v3 SMI-PI
+//                                    loading L; v4 needs no loading register.)
+//    0x400.. AJ_W[0..63]     RW      SMI-PI space-time weights, SHADOW copy (4.9: 64 words, was 32 at 0x100).
+//    0x4FC                           Word k: {imag[31:16], real[15:0]}, signed
+//                                    Q3.12 (1.0 = 0x1000).
+//                                      k = 0..31  RX1 tap at delay k
+//                                                 (k = 4 is the reference,
+//                                                 fixed at 1; its word is
+//                                                 ignored by the core)
+//                                      k = 32..63 RX2 tap at delay k-32
+//                                                 (applied to the NORMALISED
+//                                                 RX2, see AJ_NORM)
+//                                    Writing here does NOT change the filter.
+//    0x180   AJ_COMMIT       W/RO    Any write copies ALL shadow registers
+//                                    (AJ_W, AJ_CFG, AJ_NORM, AJ_WC) to the
+//                                    values the core uses, in one s_axi_aclk
+//                                    edge, so the core never runs a half-old,
+//                                    half-new set. Reads a commit counter.
+//    0x184   AJ_INFO         RO      {8'd taps per channel, 8'd reference delay,
+//                                     8'd fraction bits, 8'd layout version}
+//                                    = 0x20040C07 (layout 7 = v4.9: 32 taps, weights at 0x400; layout 6 = v4.7: reference delay 4; 5 = v4.6: pulse blanker + RX peak hold; 4 = v4.5;
+//                                      3 = v4.4; 2 = v4.1)
+//    0x188   AJ_CFG          RW      SHADOW. [0] bypass: 1 = TX1 carries RX1
+//                                    delayed by 8 samples, no weights (reset
+//                                    value 0x1: nothing is filtered until the
+//                                    firmware has seen a jammer).
+//                                    [10:8] output make-up shift s, 0..4: the
+//                                    filter output x 2^s (6 dB per step; 0..7 from v4.5).
+//                                    [14:12] weight scale ws, 0..5 (v4.4): the weight
+//                                    words hold w * 2^ws and the core divides the sum
+//                                    by 2^ws (finer steps for a CW 60-70 dB above noise).
+//    0x18C   AJ_NORM         RW      SHADOW. RX2 input normalisation g2,
+//                                    {imag[31:16], real[15:0]} signed Q3.13
+//                                    (1.0 = 0x2000, the reset value). The core
+//                                    filters g2 * RX2.
+//    0x190   AJ_WC0          RW      SHADOW. Image tap c1 on conj(RX1[n-8]),
+//                                    weight-word format.
+//    0x194   AJ_WC1          RW      SHADOW. Image tap c2 on conj(RX2n[n-8]).
+//    0x198   AJ_CFG_ACTIVE   RO      AJ_CFG as committed (what the core runs).
+//    0x19C   AJ_BLK_THR      RW      SHADOW (v4.6, AJ_INFO layout 5). Pulse blanker threshold: the
+//                                    blanker (gnss_pulse_blank.v) zeroes the filter output while the sum
+//                                    of 8 samples of I^2+Q^2 exceeds it. Reset 0xFFFFFFFF (never).
+//                                    AJ_CFG[15] = blanker enable (committed with the rest).
+//    0x1A0   AJ_BLK_THR_ACT  RO      the committed threshold.
+//    0x1A4   AJ_BLK_COUNT    RO      samples blanked since CONTROL[8] (counter clear).
+//    0x1A8   AJ_BLK_BURSTS   RO      bursts blanked (rising edges) since the clear.
+//    0x1AC   AJ_RX_PEAK      RO      [15:0] largest |I| or |Q| of RX1 and RX2 over the last window of
+//                                    2^19 sample strobes (8.5 ms at 61.44 MS/s), updated at the
+//                                    end of each window; [31:16] window counter (wraps).
+//
+//  SMI-PI v4 CLOCKING
+//    smi_pi_0 runs on sys_cpu_clk (= s_axi_aclk), not on clk: the block design
+//    puts an asynchronous AXI-Stream FIFO on each side of it (m_axis_smi ->
+//    FIFO -> core -> FIFO -> s_axis_smi). The committed values (aj_wts,
+//    aj_wcj, aj_cfg, aj_nrm) are therefore driven from the same clock the core
+//    runs on -- no crossing.
+//
+//  LICENCE
+//    Original work for this project.  Not derived from Analog Devices or
+//    MicroPhase source.  See Docs/Architecture/MODIFICATIONS.md.
+// ============================================================================
+
+`timescale 1ns/100ps
+
+module gnss_passthrough #(
+  parameter FIFO_ADDR_WIDTH = 5   // elastic buffer depth = 2**FIFO_ADDR_WIDTH
+) (
+  // ---- sample-domain clock / reset (axi_ad9361 l_clk / rst) ----------------
+  input               clk,
+  input               rst,               // active high, from axi_ad9361/rst
+
+  // ---- RX: from axi_ad9361 ADC interface ----------------------------------
+  input               adc_enable_i0,
+  input               adc_valid_i0,
+  input      [15:0]   adc_data_i0,
+  input               adc_enable_q0,
+  input               adc_valid_q0,
+  input      [15:0]   adc_data_q0,
+  input               adc_enable_i1,
+  input               adc_valid_i1,
+  input      [15:0]   adc_data_i1,
+  input               adc_enable_q1,
+  input               adc_valid_q1,
+  input      [15:0]   adc_data_q1,
+
+  // ---- TX: request strobes from axi_ad9361 DAC interface ------------------
+  input               dac_enable_i0,
+  input               dac_valid_i0,
+  input               dac_enable_q0,
+  input               dac_valid_q0,
+  input               dac_enable_i1,
+  input               dac_valid_i1,
+  input               dac_enable_q1,
+  input               dac_valid_q1,
+
+  // ---- TX: vendor DMA/DDS sourced data (from util_rfifo dout_data_*) ------
+  input      [15:0]   dma_dac_data_i0,
+  input      [15:0]   dma_dac_data_q0,
+  input      [15:0]   dma_dac_data_i1,
+  input      [15:0]   dma_dac_data_q1,
+
+  // ---- TX: muxed data driven into axi_ad9361 ------------------------------
+  output     [15:0]   dac_data_i0,
+  output     [15:0]   dac_data_q0,
+  output     [15:0]   dac_data_i1,
+  output     [15:0]   dac_data_q1,
+
+  // ---- SMI-PI v4 core: separate block-design IP (smi_pi_0) ----------------
+  //  Source/BlockDesign/system_bd.tcl connects:
+  //    m_axis_smi (clk) -> async FIFO -> smi_pi_0/s_axis_x {rx2_q, rx2_i, rx1_q, rx1_i}
+  //    smi_pi_0/m_axis_y -> async FIFO -> s_axis_smi (clk)  {y_q, y_i}
+  //    smi_rst_n (clk)  -> input FIFO reset (CONTROL[0] & CONTROL[5])
+  //    aj_wts (s_axi_aclk) -> smi_pi_0/wts, the committed AJ_W weights
+  //    aj_wcj (s_axi_aclk) -> smi_pi_0/wcj, the committed image taps AJ_WC
+  //    aj_cfg (s_axi_aclk) -> smi_pi_0/cfg, the committed AJ_CFG
+  //    aj_nrm (s_axi_aclk) -> smi_pi_0/nrm, the committed AJ_NORM
+  output     [63:0]   m_axis_smi_tdata,
+  output              m_axis_smi_tvalid,
+  input               m_axis_smi_tready,
+  input      [31:0]   s_axis_smi_tdata,
+  input               s_axis_smi_tvalid,
+  output              s_axis_smi_tready,
+  output              smi_rst_n,
+  output     [2047:0] aj_wts,
+  output     [63:0]   aj_wcj,
+  output     [31:0]   aj_cfg,
+  output     [31:0]   aj_nrm,
+
+  // ---- AXI4-Lite slave (sys_cpu_clk domain) -------------------------------
+  input               s_axi_aclk,
+  input               s_axi_aresetn,
+  input               s_axi_awvalid,
+  input      [15:0]   s_axi_awaddr,
+  input      [ 2:0]   s_axi_awprot,
+  output              s_axi_awready,
+  input               s_axi_wvalid,
+  input      [31:0]   s_axi_wdata,
+  input      [ 3:0]   s_axi_wstrb,
+  output              s_axi_wready,
+  output              s_axi_bvalid,
+  output     [ 1:0]   s_axi_bresp,
+  input               s_axi_bready,
+  input               s_axi_arvalid,
+  input      [15:0]   s_axi_araddr,
+  input      [ 2:0]   s_axi_arprot,
+  output              s_axi_arready,
+  output              s_axi_rvalid,
+  output     [ 1:0]   s_axi_rresp,
+  output     [31:0]   s_axi_rdata,
+  input               s_axi_rready
+);
+
+  localparam [31:0] CORE_ID      = 32'h47435031;   // "GCP1"
+  // v1.1 -- adds the RX->TX sample alignment stage. Bumped so a running board
+  // reports which of the two behaviours its bitstream actually has.
+  // v2.x -- PL-NPI builds (LoopBack_Code_PL_NPI).
+  // v3.0 -- SMI-PI build: closed-form power inversion (smi_pi_0, Vitis HLS,
+  //         II=2), selected by CONTROL[5], diagonal loading in register 0x48,
+  //         weight band in STATUS[21:20]. The input to it goes through a
+  //         one-entry holding register, STATUS[10] flags a sample pair it
+  //         could not take. No PI-NLMS or PL-NPI core in this design.
+  // v4.0 -- SMI-PI space-time build: 16+16-tap filter (smi_pi_0 v2.0) on
+  //         sys_cpu_clk behind two async FIFOs, 32 weight words AJ_W at 0x100
+  //         committed atomically by AJ_COMMIT (0x180); the ARM computes them.
+  //         0x48 loading and the weight band are gone; the ch0 elastic buffer
+  //         is flushed and re-primed whenever CONTROL[5] changes.
+  // v4.1 -- adds AJ_CFG (bypass, output make-up shift), AJ_NORM (RX2 input
+  //         normalisation) and the two image-tap words AJ_WC, all shadowed
+  //         and committed together with the weights (smi_pi_0 v2.1).
+  // v4.4 -- smi_pi_0 v2.2: AJ_CFG[14:12] is the weight scale (weight words hold
+  //         w * 2^ws); no register or port changed. AJ_INFO layout 3 tells the
+  //         firmware the bitstream has it (older bitstreams ignore the bits).
+  // v4.5 -- smi_pi_0 v2.3: AJ_CFG[10:8] make-up shift 0..7 (was 0..4). AJ_INFO layout 4.
+  // v4.6 -- pulse blanker on the filter output (gnss_pulse_blank.v), threshold AJ_BLK_THR
+  //         0x19C committed with AJ_COMMIT, enable AJ_CFG[15], counters 0x1A4/0x1A8, and an RX
+  //         peak hold 0x1AC. smi_pi_0 is unchanged (v2.3). AJ_INFO layout 5.
+  // v4.7 -- smi_pi_0 v2.4: the RX1 reference tap is at delay 4 (was 8), so a reflection of the jammer
+  //         up to 11 samples later can be cancelled (was 7). AJ_INFO byte 2 = 4, layout 6; the firmware
+  //         refuses to start the filter if that byte differs from its own AJ_REF.
+  localparam [31:0] CORE_VERSION = 32'h00040908;   // v4.9 (32 taps per channel)
+  localparam [31:0] AJ_INFO      = 32'h07040C07;   // 4.9.8: 7 taps per channel   // 32 taps per channel, reference delay 4, layout 7 (4.9: 64 weight words at 0x400)
+  localparam [31:0] AJ_CFG_RESET = 32'h00000001;   // bypass
+  localparam [31:0] AJ_NRM_RESET = 32'h00002000;   // g2 = 1.0
+  localparam        AW           = FIFO_ADDR_WIDTH;
+
+  // ==========================================================================
+  //  AXI4-Lite slave  (s_axi_aclk domain)
+  // ==========================================================================
+  reg         axi_awready = 1'b0;
+  reg         axi_wready  = 1'b0;
+  reg         axi_bvalid  = 1'b0;
+  reg         axi_arready = 1'b0;
+  reg         axi_rvalid  = 1'b0;
+  reg  [31:0] axi_rdata   = 32'd0;
+  reg  [13:0] axi_awaddr_r = 14'd0;
+  reg  [13:0] axi_araddr_r = 14'd0;
+
+  assign s_axi_awready = axi_awready;
+  assign s_axi_wready  = axi_wready;
+  assign s_axi_bvalid  = axi_bvalid;
+  assign s_axi_bresp   = 2'b00;          // always OKAY
+  assign s_axi_arready = axi_arready;
+  assign s_axi_rvalid  = axi_rvalid;
+  assign s_axi_rresp   = 2'b00;          // always OKAY
+  assign s_axi_rdata   = axi_rdata;
+
+  wire        wr_hs = s_axi_awvalid & s_axi_wvalid & ~axi_bvalid &
+                      ~axi_awready & ~axi_wready;
+
+  // Write address/data accepted together (single-beat AXI4-Lite).
+  always @(posedge s_axi_aclk) begin
+    if (s_axi_aresetn == 1'b0) begin
+      axi_awready  <= 1'b0;
+      axi_wready   <= 1'b0;
+      axi_bvalid   <= 1'b0;
+      axi_awaddr_r <= 14'd0;
+    end else begin
+      axi_awready <= wr_hs;
+      axi_wready  <= wr_hs;
+      if (wr_hs)
+        axi_awaddr_r <= s_axi_awaddr[15:2];
+      if (axi_awready)
+        axi_bvalid <= 1'b1;
+      else if (s_axi_bready && axi_bvalid)
+        axi_bvalid <= 1'b0;
+    end
+  end
+
+  always @(posedge s_axi_aclk) begin
+    if (s_axi_aresetn == 1'b0) begin
+      axi_arready  <= 1'b0;
+      axi_rvalid   <= 1'b0;
+      axi_araddr_r <= 14'd0;
+    end else begin
+      axi_arready <= s_axi_arvalid & ~axi_arready & ~axi_rvalid;
+      if (s_axi_arvalid && axi_arready)
+        axi_araddr_r <= s_axi_araddr[15:2];
+      if (s_axi_arvalid && axi_arready)
+        axi_rvalid <= 1'b1;
+      else if (axi_rvalid && s_axi_rready)
+        axi_rvalid <= 1'b0;
+    end
+  end
+
+  wire        reg_wr    = axi_awready;             // one-cycle write strobe
+  wire [11:0] reg_waddr = axi_awaddr_r[11:0];
+
+  // ---- software-writable state --------------------------------------------
+  reg  [31:0] reg_scratch = 32'd0;
+  reg  [31:0] reg_control = 32'd0;
+  reg  [31:0] crpa_coef [0:15];
+
+  integer ci;
+  initial for (ci = 0; ci < 16; ci = ci + 1) crpa_coef[ci] = 32'd0;
+
+  always @(posedge s_axi_aclk) begin
+    if (s_axi_aresetn == 1'b0) begin
+      reg_scratch <= 32'd0;
+      reg_control <= 32'd0;
+    end else if (reg_wr) begin
+      case (reg_waddr)
+        12'h002: reg_scratch <= s_axi_wdata;   // 0x08
+        12'h003: reg_control <= s_axi_wdata;   // 0x0C
+        default: ;
+      endcase
+      if (reg_waddr >= 12'h010 && reg_waddr <= 12'h01F)   // 0x40..0x7C
+        crpa_coef[reg_waddr[3:0]] <= s_axi_wdata;
+    end
+  end
+
+  // ---- SMI-PI v4 weights: shadow (0x100..0x17C, 0x188..0x194), committed by
+  // 0x180. All in s_axi_aclk, which is also the clock of smi_pi_0, so the
+  // whole set changes in one edge. Reset: bypass (TX1 carries RX1 delayed by
+  // 8 samples), weights zero, g2 = 1.
+  reg  [31:0]   aj_shadow [0:63];
+  reg  [2047:0] aj_active  = 2048'd0;
+  reg  [31:0]   aj_cfg_sh  = AJ_CFG_RESET, aj_cfg_act = AJ_CFG_RESET;
+  reg  [31:0]   aj_nrm_sh  = AJ_NRM_RESET, aj_nrm_act = AJ_NRM_RESET;
+  reg  [31:0]   aj_wc0_sh  = 32'd0, aj_wc1_sh = 32'd0;
+  reg  [63:0]   aj_wcj_act = 64'd0;
+  reg  [31:0]   aj_commits = 32'd0;
+  reg  [31:0]   aj_thr_sh  = 32'hFFFFFFFF, aj_thr_act = 32'hFFFFFFFF;
+  reg           aj_thr_tog = 1'b0;
+  wire [31:0]   v_blk_cnt, v_blk_bursts, v_peak;
+  wire          aj_w_sel   = (reg_waddr >= 12'h100) && (reg_waddr <= 12'h13F);      // 0x400..0x4FC (4.9)
+  wire          aj_commit  = reg_wr && (reg_waddr == 12'h060);
+  integer ai;
+  initial for (ai = 0; ai < 64; ai = ai + 1) aj_shadow[ai] = 32'd0;
+
+  always @(posedge s_axi_aclk) begin
+    if (s_axi_aresetn == 1'b0) begin
+      for (ai = 0; ai < 64; ai = ai + 1) aj_shadow[ai] <= 32'd0;
+      aj_active  <= 2048'd0;
+      aj_cfg_sh  <= AJ_CFG_RESET;  aj_cfg_act <= AJ_CFG_RESET;
+      aj_nrm_sh  <= AJ_NRM_RESET;  aj_nrm_act <= AJ_NRM_RESET;
+      aj_wc0_sh  <= 32'd0;         aj_wc1_sh  <= 32'd0;
+      aj_wcj_act <= 64'd0;
+      aj_commits <= 32'd0;
+      aj_thr_sh  <= 32'hFFFFFFFF;  aj_thr_act <= 32'hFFFFFFFF;  aj_thr_tog <= 1'b0;
+    end else begin
+      if (reg_wr && aj_w_sel)
+        aj_shadow[reg_waddr[5:0]] <= s_axi_wdata;
+      if (reg_wr) begin
+        case (reg_waddr)
+          12'h062: aj_cfg_sh <= s_axi_wdata;     // 0x188
+          12'h063: aj_nrm_sh <= s_axi_wdata;     // 0x18C
+          12'h064: aj_wc0_sh <= s_axi_wdata;     // 0x190
+          12'h065: aj_wc1_sh <= s_axi_wdata;     // 0x194
+          12'h067: aj_thr_sh <= s_axi_wdata;     // 0x19C
+          default: ;
+        endcase
+      end
+      if (aj_commit) begin
+        for (ai = 0; ai < 64; ai = ai + 1)
+          aj_active[32*ai +: 32] <= aj_shadow[ai];
+        aj_cfg_act <= aj_cfg_sh;
+        aj_nrm_act <= aj_nrm_sh;
+        aj_wcj_act <= {aj_wc1_sh, aj_wc0_sh};
+        aj_thr_act <= aj_thr_sh;
+        aj_thr_tog <= ~aj_thr_tog;
+        aj_commits <= aj_commits + 1'b1;
+      end
+    end
+  end
+  assign aj_wts = aj_active;
+  assign aj_wcj = aj_wcj_act;
+  assign aj_cfg = aj_cfg_act;
+  assign aj_nrm = aj_nrm_act;
+
+  // Status view, refreshed from the clk domain (see CDC section).
+  wire [31:0] v_status, v_rx_cnt0, v_tx_cnt0, v_ovf_cnt, v_unf_cnt;
+  wire [31:0] v_rx_snap0, v_tx_snap0, v_level, v_rx_cnt1, v_tx_cnt1, v_rx_snap1;
+
+  // Read data is captured on the SAME edge that accepts the address, using the
+  // live s_axi_araddr rather than the registered copy.
+  //
+  // The earlier version decoded axi_araddr_r, which is loaded on that very
+  // edge. The case therefore saw the PREVIOUS address while rvalid was being
+  // asserted for the current one, so every read returned the previous
+  // register's value. On hardware this showed up as VERSION reading back
+  // 0x47435031 -- the ID -- because the ID read had immediately preceded it.
+  // The first read after reset happened to be correct only because
+  // axi_araddr_r resets to 0, which is the ID offset.
+  wire [11:0] rd_idx = s_axi_araddr[13:2];
+  always @(posedge s_axi_aclk) begin
+    if (s_axi_arvalid && axi_arready) begin
+    if (rd_idx >= 12'h100 && rd_idx <= 12'h13F)
+      axi_rdata <= aj_shadow[rd_idx[5:0]];         // 0x400..0x4FC
+    else
+    case (rd_idx)
+      12'h000: axi_rdata <= CORE_ID;
+      12'h001: axi_rdata <= CORE_VERSION;
+      12'h002: axi_rdata <= reg_scratch;
+      12'h003: axi_rdata <= reg_control;
+      12'h004: axi_rdata <= v_status;
+      12'h005: axi_rdata <= v_rx_cnt0;
+      12'h006: axi_rdata <= v_tx_cnt0;
+      12'h007: axi_rdata <= v_ovf_cnt;
+      12'h008: axi_rdata <= v_unf_cnt;
+      12'h009: axi_rdata <= v_rx_snap0;
+      12'h00A: axi_rdata <= v_tx_snap0;
+      12'h00B: axi_rdata <= v_level;
+      12'h00C: axi_rdata <= v_rx_cnt1;
+      12'h00D: axi_rdata <= v_tx_cnt1;
+      12'h00E: axi_rdata <= v_rx_snap1;
+      12'h060: axi_rdata <= aj_commits;            // 0x180
+      12'h061: axi_rdata <= AJ_INFO;               // 0x184
+      12'h062: axi_rdata <= aj_cfg_sh;             // 0x188
+      12'h063: axi_rdata <= aj_nrm_sh;             // 0x18C
+      12'h064: axi_rdata <= aj_wc0_sh;             // 0x190
+      12'h065: axi_rdata <= aj_wc1_sh;             // 0x194
+      12'h066: axi_rdata <= aj_cfg_act;            // 0x198
+      12'h067: axi_rdata <= aj_thr_sh;             // 0x19C
+      12'h068: axi_rdata <= aj_thr_act;            // 0x1A0
+      12'h069: axi_rdata <= v_blk_cnt;             // 0x1A4
+      12'h06A: axi_rdata <= v_blk_bursts;          // 0x1A8
+      12'h06B: axi_rdata <= v_peak;                // 0x1AC
+      12'h010, 12'h011, 12'h012, 12'h013,
+      12'h014, 12'h015, 12'h016, 12'h017,
+      12'h018, 12'h019, 12'h01A, 12'h01B,
+      12'h01C, 12'h01D, 12'h01E, 12'h01F:
+               axi_rdata <= crpa_coef[s_axi_araddr[5:2]];
+      default: axi_rdata <= 32'd0;
+    endcase
+    end
+  end
+
+  // ==========================================================================
+  //  CDC: control  s_axi_aclk -> clk   (two-flop synchronisers)
+  //  These bits are quasi-static software settings, so bit-wise
+  //  synchronisation is sufficient; no bus-coherency requirement.
+  // ==========================================================================
+  (* ASYNC_REG = "TRUE" *) reg [8:0] ctrl_meta = 9'd0;
+  (* ASYNC_REG = "TRUE" *) reg [8:0] ctrl_sync = 9'd0;
+  wire [8:0] ctrl_raw = {reg_control[8], 1'b0, reg_control[6:0]};
+
+  always @(posedge clk) begin
+    ctrl_meta <= ctrl_raw;
+    ctrl_sync <= ctrl_meta;
+  end
+
+  wire pass_en   = ctrl_sync[0];
+  wire mute      = ctrl_sync[1];
+  wire swap_iq   = ctrl_sync[2];
+  wire ch1_copy  = ctrl_sync[3];
+  wire smi_en    = ctrl_sync[5];
+  wire cnt_clear = ctrl_sync[8];
+
+  // CONTROL[5] edges: the ch0 buffer changes source (RX1 <-> filter output,
+  // which arrives through two FIFOs and the filter, a few hundred ns later).
+  // The buffer is flushed and re-primed on every edge, so it restarts half
+  // full of the NEW source instead of draining into an underflow.
+  reg  smi_en_d = 1'b0;
+  always @(posedge clk) smi_en_d <= smi_en;
+  wire smi_switch = smi_en ^ smi_en_d;
+
+  // ==========================================================================
+  //  Elastic buffer (one per channel)
+  //  RX and TX sample strobes are both in the clk domain and run at the same
+  //  average rate, but their phase relationship is not guaranteed.  A shallow
+  //  synchronous FIFO absorbs that phase difference.  Occupancy is steered
+  //  toward half-full at start-up by holding reads off until the buffer has
+  //  filled to the midpoint.
+  // ==========================================================================
+  // Distributed (LUT) RAM: at depth 32 a block RAM would be wasteful, and
+  // block RAM is better kept free for the future CRPA implementation.
+  (* ram_style = "distributed" *) reg [31:0] fifo0 [0:(1<<AW)-1];
+  (* ram_style = "distributed" *) reg [31:0] fifo1 [0:(1<<AW)-1];
+  reg  [AW:0] wptr0 = 0, rptr0 = 0;
+  reg  [AW:0] wptr1 = 0, rptr1 = 0;
+
+  wire [AW:0] level0 = wptr0 - rptr0;
+  // ch1 occupancy is a counter updated beside the pointers (same value as
+  // wptr1 - rptr1 every cycle) so full1/empty1 do not need a subtract and a
+  // compare in front of the distributed-RAM write enable (4.8.2 timing fix).
+  reg  [AW:0] level1 = 0;
+  wire        full0  = (level0 == (1<<AW));
+  wire        empty0 = (level0 == 0);
+  wire        full1  = level1[AW];
+  wire        empty1 = (level1 == 0);
+
+  // Prime the buffer to half depth before the first read, so that a small
+  // phase error in either direction cannot immediately underflow.
+  reg  primed0 = 1'b0, primed1 = 1'b0;
+  always @(posedge clk) begin
+    if (rst || !pass_en) begin
+      primed0 <= 1'b0;
+      primed1 <= 1'b0;
+    end else if (smi_switch) begin
+      primed0 <= 1'b0;
+    end else begin
+      if (level0 >= (1<<(AW-1))) primed0 <= 1'b1;
+      if (level1 >= (1<<(AW-1))) primed1 <= 1'b1;
+    end
+  end
+
+  // With smi_en the ch0 buffer is fed by the SMI-PI output strobe instead
+  // of the raw RX strobe. Both run at the RX sample rate.
+  wire smi_out_valid;
+  wire wr_en0 = pass_en & (smi_en ? smi_out_valid
+                                  : (adc_valid_i0 & adc_enable_i0));
+  wire rd_en0 = pass_en & dac_valid_i0 & primed0;
+  wire wr_en1 = pass_en & adc_valid_i1 & adc_enable_i1;
+  wire rd_en1 = pass_en & dac_valid_i1 & primed1;
+
+  // ==========================================================================
+  //  PROCESSING CORE
+  //
+  //  smi_en = 0 : identity. proc_i/proc_q are the raw RX samples.
+  //  smi_en = 1 : channel 0 carries the SMI-PI output (RX1 and RX2
+  //               combined). Channel 1 is left as raw RX2.
+  //
+  //  RESET. smi_rst_n holds the input FIFO in reset whenever pass_en or
+  //  smi_en is 0. The filter keeps its weights; the firmware writes and
+  //  commits new ones.
+  // ==========================================================================
+  // --------------------------------------------------------------------------
+  //  SMI-PI (smi_pi_0), a separate block-design IP. It works at the RAW ADC
+  //  scale, so RX samples go in as received -- 12-bit right-aligned,
+  //  sign-extended to 16 -- and its 16-bit output is saturated back to the
+  //  12-bit range the elastic buffer and output alignment stage expect.
+  // --------------------------------------------------------------------------
+  wire smi_run = pass_en & smi_en;
+
+  reg smi_rst_n_r = 1'b0;
+  always @(posedge clk) smi_rst_n_r <= ~rst & smi_run;
+  assign smi_rst_n = smi_rst_n_r;
+
+  // The input FIFO's TREADY may be low in the clock a pair arrives (it is
+  // only low when full, which a 100 MS/s filter behind it never lets happen).
+  // The pair is held in a one-entry register until accepted. Pairs arrive at
+  // most every 2nd clock, so one entry is enough; a pair that finds the
+  // register still occupied is dropped and flagged (STATUS[10]).
+  wire smi_in_valid = smi_rst_n_r & adc_valid_i0 & adc_valid_i1 &
+                      adc_enable_i0 & adc_enable_i1;
+  reg  [63:0] smi_x_data  = 64'd0;
+  reg         smi_x_valid = 1'b0;
+  wire        smi_x_free  = ~smi_x_valid | m_axis_smi_tready;
+  wire        smi_drop    = smi_in_valid & ~smi_x_free;
+  always @(posedge clk) begin
+    if (!smi_rst_n_r) begin
+      smi_x_valid <= 1'b0;
+    end else if (smi_in_valid && smi_x_free) begin
+      smi_x_data  <= {adc_data_q1, adc_data_i1, adc_data_q0, adc_data_i0};
+      smi_x_valid <= 1'b1;
+    end else if (m_axis_smi_tready) begin
+      smi_x_valid <= 1'b0;
+    end
+  end
+  assign m_axis_smi_tdata  = smi_x_data;
+  assign m_axis_smi_tvalid = smi_x_valid;
+  assign s_axis_smi_tready = 1'b1;        // the elastic buffer always accepts
+
+  function [15:0] sat12(input [15:0] v);
+    begin
+      if      ($signed(v) >  $signed(16'sd2047)) sat12 = 16'h07FF;
+      else if ($signed(v) < -$signed(16'sd2048)) sat12 = 16'hF800;
+      else                                        sat12 = v;
+    end
+  endfunction
+
+  wire [15:0] smi_pre_i = sat12(s_axis_smi_tdata[15:0]);
+  wire [15:0] smi_pre_q = sat12(s_axis_smi_tdata[31:16]);
+
+  // ---- pulse blanker on the filter output (v4.6): enable and threshold come from the
+  // committed AJ_CFG[15] / AJ_BLK_THR (s_axi_aclk) and are brought into clk here; the
+  // threshold is copied only when the commit toggle has crossed (the value has been stable
+  // for far longer than the synchroniser needs).
+  (* ASYNC_REG = "TRUE" *) reg       blk_en_ctrl_meta = 1'b0, blk_en_ctrl_sync = 1'b0;   // *ctrl_meta_reg*: false path in the CDC xdc
+  (* ASYNC_REG = "TRUE" *) reg       thr_tog_meta = 1'b0, thr_tog_s = 1'b0;               // *tog_meta_reg*: false path
+  reg                                thr_tog_p   = 1'b0;
+  reg [31:0]                         blk_thr_c   = 32'hFFFFFFFF;
+  always @(posedge clk) begin
+    blk_en_ctrl_meta <= aj_cfg_act[15];
+    blk_en_ctrl_sync <= blk_en_ctrl_meta;
+    thr_tog_meta <= aj_thr_tog;
+    thr_tog_s <= thr_tog_meta;
+    thr_tog_p <= thr_tog_s;
+    if (thr_tog_s != thr_tog_p) blk_thr_c <= aj_thr_act;
+  end
+  wire        blk_out_valid;
+  wire [15:0] blk_out_i, blk_out_q;
+  wire [31:0] blk_cnt_w, blk_bursts_w;
+  gnss_pulse_blank u_blank (
+    .clk(clk), .rst_n(smi_rst_n_r), .clr(cnt_clear),
+    .in_valid(s_axis_smi_tvalid), .in_i(smi_pre_i), .in_q(smi_pre_q),
+    .en(blk_en_ctrl_sync), .thr(blk_thr_c),
+    .out_valid(blk_out_valid), .out_i(blk_out_i), .out_q(blk_out_q),
+    .blk_cnt(blk_cnt_w), .burst_cnt(blk_bursts_w));
+  assign smi_out_valid = blk_out_valid;
+  wire [15:0] smi_i = blk_out_i;
+  wire [15:0] smi_q = blk_out_q;
+
+  // largest |I|,|Q| of both RX channels per window (for the RX gain loop)
+  wire [15:0] peak_w, peak_idx_w;
+  gnss_peak_hold u_peak (
+    .clk(clk), .rst_n(~rst), .valid(adc_valid_i0 & adc_valid_i1),
+    .a0(adc_data_i0), .b0(adc_data_q0), .a1(adc_data_i1), .b1(adc_data_q1),
+    .peak_win(peak_w), .win_idx(peak_idx_w));
+
+  wire [15:0] proc_i0 = smi_en ? smi_i : adc_data_i0;
+  wire [15:0] proc_q0 = smi_en ? smi_q : adc_data_q0;
+  wire [15:0] proc_i1 = adc_data_i1;
+  wire [15:0] proc_q1 = adc_data_q1;
+  // ======================= END PROCESSING CORE ==============================
+
+  reg  [31:0] rd_data0 = 32'd0;
+  reg  [31:0] rd_data1 = 32'd0;
+
+  always @(posedge clk) begin
+    if (rst) begin
+      wptr0 <= 0; rptr0 <= 0;
+      wptr1 <= 0; rptr1 <= 0; level1 <= 0;
+    end else begin
+      if (smi_switch) begin
+        rptr0 <= wptr0;                 // flush ch0; re-primed above
+      end else begin
+        if (wr_en0 && !full0) begin
+          fifo0[wptr0[AW-1:0]] <= {proc_q0, proc_i0};
+          wptr0 <= wptr0 + 1'b1;
+        end
+        if (rd_en0 && !empty0) begin
+          rd_data0 <= fifo0[rptr0[AW-1:0]];
+          rptr0 <= rptr0 + 1'b1;
+        end
+      end
+      if (wr_en1 && !full1) begin
+        fifo1[wptr1[AW-1:0]] <= {proc_q1, proc_i1};
+        wptr1 <= wptr1 + 1'b1;
+      end
+      if (rd_en1 && !empty1) begin
+        rd_data1 <= fifo1[rptr1[AW-1:0]];
+        rptr1 <= rptr1 + 1'b1;
+      end
+      case ({(wr_en1 && !full1), (rd_en1 && !empty1)})
+        2'b10:   level1 <= level1 + 1'b1;
+        2'b01:   level1 <= level1 - 1'b1;
+        default: ;
+      endcase
+    end
+  end
+
+  // ==========================================================================
+  //  Output mux  (requirement 51: processed I/Q feeds the normal TX path)
+  //    pass_en = 0 -> vendor DMA / DDS data, i.e. the untouched E310 baseline
+  //    pass_en = 1 -> samples that came from RX through this block
+  // ==========================================================================
+  wire [15:0] pt_i0 = swap_iq ? rd_data0[31:16] : rd_data0[15:0];
+  wire [15:0] pt_q0 = swap_iq ? rd_data0[15:0]  : rd_data0[31:16];
+  wire [31:0] src1  = ch1_copy ? rd_data0 : rd_data1;
+  wire [15:0] pt_i1 = swap_iq ? src1[31:16] : src1[15:0];
+  wire [15:0] pt_q1 = swap_iq ? src1[15:0]  : src1[31:16];
+
+  // ==========================================================================
+  //  OUTPUT SAMPLE ALIGNMENT
+  //
+  //  axi_ad9361 is ASYMMETRIC about where the 12 significant bits sit inside a
+  //  16-bit word, and an identity passthrough has to convert between the two:
+  //
+  //    RX  axi_ad9361_rx_channel.v:144 instantiates
+  //          ad_datafmt #(.DATA_WIDTH(12))            -> BITS_PER_SAMPLE 16
+  //        whose output is RIGHT-aligned: ad_datafmt.v:100-101 place the
+  //        sample in [11:0] and :96 fills [15:12] with sign extension.
+  //
+  //    TX  axi_ad9361_tx_channel.v:301 consumes
+  //          dma_data[15:4]
+  //        i.e. the 12 bits LEFT-aligned, discarding [3:0].
+  //
+  //  Copying RX straight into TX therefore hands the DAC sample>>4: 24 dB down
+  //  with the four least significant bits thrown away. At the RX noise-floor
+  //  magnitudes measured on this board (|sample| ~ 20 LSB) that leaves one or
+  //  two bits of signal. Shifting left by 4 restores unity gain through the
+  //  block.
+  //
+  //  The shift applies to the PASSTHROUGH branch only. The vendor DMA branch
+  //  (dma_dac_data_*, from util_rfifo) is already in the left-aligned TX
+  //  format, so pass_en = 0 must still deliver exact vendor behaviour.
+  //
+  //  Only the low 12 bits are taken, so this is correct whatever the ADC
+  //  data-format control does with [15:12] (sign-extend or zero-fill).
+  //
+  //  FOR THE FUTURE CRPA: the processing core works in RX format. If it ever
+  //  produces a value outside the 12-bit signed range -- a weighted sum of two
+  //  elements easily can -- it must SATURATE before reaching this point.
+  //  Truncating to [11:0] here would wrap, turning a large sample into an
+  //  opposite-signed small one. That is a silent, hard-to-see failure.
+  // ==========================================================================
+  wire [15:0] al_i0 = {pt_i0[11:0], 4'b0000};
+  wire [15:0] al_q0 = {pt_q0[11:0], 4'b0000};
+  wire [15:0] al_i1 = {pt_i1[11:0], 4'b0000};
+  wire [15:0] al_q1 = {pt_q1[11:0], 4'b0000};
+
+  assign dac_data_i0 = mute ? 16'd0 : (pass_en ? al_i0 : dma_dac_data_i0);
+  assign dac_data_q0 = mute ? 16'd0 : (pass_en ? al_q0 : dma_dac_data_q0);
+  assign dac_data_i1 = mute ? 16'd0 : (pass_en ? al_i1 : dma_dac_data_i1);
+  assign dac_data_q1 = mute ? 16'd0 : (pass_en ? al_q1 : dma_dac_data_q1);
+
+  // ==========================================================================
+  //  Counters and sticky flags  (requirement 59: prove data is flowing)
+  // ==========================================================================
+  reg [31:0] rx_cnt0 = 32'd0, tx_cnt0 = 32'd0;
+  reg [31:0] rx_cnt1 = 32'd0, tx_cnt1 = 32'd0;
+  reg [31:0] ovf_cnt = 32'd0, unf_cnt = 32'd0;
+  reg [31:0] rx_snap0 = 32'd0, tx_snap0 = 32'd0, rx_snap1 = 32'd0;
+  reg        ovf_sticky = 1'b0, unf_sticky = 1'b0;
+  reg        smi_drop_sticky = 1'b0;
+
+  always @(posedge clk) begin
+    if (rst || cnt_clear) begin
+      rx_cnt0 <= 32'd0; tx_cnt0 <= 32'd0;
+      rx_cnt1 <= 32'd0; tx_cnt1 <= 32'd0;
+      ovf_cnt <= 32'd0; unf_cnt <= 32'd0;
+      ovf_sticky <= 1'b0; unf_sticky <= 1'b0;
+      smi_drop_sticky <= 1'b0;
+      rx_snap0 <= 32'd0; tx_snap0 <= 32'd0; rx_snap1 <= 32'd0;
+    end else begin
+      if (adc_valid_i0) begin
+        rx_cnt0  <= rx_cnt0 + 1'b1;
+        rx_snap0 <= {adc_data_q0, adc_data_i0};
+      end
+      if (adc_valid_i1) begin
+        rx_cnt1  <= rx_cnt1 + 1'b1;
+        rx_snap1 <= {adc_data_q1, adc_data_i1};
+      end
+      if (dac_valid_i0) begin
+        tx_cnt0  <= tx_cnt0 + 1'b1;
+        tx_snap0 <= {dac_data_q0, dac_data_i0};
+      end
+      if (dac_valid_i1)
+        tx_cnt1 <= tx_cnt1 + 1'b1;
+
+      if (wr_en0 && full0) begin
+        ovf_cnt    <= ovf_cnt + 1'b1;
+        ovf_sticky <= 1'b1;
+      end
+      if (rd_en0 && empty0) begin
+        unf_cnt    <= unf_cnt + 1'b1;
+        unf_sticky <= 1'b1;
+      end
+      if (smi_drop)
+        smi_drop_sticky <= 1'b1;
+    end
+  end
+
+  wire [31:0] status_w;
+  assign status_w = { 12'd0,           1'b0, smi_en, 1'b0, pass_en,
+                      5'd0, smi_drop_sticky, unf_sticky, ovf_sticky,
+                      full1, empty1, full0, empty0,
+                      dac_enable_q0, dac_enable_i0,
+                      adc_enable_q0, adc_enable_i0 };
+
+  // Occupancy is (AW+1) bits wide; zero-extend each to 6 bits for the register.
+  // FIFO_ADDR_WIDTH must be <= 5 for the field to hold the full range.
+  wire [5:0] level0_6 = level0;
+  wire [5:0] level1_6 = level1;
+  wire [31:0] level_w = { 18'd0, level1_6, 2'd0, level0_6 };
+
+  // ==========================================================================
+  //  CDC: status  clk -> s_axi_aclk
+  //  Every 256 clk cycles the whole status set is latched into cap_* and a
+  //  toggle is flipped.  cap_* is then stable for the following 256 cycles,
+  //  which is far longer than the two-flop synchroniser latency, so the AXI
+  //  side always copies a coherent snapshot.
+  // ==========================================================================
+  reg  [7:0]  cap_div    = 8'd0;
+  reg         cap_toggle = 1'b0;
+  reg  [31:0] cap_status, cap_rx0, cap_tx0, cap_ovf, cap_unf;
+  reg  [31:0] cap_rxs0, cap_txs0, cap_lvl, cap_rx1, cap_tx1, cap_rxs1;
+  reg  [31:0] cap_blk, cap_bursts, cap_peak;
+
+  always @(posedge clk) begin
+    cap_div <= cap_div + 1'b1;
+    if (cap_div == 8'd0) begin
+      cap_status <= status_w;
+      cap_rx0    <= rx_cnt0;
+      cap_tx0    <= tx_cnt0;
+      cap_ovf    <= ovf_cnt;
+      cap_unf    <= unf_cnt;
+      cap_rxs0   <= rx_snap0;
+      cap_txs0   <= tx_snap0;
+      cap_lvl    <= level_w;
+      cap_rx1    <= rx_cnt1;
+      cap_tx1    <= tx_cnt1;
+      cap_rxs1   <= rx_snap1;
+      cap_blk    <= blk_cnt_w;
+      cap_bursts <= blk_bursts_w;
+      cap_peak   <= {peak_idx_w, peak_w};
+      cap_toggle <= ~cap_toggle;
+    end
+  end
+
+  (* ASYNC_REG = "TRUE" *) reg tog_meta = 1'b0;
+  (* ASYNC_REG = "TRUE" *) reg tog_sync = 1'b0;
+  reg                         tog_prev = 1'b0;
+
+  reg [31:0] h_status = 32'd0, h_rx0 = 32'd0, h_tx0 = 32'd0;
+  reg [31:0] h_ovf = 32'd0, h_unf = 32'd0, h_rxs0 = 32'd0, h_txs0 = 32'd0;
+  reg [31:0] h_lvl = 32'd0, h_rx1 = 32'd0, h_tx1 = 32'd0, h_rxs1 = 32'd0;
+  reg [31:0] h_blk = 32'd0, h_bursts = 32'd0, h_peak = 32'd0;
+
+  always @(posedge s_axi_aclk) begin
+    tog_meta <= cap_toggle;
+    tog_sync <= tog_meta;
+    tog_prev <= tog_sync;
+    if (tog_sync != tog_prev) begin
+      h_status <= cap_status;
+      h_rx0    <= cap_rx0;
+      h_tx0    <= cap_tx0;
+      h_ovf    <= cap_ovf;
+      h_unf    <= cap_unf;
+      h_rxs0   <= cap_rxs0;
+      h_txs0   <= cap_txs0;
+      h_lvl    <= cap_lvl;
+      h_rx1    <= cap_rx1;
+      h_tx1    <= cap_tx1;
+      h_rxs1   <= cap_rxs1;
+      h_blk    <= cap_blk;
+      h_bursts <= cap_bursts;
+      h_peak   <= cap_peak;
+    end
+  end
+
+  assign v_status   = h_status;
+  assign v_rx_cnt0  = h_rx0;
+  assign v_tx_cnt0  = h_tx0;
+  assign v_ovf_cnt  = h_ovf;
+  assign v_unf_cnt  = h_unf;
+  assign v_rx_snap0 = h_rxs0;
+  assign v_tx_snap0 = h_txs0;
+  assign v_level    = h_lvl;
+  assign v_rx_cnt1  = h_rx1;
+  assign v_tx_cnt1  = h_tx1;
+  assign v_rx_snap1 = h_rxs1;
+  assign v_blk_cnt    = h_blk;
+  assign v_blk_bursts = h_bursts;
+  assign v_peak       = h_peak;
+
+endmodule
