@@ -149,3 +149,28 @@ time=2026-11-5 14:30:0   (or: not_set, uptime only)
 * Commands: `gnss_log=N`, `gnss_log?` (state, last file), `gnss_log_now=1` (one snapshot now), `gnss_time=Y M D h m s`.
 
 **Checked:** the C files pass `gcc -fsyntax-only` with stubs, with and without `GNSS_LOG_SD`; the date arithmetic was tested on the PC (leap year, rollover). **Not checked:** the xilffs library addition in `build_software.tcl` (Vitis 2023.2 XSCT; if it fails the script prints `SW_NOTE: xilffs could NOT be added` and the compile stops at `ff.h`: build without the define), the SD mount and file writes on the board. A snapshot takes a few milliseconds to a few tens of ms, during which the anti-jam loop waits (once a minute).
+
+## 4.9.7: a new folder every hour, and a PC logger for what GNSS Viewer shows
+
+**On the SD card (firmware, `--defines GNSS_LOG_SD`):** a new folder every hour: `0:/LOG/<YYYYMMDD>/H<hh>/<HHMMSS>.TXT`; without a clock `0:/LOG/UPTIME/H<hours of uptime>/T<seconds>.TXT`.
+
+**GNSS Viewer data cannot come from the E310.** The Venus 8 receiver is connected to the PC (COM11), not to the board. `Tools/gnss_logger.py` runs on the PC and records both streams with the PC clock, in a new folder every hour:
+
+```
+<out>\<YYYYMMDD>\H<hh>\e310_console.txt   every E310 console line (what PuTTY shows), "[hh:mm:ss.mmm] text"
+<out>\<YYYYMMDD>\H<hh>\gnss_nmea.txt      every NMEA line of the receiver (what GNSS Viewer is built from)
+<out>\<YYYYMMDD>\H<hh>\gnss_summary.csv   one row per second: status, fix quality and mode, satellites used, HDOP/PDOP/VDOP,
+                                          lat/lon/alt, speed, satellites per system (GPS, GLONASS, Galileo, BeiDou, QZSS),
+                                          tracked count, mean and max C/N0, time to first fix, and every satellite as sys_prn:cn0:elev:az
+<out>\<YYYYMMDD>\H<hh>\session.txt        ports and start time
+```
+
+It also sets the E310 clock at start (`gnss_time=` from the PC clock), so the firmware's own snapshots and the PC files share one time base. What you type in its window goes to the E310 (it replaces the PuTTY window).
+
+```
+pip install pyserial
+python gnss_logger.py --e310 COM20 --gnss COM11 --out C:\gnss_logs          (close GNSS Viewer and PuTTY first)
+```
+A serial port can be opened by only one program. If GNSS Viewer must stay open, use its menu DataLog to save its own file and start the logger with `--gnss none`.
+Not logged: the receiver's binary messages (TTFF as the Viewer shows it, scatter view); the NMEA carries the fix, the satellites with C/N0, elevation and azimuth, DOP and position. `first_fix_s` is counted from the start of the logger.
+Tested here with two pseudo serial ports, NMEA taken from your GNSS Viewer screenshots, a bad-checksum line (kept in the raw file, ignored in the CSV), and an hour/day change. Not tested with the real Venus 8 and a Windows COM port.

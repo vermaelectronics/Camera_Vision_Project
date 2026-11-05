@@ -19,7 +19,7 @@ static unsigned loglen, log_overflow;
 static unsigned period_s = LOG_DEFAULT_S;
 static XTime    t_start, t_next;
 static unsigned saved, failed;
-static char     last_name[40];
+static char     last_name[40];  /* the tail of the path is kept */
 static int      sd_ok;
 
 /* wall clock: seconds since 2000-01-01 at the moment gnss_time= was typed, and the uptime then */
@@ -88,47 +88,53 @@ static void tee(char c)
 static void two(char *p, int v) { p[0] = (char)('0' + (v / 10) % 10); p[1] = (char)('0' + v % 10); }
 
 #ifdef GNSS_LOG_SD
-/* "0:/LOG/20261105/143000.TXT" or "0:/LOG/UPTIME/T000123.TXT" */
-static void make_path(char *dir, char *path)
+/* A NEW FOLDER EVERY HOUR (4.9.7), 8.3 names:
+ *   with a clock : 0:/LOG/20261105/H14/143000.TXT
+ *   no clock     : 0:/LOG/UPTIME/H0003/T012345.TXT   (H = whole hours of uptime, T = uptime seconds)
+ * d1 = 0:/LOG/<day>, d2 = d1/H<hour>, path = d2/<file>. */
+static void put_str(char *dst, int *i, const char *src) { while(*src) dst[(*i)++] = *src++; dst[*i] = 0; }
+
+static void make_path(char *d0, char *d1, char *d2, char *path)
 {
-	int y, mo, d, h, mi, s, i = 0;
-	const char *a = "0:/LOG/";
-	while(*a) { dir[i] = *a; i++; a++; }
-	dir[i] = 0;
+	int y, mo, d, h, mi, s, i, k;
+	d0[0] = 0; i = 0; put_str(d0, &i, "0:/LOG");
+	i = 0; put_str(d1, &i, "0:/LOG/");
 	if(clk_set) {
 		wall(&y, &mo, &d, &h, &mi, &s);
-		two(&dir[i], y / 100); two(&dir[i + 2], y % 100); two(&dir[i + 4], mo); two(&dir[i + 6], d);
-		dir[i + 8] = 0;
-		for(i = 0; dir[i]; i++) path[i] = dir[i];
-		path[i++] = '/';
-		two(&path[i], h); two(&path[i + 2], mi); two(&path[i + 4], s);
-		path[i + 6] = '.'; path[i + 7] = 'T'; path[i + 8] = 'X'; path[i + 9] = 'T'; path[i + 10] = 0;
+		two(&d1[i], y / 100); two(&d1[i + 2], y % 100); two(&d1[i + 4], mo); two(&d1[i + 6], d); i += 8; d1[i] = 0;
+		for(k = 0; d1[k]; k++) d2[k] = d1[k];
+		d2[k++] = '/'; d2[k++] = 'H'; two(&d2[k], h); k += 2; d2[k] = 0;
+		for(k = 0; d2[k]; k++) path[k] = d2[k];
+		path[k++] = '/'; two(&path[k], h); two(&path[k + 2], mi); two(&path[k + 4], s); k += 6;
+		path[k++] = '.'; path[k++] = 'T'; path[k++] = 'X'; path[k++] = 'T'; path[k] = 0;
 	} else {
-		uint32_t u = uptime_s();
-		const char *b = "UPTIME";
-		int k;
-		for(k = 0; b[k]; k++) dir[i + k] = b[k];
-		dir[i + k] = 0;
-		for(i = 0; dir[i]; i++) path[i] = dir[i];
-		path[i++] = '/'; path[i++] = 'T';
-		path[i + 5] = (char)('0' + u % 10); u /= 10; path[i + 4] = (char)('0' + u % 10); u /= 10;
-		path[i + 3] = (char)('0' + u % 10); u /= 10; path[i + 2] = (char)('0' + u % 10); u /= 10;
-		path[i + 1] = (char)('0' + u % 10); u /= 10; path[i + 0] = (char)('0' + u % 10);
-		path[i + 6] = '.'; path[i + 7] = 'T'; path[i + 8] = 'X'; path[i + 9] = 'T'; path[i + 10] = 0;
+		uint32_t u = uptime_s(), hh = u / 3600U;
+		put_str(d1, &i, "UPTIME");
+		for(k = 0; d1[k]; k++) d2[k] = d1[k];
+		d2[k++] = '/'; d2[k++] = 'H';
+		d2[k + 3] = (char)('0' + hh % 10); hh /= 10; d2[k + 2] = (char)('0' + hh % 10); hh /= 10;
+		d2[k + 1] = (char)('0' + hh % 10); hh /= 10; d2[k + 0] = (char)('0' + hh % 10); k += 4; d2[k] = 0;
+		for(k = 0; d2[k]; k++) path[k] = d2[k];
+		path[k++] = '/'; path[k++] = 'T';
+		path[k + 5] = (char)('0' + u % 10); u /= 10; path[k + 4] = (char)('0' + u % 10); u /= 10;
+		path[k + 3] = (char)('0' + u % 10); u /= 10; path[k + 2] = (char)('0' + u % 10); u /= 10;
+		path[k + 1] = (char)('0' + u % 10); u /= 10; path[k + 0] = (char)('0' + u % 10); k += 6;
+		path[k++] = '.'; path[k++] = 'T'; path[k++] = 'X'; path[k++] = 'T'; path[k] = 0;
 	}
 }
 
 static FATFS fs;
 static int write_sd(void)
 {
-	char dir[40], path[48];
+	char d0[16], d1[40], d2[48], path[64];
 	FIL f;
 	UINT bw = 0;
 	int i;
 	if(!sd_ok) return -1;
-	make_path(dir, path);
-	(void)f_mkdir("0:/LOG");
-	(void)f_mkdir(dir);
+	make_path(d0, d1, d2, path);
+	(void)f_mkdir(d0);
+	(void)f_mkdir(d1);
+	(void)f_mkdir(d2);
 	if(f_open(&f, path, FA_CREATE_ALWAYS | FA_WRITE) != FR_OK) return -2;
 	if(f_write(&f, logbuf, loglen, &bw) != FR_OK || bw != loglen) { (void)f_close(&f); return -3; }
 	(void)f_close(&f);
@@ -229,7 +235,7 @@ void gnss_log_print_state(void)
 	console_print("GNSS_LOG: period %d s%s, %d snapshot(s) done, %d write failure(s)\n", (long)period_s,
 		      (char*)(period_s ? "" : " (off)"), (long)saved, (long)failed);
 #ifdef GNSS_LOG_SD
-	console_print("  target  : %s%s\n", (char*)(sd_ok ? "SD card, 0:/LOG/<YYYYMMDD>/<HHMMSS>.TXT" : "console (no SD card mounted)"),
+	console_print("  target  : %s%s\n", (char*)(sd_ok ? "SD card, 0:/LOG/<YYYYMMDD>/H<hh>/<HHMMSS>.TXT (a new folder every hour)" : "console (no SD card mounted)"),
 		      (char*)(last_name[0] ? "" : ""));
 	if(last_name[0]) console_print("  last    : %s\n", last_name);
 #else
