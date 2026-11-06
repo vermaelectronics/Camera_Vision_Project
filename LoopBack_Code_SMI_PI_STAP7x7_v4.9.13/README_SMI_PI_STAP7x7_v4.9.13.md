@@ -165,7 +165,7 @@ TX1. On top of that, `ad9361_init` starts both TX outputs at 10 dB.
 **Both are the same power inversion.** They minimise the output power with the RX1 reference
 tap fixed at 1, and both converge to the same Wiener solution `w = R^-1 s / (s^H R^-1 s)`.
 The difference is only *how* `w` is found:
-* **SMI** solves it directly (Cholesky on the ARM) from a 4096-sample capture.
+* **SMI** solves it directly (Cholesky on the ARM) from an 8192-sample capture (`AJ_NSAMP`, since 4.9.4).
 * **NLMS** walks towards it one sample at a time inside the FPGA.
 
 With STAP (14 taps + 2 image taps against a wideband jammer) the covariance has a very large
@@ -178,7 +178,7 @@ the output noise.
 
 | J/N | Method | after 1 ms | after 12 ms |
 |---|---|---:|---:|
-| 43 dB | **SMI-PI** (4096-sample blocks) | **-10.5 dB** | **-10.4 dB** |
+| 43 dB | **SMI-PI** (my model: 4096-sample blocks) | **-10.5 dB** | **-10.4 dB** |
 | 43 dB | NLMS-PI, mu = 0.05 | -0.4 dB | -5.6 dB (still converging) |
 | 43 dB | NLMS-PI, mu = 0.01 | +7.3 dB | -1.2 dB |
 | 61 dB | **SMI-PI** | **-16.4 dB** | **-16.2 dB** |
