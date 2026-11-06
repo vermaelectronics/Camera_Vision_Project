@@ -17,9 +17,9 @@
 
 // Taps per channel (delays 0..31, 4.9: was 16) and the RX1 reference delay. Must match
 // AJ_NT / AJ_REF in Source/Firmware/app_gnss_e310/gnss_aj_math.h.
-#define SMI_NT    6    /* 4.9.11: 6 taps per antenna (6 + 6 = 12 taps); was 7 (4.9.10), 16 (4.9.9), 32 (4.9.7) */
+#define SMI_NT    5    /* 4.9.12: 5 taps per antenna (5 + 5 = 10 taps); was 6 (4.9.11), 7 (4.9.10), 16, 32 */
 #ifndef SMI_REF
-#define SMI_REF    4
+#define SMI_REF    2    /* 4.9.12: reference tap at delay 2 (was 4): reach NT-1-REF = 2 samples, 2 pre-cursor taps */
 #endif
 // RX1 taps (the highest delays) whose multipliers are built from LUTs, not DSP48 (4.9.1: the 32-tap build needed 229 DSP48 of 220).
 // 12 taps = 36 multipliers = about 36 DSP48 saved, about 8000 LUT spent. 0 = all DSP48.

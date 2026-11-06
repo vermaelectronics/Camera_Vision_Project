@@ -1,3 +1,27 @@
+# SMI-PI 4.9.12: STAP 5+5 taps (10 total), reference tap moved to delay 2
+
+## Design
+* 5 taps per antenna (RX1 delays 0..4, RX2 delays 0..4) plus 2 image taps = 12 weight words (10 adaptive + reference handling).
+* **Reference tap at delay 2** (was 4). With few taps the reference position decides how the taps are spent: delay REF has REF taps before it (they let the filter see earlier samples) and NT-1-REF taps after it (the reach for reflections). Measured in the C simulation, REF=2 gives the best result for barrage jammers with 5 taps; REF=4 wastes taps and is much worse (51 dB barrage: suppression 40.5 dB, satellite loss 17 dB at REF=4, 51.2 dB and 2.6 dB at REF=2).
+* The bypass path follows the reference automatically (the output is x1[n-REF]): no other HDL change. AJ_INFO byte 2 = 2, so firmware and bitstream must both be 4.9.12 (the firmware refuses to start the filter otherwise).
+* To trade barrage performance for reflection reach, set `SMI_REF` in `smi_pi.h` and `AJ_REF` in `gnss_aj_math.h` to 3 and the AJ_INFO byte 2 in `gnss_passthrough.v` / `gnss_passthrough.h` to 03 (reflection scenario then 17.9 dB / 3 dB loss instead of 17.4 dB / 14 dB loss, barrage scenarios worse).
+
+## Simulation results (g++ C simulation, 20 scenarios pass; not verified in Vivado or on the board)
+| Scenario | 7+7 REF4 (4.9.10) | 6+6 REF4 (4.9.11) | 5+5 REF2 (4.9.12) |
+|---|---|---|---|
+| 30 dB wideband | 36.9 dB, res +0.5 | 33.3 dB, +1.0 | 35.5 dB, +0.65 |
+| 41 dB barrage | 46.5 dB, +0.6 | 42.2 dB, +1.5 | 43.8 dB, +1.0 |
+| 51 dB barrage | 53.0 dB, +0.9 | 47.6 dB, +2.8 | 50.3 dB, +1.6 |
+| 61 dB barrage | passes | 48.5 dB, +8.9, loss 7.5 | 51.2 dB, +6.8, loss 2.6 |
+| 30 dB + reflection | 20.7 dB, loss 4.4 | 19.1 dB | 17.4 dB, **loss 14 dB** |
+
+## Cost
+* A strong reflection (jammer echo 3 samples or more after the direct path) is cancelled poorly and can hurt the satellite SNR a lot (14 dB loss in the reflection scenario). Use 7+7 if multipath is strong.
+* Jammers above 55 dB still leave +6.8 dB residual.
+* Testbench limits for SMI_NT <= 5 are set to the measured values.
+
+---
+
 # SMI-PI 4.9.11: STAP 6+6 taps (12 total)
 
 6 taps per antenna (was 7 in 4.9.10). Hardware gain over 7+7 is small (about 6 DSP48, about 0.01 W). Everything else (clock group fix, adaptive/manual averaging, logging, bands) is as in 4.9.10.

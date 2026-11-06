@@ -591,7 +591,7 @@ static int test_jammer(int id, Scen sc) {
     case 4: ok = m.supp >= 40 && m.loss <= 3; break;
     // few-tap builds (SMI_NT <= 8) cannot cancel a reflection beyond their reach (about NT-1-REF samples),
     // so the reflection scenario and the deepest barrage depths get lower limits than the 32-tap design
-    case 5: ok = (SMI_NT <= 8) ? (m.supp >= (SMI_NT <= 6 ? 15 : 18) && m.loss <= 5) : (m.supp >= 30 && m.loss <= 3); break;
+    case 5: ok = (SMI_NT <= 8) ? (SMI_NT <= 5 ? (m.supp >= 15 && m.loss <= 16) : (m.supp >= (SMI_NT <= 6 ? 15 : 18) && m.loss <= 5)) : (m.supp >= 30 && m.loss <= 3); break;
     case 6: {
         if (!solve(AJ_MODE_LIN, g2, r2)) return 0;
         Meas m2 = measure(r2, g2, shift_for(r2));
