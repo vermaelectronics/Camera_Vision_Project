@@ -692,6 +692,10 @@ int main(void)
 	 * (10 dB). TX2 is not used: put it at the quietest setting at once, before
 	 * anything is routed to the DAC. It stays there (see GNSS_L1_TX2_ATTEN_MDB). */
 	ad9361_set_tx_attenuation(ad9361_phy, 1, GNSS_L1_TX2_ATTEN_MDB);
+	/* GNSS-CRPA 4.9.14: TX2 carries a copy of the CRPA output (never raw RX2)
+	 * and is muted. The bitstream already resets that way; this also covers a
+	 * soft restart that kept the PL registers. gnss_tx2=1 lets the copy out. */
+	gnss_pt_set_tx2(0);
 
 	ad9361_set_tx_fir_config(ad9361_phy, tx_fir_config);
 	ad9361_set_rx_fir_config(ad9361_phy, rx_fir_config);

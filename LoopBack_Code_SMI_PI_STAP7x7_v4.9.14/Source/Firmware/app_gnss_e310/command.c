@@ -86,6 +86,8 @@ command cmd_list[] = {
 	{"tx_att_db=", "TX1 attenuation in dB, 0 to 89.75 in 0.25 steps (smaller = louder).", "tx_att_db=70.5", set_tx_att_db},
 	{"tx2_attenuation?", "Gets current TX2 attenuation [mdB].", "", get_tx2_attenuation},
 	{"tx2_attenuation=", "Sets the TX2 attenuation [mdB].", "", set_tx2_attenuation},
+	{"gnss_tx2?", "TX2 state: muted (default) or carrying a copy of the CRPA output.", "", get_gnss_tx2},
+	{"gnss_tx2=", "0 = TX2 muted (default), 1 = TX2 carries a copy of the CRPA output (TX1 samples), at 89.75 dB.", "gnss_tx2=0", set_gnss_tx2},
 	{"tx_fir_en?", "Gets current TX FIR state.", "", get_tx_fir_en},
 	{"tx_fir_en=", "Sets the TX FIR state.", "", set_tx_fir_en},
 	{"rx_lo_freq?", "Gets current RX LO frequency [MHz].", "", get_rx_lo_freq},
@@ -321,6 +323,47 @@ void get_gnss_status(double* param, char param_no)
 	}
 	gnss_l1_print_status(ad9361_phy);
 	gnss_pt_print_state();
+}
+
+/**************************************************************************//***
+ * @brief GNSS-CRPA 4.9.14: TX2 state. TX2's source is the CRPA output (the
+ * samples TX1 carries), never raw RX2; it is muted unless gnss_tx2=1.
+*******************************************************************************/
+void get_gnss_tx2(double* param, char param_no)
+{
+	uint32_t ver = gnss_pt_read(GNSS_PT_REG_VERSION);
+	uint32_t c   = gnss_pt_read(GNSS_PT_REG_CONTROL);
+	uint32_t att = 0;
+
+	(void)param; (void)param_no;
+	ad9361_get_tx_attenuation(ad9361_phy, 1, &att);
+	if(ver < GNSS_PT_VERSION_TX2_MUTE) {
+		console_print("gnss_tx2=%d  (bitstream %d.%d cannot mute TX2: it carries %s, "
+			      "attenuation %d mdB)\n", 1L, (long)(ver >> 16), (long)(ver & 0xFFFFU),
+			      (char*)((c & GNSS_PT_CTRL_CH1_COPY_OLD) ? "a copy of the CRPA output" : "RAW RX2"),
+			      (long)att);
+		return;
+	}
+	console_print("gnss_tx2=%d  (TX2 %s; source %s; attenuation %d mdB)\n",
+		      (long)gnss_pt_tx2_on(),
+		      (char*)(gnss_pt_tx2_on() ? "LIVE" : "MUTED, digital zero"),
+		      (char*)((c & GNSS_PT_CTRL_CH1_RAW) ? "RAW RX2 (diagnostic)" : "CRPA output = TX1 samples"),
+		      (long)att);
+}
+
+/**************************************************************************//***
+ * @brief GNSS-CRPA 4.9.14: gnss_tx2=0 mutes TX2 (the default), gnss_tx2=1
+ * lets out a copy of the CRPA output. The attenuation is not touched: it
+ * stays at GNSS_L1_TX2_ATTEN_MDB (89.75 dB).
+*******************************************************************************/
+void set_gnss_tx2(double* param, char param_no)
+{
+	if(param_no < 1) {
+		console_print("gnss_tx2= needs 0 or 1\n");
+		return;
+	}
+	gnss_pt_set_tx2((int)param[0] != 0);
+	get_gnss_tx2(param, param_no);
 }
 
 /**************************************************************************//***

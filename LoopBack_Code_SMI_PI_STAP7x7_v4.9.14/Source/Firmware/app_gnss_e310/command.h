@@ -254,6 +254,9 @@ void get_gnss_status(double* param, char param_no);
  * gnss_aj_csv= a CSV line, gnss_aj_mode= the filter, gnss_band= the RF
  * profile. No loading or other tuning value to set. */
 void get_gnss_smi(double* param, char param_no);
+/* 4.9.14: TX2 = copy of the CRPA output, muted unless gnss_tx2=1. */
+void get_gnss_tx2(double* param, char param_no);
+void set_gnss_tx2(double* param, char param_no);
 void set_gnss_smi(double* param, char param_no);
 void set_gnss_smi_freeze(double* param, char param_no);
 void get_gnss_aj(double* param, char param_no);

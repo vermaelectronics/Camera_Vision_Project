@@ -47,8 +47,21 @@
 //                                         0 = vendor DMA/DDS drives the DAC
 //                                    [1]  mute       1 = drive 0x0000 to DAC
 //                                    [2]  swap_iq    1 = exchange I and Q
-//                                    [3]  ch1_copy   1 = ch1 DAC fed from ch0
-//                                    [4]  reserved (reads back what was written)
+//                                    [3]  ch1_raw    source of TX2 (ch1 DAC), 4.9.14:
+//                                                    0 = ch0 = the CRPA / SMI-PI
+//                                                        output, the same samples
+//                                                        TX1 carries (reset value)
+//                                                    1 = raw RX2 (the loopback
+//                                                        path of 4.9.13 and older;
+//                                                        diagnostics only)
+//                                         Up to 4.9.13 this bit was ch1_copy with
+//                                         the opposite sense (1 = ch1 fed from ch0).
+//                                    [4]  tx2_on     4.9.14: 0 = TX2 forced to
+//                                                        0x0000 (MUTED, reset value)
+//                                                    1 = TX2 carries the source
+//                                                        chosen by [3]
+//                                         [1] still mutes BOTH channels; TX2 is
+//                                         live only with [1] = 0 and [4] = 1.
 //                                    [5]  smi_en     1 = ch0 TX carries the
 //                                                        SMI-PI space-time filter
 //                                                        output (RX1 and RX2
@@ -283,8 +296,12 @@ module gnss_passthrough #(
   // v4.7 -- smi_pi_0 v2.4: the RX1 reference tap is at delay 4 (was 8), so a reflection of the jammer
   //         up to 11 samples later can be cancelled (was 7). AJ_INFO byte 2 = 4, layout 6; the firmware
   //         refuses to start the filter if that byte differs from its own AJ_REF.
-  localparam [31:0] CORE_VERSION = 32'h0004090D;   // 4.9.13 (7 taps per channel, low-DSP axi_ad9361)
-  localparam [31:0] AJ_INFO      = 32'h07040C07;   // 4.9.13: 7 taps per channel, reference delay 4   // 32 taps per channel, reference delay 4, layout 7 (4.9: 64 weight words at 0x400)
+  // v4.9.14 -- TX2 (ch1 DAC) is fed from ch0, i.e. the CRPA output, instead of
+  //         raw RX2 (CONTROL[3] is now ch1_raw, 0 = CRPA), and is MUTED unless
+  //         CONTROL[4] tx2_on = 1. Both reset values give a silent TX2 whose
+  //         source is the CRPA output. smi_pi_0 and AJ_INFO are unchanged.
+  localparam [31:0] CORE_VERSION = 32'h0004090E;   // 4.9.14 (7 taps per channel, low-DSP axi_ad9361, TX2 = CRPA copy, muted)
+  localparam [31:0] AJ_INFO      = 32'h07040C07;   // 4.9.13/4.9.14: 7 taps per channel, reference delay 4   // 32 taps per channel, reference delay 4, layout 7 (4.9: 64 weight words at 0x400)
   localparam [31:0] AJ_CFG_RESET = 32'h00000001;   // bypass
   localparam [31:0] AJ_NRM_RESET = 32'h00002000;   // g2 = 1.0
   localparam        AW           = FIFO_ADDR_WIDTH;
@@ -508,7 +525,8 @@ module gnss_passthrough #(
   wire pass_en   = ctrl_sync[0];
   wire mute      = ctrl_sync[1];
   wire swap_iq   = ctrl_sync[2];
-  wire ch1_copy  = ctrl_sync[3];
+  wire ch1_raw   = ctrl_sync[3];   // 4.9.14: 0 = TX2 from ch0 (CRPA output)
+  wire tx2_on    = ctrl_sync[4];   // 4.9.14: 0 = TX2 muted (reset value)
   wire smi_en    = ctrl_sync[5];
   wire cnt_clear = ctrl_sync[8];
 
@@ -574,7 +592,9 @@ module gnss_passthrough #(
   //
   //  smi_en = 0 : identity. proc_i/proc_q are the raw RX samples.
   //  smi_en = 1 : channel 0 carries the SMI-PI output (RX1 and RX2
-  //               combined). Channel 1 is left as raw RX2.
+  //               combined). Channel 1 (the ch1 elastic buffer) is left as
+  //               raw RX2; since 4.9.14 TX2 does NOT use it unless
+  //               CONTROL[3] ch1_raw = 1 -- see the output mux.
   //
   //  RESET. smi_rst_n holds the input FIFO in reset whenever pass_en or
   //  smi_en is 0. The filter keeps its weights; the firmware writes and
@@ -713,7 +733,11 @@ module gnss_passthrough #(
   // ==========================================================================
   wire [15:0] pt_i0 = swap_iq ? rd_data0[31:16] : rd_data0[15:0];
   wire [15:0] pt_q0 = swap_iq ? rd_data0[15:0]  : rd_data0[31:16];
-  wire [31:0] src1  = ch1_copy ? rd_data0 : rd_data1;
+  // 4.9.14: TX2 takes the ch0 word -- the CRPA output that TX1 carries, read
+  // from the ch0 buffer on the same DAC strobe -- unless ch1_raw selects the
+  // raw RX2 buffer. Up to 4.9.13 the default was raw RX2, which put an
+  // unprocessed copy of the jammer on TX2.
+  wire [31:0] src1  = ch1_raw ? rd_data1 : rd_data0;
   wire [15:0] pt_i1 = swap_iq ? src1[31:16] : src1[15:0];
   wire [15:0] pt_q1 = swap_iq ? src1[15:0]  : src1[31:16];
 
@@ -758,8 +782,11 @@ module gnss_passthrough #(
 
   assign dac_data_i0 = mute ? 16'd0 : (pass_en ? al_i0 : dma_dac_data_i0);
   assign dac_data_q0 = mute ? 16'd0 : (pass_en ? al_q0 : dma_dac_data_q0);
-  assign dac_data_i1 = mute ? 16'd0 : (pass_en ? al_i1 : dma_dac_data_i1);
-  assign dac_data_q1 = mute ? 16'd0 : (pass_en ? al_q1 : dma_dac_data_q1);
+  // 4.9.14: TX2 is silent unless the firmware sets CONTROL[4] tx2_on. The mute
+  // covers the vendor DMA branch too, so a DDR replay cannot reach TX2 either.
+  wire tx2_mute = mute | ~tx2_on;
+  assign dac_data_i1 = tx2_mute ? 16'd0 : (pass_en ? al_i1 : dma_dac_data_i1);
+  assign dac_data_q1 = tx2_mute ? 16'd0 : (pass_en ? al_q1 : dma_dac_data_q1);
 
   // ==========================================================================
   //  Counters and sticky flags  (requirement 59: prove data is flowing)

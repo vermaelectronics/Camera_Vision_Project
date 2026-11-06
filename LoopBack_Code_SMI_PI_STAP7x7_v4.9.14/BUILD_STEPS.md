@@ -1,4 +1,4 @@
-> **4.9.13 (7 + 7 taps, low-DSP, no TIMING-54):** read `README_SMI_PI_STAP7x7_v4.9.13.md` first. Rebuild from
+> **4.9.14 (7 + 7 taps, low-DSP, no TIMING-54, TX2 = CRPA copy, muted):** read `README_SMI_PI_STAP7x7_v4.9.14.md` first. Rebuild from
 > stage 1 (`build_all.sh --clean`) so the vendor working copy is patched and smi_pi 2.5 is built.
 
 # Build SMI-PI v4.1 step by step (zip → BOOT.BIN → SD card)

@@ -260,7 +260,11 @@ static void info_config(struct ad9361_rf_phy *phy)
     console_print("     [1] mute     : %d   %s\n", (long)((ctrl >> 1) & 1U),
                   (char *)(((ctrl >> 1) & 1U) ? "output forced to zero" : "output live"));
     console_print("     [2] swap_iq  : %d\n", (long)((ctrl >> 2) & 1U));
-    console_print("     [3] ch1_copy : %d\n", (long)((ctrl >> 3) & 1U));
+    console_print("     [3] ch1_raw  : %d   %s\n", (long)((ctrl >> 3) & 1U),
+                  (char *)(((ctrl >> 3) & 1U) ? "TX2 source = RAW RX2 (diagnostic)"
+                                              : "TX2 source = CRPA output (TX1 samples)"));
+    console_print("     [4] tx2_on   : %d   %s\n", (long)((ctrl >> 4) & 1U),
+                  (char *)(((ctrl >> 4) & 1U) ? "TX2 live" : "TX2 MUTED (default)"));
     console_print("     [5] smi_en   : %d   %s\n", (long)((ctrl >> 5) & 1U),
                   (char *)(((ctrl >> 5) & 1U) ? "TX1 = SMI-PI space-time filter (RX1, RX2)"
                                               : "TX1 = RX1 (anti-jam off)"));
@@ -548,7 +552,8 @@ static void info_registers(void)
     console_print("   0x04  VERSION         RO  0x00040001 = v4.1\n");
     console_print("   0x08  SCRATCH         RW  read/write test\n");
     console_print("   0x0C  CONTROL         RW  [0] pass_en  [1] mute\n");
-    console_print("                             [2] swap_iq  [3] ch1_copy\n");
+    console_print("                             [2] swap_iq  [3] ch1_raw (TX2 = raw RX2)\n");
+    console_print("                             [4] tx2_on (0 = TX2 muted, default)\n");
     console_print("                             [5] smi_en   [6] smi_freeze\n");
     console_print("                             [8] cnt_clear\n");
     console_print("   0x10  STATUS          RO  [0] adc_enable_i0  [1] adc_enable_q0\n");

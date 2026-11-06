@@ -105,6 +105,40 @@ void gnss_pt_set_smi(int enable)
     gnss_pt_write(GNSS_PT_REG_CONTROL, c);
 }
 
+void gnss_pt_set_tx2(int on)
+{
+    uint32_t ver = gnss_pt_read(GNSS_PT_REG_VERSION);
+    uint32_t c   = gnss_pt_read(GNSS_PT_REG_CONTROL);
+
+    if (ver >= GNSS_PT_VERSION_TX2_MUTE) {
+        c &= ~GNSS_PT_CTRL_CH1_RAW;               /* TX2 source = CRPA output */
+        if (on) { c |=  GNSS_PT_CTRL_TX2_ON; }
+        else    { c &= ~GNSS_PT_CTRL_TX2_ON; }
+        gnss_pt_write(GNSS_PT_REG_CONTROL, c);
+        printf("gnss_pt: TX2 %s\n", on
+               ? "ON - copy of the CRPA output (the TX1 samples), at the TX2 attenuation"
+               : "MUTED (digital zero; its source is the CRPA output, not raw RX2)");
+        return;
+    }
+    /* Older bitstream: bit 3 is ch1_copy (1 = TX2 fed from ch0) and bit 4 does
+     * nothing, so the best it can do is the CRPA copy at 89.75 dB. */
+    c |= GNSS_PT_CTRL_CH1_COPY_OLD;
+    c &= ~GNSS_PT_CTRL_TX2_ON;
+    gnss_pt_write(GNSS_PT_REG_CONTROL, c);
+    printf("gnss_pt: WARNING bitstream %lu.%lu cannot mute TX2 (needs 4.9.14).\n"
+           "         TX2 carries a copy of the CRPA output at the TX2 attenuation.\n",
+           (unsigned long)(ver >> 16), (unsigned long)(ver & 0xFFFFU));
+}
+
+int gnss_pt_tx2_on(void)
+{
+    uint32_t c = gnss_pt_read(GNSS_PT_REG_CONTROL);
+    if (gnss_pt_read(GNSS_PT_REG_VERSION) < GNSS_PT_VERSION_TX2_MUTE) {
+        return 1;                                 /* cannot be muted */
+    }
+    return ((c & GNSS_PT_CTRL_TX2_ON) && !(c & GNSS_PT_CTRL_MUTE)) ? 1 : 0;
+}
+
 void gnss_pt_write_aj(const int16_t *re, const int16_t *im,
                       uint32_t cfg, int32_t g2_q13, uint32_t blk_thr)
 {

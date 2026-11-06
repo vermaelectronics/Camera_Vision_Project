@@ -109,14 +109,21 @@
  *       weights the ARM computes and writes to AJ_W / AJ_COMMIT. No 0x48
  *       loading, no weight band.
  * 4.1 = adds AJ_CFG (bypass, output make-up shift), AJ_NORM (RX2 input
- *       normalisation) and the image taps AJ_WC (smi_pi_0 v2.1). */
-#define GNSS_PT_EXPECTED_VERSION    0x0004090DU
+ *       normalisation) and the image taps AJ_WC (smi_pi_0 v2.1).
+ * 4.9.14 = TX2 (ch1 DAC) carries a copy of the CRPA output instead of raw
+ *       RX2, and is MUTED unless CONTROL[4] tx2_on = 1. CONTROL[3] is now
+ *       ch1_raw (1 = raw RX2, diagnostics); up to 4.9.13 it was ch1_copy with
+ *       the opposite sense. */
+#define GNSS_PT_EXPECTED_VERSION    0x0004090EU
+#define GNSS_PT_VERSION_TX2_MUTE    0x0004090EU   /* first bitstream with CONTROL[4] tx2_on */
 
 /* ---- CONTROL bits -------------------------------------------------------- */
 #define GNSS_PT_CTRL_PASS_EN        (1U << 0)  /* 1 = RX->TX passthrough      */
 #define GNSS_PT_CTRL_MUTE           (1U << 1)  /* 1 = drive zeros to the DAC  */
 #define GNSS_PT_CTRL_SWAP_IQ        (1U << 2)
-#define GNSS_PT_CTRL_CH1_COPY       (1U << 3)  /* ch1 TX fed from ch0         */
+#define GNSS_PT_CTRL_CH1_RAW        (1U << 3)  /* 4.9.14: 1 = TX2 = raw RX2; 0 = TX2 = CRPA output (default) */
+#define GNSS_PT_CTRL_CH1_COPY_OLD   (1U << 3)  /* up to 4.9.13: 1 = TX2 fed from ch0 (same bit, opposite sense) */
+#define GNSS_PT_CTRL_TX2_ON         (1U << 4)  /* 4.9.14: 1 = TX2 live; 0 = TX2 forced to zero (default) */
 #define GNSS_PT_CTRL_SMI_EN         (1U << 5)  /* ch0 TX = SMI-PI(RX1, RX2)   */
 #define GNSS_PT_CTRL_CNT_CLEAR      (1U << 8)  /* held, not self-clearing     */
 
@@ -162,6 +169,14 @@ void     gnss_pt_clear_counters(void);
  * the filter output (RX1 and RX2 combined) instead of RX1 alone; passthrough
  * must also be on. The weights are whatever was last committed. */
 void     gnss_pt_set_smi(int enable);
+/* 4.9.14: TX2 (ch1 DAC). Its source is always the CRPA output -- the same
+ * samples TX1 carries -- never raw RX2. on = 0 mutes it (digital zero, the
+ * default at power-on and boot), on = 1 lets the copy out. The attenuation
+ * stays at GNSS_L1_TX2_ATTEN_MDB either way. On a bitstream older than
+ * 4.9.14 TX2 cannot be muted: the copy is selected and a warning printed.
+ * gnss_pt_tx2_on() reads back whether TX2 is live. */
+void     gnss_pt_set_tx2(int on);
+int      gnss_pt_tx2_on(void);
 /* Writes the 34 weight words (32 space-time + 2 image, Q3.12, see
  * gnss_aj_math.h), cfg (GNSS_PT_AJ_CFG_*) and the RX2 normalisation g2
  * (Q3.13 real part; imaginary 0), and commits them in one go: the filter

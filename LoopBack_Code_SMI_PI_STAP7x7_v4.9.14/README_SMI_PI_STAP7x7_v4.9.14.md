@@ -1,6 +1,10 @@
-# SMI-PI 4.9.13: 7 + 7 taps, fewer DSP48, no TIMING-54 critical warnings
+# SMI-PI 4.9.14: 7 + 7 taps, fewer DSP48, no TIMING-54 critical warnings, TX2 = CRPA copy (muted)
 
-Built from **4.9.12** (5 + 5 taps, level lock) with these changes:
+**4.9.14** is 4.9.13 plus one change: **TX2 now carries a copy of the CRPA output instead of raw RX2,
+and it is muted** (digital zero, still at 89.75 dB). The filter, the tap count, the DSP budget and the
+constraints are those of 4.9.13. See section 3c. The HDL changed, so **the bitstream must be rebuilt**.
+
+4.9.13 was built from **4.9.12** (5 + 5 taps, level lock) with these changes:
 
 | # | Change | Why |
 |---|---|---|
@@ -12,6 +16,7 @@ Built from **4.9.12** (5 + 5 taps, level lock) with these changes:
 | 6 | The mode text now shows the real tap count (`space-time 13 + 2 image taps`) | 4.9.12 printed "63 + 2" (the 32-tap layout) |
 | 6b | **TX2 fixed at 89750 mdB (89.75 dB, the quietest setting); the bands set TX1 only** | TX2 is not used, but it re-transmitted RX2's **raw, unfiltered** samples (jammer included, `CONTROL[3] ch1_copy = 0`) at the band's 10-30 dB attenuation; a leak back into the antennas that no filter can cancel. See section 3b |
 | 7 | HLS IP version **smi_pi 2.5**, `CORE_VERSION 0x0004090D` (prints 4.2317), `AJ_INFO 0x07040C07` | a stale 5 + 5 core or bitstream cannot be used by mistake |
+| 8 | **4.9.14: TX2 = copy of the CRPA output, muted by default** (`CONTROL[3]` = `ch1_raw`, `CONTROL[4]` = `tx2_on`), `CORE_VERSION 0x0004090E` (prints **4.2318**) | even at 89.75 dB, TX2 should not carry an unfiltered copy of the jammer. See section 3c |
 
 The SMI power-inversion algorithm itself (block SMI, Cholesky on the ARM, image taps,
 RX2 normalisation, level lock) is unchanged.
@@ -160,6 +165,66 @@ TX1. On top of that, `ad9361_init` starts both TX outputs at 10 dB.
 
 ---
 
+## 3c. 4.9.14: TX2 carries the CRPA output and is muted
+
+**Before (up to 4.9.13).** The original loopback fed TX2 from its own elastic buffer, filled with
+**raw RX2** (`src1 = ch1_copy ? rd_data0 : rd_data1`, and the firmware never set `ch1_copy`). The
+CRPA filter only ever processed the ch0 path to TX1.
+
+**Now (`Source/HDL/gnss_passthrough.v`).**
+
+```
+TX2 source = ch1_raw ? raw RX2 : ch0 word        (ch0 word = the CRPA output = what TX1 carries)
+TX2 data   = (mute | ~tx2_on) ? 0x0000 : (pass_en ? TX2 source : vendor DMA)
+```
+
+| CONTROL bit | Name | 0 (reset value) | 1 |
+|---|---|---|---|
+| [1] | `mute` | both channels live | **both** TX1 and TX2 = 0 (unchanged) |
+| [3] | `ch1_raw` (was `ch1_copy`) | TX2 source = **CRPA output** | TX2 source = raw RX2 (diagnostics only) |
+| [4] | `tx2_on` (was reserved) | **TX2 = 0x0000 (muted)** | TX2 carries its source |
+
+Both reset values are the safe ones, so TX2 is silent from power-on, before the firmware runs. The
+mute also covers the vendor DMA branch, so a DDR replay cannot reach TX2 either. When it is
+un-muted, TX2 is read from the ch0 buffer on the same DAC strobe as TX1, so it is sample-for-sample
+identical to TX1.
+
+**Firmware.**
+
+| Where | What it does |
+|---|---|
+| `main.c` | `gnss_pt_set_tx2(0)` right after TX2 is set to 89.75 dB: TX2 muted, source = CRPA (also covers a soft restart that kept the PL registers) |
+| `gnss_pt_set_tx2()` | clears `ch1_raw` and sets or clears `tx2_on`. On a bitstream older than 4.9.14 (no TX2 mute) it selects the CRPA copy instead (old `ch1_copy = 1`) and prints a warning |
+| `gnss_tx2?` | `gnss_tx2=0  (TX2 MUTED, digital zero; source CRPA output = TX1 samples; attenuation 89750 mdB)` |
+| `gnss_tx2=1` / `gnss_tx2=0` | lets the CRPA copy out on TX2 (still at 89.75 dB) / mutes it again |
+| `gnss_info` | decodes `CONTROL[3] ch1_raw` and `CONTROL[4] tx2_on` |
+
+The TX2 attenuation stays at **89750 mdB** whatever `gnss_tx2=` says (section 3b). The usual
+`CONTROL` value with anti-jam on is still **0x21**: `tx2_on = 0`, so TX2 is muted.
+
+**PL resources (extra, compared with 4.9.13).**
+
+| Resource | Extra | Why |
+|---|---|---|
+| DSP48 | **0** | no arithmetic |
+| Block RAM | **0** | the copy reuses the ch0 buffer word that TX1 already reads |
+| LUTRAM | **0** | the ch1 buffer is unchanged (16 RAM32M before and after) |
+| Flip-flops | **+2** | the `CONTROL[4]` two-flop synchroniser, which was trimmed while the bit was unused |
+| LUTs | **about 0** | one more input on the 32 TX2 output-mux bits. yosys `synth_xilinx` of `gnss_passthrough`: 2,098 → 2,029 LUTs, i.e. no measurable change (mapping noise) |
+
+That is < 0.01 % of the XC7Z020 (53,200 LUTs, 106,400 FFs) and has no measurable effect on the
+FPGA junction temperature. A muted TX2 stops the TX2 DAC data from toggling, which saves a little
+AD9361 power. The AD9361 TX2 analogue chain stays powered, because switching the AD9361 to 1T would
+change the `axi_ad9361` interface mode.
+
+**Why not remove the raw RX2 buffer as well?** It would save about 50 LUTs and 50 FFs (≈ 0.1 %),
+but its counters, FIFO level and STATUS bits (`gnss_status?`) would then read differently, and the
+register map would change. It is kept as the `ch1_raw = 1` diagnostic.
+
+**Check on the board:** `gnss_status?` shows version **4.2318**, and `gnss_tx2?` reads **gnss_tx2=0 (TX2 MUTED ...)**.
+
+---
+
 ## 4. Why SMI power inversion, and not "normal" (LMS/NLMS) PI
 
 **Both are the same power inversion.** They minimise the output power with the RX1 reference
@@ -223,6 +288,11 @@ build (4.9.9) handles those.
    ```bash
    ./Automation/Linux/build_all.sh --clean
    ```
+   If this same folder already completed a 4.9.13 build (its `Build/` is still there), 4.9.14
+   only needs the custom IP and everything after it:
+   ```bash
+   ./Automation/Linux/build_all.sh --from 4
+   ```
 3. Check the logs:
    - `vendor_patch.log`: `VENDOR_PATCH: PASS`, 1 statement moved out of `util_clkdiv` and 3 out of `axi_dmac`.
    - `smi.log`: `IP antsdr:gnss:smi_pi:2.5`, and the estimated clock ≤ 10 ns.
@@ -231,9 +301,10 @@ build (4.9.9) handles those.
 4. `SD_Image/BOOT.BIN` is **not** included: the 4.9.12 file was a 5 + 5 bitstream. Build it
    with stage 9.
 5. On the board:
-   - `gnss_status?` must show version **4.2317** and layout **0x07040c07**.
+   - `gnss_status?` must show version **4.2318** (4.9.14) and layout **0x07040c07**.
    - `gnss_report?` must show `mode: space-time 13 + 2 image taps`.
    - `tx2_attenuation?` must read **89750**.
+   - `gnss_tx2?` must read **gnss_tx2=0** (TX2 muted, source = CRPA output).
    The firmware refuses to start the filter on a bitstream with another tap count.
 
 **Firmware note:** the vendor demo commands `dds_*` no longer do anything, because the DDS is
@@ -249,6 +320,8 @@ not in the bitstream. TX uses only DAC data source 2 (DMA = gnss_passthrough) or
 | `patch_vendor_constraints.tcl` on the ADI `hdl_2023_r2` files: exact diff, idempotent, refuses a mismatching file | Vivado `report_methodology`, `report_utilization`, `report_power`, timing |
 | `package_library_ip.tcl` hook with tclsh; `build_all.sh` bash syntax | the BOOT.BIN and the board |
 | HDL compiles (iverilog, Verilog-2005); `gnss_aj.c` passes a syntax check | |
+| 4.9.14 TX2 routing: `Tests/rtl/run_tx2_rtl.sh` (iverilog, `gnss_passthrough.v` + a smi_pi stub), 10 CONTROL settings, `TX2_RTL: PASS`; the same test FAILS on the 4.9.13 HDL (TX2 = raw RX2) | Vivado utilisation of the TX2 change (yosys estimate only, see 3c) |
+| 4.9.14 firmware (`gnss_passthrough.c`, `command.c`, `gnss_info.c`, `main.c`): syntax check, no new errors (only BSP-generated symbols missing, as before) | |
 | `axi_ad9361` source (2023_r2): DMA (2) and zero (3) DAC sources bypass the DDS; the disabled blocks reset to pass-through | |
 
 If Vivado reports something other than the expectations in sections 1-3, send me
