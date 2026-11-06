@@ -85,4 +85,16 @@ set_multicycle_path -hold 1 -from [get_cells -quiet -hier -filter {NAME =~ *aj_t
 
 # 4.9.9 (Vivado TIMING-6/7/54): the sample clock (rx_clk, clk_div_sel_*) and the AXI/PS clock (clk_fpga_0)
 # are unrelated: asynchronous clock groups instead of scoped datapath-only max-delay between clocks.
+# 4.9.13: this is now the ONLY copy (the duplicate in the IP-scoped gnss_passthrough_constr.xdc was itself
+# one of the TIMING-54s). This file is project-level, i.e. unscoped, so it is not a TIMING-54.
 set_clock_groups -asynchronous -group [get_clocks -quiet clk_fpga_0] -group [get_clocks -quiet {rx_clk clk_div_sel_*}]
+
+# --- 5. ADI util_clkdiv, moved here from its IP-scoped XDC (4.9.13, TIMING-54) ---------------------
+# util_ad9361_divclk divides l_clk by 4 (BUFR clk_divide_sel_0 -> clock clk_div_sel_0_s) and by 2
+# (clk_divide_sel_1 -> clk_div_sel_1_s); both feed one BUFGMUX and only one of them is ever selected, so
+# the two clocks are logically exclusive. ADI writes exactly this in library/xilinx/util_clkdiv/
+# util_clkdiv_constr.xdc, but that file is scoped to the IP, and a clock group between clocks in a scoped
+# file is a TIMING-54. Vivado/Scripts/patch_vendor_constraints.tcl removes it from the vendor working copy
+# (Build/VendorWork, never Vendor/) and it is applied here instead, unscoped. Same constraint, same effect.
+# The two clock names are Vivado's auto-derived ones (check with report_clocks if ADI renames the nets).
+set_clock_groups -logically_exclusive -group [get_clocks -quiet clk_div_sel_0_s] -group [get_clocks -quiet clk_div_sel_1_s]

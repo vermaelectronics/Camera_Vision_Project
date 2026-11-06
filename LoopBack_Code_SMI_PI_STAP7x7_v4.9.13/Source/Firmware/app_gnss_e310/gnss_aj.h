@@ -35,7 +35,7 @@
 #define GNSS_AJ_BUF_ADDR   0x11000000U
 #endif
 
-#define GNSS_AJ_VERSION_STR  "4.9.12 + level lock (firmware-only update; bitstream stays 4.9.12)"
+#define GNSS_AJ_VERSION_STR  "4.9.13 (7 + 7 taps, low-DSP bitstream, level lock)"
 
 /* RF profiles (gnss_band=). RX and TX are always set together, so the
  * retransmitted signal comes out on the frequency it came in on and the

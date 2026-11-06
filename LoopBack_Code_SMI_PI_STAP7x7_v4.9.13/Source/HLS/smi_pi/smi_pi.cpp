@@ -1,5 +1,5 @@
 // ============================================================================
-//  smi_pi.cpp  --  space-time SMI power inversion core (SMI-PI v4.4)
+//  smi_pi.cpp  --  space-time SMI power inversion core (SMI-PI v4.4; 4.9.13: 7 + 7 taps)
 //  ANTSDR E310 V1 / GNSS CRPA project, Vitis HLS 2023.2
 //
 //  PIPELINE (one sample pair per clock)
@@ -11,10 +11,11 @@
 //       RX1 would otherwise need a weight of 10, beyond the Q3.12 range
 //       (|w| < 8), and the null would fail. x2n keeps 2 fractional bits so the
 //       scaling adds no rounding noise of its own.
-//    2. SPACE-TIME FILTER     32 taps on RX1 and 32 on the normalised RX2 (4.9; 16 before):
-//         y[n] = x1[n-8] - sum_{k != 8} a_k x1[n-k] - sum_k b_k x2n[n-k]
-//                        - c1 conj(x1[n-8]) - c2 conj(x2n[n-8])
-//       The RX1 tap at delay 8 is the reference, fixed at 1 (power
+//    2. SPACE-TIME FILTER     SMI_NT taps on RX1 and SMI_NT on the normalised RX2
+//       (4.9.13: 7 + 7, reference R = SMI_REF = 4; 32 + 32 in 4.9.7, 16 + 16 before):
+//         y[n] = x1[n-R] - sum_{k != R} a_k x1[n-k] - sum_k b_k x2n[n-k]
+//                        - c1 conj(x1[n-R]) - c2 conj(x2n[n-R])
+//       The RX1 tap at delay R is the reference, fixed at 1 (power
 //       inversion), so the output can never be turned down as a whole. The
 //       RX2 taps follow the frequency-dependent RX1/RX2 ratio across the band
 //       (cables, antenna spacing, the two analog filters); the RX1 taps also
@@ -28,9 +29,9 @@
 //       one conjugate tap per channel cancels it (+0.2 dB and +1.4 dB). The
 //       satellites have no image partner in the band, so the taps leave them
 //       alone.
-//    3. BYPASS                cfg[0] = 1: y[n] = x1[n-8], no weights at all.
+//    3. BYPASS                cfg[0] = 1: y[n] = x1[n-R], no weights at all.
 //       The firmware keeps the filter bypassed while there is no jammer and
-//       switches it in when one appears. Same 8-sample delay in both modes,
+//       switches it in when one appears. Same SMI_REF-sample delay in both modes,
 //       so switching never shifts the satellites' code phase.
 //    4. OUTPUT MAKE-UP GAIN   y <<= s, s = cfg[10:8] (0..7, 6 dB each)
 //       A strong jammer makes the RX gain loop cut the gain (26 dB for a
@@ -69,7 +70,8 @@
 //    x2n     : 18-bit signed, Q2 (g2 x2, |g2| < 4)
 //    weights : 16-bit signed Q3.12, complex multiply with 3 real multipliers
 //              (k1 = wr (xr + xi), k2 = xr (wi - wr), k3 = xi (wr + wi);
-//               re = k1 - k3, im = k1 + k2): 195 multipliers + 4 for g2 (4.9, 32 taps); SMI_NFAB = 12 RX1 taps (36 multipliers) are built from LUTs
+//               re = k1 - k3, im = k1 + k2): 4.9.13 (7 + 7): 45 multipliers + 2 for the real g2 = 47 DSP48;
+//               (4.9, 32 taps: 195 + 4 for g2, SMI_NFAB = 12 RX1 taps (36 multipliers) built from LUTs)
 //    sum     : 48 bits, Q14; the weighted taps are summed first, divided by
 //              2^ws (weight scale, v4.4), then subtracted from the reference;
 //              rounded to nearest after the make-up shift, saturated to 16 bits.
@@ -154,11 +156,15 @@ void smi_pi(hls::stream<ap_uint<64> > &s_axis_x,
     s12_t x2r = (s12_t)in(43, 32), x2i = (s12_t)in(59, 48);
 
     // ---- 1. input normalisation: x2n = g2 x2 (Q13 x Q0 -> Q2) ---------------
-    // |g2r x2r - g2i x2i| <= 2 * 32768 * 2048 = 2^28, so after the shift by
-    // 11 the result is within +-2^17: 18 bits always hold it, no saturation.
-    ap_int<16> g2r = (ap_int<16>)nrm(15, 0), g2i = (ap_int<16>)nrm(31, 16);
-    ap_int<32> nr = ap_int<32>(g2r * x2r) - ap_int<32>(g2i * x2i);
-    ap_int<32> ni = ap_int<32>(g2r * x2i) + ap_int<32>(g2i * x2r);
+    // 4.9.13: g2 is real. The firmware learns it from the two noise floors (a
+    // power ratio) and always wrote 0 into nrm[31:16], so the two g2i products
+    // of the complex form were always zero: two multipliers (2 DSP48) saved,
+    // x2n unchanged bit for bit.
+    // |g2r x2r| <= 32768 * 2048 = 2^26, so after the shift by 11 the result is
+    // within +-2^15: 18 bits always hold it, no saturation.
+    ap_int<16> g2r = (ap_int<16>)nrm(15, 0);
+    ap_int<32> nr = ap_int<32>(g2r * x2r);
+    ap_int<32> ni = ap_int<32>(g2r * x2i);
     const ap_int<32> nhalf = ap_int<32>(1) << (SMI_GFRAC - SMI_XFRAC - 1);
     s18_t x2nr = (s18_t)((nr + nhalf) >> (SMI_GFRAC - SMI_XFRAC));
     s18_t x2ni = (s18_t)((ni + nhalf) >> (SMI_GFRAC - SMI_XFRAC));
@@ -199,7 +205,7 @@ void smi_pi(hls::stream<ap_uint<64> > &s_axis_x,
             si += acc_t(pi);
         }
     }
-    {   // image taps: c1 conj(x1[n-8]) (Q12) and c2 conj(x2n[n-8]) (Q14)
+    {   // image taps: c1 conj(x1[n-R]) (Q12) and c2 conj(x2n[n-R]) (Q14)
         ap_int<32> pr1, pi1;
         ap_int<38> pr2, pi2;
         w16_t c1r = (w16_t)wcj(15, 0),  c1i = (w16_t)wcj(31, 16);

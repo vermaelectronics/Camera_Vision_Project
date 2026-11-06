@@ -205,8 +205,8 @@ static int test_bitexact() {
             if (seg == 0) { wr[0] = 32767; wi[0] = -32768; wr[SMI_NT] = -32768; wi[SMI_NT] = -32768;
                             wr[AJ_IMG1] = -32768; wi[AJ_IMG1] = 32767; wr[AJ_IMG2] = 32767; wi[AJ_IMG2] = -32768; }
             g2r = (seg == 1) ? 32767 : (seg == 2) ? -32768 : (int)(urand() * 65536) - 32768;
-            g2i = (seg == 1) ? 32767 : (seg == 2) ? -32768 : (int)(urand() * 65536) - 32768;
-            if (seg == 3) { g2r = 1 << SMI_GFRAC; g2i = 0; }
+            g2i = 0;    // 4.9.13: g2 is real (the core ignores nrm[31:16], the firmware writes 0 there)
+            if (seg == 3) { g2r = 1 << SMI_GFRAC; }
             byp = (seg % 4 == 3);
             sh = seg % 8;                                  // 0..7 all act (4.5)
             wsc = (seg * 3) % 8;                           // weight scale 0..7: 6, 7 must act as 5
@@ -546,8 +546,8 @@ static int test_jammer(int id, Scen sc) {
     if (!solve(AJ_MODE_STAP, g2, r)) { std::printf("solver failed\n"); return 0; }
     int sh = (id >= 6) ? shift_for(r) : 0;
     Meas m = measure(r, g2, sh);
-    std::printf("  space-time 63+2 taps: suppression %.1f dB, residual %+.2f dB, satellite SNR loss %.2f dB, output %+.2f dB re RX1%s\n",
-                m.supp, m.res, m.loss, m.out_db, sh ? "" : "");
+    std::printf("  space-time %d+2 taps: suppression %.1f dB, residual %+.2f dB, satellite SNR loss %.2f dB, output %+.2f dB re RX1%s\n",
+                2 * SMI_NT - 1, m.supp, m.res, m.loss, m.out_db, sh ? "" : "");
     if (sh) std::printf("  output make-up    : %d (x%d, +%d dB)\n", sh, 1 << sh, 6 * sh);
     std::printf("  output level      : %+.1f dB against the clean level (RX gain cut %.0f dB, make-up +%d dB)\n", m.lvl, cut_db, 6 * sh);
     std::printf("  firmware figures  : J/N %.1f dB, suppression %.1f dB, residual %+.1f dB, |w|^2 %.2f, loading %.1f LSB^2 (%d passes), weight scale 2^%d\n",

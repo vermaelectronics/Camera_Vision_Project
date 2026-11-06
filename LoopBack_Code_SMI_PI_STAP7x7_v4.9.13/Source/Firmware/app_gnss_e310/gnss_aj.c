@@ -2,6 +2,7 @@
  *  gnss_aj.c  --  SMI-PI v4.1 anti-jam engine. See gnss_aj.h.
  *****************************************************************************/
 
+#include <stdio.h>
 #include "gnss_aj.h"
 #include "gnss_aj_math.h"
 #include "gnss_smi_agc.h"
@@ -271,10 +272,16 @@ static int add_event(XTime now, int type, double v1, double v2, double v3)
 /* ---- FPGA filter ------------------------------------------------------------ */
 static void commit_bypass(void)
 {
+	/* 4.9.13: zero weights while bypassed. The output is x1[n-REF] either way (bit for
+	 * bit), but with the last jammer's weights still loaded the filter's multipliers kept
+	 * multiplying every sample by them for nothing. With zero weights their products and
+	 * the adder tree stay at 0: less switching power in the state the board spends most
+	 * of its time in (no jammer). commit_weights() loads real weights again on a jammer. */
+	static const int16_t zero_w[AJ_NW] = {0};
 	shift = 0;
 	gnss_rxg_set_digital_db(0);
 	blk_thr_set = blk_threshold(0);
-	gnss_pt_write_aj(0, 0, GNSS_PT_AJ_CFG_BYPASS | blk_cfg_bit(blk_thr_set), g2_q13(), blk_thr_set);
+	gnss_pt_write_aj(zero_w, zero_w, GNSS_PT_AJ_CFG_BYPASS | blk_cfg_bit(blk_thr_set), g2_q13(), blk_thr_set);
 }
 
 static void commit_weights(void)
@@ -1206,14 +1213,18 @@ void gnss_aj_note_tx(int on)
 	console_print("TX1 %s\n", (char*)(on ? "ON: the receiver's time to fix counts from here" : "OFF"));
 }
 
+/* 4.9.13: the tap counts come from AJ_NT (the 4.9.12 text still said "63 + 2", the
+ * 32-tap layout of 4.9.7, while the filter had 5 + 5 taps). Single caller per print. */
 static const char *mode_name(int m)
 {
+	static char txt[80];
 	switch(m) {
-	case AJ_MODE_STAP: return "space-time 63 + 2 image taps (gnss_aj_mode=0)";
-	case AJ_MODE_RX2:  return "RX2 16 + 2 image taps (gnss_aj_mode=1)";
+	case AJ_MODE_STAP: snprintf(txt, sizeof txt, "space-time %d + 2 image taps (gnss_aj_mode=0)", 2 * AJ_NT - 1); break;
+	case AJ_MODE_RX2:  snprintf(txt, sizeof txt, "RX2 %d + 2 image taps (gnss_aj_mode=1)", AJ_NT); break;
 	case AJ_MODE_NB:   return "one weight, the old v3 SMI-PI (gnss_aj_mode=2)";
-	default:           return "space-time 31 taps, no image taps, v4.0 (gnss_aj_mode=3)";
+	default:           snprintf(txt, sizeof txt, "space-time %d taps, no image taps (gnss_aj_mode=3)", 2 * AJ_NT - 1); break;
 	}
+	return txt;
 }
 
 static const char *g2_src_txt(void)

@@ -56,6 +56,9 @@ set_false_path \
 set_multicycle_path -setup 2 -from [get_cells -quiet -hier -filter {NAME =~ *aj_thr_act_reg*}] -to [get_cells -quiet -hier -filter {NAME =~ *blk_thr_c_reg*}]
 set_multicycle_path -hold 1 -from [get_cells -quiet -hier -filter {NAME =~ *aj_thr_act_reg*}] -to [get_cells -quiet -hier -filter {NAME =~ *blk_thr_c_reg*}]
 
-# 4.9.9 (Vivado TIMING-6/7/54): the sample clock (rx_clk, clk_div_sel_*) and the AXI/PS clock (clk_fpga_0)
-# are unrelated: asynchronous clock groups instead of scoped datapath-only max-delay between clocks.
-set_clock_groups -asynchronous -group [get_clocks -quiet clk_fpga_0] -group [get_clocks -quiet {rx_clk clk_div_sel_*}]
+# 4.9.13 (Vivado TIMING-54): NO clock-to-clock constraint in this file. It is packaged with the IP
+# and Vivado applies it SCOPED to the gnss_passthrough instance; a set_clock_groups (or a false path /
+# datapath-only max delay between clocks) in a scoped file still acts on every path between those clocks
+# in the whole design, which is exactly what TIMING-54 reports. The asynchronous clock group between
+# clk_fpga_0 and {rx_clk clk_div_sel_*} (4.9.9, for TIMING-6/7) is kept, unscoped, in
+# Source/XDC/gnss_passthrough_cdc.xdc. Everything above in this file is cell-based and stays.

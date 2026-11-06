@@ -50,15 +50,15 @@
 extern "C" {
 #endif
 
-#define AJ_NT        5    /* 4.9.12: 5 taps per antenna (5 + 5 = 10 taps) */     /* taps per channel, delays 0..31 (4.9; 16 before) */
+#define AJ_NT        7    /* 4.9.13: 7 taps per antenna (7 + 7 = 14 taps); 4.9.12: 5, 4.9.11: 6 */     /* taps per channel, delays 0..31 (4.9; 16 before) */
 #ifndef AJ_REF
-#define AJ_REF        2     /* RX1 reference delay (4.8: was 8; echoes up to 11 samples can be cancelled) */
+#define AJ_REF        4     /* 4.9.13: 4 (4.9.12: 2). RX1 reference delay (4.8: was 8; echoes up to 11 samples can be cancelled) */
 #endif
-#define AJ_NSPT      10     /* space-time weight words (RX1 32 + RX2 32)      */
-#define AJ_IMG1      10     /* image tap c1: conj(x1[n-REF])                  */
-#define AJ_IMG2      11     /* image tap c2: conj(x2n[n-REF])                 */
-#define AJ_NW        12     /* weight words                                   */
-#define AJ_MAXDIM    11     /* adaptive weights                               */
+#define AJ_NSPT      14     /* space-time weight words (RX1 32 + RX2 32)      */
+#define AJ_IMG1      14     /* image tap c1: conj(x1[n-REF])                  */
+#define AJ_IMG2      15     /* image tap c2: conj(x2n[n-REF])                 */
+#define AJ_NW        16     /* weight words                                   */
+#define AJ_MAXDIM    15     /* adaptive weights                               */
 #define AJ_WFRAC     12     /* Q3.12                                          */
 #define AJ_GFRAC     13     /* RX2 normalisation g2, Q3.13                    */
 #define AJ_MAXWS      5     /* weight scale: words hold w * 2^ws (SMI-PI 4.4)  */
@@ -68,10 +68,10 @@ extern "C" {
 #define AJ_NSAMP   8192     /* samples per block (one DMA capture). 4.9.4: 8192 (was 4096); 16384 broke the chirp detector and 2 tests */
 #endif
 
-#define AJ_MODE_STAP  0     /* RX1 31 + RX2 32 + 2 image taps (default)       */
-#define AJ_MODE_RX2   1     /* RX2 16 + 2 image taps                          */
+#define AJ_MODE_STAP  0     /* RX1 NT-1 + RX2 NT + 2 image taps (default)     */
+#define AJ_MODE_RX2   1     /* RX2 NT + 2 image taps                          */
 #define AJ_MODE_NB    2     /* one weight, RX2 at delay 8: the old SMI-PI     */
-#define AJ_MODE_LIN   3     /* RX1 31 + RX2 32, no image taps (v4.0)          */
+#define AJ_MODE_LIN   3     /* RX1 NT-1 + RX2 NT, no image taps (v4.0)        */
 #define AJ_NMODES     4
 
 /* Weight of the previous block's statistics in the solve (0 = none). */

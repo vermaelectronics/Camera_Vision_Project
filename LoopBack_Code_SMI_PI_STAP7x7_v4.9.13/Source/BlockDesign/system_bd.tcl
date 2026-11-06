@@ -12,7 +12,9 @@
 #    Diff the two files to see every change (requirements 34, 35).
 #
 #  CHANGES FROM THE OFFICIAL BASELINE
-#    Every change is bracketed by "GNSS-CRPA MOD" comments.  There are two:
+#    Every change is bracketed by "GNSS-CRPA MOD" comments.  MOD-1 and MOD-2
+#    are below; SMI-PI 4.9.13 adds MOD-3 (the unused DDS, I/Q-correction and
+#    DC-filter blocks of axi_ad9361 are disabled, see the MOD-3 block).
 #      MOD-1  The four axi_ad9361_dac_fifo/dout_data_* -> axi_ad9361/dac_data_*
 #             connections are removed, so the DAC data pins are free to be
 #             driven by the custom processing block instead.
@@ -81,9 +83,9 @@ if {[llength $gnss_ipdef] == 0} {
 # cfg[14:12], make-up shift to 7); a 2.0 / 2.1 / 2.2 left over from an earlier build is
 # refused here (they would run, but ignore parts of cfg that the 4.5 firmware uses).
 set smi_ipdef [get_ipdefs -all -quiet -filter \
-  {VLNV =~ *:smi_pi:2.4 && design_tool_contexts =~ *IPI* && UPGRADE_VERSIONS == ""}]
+  {VLNV =~ *:smi_pi:2.5 && design_tool_contexts =~ *IPI* && UPGRADE_VERSIONS == ""}]
 if {[llength $smi_ipdef] == 0} {
-  error "ERROR: smi_pi 2.4 was not found in the IP catalog at $gnss_ip_repo.\
+  error "ERROR: smi_pi 2.5 (4.9.13, 7 + 7 taps) was not found in the IP catalog at $gnss_ip_repo.\
          Build it with Source/HLS/smi_pi/build_hls.tcl (vitis_hls), or run\
          Automation/Linux/build_all.sh --from smi."
 }
@@ -506,7 +508,7 @@ ad_connect gnss_passthrough/dac_data_q0 axi_ad9361/dac_data_q0
 ad_connect gnss_passthrough/dac_data_i1 axi_ad9361/dac_data_i1
 ad_connect gnss_passthrough/dac_data_q1 axi_ad9361/dac_data_q1
 
-# SMI-PI v4.1 space-time power-inversion filter (Vitis HLS IP smi_pi 2.4, II=1).
+# SMI-PI space-time power-inversion filter (Vitis HLS IP smi_pi 2.5 = 4.9.13, 7 + 7 taps, II=1).
 #   It runs on sys_cpu_clk (100 MHz), NOT on axi_ad9361/l_clk: l_clk follows the
 #   sample rate (4x it in 2R2T, 200 MHz at 50 MS/s, 245.76 MHz at 61.44 MS/s),
 #   while sys_cpu_clk is fixed, so the filter's timing does not depend on the
@@ -594,14 +596,35 @@ set_property CONFIG.DAC_DATAPATH_DISABLE 0  [get_bd_cells axi_ad9361]
 
 ## data-path disable (individual control)- effective ONLY if DATAPATH_DISABLE is 0x0.
 
+# ---------------------------------------------------------------------------
+# GNSS-CRPA MOD-3 BEGIN (SMI-PI 4.9.13): remove the axi_ad9361 DSP blocks this
+# design never uses. They cost ~24 DSP48 and, worse for the temperature, they
+# toggle at l_clk (245.76 MHz at 61.44 MS/s) all the time:
+#   ADC DC filter      ad_dcfilter, 1 DSP48 per RX channel (I0 Q0 I1 Q1)
+#   ADC I/Q correction ad_iqcor,    2 multipliers per RX channel
+#   DAC I/Q correction ad_iqcor,    2 multipliers per TX channel
+#   DAC DDS            ad_dds (CORDIC), 1 scale multiplier per tone, 2 tones per TX channel
+# Why it is safe (checked in Source/Firmware/app_gnss_e310):
+#   - TX data: the firmware only selects DAC data source 2 (DMA = gnss_passthrough,
+#     gnss_l1_set_dac_source) or 3 (zero); in axi_ad9361_tx_channel these bypass the
+#     DDS. Only the vendor demo console commands dds_* used the DDS; they now write
+#     registers that have no effect.
+#   - TX digital-interface tuning (the other DDS/PN user) is skipped
+#     (digital_interface_tune_skip_mode = 1, main.c MOD-4).
+#   - Nothing sets IQCOR_ENB or DCFILT_ENB (both reset to 0 = pass-through), so the
+#     RX samples are bit-identical; the AD9361's own RX quadrature and DC tracking
+#     are untouched. The PN monitors used by RX tuning stay in the core.
+# Set any of them back to 0 to restore the vendor core.
 set_property CONFIG.ADC_DATAFORMAT_DISABLE 0  [get_bd_cells axi_ad9361]
-set_property CONFIG.ADC_DCFILTER_DISABLE 0  [get_bd_cells axi_ad9361]
-set_property CONFIG.ADC_IQCORRECTION_DISABLE 0  [get_bd_cells axi_ad9361]
+set_property CONFIG.ADC_DCFILTER_DISABLE 1  [get_bd_cells axi_ad9361]
+set_property CONFIG.ADC_IQCORRECTION_DISABLE 1  [get_bd_cells axi_ad9361]
 set_property CONFIG.ADC_USERPORTS_DISABLE 0 [get_bd_cells axi_ad9361]
 
-set_property CONFIG.DAC_DDS_DISABLE 0 [get_bd_cells axi_ad9361]
-set_property CONFIG.DAC_IQCORRECTION_DISABLE 0  [get_bd_cells axi_ad9361]
+set_property CONFIG.DAC_DDS_DISABLE 1 [get_bd_cells axi_ad9361]
+set_property CONFIG.DAC_IQCORRECTION_DISABLE 1  [get_bd_cells axi_ad9361]
 set_property CONFIG.DAC_USERPORTS_DISABLE 0 [get_bd_cells axi_ad9361]
+# GNSS-CRPA MOD-3 END
+# ---------------------------------------------------------------------------
 
 ## tdd-disable (control is moved exclusively to GPIO)
 

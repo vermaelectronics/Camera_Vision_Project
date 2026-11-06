@@ -171,6 +171,19 @@ if want 1; then
   # Copy without --delete so already-packaged IP survives a re-run.
   cp -a "$VENDOR_SRC/." "$ADI_WORK/"
   echo "BUILD_ALL: [vendor] working copy at $ADI_WORK"
+  # 4.9.13 (Vivado TIMING-54): move the clock-to-clock constraints out of the
+  # IP-scoped XDCs of util_clkdiv and axi_dmac in the WORKING COPY (cp -a above
+  # restores the pristine files on every run, the patch is then re-applied).
+  # The patched files are newer than their component.xml, so stage 2 (make)
+  # re-packages those two IPs. See Vivado/Scripts/patch_vendor_constraints.tcl.
+  if command -v tclsh >/dev/null 2>&1; then
+    run_logged vendor_patch "VENDOR_PATCH: PASS" \
+      tclsh "$ROOT/Vivado/Scripts/patch_vendor_constraints.tcl" "$ADI_WORK"
+  else
+    run_logged vendor_patch "VENDOR_PATCH: PASS" \
+      vivado -mode batch -nojournal -nolog \
+      -source "$ROOT/Vivado/Scripts/patch_vendor_constraints.tcl" -tclargs "$ADI_WORK"
+  fi
 fi
 
 # ---- 2 library IP -----------------------------------------------------------

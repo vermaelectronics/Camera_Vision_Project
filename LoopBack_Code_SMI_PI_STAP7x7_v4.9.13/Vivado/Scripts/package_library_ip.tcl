@@ -36,6 +36,19 @@ if {![file exists $ip_tcl]} {
   exit 2
 }
 
+# 4.9.13 (Vivado TIMING-54): before packaging util_clkdiv or axi_dmac, move the
+# clock-to-clock constraints out of their IP-scoped XDCs in this working copy
+# (same patch as build_all.sh stage 1; idempotent, see the script's header).
+if {$lib_name in {util_clkdiv axi_dmac}} {
+  set ::gnss_vp_no_main 1
+  source [file join [file dirname [file normalize [info script]]] patch_vendor_constraints.tcl]
+  if {[catch {gnss_patch_vendor_lib [pwd] $lib_name} r]} {
+    puts "LIBIP_RESULT: FAIL - $lib_rel: $r"
+    exit 2
+  }
+  puts "LIBIP_PATCH: $lib_rel -> $r"
+}
+
 # The vendor _ip.tcl files do "source ../scripts/adi_env.tcl", which resolves
 # relative to this library directory inside the working copy.
 if {[catch {source $ip_tcl} err]} {
