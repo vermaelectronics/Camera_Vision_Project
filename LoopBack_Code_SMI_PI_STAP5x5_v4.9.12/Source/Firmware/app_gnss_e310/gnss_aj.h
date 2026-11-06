@@ -35,7 +35,7 @@
 #define GNSS_AJ_BUF_ADDR   0x11000000U
 #endif
 
-#define GNSS_AJ_VERSION_STR  "4.9.12"
+#define GNSS_AJ_VERSION_STR  "4.9.12 + level lock (firmware-only update; bitstream stays 4.9.12)"
 
 /* RF profiles (gnss_band=). RX and TX are always set together, so the
  * retransmitted signal comes out on the frequency it came in on and the
@@ -75,6 +75,8 @@ void gnss_aj_dma_release(void);
 int  gnss_band_set(int band);
 int  gnss_band_get(void);
 void gnss_band_levels(void);
+void gnss_levels_adopt(void);        /* 4.9.13: the present RX gain / TX attenuation become the locked values */
+uint32_t gnss_levels_repairs(void);  /* how often the level lock had to put them back */
 void gnss_aj_csv_once(void);                 /* the AJCSV header + one line (for the snapshot log) */                 /* the current band's TX attenuation (TX1, TX2) and RX gain */
 void gnss_band_print(void);
 void gnss_radio_cmd(double *p, char n);   /* radio=: LO, rate, attenuation, gain, bandwidth by hand */

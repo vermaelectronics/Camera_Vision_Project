@@ -1100,8 +1100,10 @@ void gnss_aj_enable(int on)
 		/* The weights assume both channels always have the same gain: two
 		 * independent AD9361 AGCs would step them apart. A manual gain the
 		 * operator locked (gnss_rx_agc=0) is matched too and is kept. */
+		/* 4.9.13: the RX gain and TX attenuation are the band's FIXED values (gnss_band=N). The matched loop
+		 * (gnss_rx_agc=2) moved both with the jammer level; it is only used when the operator asks for it. */
 		if(gnss_rxg_mode() == GNSS_RXG_AD9361)
-			gnss_rxg_set_mode(GNSS_RXG_MATCHED);
+			gnss_rxg_set_mode(GNSS_RXG_MANUAL);
 		if(!aj_on) {
 			state = ST_CLEAR;
 			on_cnt = 0;
@@ -1505,6 +1507,72 @@ static int radio_recal(void)
 /* The current band's TX attenuation (TX1 and TX2) and RX gain (both channels, also the auto reference).
  * Called after TX is on (gnss_tx_always() in command.c): the attenuation must not be lowered before the data path
  * and the safe start are in place. */
+/* ---- 4.9.13 level lock: RX1/RX2 gain and TX1/TX2 attenuation stay at the band's values ------------------
+ * Something moved them (the AD9361 AGC, the matched loop, a gain-table change after an LO / bandwidth change,
+ * the vendor commands). Once a second the guard reads them back and writes the band's values again if one is
+ * off by more than 1 dB (gain) or 0.25 dB (attenuation); each repair is counted and printed (at most every 10 s).
+ * An operator command (gnss_rx_gain=, tx1/tx2_attenuation=, radio=) becomes the new target
+ * (gnss_levels_adopt()); gnss_rx_agc=1 or 2 switches the gain part of the lock off. */
+static int      lvl_on;
+static int32_t  lvl_rxg_db;
+static uint32_t lvl_att_mdb[2];
+static uint32_t lvl_repairs;
+static XTime    t_lvl, t_lvl_msg;
+
+void gnss_levels_adopt(void)
+{
+	uint32_t a0 = 0, a1 = 0;
+	int32_t g = 0;
+	if(!ad9361_phy) return;
+	ad9361_get_tx_attenuation(ad9361_phy, 0, &a0);
+	ad9361_get_tx_attenuation(ad9361_phy, 1, &a1);
+	ad9361_get_rx_rf_gain(ad9361_phy, 0, &g);
+	lvl_att_mdb[0] = a0; lvl_att_mdb[1] = a1; lvl_rxg_db = g;
+	lvl_on = 1;
+}
+
+static void levels_guard(void)
+{
+	uint8_t m1 = 0, m2 = 0;
+	uint32_t a[2] = {0, 0};
+	int32_t g1 = 0, g2 = 0;
+	int bad_g = 0, bad_a = 0, ch;
+	XTime now;
+	if(!lvl_on || !ad9361_phy) return;
+	XTime_GetTime(&now);
+	if(now - t_lvl < us(1000000U)) return;
+	t_lvl = now;
+	if(gnss_rxg_mode() == GNSS_RXG_MANUAL) {
+		ad9361_get_rx_gain_control_mode(ad9361_phy, 0, &m1);
+		ad9361_get_rx_gain_control_mode(ad9361_phy, 1, &m2);
+		ad9361_get_rx_rf_gain(ad9361_phy, 0, &g1);
+		ad9361_get_rx_rf_gain(ad9361_phy, 1, &g2);
+		if(m1 != RF_GAIN_MGC || m2 != RF_GAIN_MGC || g1 < lvl_rxg_db - 1 || g1 > lvl_rxg_db + 1 ||
+		   g2 < lvl_rxg_db - 1 || g2 > lvl_rxg_db + 1) bad_g = 1;
+	}
+	for(ch = 0; ch < 2; ch++) {
+		ad9361_get_tx_attenuation(ad9361_phy, (uint8_t)ch, &a[ch]);
+		if(a[ch] + 250U < lvl_att_mdb[ch] || a[ch] > lvl_att_mdb[ch] + 250U) bad_a = 1;
+	}
+	if(!bad_g && !bad_a) return;
+	if(bad_g) gnss_rxg_set_gain(lvl_rxg_db);
+	if(bad_a) {
+		ad9361_set_tx_attenuation(ad9361_phy, 0, lvl_att_mdb[0]);
+		ad9361_set_tx_attenuation(ad9361_phy, 1, lvl_att_mdb[1]);
+	}
+	lvl_repairs++;
+	if(now - t_lvl_msg > us(10000000U) || lvl_repairs == 1U) {
+		t_lvl_msg = now;
+		stamp(now);
+		console_print("LEVEL LOCK: %s%s moved (RX1 %d / RX2 %d dB, TX1 %s / TX2 %s dB) -> back to RX %d dB, TX %s dB (repair #%lu)\n",
+			      (char*)(bad_g ? "RX gain" : ""), (char*)(bad_a ? (bad_g ? " + TX attenuation" : "TX attenuation") : ""),
+			      (long)g1, (long)g2, fmt((double)a[0] / 1000.0, 2, 0), fmt((double)a[1] / 1000.0, 2, 0),
+			      (long)lvl_rxg_db, fmt((double)lvl_att_mdb[0] / 1000.0, 2, 0), (unsigned long)lvl_repairs);
+	}
+}
+
+uint32_t gnss_levels_repairs(void) { return lvl_repairs; }
+
 void gnss_band_levels(void)
 {
 	const struct band_cfg *c = &bands[band];
@@ -1513,6 +1581,9 @@ void gnss_band_levels(void)
 	r |= ad9361_set_tx_attenuation(ad9361_phy, 0, c->att_mdb);
 	r |= ad9361_set_tx_attenuation(ad9361_phy, 1, c->att_mdb);
 	gnss_rxg_set_gain(c->rxg_db);
+	lvl_att_mdb[0] = lvl_att_mdb[1] = c->att_mdb;
+	lvl_rxg_db = c->rxg_db;
+	lvl_on = 1;
 	console_print("GNSS_BAND %d levels: TX1/TX2 attenuation %s dB, RX1/RX2 gain %d dB%s\n", (long)band,
 		      fmt((double)c->att_mdb / 1000.0, 2, 0), (long)c->rxg_db, (char*)(r ? "  (the AD9361 refused part of it)" : ""));
 }
@@ -1725,6 +1796,7 @@ void gnss_radio_cmd(double *p, char n)
 	r |= ad9361_set_tx_attenuation(ad9361_phy, 0, mdb);
 	gnss_rxg_set_gain((int32_t)(gain + 0.5));
 	r |= radio_recal();
+	gnss_levels_adopt();
 	gnss_aj_radio_manual();            /* the guard keeps its hands off; floors are learned again */
 	if(r)
 		console_print("radio=: the AD9361 refused part of it (see the values below; rate range, LO or bandwidth)\n");
@@ -1830,5 +1902,6 @@ void gnss_idle(void)
 	gnss_rxg_poll();
 	gnss_aj_poll();
 	radio_guard();
+	levels_guard();
 	gnss_log_poll();
 }

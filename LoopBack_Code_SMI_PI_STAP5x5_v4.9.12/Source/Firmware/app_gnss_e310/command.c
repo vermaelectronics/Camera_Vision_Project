@@ -556,6 +556,7 @@ void set_gnss_rx_gain(double* param, char param_no)
 		return;
 	}
 	gnss_rxg_set_gain((int32_t)param[0]);
+	gnss_levels_adopt();
 	gnss_rxg_print();
 }
 
@@ -963,6 +964,7 @@ void set_tx1_attenuation(double* param, char param_no) // "tx1_attenuation=" com
 	{
 		attenuation_mdb = param[0];
 		ad9361_set_tx_attenuation(ad9361_phy, 0, attenuation_mdb);
+		gnss_levels_adopt();
 		console_print("tx1_attenuation=%d\n", attenuation_mdb);
 	}
 	else
@@ -995,6 +997,7 @@ void set_tx2_attenuation(double* param, char param_no) // "tx1_attenuation=" com
 	{
 		attenuation_mdb = param[0];
 		ad9361_set_tx_attenuation(ad9361_phy, 1, attenuation_mdb);
+		gnss_levels_adopt();
 		console_print("tx2_attenuation=%d\n", attenuation_mdb);
 	}
 	else

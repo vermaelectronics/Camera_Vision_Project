@@ -1,3 +1,13 @@
+# Firmware update (level lock), bitstream unchanged (4.9.12)
+
+RX1/RX2 gain and TX1/TX2 attenuation now stay at the values of the selected `gnss_band=N` (the table in `gnss_aj.c`, e.g. band 1: TX 30 dB, RX 50 dB).
+* The anti-jam start no longer switches the gain to the matched loop, which moved RX gain (and TX attenuation) with the jammer level. `gnss_rx_agc=2` still does it if you ask for it.
+* A **level lock** reads RX1, RX2 gain/mode and TX1, TX2 attenuation once a second. If one is off by more than 1 dB (gain) or 0.25 dB (attenuation), or the gain is not in manual mode, the band's value is written again and the console prints `LEVEL LOCK: ... repair #n`. Repairs are counted (`gnss_levels_repairs()`).
+* Your own commands win: `gnss_rx_gain=`, `tx1_attenuation=`, `tx2_attenuation=`, `radio=` become the new locked value. `gnss_rx_agc=1` or `2` switches the gain lock off.
+* Firmware-only change: rebuild with `./build_all.sh --from sw --to boot`; the 4.9.12 bitstream is unchanged. Not tested on the board (syntax-checked only).
+
+---
+
 # SMI-PI 4.9.12: STAP 5+5 taps (10 total), reference tap moved to delay 2
 
 ## Design
