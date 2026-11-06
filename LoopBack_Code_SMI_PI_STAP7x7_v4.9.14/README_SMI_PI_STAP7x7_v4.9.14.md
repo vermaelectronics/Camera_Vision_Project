@@ -1,8 +1,49 @@
 # SMI-PI 4.9.14: 7 + 7 taps, fewer DSP48, no TIMING-54 critical warnings, TX2 = CRPA copy (muted)
 
 **4.9.14** is 4.9.13 plus one change: **TX2 now carries a copy of the CRPA output instead of raw RX2,
-and it is muted** (digital zero, still at 89.75 dB). The filter, the tap count, the DSP budget and the
-constraints are those of 4.9.13. See section 3c. The HDL changed, so **the bitstream must be rebuilt**.
+and it is muted** (digital zero, still at 89.75 dB). The filter, the DSP savings and the constraints are
+those of 4.9.13 (section 3c has the TX2 change). 4.9.14 comes in three tap counts, see below. The HDL changed, so **the bitstream must be rebuilt**.
+
+### The three 4.9.14 builds (this folder is **7 + 7**)
+
+The three folders hold **the same code**. Only the tap count (`SMI_NT` / `AJ_NT`), the reference
+delay (`SMI_REF` / `AJ_REF`) and the derived constants (`AJ_NSPT`, `AJ_IMG1/2`, `AJ_NW`,
+`AJ_MAXDIM`, `AJ_INFO`) differ. TX2 (copy of the CRPA output, muted, 89.75 dB), the low-DSP
+`axi_ad9361`, the TIMING-54 fixes, the real `g2` and the level lock are in all three.
+
+| | **7 + 7** | 6 + 6 | 5 + 5 |
+|---|---:|---:|---:|
+| Folder | **`..._STAP7x7_v4.9.14`** | `..._STAP6x6_v4.9.14` | `..._STAP5x5_v4.9.14` |
+| RX1 reference tap | **delay 4** | delay 3 | delay 2 |
+| Taps before / after the reference | **4 / 2** | 3 / 2 | 2 / 2 |
+| DSP48 in `smi_pi` | **47** | 41 | 35 |
+| DSP48, whole design (estimate) | **~49** | ~43 | ~37 |
+| `AJ_INFO` | **`0x07040C07`** | `0x06030C07` | `0x05020C07` |
+| `gnss_report?` mode | **space-time 13 + 2** | space-time 11 + 2 | space-time 9 + 2 |
+| C simulation | **20 / 20** | 20 / 20 | 20 / 20 |
+| Barrage J/N 61 dB: residual | **+4.88 dB** | +5.29 dB | +6.80 dB |
+| Barrage J/N 51 dB: residual | **+0.93 dB** | +1.04 dB | +1.64 dB |
+| J/N 30 dB + reflection: satellite loss | **4.4 dB** | 4.9 dB | 14.2 dB |
+
+C-sim numbers: residual = jammer left over the output noise (0 dB = fully nulled); "loss" = the
+satellite SNR loss. All three use `CORE_VERSION 0x0004090E` (prints 4.2318); `AJ_INFO` tells them
+apart, and the firmware refuses to start the filter if the bitstream has another tap count or
+reference delay, so firmware and bitstream of different folders cannot be mixed by mistake.
+
+**6 + 6 uses reference delay 3, not 4 as in 4.9.11.** With 6 taps and the reference at delay 4
+only **one** tap followed the reference, so a jammer component arriving 2 samples late could not
+be cancelled. Delay 3 gives 3 taps before and 2 after (as 7 + 7 and 5 + 5 have 2 after). Same DSP
+count. C simulation, 6 + 6, delay 4 → delay 3: barrage J/N 61 dB residual +8.91 → **+5.29 dB**,
+J/N 51 dB +2.79 → **+1.04 dB**, J/N 41 dB +1.47 → **+0.74 dB**, wideband J/N 30 dB +1.00 → **+0.50 dB**.
+The one scenario where delay 4 was better is the J/N 30 dB reflection test (satellite loss 1.3 dB
+instead of 4.9 dB). To go back to delay 4: `SMI_REF 4` in `Source/HLS/smi_pi/smi_pi.h`,
+`AJ_REF 4` in `gnss_aj_math.h`, `AJ_INFO 32'h06040C07` in `gnss_passthrough.v` and
+`GNSS_PT_AJ_INFO_EXPECTED 0x06040C07U` in `gnss_passthrough.h`.
+
+**Which one?** 7 + 7 leaks least (best barrage residual, best with reflections). 6 + 6 is within
+about 0.4 dB of it on barrage for 6 DSP48 less. 5 + 5 saves another 6 DSP48 but leaks about 2 dB
+more at J/N 61 dB and is poor with reflections (14 dB satellite loss in scenario 5). The DSP48
+difference between them is only about 0.01 W, so the choice is about leakage, not heat.
 
 4.9.13 was built from **4.9.12** (5 + 5 taps, level lock) with these changes:
 
@@ -13,7 +54,7 @@ constraints are those of 4.9.13. See section 3c. The HDL changed, so **the bitst
 | 3 | **RX2 gain `g2` is real** in the HLS core | the firmware always wrote 0 into the imaginary half, so 2 multipliers were wasted |
 | 4 | **Zero weights while bypassed** (no jammer) | the filter multiplied every sample by the last jammer's weights for nothing |
 | 5 | **All 7 TIMING-54 critical warnings removed at their source** | see section 2 |
-| 6 | The mode text now shows the real tap count (`space-time 13 + 2 image taps`) | 4.9.12 printed "63 + 2" (the 32-tap layout) |
+| 6 | The mode text now shows the real tap count (`space-time 13 + 2 image taps` here) | 4.9.12 printed "63 + 2" (the 32-tap layout) |
 | 6b | **TX2 fixed at 89750 mdB (89.75 dB, the quietest setting); the bands set TX1 only** | TX2 is not used, but it re-transmitted RX2's **raw, unfiltered** samples (jammer included, `CONTROL[3] ch1_copy = 0`) at the band's 10-30 dB attenuation; a leak back into the antennas that no filter can cancel. See section 3b |
 | 7 | HLS IP version **smi_pi 2.5**, `CORE_VERSION 0x0004090D` (prints 4.2317), `AJ_INFO 0x07040C07` | a stale 5 + 5 core or bitstream cannot be used by mistake |
 | 8 | **4.9.14: TX2 = copy of the CRPA output, muted by default** (`CONTROL[3]` = `ch1_raw`, `CONTROL[4]` = `tx2_on`), `CORE_VERSION 0x0004090E` (prints **4.2318**) | even at 89.75 dB, TX2 should not carry an unfiltered copy of the jammer. See section 3c |
@@ -28,15 +69,15 @@ RX2 normalisation, level lock) is unchanged.
 The numbers below are counted from the code: 3 multipliers per complex tap (Gauss form) and
 one DSP48 per multiplier. The final number is in Vivado's `utilization_impl.rpt`.
 
-| Block | 4.9.11 (6 + 6) | 4.9.12 (5 + 5) | **4.9.13 (7 + 7)** |
-|---|---:|---:|---:|
-| `smi_pi` taps: (RX1 NT-1 + RX2 NT + 2 image) x 3 | 39 | 33 | **45** |
-| `smi_pi` RX2 normalisation `g2` | 4 | 4 | **2** |
-| `axi_ad9361` DDS + I/Q correction + DC filter | ~24 | ~24 | **0** |
-| `gnss_pulse_blank` (I^2 + Q^2) | 2 | 2 | 2 |
-| **Total** | **~69** (you saw "almost 70") | ~63 | **~49** |
+| Block | 4.9.11 (6 + 6) | 4.9.12 (5 + 5) | **4.9.14 (7 + 7)** | 4.9.14 (6 + 6) | 4.9.14 (5 + 5) |
+|---|---:|---:|---:|---:|---:|
+| `smi_pi` taps: (RX1 NT-1 + RX2 NT + 2 image) x 3 | 39 | 33 | **45** | 39 | 33 |
+| `smi_pi` RX2 normalisation `g2` | 4 | 4 | **2** | 2 | 2 |
+| `axi_ad9361` DDS + I/Q correction + DC filter | ~24 | ~24 | **0** | 0 | 0 |
+| `gnss_pulse_blank` (I^2 + Q^2) | 2 | 2 | **2** | 2 | 2 |
+| **Total** | **~69 (you saw "almost 70")** | ~63 | **~49** | ~43 | ~37 |
 
-So 4.9.13 has **2 more taps per antenna and about 20 fewer DSP48** than 6 + 6.
+So 4.9.14 7 + 7 has **2 more taps per antenna and about 20 fewer DSP48** than 4.9.11 6 + 6.
 The Zynq-7020 has 220 DSP48, so the design uses about 22 % of them.
 
 **Why not fewer?** The filter runs on `sys_cpu_clk` (100 MHz) and takes one sample per clock
@@ -260,22 +301,22 @@ one-weight form that NLMS-type PI converges to reached 14.5 dB, the space-time S
 
 ## 5. C simulation (`Tests/run_csim.sh`, g++, your 20 scenarios, core + firmware solver)
 
-**20 / 20 PASS**, including scenario 1, which is bit-exact over 24 000 samples (0 mismatches)
-with the real `g2`.
+**20 / 20 PASS for each of the three 4.9.14 builds**, including scenario 1, which is bit-exact over
+24 000 samples (0 mismatches) with the real `g2`. Format: suppression, residual.
 
-| Scenario | 5 + 5 (4.9.12) | **7 + 7 (4.9.13)** |
-|---|---|---|
-| 2: wideband J/N 30 dB | 35.5 dB, residual +0.65 | **37.2 dB, +0.46** |
-| 5: J/N 30 dB + reflection | 17.4 dB, residual +8.4, **satellite loss 14.2 dB** | **20.7 dB, +5.6, loss 4.4 dB** |
-| 6: J/N 50 dB + I/Q imbalance | 49.0 dB, +1.88 | **50.6 dB, +1.39** |
-| 8: J/N 60 dB + I/Q imbalance | 49.8 dB, +6.77 | **51.7 dB, +5.45** |
-| 11: barrage J/N 61 dB | 51.2 dB, +6.80 | **54.1 dB, +4.88** |
-| 12: barrage J/N 51 dB | 50.3 dB, +1.64 | **53.0 dB, +0.93** |
-| 13: barrage J/N 41 dB | 43.8 dB, +1.03 | **46.5 dB, +0.61** |
+| Scenario | **7 + 7 (REF 4)** | 6 + 6 (REF 3) | 5 + 5 (REF 2) |
+|---|---|---|---|
+| 2: wideband J/N 30 dB | **37.2 dB, +0.46** | 36.7 dB, +0.50 | 35.5 dB, +0.65 |
+| 5: J/N 30 dB + reflection | **20.7 dB, +5.63, loss 4.4 dB** | 20.4 dB, +5.96, loss 4.9 dB | 17.4 dB, +8.42, loss 14.2 dB |
+| 6: J/N 50 dB + I/Q imbalance | **50.6 dB, +1.39** | 50.0 dB, +1.56 | 49.0 dB, +1.88 |
+| 8: J/N 60 dB + I/Q imbalance | **51.7 dB, +5.45** | 51.0 dB, +5.93 | 49.8 dB, +6.77 |
+| 11: barrage J/N 61 dB | **54.1 dB, +4.88** | 53.4 dB, +5.29 | 51.2 dB, +6.80 |
+| 12: barrage J/N 51 dB | **53.0 dB, +0.93** | 52.4 dB, +1.04 | 50.3 dB, +1.64 |
+| 13: barrage J/N 41 dB | **46.5 dB, +0.61** | 45.7 dB, +0.74 | 43.8 dB, +1.03 |
 
-At J/N 61 dB the 12-bit ADC is the limit (+4.9 dB is mostly ADC noise, see the 4.5 README).
-Reflections arriving more than 2 samples late are still beyond 7 + 7 (scenario 5); the 16-tap
-build (4.9.9) handles those.
+At J/N 61 dB the 12-bit ADC is the limit (+4.9 dB for 7 + 7 is mostly ADC noise, see the 4.5
+README). Reflections arriving more than 2 samples after the reference are beyond all three
+builds (scenario 5; 5 + 5 suffers most); the 16-tap build (4.9.9) handles those.
 
 ---
 
@@ -316,10 +357,10 @@ not in the bitstream. TX uses only DAC data source 2 (DMA = gnss_passthrough) or
 
 | Verified | Not verified (no Vivado, Vitis HLS or board here) |
 |---|---|
-| C simulation 20/20 (core + firmware solver, bit-exact scenario included) | Vitis HLS synthesis (II = 1 at 10 ns, DSP count) |
+| C simulation 20/20 for this 7 + 7 build (and for the other two; core + firmware solver, bit-exact scenario included) | Vitis HLS synthesis (II = 1 at 10 ns, DSP count) |
 | `patch_vendor_constraints.tcl` on the ADI `hdl_2023_r2` files: exact diff, idempotent, refuses a mismatching file | Vivado `report_methodology`, `report_utilization`, `report_power`, timing |
 | `package_library_ip.tcl` hook with tclsh; `build_all.sh` bash syntax | the BOOT.BIN and the board |
-| HDL compiles (iverilog, Verilog-2005); `gnss_aj.c` passes a syntax check | |
+| HDL compiles (iverilog, Verilog-2005); `gnss_aj.c`, `gnss_aj_math.c`, `gnss_info.c`, `gnss_l1.c` pass a syntax check | |
 | 4.9.14 TX2 routing: `Tests/rtl/run_tx2_rtl.sh` (iverilog, `gnss_passthrough.v` + a smi_pi stub), 10 CONTROL settings, `TX2_RTL: PASS`; the same test FAILS on the 4.9.13 HDL (TX2 = raw RX2) | Vivado utilisation of the TX2 change (yosys estimate only, see 3c) |
 | 4.9.14 firmware (`gnss_passthrough.c`, `command.c`, `gnss_info.c`, `main.c`): syntax check, no new errors (only BSP-generated symbols missing, as before) | |
 | `axi_ad9361` source (2023_r2): DMA (2) and zero (3) DAC sources bypass the DDS; the disabled blocks reset to pass-through | |

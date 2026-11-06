@@ -1,0 +1,96 @@
+/******************************************************************************
+ *  gnss_aj.h  --  SMI-PI v4.1 anti-jam engine (runs on the ARM)
+ *
+ *  WHAT IT DOES, CONTINUOUSLY, WITH NO OPERATOR SETTING
+ *    1. Captures 4096 samples of RX1 and RX2 into DDR over the existing ADC
+ *       DMA (a fan-out of the RX stream; the PL path is not interrupted).
+ *    2. CLEAR (no jammer): the filter is BYPASSED -- TX1 carries RX1 exactly,
+ *       8 samples later -- and each capture only goes through a cheap
+ *       detector (aj_detect: powers + RX1/RX2 coherence). Meanwhile it learns
+ *       the receiver noise floor and the RX2/RX1 level ratio (the input
+ *       normalisation g2 the FPGA applies to RX2).
+ *    3. JAMMED: from the capture that detected the jammer on, every capture
+ *       is solved (aj_compute: exact space-time statistics, 31 + 2 image
+ *       weights, loading = the canceller's own noise estimate, Cholesky in
+ *       double precision) and the weights are committed to the FPGA filter
+ *       together with cfg (filter in, output make-up shift) and g2.
+ *    4. Back to CLEAR (bypass) once the jammer has been gone for 0.5 s.
+ *    Every change is printed on the console with a time stamp:
+ *         [AJ   12.345 s] *** JAMMER ON *** ...
+ *         [AJ   12.361 s] NULLED in 16 ms ...
+ *         [AJ   45.678 s] jammer OFF after 33.3 s ...
+ *    plus a status line every gnss_aj_log= seconds (default 0 = off, held back while the operator types), a CSV line
+ *    every gnss_aj_csv= ms (default off) and the full gnss_report? block.
+ *
+ *  Runs from the console idle hook (gnss_idle), like the matched RX gain loop.
+ *****************************************************************************/
+#ifndef GNSS_AJ_H_
+#define GNSS_AJ_H_
+
+#include <stdint.h>
+
+/* DDR buffer for the captures: AJ_NSAMP (8192) samples x 2 channels x 4 bytes = 64 KiB.
+ * Away from the boot captures (0x10000000, 0x10800000; gnss_capture.h). */
+#ifndef GNSS_AJ_BUF_ADDR
+#define GNSS_AJ_BUF_ADDR   0x11000000U
+#endif
+
+#define GNSS_AJ_VERSION_STR  "4.9.14 (5 + 5 taps, low-DSP bitstream, level lock, TX2 = CRPA copy, muted, 89.75 dB)"
+
+/* RF profiles (gnss_band=). RX and TX are always set together, so the
+ * retransmitted signal comes out on the frequency it came in on and the
+ * board's clock error cancels between down- and up-conversion. */
+#define GNSS_BAND_COUNT       7   /* seven fixed presets 0..6 (4.9.5); no custom band: see gnss_aj.c */
+#define GNSS_BAND_DEFAULT     0   /* 1569.42 MHz, 61.44 MS/s, 56 MHz, TX att 30 dB, RX gain 50 dB */
+
+void gnss_aj_init(void);            /* once, after the radio and DMA are up  */
+void gnss_aj_enable(int on);        /* filter in the TX1 path + engine       */
+void gnss_aj_command(int on);       /* the same, by the operator (gnss_smi=) */
+int  gnss_aj_enabled(void);
+int  gnss_aj_user_off(void);        /* 1 if the operator typed gnss_smi=0    */
+void gnss_aj_freeze(int on);        /* keep the present weights              */
+void gnss_aj_set_blank(int mode);           /* pulse blanker: 0 off, 1 auto (default), 2 on (bitstream 4.6) */
+void gnss_aj_set_blank_db(double db);       /* blanker threshold above the output noise [dB], 3..30      */
+int  gnss_aj_blank_available(void);         /* 1 = the bitstream has the blanker                          */
+void gnss_aj_set_sweep(int on);           /* slow-chirp detector on/off (default on) */
+int  gnss_aj_sweep_active(void);          /* 1 while a moving jammer is being averaged */
+void gnss_aj_set_mode(int mode);    /* AJ_MODE_STAP / _RX2 / _NB / _LIN      */
+void gnss_aj_set_log(int seconds);  /* periodic status line, 0 = events only */
+void gnss_aj_set_events(int on);  /* 0 = no event lines (gnss_report? keeps them) */
+void gnss_aj_set_csv(int ms);
+void gnss_aj_set_avg(double v, int automatic);   /* 4.9.9: gnss_aj_avg= (manual value, or auto) */
+void gnss_aj_avg_print(void);                    /* gnss_aj_avg? */       /* CSV line period, 0 = off              */
+int  gnss_aj_jammer_on(void);
+void gnss_aj_poll(void);
+void gnss_aj_print(void);           /* gnss_aj? / gnss_smi?                  */
+void gnss_aj_print_short(void);
+void gnss_aj_report(void);          /* gnss_report?: everything, for a copy  */
+void gnss_aj_note_tx(int on);       /* gnss_tx= tells the engine (time stamp) */
+
+/* Waits for the engine's capture in flight (if any) and leaves the RX DMA
+ * free. Call before anything else submits a transfer on rx_dmac. */
+void gnss_aj_dma_release(void);
+
+/* RF profile; returns 0 on success. */
+int  gnss_band_set(int band);
+int  gnss_band_get(void);
+void gnss_band_levels(void);
+void gnss_levels_adopt(void);        /* 4.9.13: the present RX gain / TX attenuation become the locked values */
+uint32_t gnss_levels_repairs(void);  /* how often the level lock had to put them back */
+void gnss_aj_csv_once(void);                 /* the AJCSV header + one line (for the snapshot log) */                 /* the current band's TX attenuation (TX1, TX2) and RX gain */
+void gnss_band_print(void);
+void gnss_radio_cmd(double *p, char n);   /* radio=: LO, rate, attenuation, gain, bandwidth by hand */
+char *gnss_fmt(double v, int dec);        /* "1575.4200" without printf's %f */
+void gnss_radio_print(void);              /* radio? */
+/* unit helpers (value in MHz / MS/s or in Hz is recognised by size); 0 = ok, -1 = out of range */
+int  gnss_radio_lo_hz(double v, uint64_t *hz);
+int  gnss_radio_rate_hz(double v, uint32_t *hz);
+int  gnss_radio_bw_hz(double v, uint32_t *hz);
+int  gnss_radio_att_mdb(double db, uint32_t *mdb);
+void gnss_aj_radio_manual(void);   /* rx/tx_lo_freq=, rx/tx_samp_freq=, rx/tx_fir_en=: keep what the operator set */
+
+/* The console idle hook: matched RX gain loop + anti-jam engine + radio
+ * guard (keeps the gnss_band= profile and the AD9361 FIRs off). */
+void gnss_idle(void);
+
+#endif

@@ -14,6 +14,7 @@
 #include "console.h"
 #include "gnss_l1.h"
 #include "gnss_passthrough.h"
+#include "gnss_aj_math.h"     /* 4.9.14: AJ_NT, AJ_REF, AJ_MAXDIM, AJ_NSAMP */
 #include "gnss_txdma.h"
 
 #ifdef XILINX_PLATFORM
@@ -401,18 +402,23 @@ static void info_pl(void)
     console_print("   smi_pi_0 is a Vitis HLS filter on sys_cpu_clk (100 MHz), fed\n");
     console_print("   from gnss_passthrough through an async FIFO and returning\n");
     console_print("   through another. RX2 is first scaled to RX1's level (g2,\n");
-    console_print("   learned from the noise floors), then 32 taps on RX1, 32 on\n");
+    /* 4.9.14: tap count, reference delay, weight count and block size come
+     * from gnss_aj_math.h (the text said 32 taps, delay 4, 33 weights, 4096). */
+    console_print("   learned from the noise floors), then %d taps on RX1, %d on\n",
+                  (long)AJ_NT, (long)AJ_NT);
     console_print("   RX2 and 2 image taps (the AD9361 I/Q mirror of the jammer):\n");
-    console_print("     y = x1[n-4] - sum a_k x1[n-k] - sum b_k x2n[n-k]\n");
-    console_print("                 - c1 conj(x1[n-4]) - c2 conj(x2n[n-4])\n");
-    console_print("   RX1's tap at delay 4 is fixed at 1, so the output can never be\n");
+    console_print("     y = x1[n-%d] - sum a_k x1[n-k] - sum b_k x2n[n-k]\n", (long)AJ_REF);
+    console_print("                 - c1 conj(x1[n-%d]) - c2 conj(x2n[n-%d])\n",
+                  (long)AJ_REF, (long)AJ_REF);
+    console_print("   RX1's tap at delay %d is fixed at 1, so the output can never be\n", (long)AJ_REF);
     console_print("   turned down as a whole. With no jammer the filter is BYPASSED\n");
-    console_print("   (y = x1[n-4] exactly) and the ARM only runs a cheap detector.\n");
-    console_print("   When a jammer appears the ARM computes the 33 weights from\n");
-    console_print("   4096-sample DMA captures of both channels (gnss_aj.c), a few\n");
+    console_print("   (y = x1[n-%d] exactly) and the ARM only runs a cheap detector.\n", (long)AJ_REF);
+    console_print("   When a jammer appears the ARM computes the %d weights from\n", (long)AJ_MAXDIM);
+    console_print("   %d-sample DMA captures of both channels (gnss_aj.c), a few\n", (long)AJ_NSAMP);
     console_print("   hundred times a second, and commits weights, bypass, make-up\n");
     console_print("   gain and g2 all at once (weights 0x400-0x4FC, the rest 0x180-0x194, AJ_COMMIT 0x180).\n");
-    console_print("   CONTROL[5] puts it on TX1. TX2 always carries plain RX2.\n");
+    console_print("   CONTROL[5] puts it on TX1. TX2 carries a copy of the TX1 output\n");
+    console_print("   (never raw RX2) and is MUTED unless gnss_tx2=1 (4.9.14).\n");
     rule();
 
     console_print("\n THE ONE MODIFICATION THAT MATTERS\n");

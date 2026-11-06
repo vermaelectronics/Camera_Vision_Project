@@ -1,0 +1,100 @@
+# ============================================================================
+#  gnss_passthrough_cdc.xdc
+#  Clock-domain-crossing constraints for the custom processing block.
+#
+#  !! XDC IS NOT FULL TCL !!
+#    Vivado rejects control-flow commands in a constraint file:
+#      CRITICAL WARNING: [Designutils 20-1307] Command 'if' is not supported in
+#      the xdc constraint file.
+#    An earlier version of this file wrapped each constraint in an
+#    "if {[llength $cells] > 0}" guard. Vivado skipped every one of them and the
+#    violation was unchanged, with only a CRITICAL WARNING in the run log to say
+#    so. Keep this file to straight-line constraint commands only -- no if, no
+#    loops, no puts.
+#
+#  WHY THESE CONSTRAINTS EXIST
+#    gnss_passthrough spans two asynchronous clocks:
+#      clk        - axi_ad9361/l_clk, sample domain   (rx_clk,     4 ns)
+#      s_axi_aclk - sys_cpu_clk, register domain      (clk_fpga_0, 10 ns)
+#
+#    Vivado times the crossings between them as ordinary synchronous paths and
+#    reports violations that are not real. Unconstrained, this produced the ONLY
+#    failing timing in the whole device: WNS -0.817 ns with 312 failing
+#    endpoints, every one of them a cap_* -> h_* crossing. Both intra-clock
+#    groups were comfortably met (clk_fpga_0 +1.238 ns, rx_clk +1.420 ns).
+#
+#    The crossings are safe by protocol, not by timing. See the CDC section of
+#    Source/HDL/gnss_passthrough.v and Docs/Architecture/DATAPATH.md.
+#
+#  WHY NOT PACKAGED WITH THE IP
+#    Tried first. The XDC packaged into component.xml with userFileType "xdc",
+#    but Vivado never scoped it to the instance -- the implementation log showed
+#    "Parsing XDC File ... for cell ..." for every other IP and none for
+#    gnss_passthrough. Applied at project level it is unambiguously read. This
+#    project owns both the IP and the design that instantiates it.
+#
+#  HIERARCHY
+#    Matched by wildcard so the constraints survive block-design regeneration.
+#    The instance is currently at:
+#      i_system_wrapper/system_i/gnss_passthrough/inst/
+#
+#    A pattern that matches nothing yields an empty object list and a warning,
+#    not an error -- so check the run log if timing regresses after renaming
+#    anything inside the IP.
+# ============================================================================
+
+# --- 1. Status capture: clk -> s_axi_aclk -----------------------------------
+# cap_* is loaded once every 256 clk cycles and then held. A toggle flips at the
+# same moment, crosses through a two-flop synchroniser, and only on its edge
+# does the AXI side copy cap_* into h_*. The data is stable for far longer than
+# the transfer takes.
+#
+# set_max_delay -datapath_only rather than set_false_path: the transfer must
+# still finish before cap_* is reloaded, so a bound is wanted rather than a
+# licence to route arbitrarily. cap_* is held for 256 clk cycles (1 us at
+# 4 ns) and the toggle takes 2-3 s_axi_aclk cycles (30 ns) to arrive, so
+# 8.000 ns is a tight bound with a wide margin (it was "the shorter of the two
+# periods" when rx_clk was 8 ns).
+set_multicycle_path -setup 2 -from [get_cells -quiet -hier -filter {NAME =~ *gnss_passthrough/inst/cap_*_reg*}] -to [get_cells -quiet -hier -filter {NAME =~ *gnss_passthrough/inst/h_*_reg*}]
+set_multicycle_path -hold 1 -from [get_cells -quiet -hier -filter {NAME =~ *gnss_passthrough/inst/cap_*_reg*}] -to [get_cells -quiet -hier -filter {NAME =~ *gnss_passthrough/inst/h_*_reg*}]
+
+# --- 2. Toggle handshake into the AXI domain --------------------------------
+# cap_toggle -> tog_meta is the single-bit asynchronous crossing that the
+# two-flop synchroniser exists to handle.
+set_false_path \
+  -to [get_cells -quiet -hier -filter {NAME =~ *gnss_passthrough/inst/tog_meta_reg*}]
+
+# --- 3. Control crossing into the sample domain -----------------------------
+# Quasi-static software settings through two-flop synchronisers: the CONTROL
+# bits (ctrl_meta) and the core parameters (mu_ctrl_meta in the PI-NLMS
+# design, gamma_ctrl_meta in PL-NPI; the SMI-PI v4 weights need none: they
+# are in sys_cpu_clk, the filter's own clock, and the sample streams cross
+# through the two axis_data_fifo IPs, which carry their own constraints).
+#
+# The pattern was "inst/ctrl_meta_reg*" until 2026-10-08, which matched only
+# the CONTROL synchroniser: the parameter synchronisers were timed as ordinary
+# s_axi_aclk -> rx_clk paths and could show up as failing inter-clock paths.
+set_false_path \
+  -to [get_cells -quiet -hier -filter {NAME =~ *gnss_passthrough/inst/*ctrl_meta_reg*}]
+
+# --- 4. Pulse blanker threshold, s_axi_aclk -> clk (v4.6) -------------------------------------------
+# aj_thr_act is written once per AJ_COMMIT and is stable for far longer than the toggle needs to
+# cross; blk_thr_c copies it only when the toggle (thr_tog_meta, false path above) has arrived.
+set_multicycle_path -setup 2 -from [get_cells -quiet -hier -filter {NAME =~ *aj_thr_act_reg*}] -to [get_cells -quiet -hier -filter {NAME =~ *blk_thr_c_reg*}]
+set_multicycle_path -hold 1 -from [get_cells -quiet -hier -filter {NAME =~ *aj_thr_act_reg*}] -to [get_cells -quiet -hier -filter {NAME =~ *blk_thr_c_reg*}]
+
+# 4.9.9 (Vivado TIMING-6/7/54): the sample clock (rx_clk, clk_div_sel_*) and the AXI/PS clock (clk_fpga_0)
+# are unrelated: asynchronous clock groups instead of scoped datapath-only max-delay between clocks.
+# 4.9.13: this is now the ONLY copy (the duplicate in the IP-scoped gnss_passthrough_constr.xdc was itself
+# one of the TIMING-54s). This file is project-level, i.e. unscoped, so it is not a TIMING-54.
+set_clock_groups -asynchronous -group [get_clocks -quiet clk_fpga_0] -group [get_clocks -quiet {rx_clk clk_div_sel_*}]
+
+# --- 5. ADI util_clkdiv, moved here from its IP-scoped XDC (4.9.13, TIMING-54) ---------------------
+# util_ad9361_divclk divides l_clk by 4 (BUFR clk_divide_sel_0 -> clock clk_div_sel_0_s) and by 2
+# (clk_divide_sel_1 -> clk_div_sel_1_s); both feed one BUFGMUX and only one of them is ever selected, so
+# the two clocks are logically exclusive. ADI writes exactly this in library/xilinx/util_clkdiv/
+# util_clkdiv_constr.xdc, but that file is scoped to the IP, and a clock group between clocks in a scoped
+# file is a TIMING-54. Vivado/Scripts/patch_vendor_constraints.tcl removes it from the vendor working copy
+# (Build/VendorWork, never Vendor/) and it is applied here instead, unscoped. Same constraint, same effect.
+# The two clock names are Vivado's auto-derived ones (check with report_clocks if ADI renames the nets).
+set_clock_groups -logically_exclusive -group [get_clocks -quiet clk_div_sel_0_s] -group [get_clocks -quiet clk_div_sel_1_s]
