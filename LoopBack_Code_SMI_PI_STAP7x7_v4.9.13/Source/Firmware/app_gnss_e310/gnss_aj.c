@@ -7,6 +7,7 @@
 #include "gnss_aj_math.h"
 #include "gnss_smi_agc.h"
 #include "gnss_passthrough.h"
+#include "gnss_l1.h"          /* 4.9.13: GNSS_L1_TX2_ATTEN_MDB */
 #include "gnss_txdma.h"
 #include "gnss_log.h"
 #include "ad9361_api.h"
@@ -1435,17 +1436,18 @@ void gnss_aj_report(void)
  * the filters' transition band, attenuated twice (RX and TX) -- that is
  * why BeiDou was not seen -- and the upper GLONASS channels at the edge. */
 struct band_cfg { uint64_t lo; uint32_t fs, bw; uint32_t att_mdb; int32_t rxg_db; const char *name; };
-/* 4.9.5: seven FIXED presets. Each one sets the LO, the sample rate, the RF bandwidth and, for RX and TX
- * together, the TX attenuation (TX1 and TX2) and the RX gain (both channels). There is no custom band any more.
+/* 4.9.5: seven FIXED presets. Each one sets the LO, the sample rate, the RF bandwidth, the TX1 attenuation and
+ * the RX gain (both channels). There is no custom band any more. 4.9.13: the TX column is TX1 ONLY; TX2 is not
+ * used and is always at GNSS_L1_TX2_ATTEN_MDB (89.75 dB).
  *            LO MHz     MS/s   BW MHz  TX att dB  RX gain dB */
 static struct band_cfg bands[GNSS_BAND_COUNT] = {
-	{1569420000ULL, 61440000U, 56000000U, 30000U, 50, "1569.42 MHz, TX 30 dB, RX 50 dB (default)"},
-	{1575420000ULL, 61440000U, 56000000U, 30000U, 50, "1575.42 MHz, TX 30 dB, RX 50 dB"},
-	{1575420000ULL, 61440000U, 56000000U, 20000U, 40, "1575.42 MHz, TX 20 dB, RX 40 dB"},
-	{1575420000ULL, 30220000U, 18000000U, 30000U, 50, "1575.42 MHz, 30.22 MS/s, 18 MHz, TX 30 dB, RX 50 dB"},
-	{1575420000ULL, 61440000U, 56000000U, 10000U, 40, "1575.42 MHz, TX 10 dB, RX 40 dB"},
-	{1582500000ULL, 61440000U, 56000000U, 20000U, 40, "1582.50 MHz, TX 20 dB, RX 40 dB"},
-	{1575420000ULL, 61440000U, 56000000U, 30000U, 50, "1575.42 MHz, TX 30 dB, RX 50 dB"},
+	{1569420000ULL, 61440000U, 56000000U, 30000U, 50, "1569.42 MHz, TX1 30 dB, RX 50 dB (default)"},
+	{1575420000ULL, 61440000U, 56000000U, 30000U, 50, "1575.42 MHz, TX1 30 dB, RX 50 dB"},
+	{1575420000ULL, 61440000U, 56000000U, 20000U, 40, "1575.42 MHz, TX1 20 dB, RX 40 dB"},
+	{1575420000ULL, 30220000U, 18000000U, 30000U, 50, "1575.42 MHz, 30.22 MS/s, 18 MHz, TX1 30 dB, RX 50 dB"},
+	{1575420000ULL, 61440000U, 56000000U, 10000U, 40, "1575.42 MHz, TX1 10 dB, RX 40 dB"},
+	{1582500000ULL, 61440000U, 56000000U, 20000U, 40, "1582.50 MHz, TX1 20 dB, RX 40 dB"},
+	{1575420000ULL, 61440000U, 56000000U, 30000U, 50, "1575.42 MHz, TX1 30 dB, RX 50 dB"},
 };
 static int band_applied;
 static int radio_manual, manual_warn;   /* the operator set LO / rate / FIR by hand: the guard keeps its hands off */
@@ -1515,10 +1517,10 @@ static int radio_recal(void)
 	return r;
 }
 
-/* The current band's TX attenuation (TX1 and TX2) and RX gain (both channels, also the auto reference).
+/* The current band's TX1 attenuation and RX gain (both channels, also the auto reference); TX2 fixed at 89.75 dB.
  * Called after TX is on (gnss_tx_always() in command.c): the attenuation must not be lowered before the data path
  * and the safe start are in place. */
-/* ---- 4.9.13 level lock: RX1/RX2 gain and TX1/TX2 attenuation stay at the band's values ------------------
+/* ---- 4.9.13 level lock: RX1/RX2 gain and TX1 attenuation stay at the band's values, TX2 at 89.75 dB ----
  * Something moved them (the AD9361 AGC, the matched loop, a gain-table change after an LO / bandwidth change,
  * the vendor commands). Once a second the guard reads them back and writes the band's values again if one is
  * off by more than 1 dB (gain) or 0.25 dB (attenuation); each repair is counted and printed (at most every 10 s).
@@ -1538,7 +1540,8 @@ void gnss_levels_adopt(void)
 	ad9361_get_tx_attenuation(ad9361_phy, 0, &a0);
 	ad9361_get_tx_attenuation(ad9361_phy, 1, &a1);
 	ad9361_get_rx_rf_gain(ad9361_phy, 0, &g);
-	lvl_att_mdb[0] = a0; lvl_att_mdb[1] = a1; lvl_rxg_db = g;
+	(void)a1;
+	lvl_att_mdb[0] = a0; lvl_att_mdb[1] = GNSS_L1_TX2_ATTEN_MDB; lvl_rxg_db = g;   /* 4.9.13: TX2 never adopted */
 	lvl_on = 1;
 }
 
@@ -1575,10 +1578,11 @@ static void levels_guard(void)
 	if(now - t_lvl_msg > us(10000000U) || lvl_repairs == 1U) {
 		t_lvl_msg = now;
 		stamp(now);
-		console_print("LEVEL LOCK: %s%s moved (RX1 %d / RX2 %d dB, TX1 %s / TX2 %s dB) -> back to RX %d dB, TX %s dB (repair #%lu)\n",
+		console_print("LEVEL LOCK: %s%s moved (RX1 %d / RX2 %d dB, TX1 %s / TX2 %s dB) -> back to RX %d dB, TX1 %s dB, TX2 %s dB (repair #%lu)\n",
 			      (char*)(bad_g ? "RX gain" : ""), (char*)(bad_a ? (bad_g ? " + TX attenuation" : "TX attenuation") : ""),
 			      (long)g1, (long)g2, fmt((double)a[0] / 1000.0, 2, 0), fmt((double)a[1] / 1000.0, 2, 0),
-			      (long)lvl_rxg_db, fmt((double)lvl_att_mdb[0] / 1000.0, 2, 0), (unsigned long)lvl_repairs);
+			      (long)lvl_rxg_db, fmt((double)lvl_att_mdb[0] / 1000.0, 2, 0), fmt((double)lvl_att_mdb[1] / 1000.0, 2, 0),
+			      (unsigned long)lvl_repairs);
 	}
 }
 
@@ -1589,14 +1593,16 @@ void gnss_band_levels(void)
 	const struct band_cfg *c = &bands[band];
 	int r = 0;
 	if(!ad9361_phy) return;
-	r |= ad9361_set_tx_attenuation(ad9361_phy, 0, c->att_mdb);
-	r |= ad9361_set_tx_attenuation(ad9361_phy, 1, c->att_mdb);
+	r |= ad9361_set_tx_attenuation(ad9361_phy, 0, c->att_mdb);                /* the band's value: TX1 only */
+	r |= ad9361_set_tx_attenuation(ad9361_phy, 1, GNSS_L1_TX2_ATTEN_MDB);      /* 4.9.13: TX2 always 89.75 dB */
 	gnss_rxg_set_gain(c->rxg_db);
-	lvl_att_mdb[0] = lvl_att_mdb[1] = c->att_mdb;
+	lvl_att_mdb[0] = c->att_mdb;
+	lvl_att_mdb[1] = GNSS_L1_TX2_ATTEN_MDB;
 	lvl_rxg_db = c->rxg_db;
 	lvl_on = 1;
-	console_print("GNSS_BAND %d levels: TX1/TX2 attenuation %s dB, RX1/RX2 gain %d dB%s\n", (long)band,
-		      fmt((double)c->att_mdb / 1000.0, 2, 0), (long)c->rxg_db, (char*)(r ? "  (the AD9361 refused part of it)" : ""));
+	console_print("GNSS_BAND %d levels: TX1 attenuation %s dB, TX2 %s dB (fixed, not used), RX1/RX2 gain %d dB%s\n", (long)band,
+		      fmt((double)c->att_mdb / 1000.0, 2, 0), fmt((double)GNSS_L1_TX2_ATTEN_MDB / 1000.0, 2, 0),
+		      (long)c->rxg_db, (char*)(r ? "  (the AD9361 refused part of it)" : ""));
 }
 
 int gnss_band_set(int b)
@@ -1845,7 +1851,7 @@ void gnss_band_print(void)
 			      f1(g->f - (double)lo / 1e6),
 			      (char*)cover_txt(sig_cover(g, (double)lo / 1e6, (double)fs / 1e6, (double)bw / 1e6)));
 	}
-	console_print("  profiles (gnss_band=N), LO / rate / RF bandwidth / TX attenuation / RX gain:\n");
+	console_print("  profiles (gnss_band=N), LO / rate / RF bandwidth / TX1 attenuation / RX gain (TX2 always 89.75 dB):\n");
 	for(i = 0; i < GNSS_BAND_COUNT; i++)
 		console_print("    %d = %s MHz, %s MS/s, %s MHz, %s dB, %d dB%s\n", (long)i, f3u((double)bands[i].lo / 1e6),
 			      f2u((double)bands[i].fs / 1e6), f1u((double)bands[i].bw / 1e6),

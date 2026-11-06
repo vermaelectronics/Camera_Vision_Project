@@ -244,6 +244,10 @@ int32_t gnss_l1_set_tx_attenuation(struct ad9361_rf_phy *phy, uint32_t mdB)
     }
     printf("gnss_l1: TX1 attenuation set to %u mdB (read back %u mdB)\n",
            (unsigned)mdB, (unsigned)back);
+    /* 4.9.13: TX2 is not used and stays at the quietest setting (GNSS_L1_TX2_ATTEN_MDB). */
+    if (ad9361_set_tx_attenuation(phy, 1, GNSS_L1_TX2_ATTEN_MDB) != 0) {
+        printf("gnss_l1: WARNING could not hold TX2 at %u mdB\n", (unsigned)GNSS_L1_TX2_ATTEN_MDB);
+    }
     return GNSS_L1_OK;
 }
 

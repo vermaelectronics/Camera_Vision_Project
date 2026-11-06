@@ -995,10 +995,13 @@ void set_tx2_attenuation(double* param, char param_no) // "tx1_attenuation=" com
 
 	if(param_no >= 1)
 	{
+		/* 4.9.13: TX2 is not used and is fixed at the quietest setting (GNSS_L1_TX2_ATTEN_MDB). */
 		attenuation_mdb = param[0];
-		ad9361_set_tx_attenuation(ad9361_phy, 1, attenuation_mdb);
-		gnss_levels_adopt();
-		console_print("tx2_attenuation=%d\n", attenuation_mdb);
+		ad9361_set_tx_attenuation(ad9361_phy, 1, GNSS_L1_TX2_ATTEN_MDB);
+		if(attenuation_mdb != GNSS_L1_TX2_ATTEN_MDB)
+			console_print("tx2_attenuation: TX2 is not used in this build and stays at %d mdB (asked %d)\n",
+				      (int)GNSS_L1_TX2_ATTEN_MDB, (int)attenuation_mdb);
+		console_print("tx2_attenuation=%d\n", (int)GNSS_L1_TX2_ATTEN_MDB);
 	}
 	else
 		show_invalid_param_message(1);

@@ -73,6 +73,13 @@
  * Step DOWN from here while watching the receiver. Never start below it. */
 #define GNSS_L1_TX_MAX_ATTEN_MDB         89750U    /* 89.75 dB = quietest     */
 
+/* 4.9.13: TX2 is not used (only TX1 feeds the GNSS receiver). It carried RX2's
+ * raw, unfiltered samples (CONTROL[3] ch1_copy = 0) at the band's attenuation
+ * and could leak the full jammer back into the antennas. It is now held at
+ * the quietest setting at all times: after ad9361_init, on every TX1 change,
+ * by the band presets and by the level lock; tx2_attenuation= cannot change it. */
+#define GNSS_L1_TX2_ATTEN_MDB            GNSS_L1_TX_MAX_ATTEN_MDB   /* always 89.75 dB */
+
 /* --------------------------------------------------------------------------
  *  Deployment (SD-card, unattended) TX attenuation. GNSS-CRPA MOD-8.
  *

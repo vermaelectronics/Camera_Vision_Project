@@ -688,6 +688,11 @@ int main(void)
 	}
 	/* GNSS-CRPA MOD-4 END */
 
+	/* GNSS-CRPA 4.9.13: ad9361_init leaves BOTH TX channels at tx_attenuation_mdB
+	 * (10 dB). TX2 is not used: put it at the quietest setting at once, before
+	 * anything is routed to the DAC. It stays there (see GNSS_L1_TX2_ATTEN_MDB). */
+	ad9361_set_tx_attenuation(ad9361_phy, 1, GNSS_L1_TX2_ATTEN_MDB);
+
 	ad9361_set_tx_fir_config(ad9361_phy, tx_fir_config);
 	ad9361_set_rx_fir_config(ad9361_phy, rx_fir_config);
 

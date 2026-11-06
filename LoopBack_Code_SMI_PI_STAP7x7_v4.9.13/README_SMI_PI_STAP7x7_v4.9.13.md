@@ -10,6 +10,7 @@ Built from **4.9.12** (5 + 5 taps, level lock) with these changes:
 | 4 | **Zero weights while bypassed** (no jammer) | the filter multiplied every sample by the last jammer's weights for nothing |
 | 5 | **All 7 TIMING-54 critical warnings removed at their source** | see section 2 |
 | 6 | The mode text now shows the real tap count (`space-time 13 + 2 image taps`) | 4.9.12 printed "63 + 2" (the 32-tap layout) |
+| 6b | **TX2 fixed at 89750 mdB (89.75 dB, the quietest setting); the bands set TX1 only** | TX2 is not used, but it re-transmitted RX2's **raw, unfiltered** samples (jammer included, `CONTROL[3] ch1_copy = 0`) at the band's 10-30 dB attenuation; a leak back into the antennas that no filter can cancel. See section 3b |
 | 7 | HLS IP version **smi_pi 2.5**, `CORE_VERSION 0x0004090D` (prints 4.2317), `AJ_INFO 0x07040C07` | a stale 5 + 5 core or bitstream cannot be used by mistake |
 
 The SMI power-inversion algorithm itself (block SMI, Cholesky on the ARM, image taps,
@@ -133,6 +134,32 @@ rate was not changed.
 
 ---
 
+## 3b. TX2 is always at 89750 mdB (89.75 dB)
+
+Only **TX1** feeds the GNSS receiver. TX2 is not used.
+
+**The problem.** With `CONTROL[3]` (`ch1_copy`) = 0, `gnss_passthrough` fed TX2 with RX2's raw
+samples, jammer included. Until 4.9.12 the band presets set TX2 to the same 10-30 dB attenuation as
+TX1. On top of that, `ad9361_init` starts both TX outputs at 10 dB.
+
+**The fix (firmware only).** TX2 is held at `GNSS_L1_TX2_ATTEN_MDB` = `GNSS_L1_TX_MAX_ATTEN_MDB` =
+**89750 mdB**:
+
+| Where | What it does |
+|---|---|
+| `main.c` | right after `ad9361_init` |
+| `gnss_l1_set_tx_attenuation()` | on every TX1 change (safe start, `gnss_tx=`) |
+| `gnss_band_levels()` | the bands set **TX1 only** |
+| level lock | its TX2 target is always 89750, so if anything moves TX2 it is put back within 1 s |
+| `tx2_attenuation=` | no longer changes TX2: it answers `tx2_attenuation=89750` |
+
+`gnss_band?` now prints `TX1 nn dB`, and the band line says
+`TX1 attenuation nn dB, TX2 89.75 dB (fixed, not used)`.
+
+**Check on the board:** `tx2_attenuation?` must read **89750**.
+
+---
+
 ## 4. Why SMI power inversion, and not "normal" (LMS/NLMS) PI
 
 **Both are the same power inversion.** They minimise the output power with the RX1 reference
@@ -203,9 +230,11 @@ build (4.9.9) handles those.
    - `utilization_impl.rpt`: about 49 DSP48.
 4. `SD_Image/BOOT.BIN` is **not** included: the 4.9.12 file was a 5 + 5 bitstream. Build it
    with stage 9.
-5. On the board, `gnss_status?` must show version **4.2317**, layout **0x07040c07**, and
-   `mode: space-time 13 + 2 image taps`. The firmware refuses to start the filter on a
-   bitstream with another tap count.
+5. On the board:
+   - `gnss_status?` must show version **4.2317** and layout **0x07040c07**.
+   - `gnss_report?` must show `mode: space-time 13 + 2 image taps`.
+   - `tx2_attenuation?` must read **89750**.
+   The firmware refuses to start the filter on a bitstream with another tap count.
 
 **Firmware note:** the vendor demo commands `dds_*` no longer do anything, because the DDS is
 not in the bitstream. TX uses only DAC data source 2 (DMA = gnss_passthrough) or 3 (zero).
