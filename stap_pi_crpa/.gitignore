@@ -1,0 +1,9 @@
+__pycache__/
+.pytest_cache/
+*.pyc
+# simulation scratch (rtl_cosim.py uses a temp dir by default)
+*.vvp
+tb_out.txt
+tb_in.hex
+tb_w.hex
+octave-workspace
