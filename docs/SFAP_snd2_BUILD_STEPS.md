@@ -4,9 +4,53 @@ Package: `SFAP_snd2.zip` → `SFAP_snd2/{Source,Automation,README_SFAP.md}`
 Tools: **Vivado + Vitis + Vitis HLS 2023.2** (exactly 2023.2) on Linux (Ubuntu 20.04 / 22.04 or RHEL 8/9).
 Flow: `check → hls → ip → hdl → sw → boot`, all driven by `Automation/Linux/build_all.sh`.
 
-The examples use the default location from `env.sh`
-(`/home/manoranjan/CRPA_Project/SFAP/SFAP_snd2`). If you unzip somewhere else,
-change `SFAP_ROOT` in step 2. Nothing else needs editing.
+## ONE CLICK (recommended)
+
+The package in this repository (`SFAP_snd2/`) has a single script that does
+every step below by itself:
+
+```bash
+cd SFAP_snd2
+```
+
+```bash
+./BUILD_BOOT_BIN.sh
+```
+
+Result: `SFAP_snd2/Build/boot/BOOT.BIN` (log: `Build/logs/one_click.log`).
+
+| Option | Use |
+|---|---|
+| `--adi <dir>` | first run: copy the STAP project's `ADI_hdl_2023_r2` instead of cloning it from GitHub (faster) |
+| `--xilinx <dir>` | Xilinx install root if it is not `/tools/Xilinx`, `/opt/Xilinx` or `~/Xilinx` |
+| `--from <stage>` | resume after a failure (`check hls ip hdl sw boot`); the script prints the exact command |
+| `--skip-csim` | skip the 9 HLS C-simulation scenarios |
+| `--clean` | delete all build outputs first |
+| `--jtag` | after the build, program + run the board over JTAG |
+| `--make-launcher [options]` | create a **double-click icon** on the Desktop (and app menu) that runs the build with `[options]` |
+
+Double-click icon, made once:
+
+```bash
+./BUILD_BOOT_BIN.sh --make-launcher --adi /home/manoranjan/CRPA_Project/<STAP project>/Vendor/ADI_hdl_2023_r2
+```
+
+Then double-click **"SFAP: build BOOT.BIN"** on the Desktop (Ubuntu: right-click → *Allow Launching* the
+first time). A terminal opens, the build runs, and the `Build/boot` folder opens at the end.
+
+What it does for you: finds and sources Vivado / Vitis / Vitis HLS 2023.2 and
+**refuses any other Vivado version**, checks host packages, sets `SFAP_ROOT`
+to its own folder (works from any unzip location without spaces), gets the
+ADI HDL library on the first run, limits parallel library builds to the RAM
+available, then runs `check → hls → ip → hdl → sw → boot`.
+
+The rest of this document is the same flow done by hand.
+
+---
+
+The manual examples use `/home/manoranjan/CRPA_Project/SFAP/SFAP_snd2`. Since
+the fixes in this repository `SFAP_ROOT` defaults to the package's own folder,
+so the `export SFAP_ROOT=…` in step 2 is only needed if you want to override it.
 
 ---
 
@@ -99,11 +143,11 @@ vivado -version | head -1
 which vitis_hls xsct bootgen make
 ```
 
-`vivado -version` **must print v2023.2**. The ADI version check does not
-protect you here: `env.sh` always exports `ADI_IGNORE_VERSION_CHECK` (as `0`),
-and ADI's `scripts/adi_env.tcl` turns the check off whenever that variable
-*exists*, whatever its value. With another Vivado version the build carries on
-with only a CRITICAL WARNING and can fail much later.
+`vivado -version` **must print v2023.2**. (In the original zip, `env.sh`
+always exported `ADI_IGNORE_VERSION_CHECK=0`, and ADI's `scripts/adi_env.tcl`
+turns the check off whenever that variable *exists*, so a wrong version only
+gave a CRITICAL WARNING. The `env.sh` in this repository leaves it unset unless
+you set it to `1`, so ADI's check works again.)
 
 ---
 

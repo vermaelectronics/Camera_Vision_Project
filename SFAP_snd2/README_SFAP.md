@@ -105,6 +105,31 @@ The firmware's own suppression/residual figures now track the measured ones (sce
 
 ## 6. Build: sources → BOOT.BIN (Linux, Vivado/Vitis 2023.2)
 
+### One click
+
+```bash
+unzip SFAP_snd2.zip && cd SFAP_snd2
+./BUILD_BOOT_BIN.sh                  # -> Build/boot/BOOT.BIN
+```
+
+`BUILD_BOOT_BIN.sh` works from any unzip location (no spaces in the path). It
+finds and sources Xilinx 2023.2 (`/tools/Xilinx`, `/opt/Xilinx`, `~/Xilinx`,
+or `--xilinx <dir>`), refuses any other Vivado version, checks the host
+packages, sets `SFAP_ROOT` to its own folder, clones the ADI HDL library on the
+first run (or copies one with `--adi <dir>`), then runs every stage of
+`build_all.sh` below. Log: `Build/logs/one_click.log`. On failure it names the
+stage and the resume command (`./BUILD_BOOT_BIN.sh --from <stage>`).
+
+```bash
+./BUILD_BOOT_BIN.sh --adi /home/manoranjan/CRPA_Project/<STAP project>/Vendor/ADI_hdl_2023_r2   # reuse ADI tree (faster)
+./BUILD_BOOT_BIN.sh --from sw        # resume / rebuild from a stage
+./BUILD_BOOT_BIN.sh --clean          # fresh build
+./BUILD_BOOT_BIN.sh --make-launcher  # double-click icon on the Desktop (+ app menu)
+./BUILD_BOOT_BIN.sh --help
+```
+
+### Step by step (what the one-click script runs)
+
 ```bash
 # 0. put this package in place
 mkdir -p /home/manoranjan/CRPA_Project/SFAP

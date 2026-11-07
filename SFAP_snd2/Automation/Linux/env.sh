@@ -4,8 +4,12 @@
 #  Edit the defaults here or override any of them in the environment.
 # ============================================================================
 
-# Project root (the directory that holds Source/, Automation/, Vendor/, Build/)
-export SFAP_ROOT="${SFAP_ROOT:-/home/manoranjan/CRPA_Project/SFAP/SFAP_snd2}"
+# Project root (the directory that holds Source/, Automation/, Vendor/, Build/).
+# Default: two levels above this file, so the package works wherever it is
+# unzipped.
+_sfap_env_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export SFAP_ROOT="${SFAP_ROOT:-$(cd "$_sfap_env_dir/../.." && pwd)}"
+unset _sfap_env_dir
 
 # Xilinx 2023.2 install. settings64.sh of each tool is sourced if the tool is
 # not already on PATH.
@@ -29,8 +33,14 @@ export SFAP_LOG_DIR="${SFAP_LOG_DIR:-$SFAP_BUILD/logs}"
 
 # ADI checks the Vivado version against this.
 export REQUIRED_VIVADO_VERSION="${REQUIRED_VIVADO_VERSION:-2023.2}"
-# Set to 1 only if you deliberately run another Vivado version.
-export ADI_IGNORE_VERSION_CHECK="${ADI_IGNORE_VERSION_CHECK:-0}"
+# Set ADI_IGNORE_VERSION_CHECK=1 only if you deliberately run another Vivado
+# version. ADI's scripts/adi_env.tcl turns the check off whenever this variable
+# EXISTS (whatever its value), so it must be unset, not 0, to keep the check on.
+if [[ "${ADI_IGNORE_VERSION_CHECK:-0}" == "1" ]]; then
+  export ADI_IGNORE_VERSION_CHECK=1
+else
+  unset ADI_IGNORE_VERSION_CHECK
+fi
 
 # Parallel jobs for the ADI library builds.
 export SFAP_JOBS="${SFAP_JOBS:-4}"

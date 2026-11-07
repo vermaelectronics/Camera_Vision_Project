@@ -60,8 +60,12 @@ want() {
 # ---- tools ---------------------------------------------------------------------
 load_tool() {   # <command> <settings script>
   if ! command -v "$1" >/dev/null 2>&1 && [[ -f "$2" ]]; then
+    # The Xilinx settings scripts expand variables that may be unset
+    # (LD_LIBRARY_PATH, ...): under `set -u` that would end this script.
+    set +u
     # shellcheck disable=SC1090
     source "$2" >/dev/null 2>&1
+    set -u
   fi
 }
 load_tool vivado    "$XILINX_ROOT/Vivado/$XILINX_VER/settings64.sh"

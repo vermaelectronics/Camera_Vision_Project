@@ -9,7 +9,9 @@
 set -uo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$here/env.sh"
-command -v vitis_hls >/dev/null 2>&1 || source "$XILINX_ROOT/Vitis_HLS/$XILINX_VER/settings64.sh" >/dev/null 2>&1
+if ! command -v vitis_hls >/dev/null 2>&1; then
+  set +u; source "$XILINX_ROOT/Vitis_HLS/$XILINX_VER/settings64.sh" >/dev/null 2>&1; set -u
+fi
 inc="${XILINX_HLS:-$XILINX_ROOT/Vitis_HLS/$XILINX_VER}/include"
 [[ -f "$inc/ap_int.h" ]] || { echo "ap_int.h not found in $inc"; exit 2; }
 S="$SFAP_ROOT/Source"; out="$SFAP_BUILD/csim_gcc"; mkdir -p "$out"
