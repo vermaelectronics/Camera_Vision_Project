@@ -79,6 +79,17 @@ report `already ...`.
 Extract it **on the Linux build machine** with `unzip`. Windows tools lose the
 symlinks and execute permissions that the Linux and U-Boot trees need.
 
+If you received the zip as two parts (`.zip.part1`, `.zip.part2`), join them
+first and check the result against `SHA256SUMS.txt`:
+
+```bash
+cat antsdr-e310-fw-v0.39-full-src.zip.part1 antsdr-e310-fw-v0.39-full-src.zip.part2 > antsdr-e310-fw-v0.39-full-src.zip
+```
+
+```bash
+sha256sum -c --ignore-missing SHA256SUMS.txt
+```
+
 ```bash
 unzip antsdr-e310-fw-v0.39-full-src.zip
 ```
