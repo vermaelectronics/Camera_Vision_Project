@@ -36,6 +36,17 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FW_DIR="$ROOT/plutosdr-fw"
 PATCH_DIR="$ROOT/patch"
 
+# ADI's hdl scripts take their library folder from ADI_HDL_DIR / ADI_GHDL_DIR
+# when these are set (e.g. left over from another ADI or SMI-PI project in
+# ~/.bashrc). This build must use plutosdr-fw/hdl only.
+for _v in ADI_HDL_DIR ADI_GHDL_DIR GNSS_CRPA_IP_REPO; do
+	if [ -n "${!_v:-}" ]; then
+		echo "build.sh: ignoring $_v=${!_v} (this build uses its own plutosdr-fw/hdl)" >&2
+		unset "$_v"
+	fi
+done
+unset _v
+
 # Everything below must reach make through the environment (see run_make).
 export TARGET="${TARGET:-ant}"
 export VIVADO_SETTINGS="${VIVADO_SETTINGS:-$ROOT/xilinx_env.sh}"
@@ -162,6 +173,9 @@ cmd_check() {
 		warn "sourcing settings64.sh: buildroot can break with Xilinx tools on PATH."
 	else
 		ok "Xilinx tools not on PATH (good: the Makefile sources them when needed)"
+	fi
+	if grep -qs "ADI_HDL_DIR\|ADI_GHDL_DIR" ~/.bashrc ~/.profile 2>/dev/null; then
+		warn "~/.bashrc or ~/.profile sets ADI_HDL_DIR/ADI_GHDL_DIR (another project); build.sh ignores it"
 	fi
 	[ -z "${LD_LIBRARY_PATH:-}" ] || warn "LD_LIBRARY_PATH is set; buildroot may refuse to build (unset LD_LIBRARY_PATH)"
 	[ "$(id -u)" != 0 ] || warn "running as root: not needed, files will be owned by root"

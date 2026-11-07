@@ -513,6 +513,7 @@ The service:
 | `vivado not found after sourcing xilinx_env.sh` | `export XILINX_DIR=<folder containing Vivado/2023.2>` |
 | `xsct not found` | Install **Vitis** 2023.2. Vivado alone does not provide `xsct`. |
 | `ERROR: vivado version mismatch; expected 2023.2` | ADI hdl requires exactly 2023.2. `ADI_IGNORE_VERSION_CHECK=1` downgrades this to a warning, but other versions are not supported. |
+| `IP definition not found for VLNV: user.org:user:axi_vcxo_ctrl:1.0`, and `ant_vivado.log` shows "Loaded user IP repository" pointing at another project | `ADI_HDL_DIR` was set by another project (e.g. in `~/.bashrc`). `build.sh` now ignores it. Rebuild the HDL libraries: `./build.sh make -C hdl/projects/ant clean-all`, then `./build.sh firmware`. |
 | `ERROR: Timing Constraints NOT met!` | See `hdl/projects/ant/timing_impl.log`. The XSA is written as `ant.sdk/system_top_bad_timing.xsa`. |
 | `Building <lib> library ... FAILED` | See `hdl/library/<lib>/<lib>_ip.log` |
 | `libtinfo.so.5: cannot open shared object file` | `sudo apt-get install libtinfo5 libncurses5`. These exist on Ubuntu 20.04/22.04 but not on 24.04, which is one reason to use 22.04. |
