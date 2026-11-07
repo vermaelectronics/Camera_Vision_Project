@@ -175,7 +175,7 @@ cmd_check() {
 		ok "Xilinx tools not on PATH (good: the Makefile sources them when needed)"
 	fi
 	if grep -qs "ADI_HDL_DIR\|ADI_GHDL_DIR" ~/.bashrc ~/.profile 2>/dev/null; then
-		warn "~/.bashrc or ~/.profile sets ADI_HDL_DIR/ADI_GHDL_DIR (another project); build.sh ignores it"
+		warn "$HOME/.bashrc or $HOME/.profile sets ADI_HDL_DIR/ADI_GHDL_DIR (another project); build.sh ignores it"
 	fi
 	[ -z "${LD_LIBRARY_PATH:-}" ] || warn "LD_LIBRARY_PATH is set; buildroot may refuse to build (unset LD_LIBRARY_PATH)"
 	[ "$(id -u)" != 0 ] || warn "running as root: not needed, files will be owned by root"
