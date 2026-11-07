@@ -429,10 +429,12 @@ E1. GLONASS (about 1602 MHz) and BeiDou B1I (1561 MHz) fall outside it.
 |---|---|
 | `gnss_passthrough not found at 0x43C10000` | The board runs a bitstream without the `0002` patch. Rebuild and flash/copy the new files. |
 | `DAC did not accept the DMA source` | The DAC core ignored the data-source write. Run `gnss_loopback status` and report it. |
-| `no RX samples are reaching the passthrough` | The AD9361 is not streaming. Check `ensm_mode` is `fdd` and the radio initialised (`dmesg | grep ad9361`). |
+| `the AD9361 is not delivering RX samples` | The AD9361 is not streaming. Check `ensm_mode` is `fdd` and the radio initialised (`dmesg | grep ad9361`). |
+| `RX1 channels are disabled in the AD9361 ADC core` | An IIO capture switched RX1 off and the command could not switch it back on. Report the `gnss_loopback status` output. |
+| `passthrough buffer is empty` or `TX samples are not changing` | Samples are not flowing through `gnss_passthrough`. Report the `gnss_loopback status` output. |
 | `could not set in_voltage0_rf_port_select` | The driver did not move to the low-band port. Report the `gnss_loopback status` output. |
 | Viewer shows no satellites | Check RSSI and gain in `gnss_loopback status`. Try `gnss_loopback start 60`, check the antenna gets power, and check that the DC block and attenuator are in the TX1 path. |
-| Loopback stops after using IIO Oscilloscope or another TX app | Those tools change the DAC source. Run `gnss_loopback start` again. |
+| Loopback stops after using IIO Oscilloscope or another IIO app | Those tools change the DAC source, and a capture that leaves out RX1 switches RX1 off in the ADC core. Run `gnss_loopback start` again; it sets both back. |
 
 ---
 

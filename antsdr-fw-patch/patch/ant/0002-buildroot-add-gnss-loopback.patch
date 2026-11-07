@@ -1,24 +1,26 @@
-From 0b37a38c6ca6b40af97e567d43b0b047dbeb8739 Mon Sep 17 00:00:00 2001
+From 811db968a99d7ff9d1caa167e84e5e79fb7a9421 Mon Sep 17 00:00:00 2001
 From: Claude <noreply@anthropic.com>
 Date: Sat, 7 Nov 2026 07:42:23 +0000
 Subject: [PATCH] ant: add gnss_loopback command
 
 /usr/sbin/gnss_loopback start|stop|status configures the AD9361 for
 GPS L1 (LO 1575.42 MHz on RX and TX, 30.72 MS/s, 18 MHz, FDD, slow
-AGC), points the DAC at the gnss_passthrough output, enables the
-passthrough at 0x43C1_0000 and ramps TX attenuation down to 70 dB.
+AGC), makes sure RX1 I/Q are enabled in the ADC core (an IIO capture
+that leaves out RX1 clears them), points the DAC at the gnss_passthrough
+output, enables the passthrough at 0x43C1_0000, checks that samples
+really flow through its buffer, and ramps TX attenuation down to 70 dB.
 ---
- board/ant/gnss_loopback | 172 ++++++++++++++++++++++++++++++++++++++++
+ board/ant/gnss_loopback | 196 ++++++++++++++++++++++++++++++++++++++++
  board/ant/post-build.sh |   1 +
- 2 files changed, 173 insertions(+)
+ 2 files changed, 197 insertions(+)
  create mode 100755 board/ant/gnss_loopback
 
 diff --git a/board/ant/gnss_loopback b/board/ant/gnss_loopback
 new file mode 100755
-index 00000000..9345a882
+index 00000000..e1d8ae5a
 --- /dev/null
 +++ b/board/ant/gnss_loopback
-@@ -0,0 +1,172 @@
+@@ -0,0 +1,196 @@
 +#!/bin/sh
 +#
 +# gnss_loopback - ANTSDR E310 GPS L1 RF loopback (RX1 -> FPGA -> TX1)
@@ -44,6 +46,7 @@ index 00000000..9345a882
 +#   GNSS_LB_BW_HZ    RF bandwidth RX and TX   (default 18000000)
 +
 +PT_BASE=0x43C10000         # gnss_passthrough registers
++ADC_BASE=0x79020000        # AD9361 ADC core (cf-ad9361-lpc)
 +DAC_BASE=0x79024000        # AD9361 DAC core (cf-ad9361-dds-core-lpc)
 +PT_ID_EXPECTED=0x47435031  # "GCP1"
 +
@@ -94,6 +97,18 @@ index 00000000..9345a882
 +	wr $((DAC_BASE + 0x44)) 1        # sync
 +}
 +
++adc_rx1_enable() {
++	# gnss_passthrough only buffers RX samples while the ADC core's channel
++	# enable is set (adc_enable_i0/q0). Linux sets it for every channel at
++	# boot, but an IIO capture that leaves out RX1 clears it and keeps it
++	# cleared. Set ENABLE (bit 0) on channels 0 and 1, keep the other bits.
++	for c in 0 1; do
++		a=$((ADC_BASE + 0x400 + c * 0x40))
++		v=$(rd $a) || die "cannot read ADC channel $c control"
++		wr $a $(( v | 1 ))
++	done
++}
++
 +set_atten() {    # set_atten <dB>  (positive = attenuation)
 +	set_attr out_voltage0_hardwaregain "-$1"
 +}
@@ -141,17 +156,26 @@ index 00000000..9345a882
 +	[ "$(get_attr in_voltage0_rf_port_select)" = "$want_rx" ] || set_attr in_voltage0_rf_port_select $want_rx
 +	[ "$(get_attr out_voltage0_rf_port_select)" = "$want_tx" ] || set_attr out_voltage0_rf_port_select $want_tx
 +
-+	# 4. DAC takes the DMA-port data, which gnss_passthrough drives
++	# 4. RX1 I/Q enabled in the ADC core; DAC takes the DMA-port data,
++	#    which gnss_passthrough drives
++	adc_rx1_enable
 +	dac_source 2
 +
-+	# 5. Passthrough on
++	# 5. Passthrough on, then prove samples really go through it
 +	wr $((PT_BASE + 0x0C)) 1
 +	sleep 0.1
 +	st=$(rd $((PT_BASE + 0x10)))
 +	[ $(( (st >> 16) & 1 )) -eq 1 ] || die "passthrough did not turn on (STATUS $st)"
++	[ $(( st & 3 )) -eq 3 ]         || die "RX1 channels are disabled in the AD9361 ADC core (STATUS $st)"
 +	[ $(( (st >> 2) & 3 )) -eq 3 ]  || die "DAC did not accept the DMA source (STATUS $st)"
 +	rx1=$(rd $((PT_BASE + 0x14))); sleep 0.1; rx2=$(rd $((PT_BASE + 0x14)))
-+	[ $((rx2)) -ne $((rx1)) ] || die "no RX samples are reaching the passthrough (RX_COUNT stuck at $rx1)"
++	[ $((rx2)) -ne $((rx1)) ] || die "the AD9361 is not delivering RX samples (RX_COUNT stuck at $rx1)"
++	lvl=$(( $(rd $((PT_BASE + 0x2C))) & 0x3F ))
++	[ "$lvl" -gt 0 ] || die "passthrough buffer is empty: RX samples are not being written into it"
++	tx1=$(rd $((PT_BASE + 0x28))); sleep 0.05; tx2=$(rd $((PT_BASE + 0x28)))
++	[ $((tx1)) -ne $((tx2)) ] || die "TX samples are not changing (TX_SNAPSHOT stuck at $tx1)"
++	u1=$(rd $((PT_BASE + 0x20))); sleep 0.1; u2=$(rd $((PT_BASE + 0x20)))
++	[ $((u1)) -eq $((u2)) ] || info "WARNING: buffer underflows are still counting ($((u1)) -> $((u2))); RX and TX rates differ"
 +
 +	# 6. Bring TX up to the requested level
 +	ramp_atten "$atten"
@@ -176,7 +200,9 @@ index 00000000..9345a882
 +	ctrl=$(rd $((PT_BASE + 0x0C)))
 +	st=$(rd $((PT_BASE + 0x10)))
 +	echo "passthrough   : $( [ $((ctrl & 1)) -eq 1 ] && echo ON || echo OFF ) (CONTROL $ctrl, STATUS $st)"
++	echo "RX1 in ADC    : $( [ $(( st & 3 )) -eq 3 ] && echo enabled || echo DISABLED )"
 +	echo "DAC source    : $( [ $(( (st >> 2) & 3 )) -eq 3 ] && echo "DMA/passthrough" || echo "DDS/other" )"
++	echo "buffer level  : $(( $(rd $((PT_BASE + 0x2C))) & 0x3F )) of 32"
 +	echo "RX / TX count : $(( $(rd $((PT_BASE + 0x14))) )) / $(( $(rd $((PT_BASE + 0x18))) ))"
 +	echo "over / under  : $(( $(rd $((PT_BASE + 0x1C))) )) / $(( $(rd $((PT_BASE + 0x20))) ))"
 +	echo "RX LO / TX LO : $(get_attr out_altvoltage0_RX_LO_frequency) / $(get_attr out_altvoltage1_TX_LO_frequency) Hz"

@@ -265,6 +265,16 @@ cmd_patch() {
 	fi
 	if [ -f "$PATCH_DIR/$TARGET/0002-buildroot-add-gnss-loopback.patch" ]; then
 		br_series+=("$PATCH_DIR/$TARGET/0002-buildroot-add-gnss-loopback.patch")
+		# An earlier version of this patch installed an older gnss_loopback.
+		# Remove only what it added (the script and its install line), so
+		# the current version applies without resetting the whole tree.
+		local br="$FW_DIR/buildroot"
+		if [ -f "$br/board/ant/gnss_loopback" ] &&
+		   ! git -C "$br" apply --reverse --check "${br_series[-1]}" 2>/dev/null; then
+			info "Replacing an earlier gnss_loopback with the current version"
+			rm -f "$br/board/ant/gnss_loopback"
+			sed -i '/BOARD_DIR}\/gnss_loopback /d' "$br/board/ant/post-build.sh"
+		fi
 	fi
 	apply_series "$FW_DIR/hdl"         "${hdl_series[@]}"
 	apply_series "$FW_DIR/u-boot-xlnx" "$PATCH_DIR/$TARGET/0001-add-support-uboot.patch"
