@@ -71,6 +71,35 @@ sudo apt-get remove libfdt-dev
 
 ## 3. Get the sources
 
+**Option A: full source zip** (`antsdr-e310-fw-v0.39-full-src.zip`). This zip
+already contains `plutosdr-fw/` with all four submodules at the pinned commits,
+patched for the E310. In Step 2 and Step 3 below, `fetch` and `patch` just
+report `already ...`.
+
+Extract it **on the Linux build machine** with `unzip`. Windows tools lose the
+symlinks and execute permissions that the Linux and U-Boot trees need.
+
+```bash
+unzip antsdr-e310-fw-v0.39-full-src.zip
+```
+
+```bash
+cd antsdr-fw-patch
+```
+
+**Option B: build kit zip or git clone.** These contain only the patches and
+scripts. Step 2 downloads the sources (about 300 MB).
+
+```bash
+unzip antsdr-e310-build-kit.zip
+```
+
+```bash
+cd antsdr-fw-patch
+```
+
+or
+
 ```bash
 git clone -b claude/happy-brown-uleqcf https://github.com/vermaelectronics/Camera_Vision_Project.git
 ```
@@ -80,6 +109,9 @@ Drop `-b claude/happy-brown-uleqcf` once this branch is merged into `main`.
 ```bash
 cd Camera_Vision_Project/antsdr-fw-patch
 ```
+
+Either way, the build still needs internet. In Step 6, buildroot downloads
+the Linaro toolchain and the rootfs package sources (about 1 GB).
 
 Use a **fresh terminal** for the build. Do **not** `source settings64.sh`
 yourself, because buildroot can break with the Xilinx tools on `PATH`. The
