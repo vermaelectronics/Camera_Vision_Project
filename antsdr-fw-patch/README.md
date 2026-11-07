@@ -1,6 +1,11 @@
 # antsdr-fw-patch
 This Repository is used to make Microphase software radio device firmware. 
 
+> **ANTSDR E310 with Vivado/Vitis 2023.2:** see [BUILD_E310.md](BUILD_E310.md).
+> `./build.sh all` fetches the pinned plutosdr-fw v0.39 sources, applies these
+> patches and builds everything up to `boot.bin` / SD-card `BOOT.bin`. The
+> original vendor instructions follow below.
+
 
 
 ## Build Instructions

@@ -25,3 +25,6 @@ xsim.dir/
 !*.tcl
 !*.xdc
 !*.sdc
+
+# ANTSDR firmware: sources fetched by antsdr-fw-patch/build.sh and build outputs
+antsdr-fw-patch/plutosdr-fw/
