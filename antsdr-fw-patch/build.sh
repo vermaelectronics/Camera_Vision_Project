@@ -3,7 +3,8 @@
 # ANTSDR firmware build helper - Vivado/Vitis 2023.2, ADI plutosdr-fw v0.39
 #
 # Default target is the ANTSDR E310 (TARGET=ant). E200 / E310v2 work the same
-# way with TARGET=e200 / TARGET=e310v2.
+# way with TARGET=e200 / TARGET=e310v2. For TARGET=ant the firmware also
+# includes the GPS L1 RX1 -> FPGA -> TX1 loopback (BUILD_E310.md section 7).
 #
 #   ./build.sh deps       install Ubuntu build packages (uses sudo apt-get)
 #   ./build.sh check      check host tools and Vivado/Vitis 2023.2
@@ -217,19 +218,33 @@ cmd_fetch() {
 # --------------------------------------------------------------------------
 # patch
 # --------------------------------------------------------------------------
-apply_patch() {
-	local dir="$1" patch="$2" name
-	name="${patch#"$PATCH_DIR"/}"
-	[ -f "$patch" ] || die "missing patch file $patch"
-	if git -C "$dir" apply --check "$patch" 2>/dev/null; then
-		git -C "$dir" apply --whitespace=nowarn "$patch"
-		ok "applied         $name"
-	elif git -C "$dir" apply --reverse --check "$patch" 2>/dev/null; then
-		ok "already applied $name"
-	else
-		git -C "$dir" apply --check "$patch" || true
-		die "$name does not apply to ${dir#"$ROOT"/} (modified sources or another TARGET was patched); run './build.sh reset'"
-	fi
+apply_series() {
+	# apply_series <dir> <patch>...  Apply patches in order, skipping those
+	# already applied. Later patches may edit files an earlier one created,
+	# so "already applied" is decided from the newest patch backwards: once
+	# patch N reverses cleanly, patches 1..N are in place.
+	local dir="$1"; shift
+	local patches=("$@") n=$# start=0 i name p
+	for p in "${patches[@]}"; do [ -f "$p" ] || die "missing patch file $p"; done
+	for ((i = n - 1; i >= 0; i--)); do
+		if git -C "$dir" apply --reverse --check "${patches[i]}" 2>/dev/null; then
+			start=$((i + 1))
+			break
+		fi
+	done
+	for ((i = 0; i < n; i++)); do
+		p="${patches[i]}"
+		name="${p#"$PATCH_DIR"/}"
+		if [ "$i" -lt "$start" ]; then
+			ok "already applied $name"
+		elif git -C "$dir" apply --check "$p" 2>/dev/null; then
+			git -C "$dir" apply --whitespace=nowarn "$p"
+			ok "applied         $name"
+		else
+			git -C "$dir" apply --check "$p" || true
+			die "$name does not apply to ${dir#"$ROOT"/} (modified sources or another TARGET was patched); run './build.sh reset'"
+		fi
+	done
 }
 
 cmd_patch() {
@@ -241,11 +256,21 @@ cmd_patch() {
 		[ -e "$FW_DIR/$path/.git" ] || die "$path missing; run './build.sh fetch'"
 	done
 	info "Applying ANTSDR patches for TARGET=$TARGET"
-	apply_patch "$FW_DIR/hdl"         "$PATCH_DIR/0001-add-three-ant-hdl-support-bump-to-v0.39-v1.patch"
-	apply_patch "$FW_DIR/u-boot-xlnx" "$PATCH_DIR/$TARGET/0001-add-support-uboot.patch"
-	apply_patch "$FW_DIR/linux"       "$PATCH_DIR/$TARGET/0001-add-support-linux.patch"
-	apply_patch "$FW_DIR/buildroot"   "$PATCH_DIR/$TARGET/0001-add-support-buildroot.patch"
-	apply_patch "$FW_DIR"             "$PATCH_DIR/$TARGET/0001-add-support-makefile-scripts.patch"
+	# 0002-* (ant only): GPS L1 RX1 -> FPGA -> TX1 loopback (gnss_passthrough
+	# in the FPGA, /usr/sbin/gnss_loopback in Linux). See BUILD_E310.md.
+	local hdl_series=("$PATCH_DIR/0001-add-three-ant-hdl-support-bump-to-v0.39-v1.patch")
+	local br_series=("$PATCH_DIR/$TARGET/0001-add-support-buildroot.patch")
+	if [ -f "$PATCH_DIR/$TARGET/0002-hdl-add-gnss-passthrough.patch" ]; then
+		hdl_series+=("$PATCH_DIR/$TARGET/0002-hdl-add-gnss-passthrough.patch")
+	fi
+	if [ -f "$PATCH_DIR/$TARGET/0002-buildroot-add-gnss-loopback.patch" ]; then
+		br_series+=("$PATCH_DIR/$TARGET/0002-buildroot-add-gnss-loopback.patch")
+	fi
+	apply_series "$FW_DIR/hdl"         "${hdl_series[@]}"
+	apply_series "$FW_DIR/u-boot-xlnx" "$PATCH_DIR/$TARGET/0001-add-support-uboot.patch"
+	apply_series "$FW_DIR/linux"       "$PATCH_DIR/$TARGET/0001-add-support-linux.patch"
+	apply_series "$FW_DIR/buildroot"   "${br_series[@]}"
+	apply_series "$FW_DIR"             "$PATCH_DIR/$TARGET/0001-add-support-makefile-scripts.patch"
 }
 
 # --------------------------------------------------------------------------

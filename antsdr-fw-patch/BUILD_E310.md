@@ -188,6 +188,8 @@ It then does a shallow fetch of each submodule at the commit v0.39 pins:
 | `patch/ant/0001-add-support-linux.patch` | `linux` | `zynq-ant.dts(i)`, `zynq_ant_defconfig`, `ad5660_mp` driver |
 | `patch/ant/0001-add-support-buildroot.patch` | `buildroot` | `zynq_ant_defconfig`, `board/ant/*` |
 | `patch/ant/0001-add-support-makefile-scripts.patch` | `plutosdr-fw` | `TARGET=ant`, `scripts/ant.its`, `make sdimg` |
+| `patch/ant/0002-hdl-add-gnss-passthrough.patch` | `hdl` | `library/gnss_passthrough` and its place in the `ant` block design (GPS L1 loopback, section 7) |
+| `patch/ant/0002-buildroot-add-gnss-loopback.patch` | `buildroot` | `/usr/sbin/gnss_loopback` command (section 7) |
 
 ### Step 4: Hardware (Vivado 2023.2): bitstream and XSA
 
@@ -332,7 +334,109 @@ sudo dfu-util -a uboot-env.dfu -D ./uboot-env.dfu
 
 ---
 
-## 7. Rebuilding and cleaning
+## 7. GPS L1 loopback: see satellites through a GNSS receiver
+
+The two `0002` patches give the E310 firmware the same RF loopback as the
+bare-metal `LoopBack_Pipeline_noCRPA` design:
+
+```text
+GPS antenna -> RX1 -> AD9361 -> FPGA gnss_passthrough -> AD9361 -> TX1
+            -> coax + attenuator + DC block -> GNSS receiver -> USB -> GNSS Viewer
+```
+
+* **FPGA:** `gnss_passthrough` sits between the `axi_ad9361` ADC outputs and
+  DAC inputs, and its registers are at `0x43C1_0000`. When it is off
+  (`pass_en = 0`, the power-up default), the DAC gets the normal DMA stream,
+  so IIO streaming works exactly as before.
+* **Linux:** `/usr/sbin/gnss_loopback` tunes RX and TX to 1575.42 MHz
+  (30.72 MS/s, 18 MHz bandwidth, FDD, slow AGC), points the DAC at the
+  passthrough, switches it on and steps TX down to 70 dB attenuation. The
+  device tree already selects the E310's low-band RF path below 3 GHz; the
+  command reads the ports back to confirm.
+
+### Build it
+
+`./build.sh patch` applies both patches automatically for `TARGET=ant`. If
+your sources are already patched and built, rebuild everything:
+
+```bash
+./build.sh patch
+```
+
+```bash
+./build.sh hdl
+```
+
+```bash
+./build.sh fsbl
+```
+
+```bash
+./build.sh firmware
+```
+
+```bash
+./build.sh sdimg
+```
+
+`./build.sh all` does the same in one go. The HDL step builds the new
+`gnss_passthrough` library first. Its log is
+`plutosdr-fw/hdl/library/gnss_passthrough/gnss_passthrough_ip.log`.
+
+### Connect
+
+| Port | Connect to |
+|---|---|
+| RX1 | Active GPS L1 antenna, with a bias-tee if it needs power |
+| TX1 | Attenuator, then a DC block, then the GNSS receiver's antenna input. Many receivers put about 3.3 V on that input. |
+| Receiver USB | Laptop running GNSS Viewer |
+
+**TX1 must reach the receiver through coax and an attenuator, never an
+antenna.** Transmitting on GNSS frequencies over the air is illegal in most
+countries.
+
+### Run it
+
+Boot the new firmware, then log in (`root` / `analog`) over SSH or the serial
+console:
+
+```bash
+ssh root@192.168.1.10
+```
+
+On the board:
+
+| Command | Does |
+|---|---|
+| `gnss_loopback start` | Starts the loopback at 70 dB TX attenuation (about −63 dBm) |
+| `gnss_loopback start 60` | Same, at 60 dB. Allowed range is 30–89.75 dB; a larger number is quieter. |
+| `gnss_loopback status` | LO, rate, ports, gain, RSSI, passthrough state and sample counters |
+| `gnss_loopback stop` | TX to minimum, passthrough off, normal TX path back |
+
+To start the loopback at every boot (the file is kept in flash):
+
+```bash
+echo "gnss_loopback start" > /mnt/jffs2/autorun.sh
+```
+
+GNSS Viewer should then show the satellites, as it does with the bare-metal
+loopback. 18 MHz of bandwidth around 1575.42 MHz passes GPS L1 and Galileo
+E1. GLONASS (about 1602 MHz) and BeiDou B1I (1561 MHz) fall outside it.
+
+### If it doesn't work
+
+| Message or symptom | Meaning / fix |
+|---|---|
+| `gnss_passthrough not found at 0x43C10000` | The board runs a bitstream without the `0002` patch. Rebuild and flash/copy the new files. |
+| `DAC did not accept the DMA source` | The DAC core ignored the data-source write. Run `gnss_loopback status` and report it. |
+| `no RX samples are reaching the passthrough` | The AD9361 is not streaming. Check `ensm_mode` is `fdd` and the radio initialised (`dmesg | grep ad9361`). |
+| `could not set in_voltage0_rf_port_select` | The driver did not move to the low-band port. Report the `gnss_loopback status` output. |
+| Viewer shows no satellites | Check RSSI and gain in `gnss_loopback status`. Try `gnss_loopback start 60`, check the antenna gets power, and check that the DC block and attenuator are in the TX1 path. |
+| Loopback stops after using IIO Oscilloscope or another TX app | Those tools change the DAC source. Run `gnss_loopback start` again. |
+
+---
+
+## 8. Rebuilding and cleaning
 
 * Re-running `./build.sh firmware` is incremental for Vivado, Linux and
   buildroot.
@@ -352,7 +456,7 @@ sudo dfu-util -a uboot-env.dfu -D ./uboot-env.dfu
 
 ---
 
-## 8. Troubleshooting
+## 9. Troubleshooting
 
 | Symptom | Fix |
 |---|---|
@@ -368,9 +472,12 @@ sudo dfu-util -a uboot-env.dfu -D ./uboot-env.dfu
 
 ---
 
-## 9. Changes compared with the vendor package
+## 10. Changes compared with the vendor package
 
 The vendor patches are **unchanged**. This folder adds:
+
+* `patch/ant/0002-*.patch`: the GPS L1 RX1 -> FPGA -> TX1 loopback
+  (section 7). With the loopback off, the firmware behaves as before.
 
 * `build.sh`: fetches sources at the pinned commits (the vendor zip has no
   `plutosdr-fw` submodule content), applies patches so they can be re-run,

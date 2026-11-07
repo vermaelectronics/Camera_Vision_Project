@@ -1,0 +1,208 @@
+From 0b37a38c6ca6b40af97e567d43b0b047dbeb8739 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sat, 7 Nov 2026 07:42:23 +0000
+Subject: [PATCH] ant: add gnss_loopback command
+
+/usr/sbin/gnss_loopback start|stop|status configures the AD9361 for
+GPS L1 (LO 1575.42 MHz on RX and TX, 30.72 MS/s, 18 MHz, FDD, slow
+AGC), points the DAC at the gnss_passthrough output, enables the
+passthrough at 0x43C1_0000 and ramps TX attenuation down to 70 dB.
+---
+ board/ant/gnss_loopback | 172 ++++++++++++++++++++++++++++++++++++++++
+ board/ant/post-build.sh |   1 +
+ 2 files changed, 173 insertions(+)
+ create mode 100755 board/ant/gnss_loopback
+
+diff --git a/board/ant/gnss_loopback b/board/ant/gnss_loopback
+new file mode 100755
+index 00000000..9345a882
+--- /dev/null
++++ b/board/ant/gnss_loopback
+@@ -0,0 +1,172 @@
++#!/bin/sh
++#
++# gnss_loopback - ANTSDR E310 GPS L1 RF loopback (RX1 -> FPGA -> TX1)
++#
++# Uses the gnss_passthrough block in the FPGA (antsdr-fw-patch 0002). The
++# samples never pass through Linux: this script only configures the AD9361 and
++# switches the passthrough on or off.
++#
++#   gnss_loopback start [TX_ATTEN_DB]   start the loopback (default 70 dB)
++#   gnss_loopback stop                  TX to minimum, normal TX path back
++#   gnss_loopback status                show radio and passthrough state
++#
++# Connect TX1 to the GNSS receiver through coax and an attenuator, never to an
++# antenna. Transmitting on GNSS frequencies over the air is illegal in most
++# countries.
++#
++# To start it at every boot:
++#   echo "gnss_loopback start" > /mnt/jffs2/autorun.sh
++#
++# Optional environment overrides:
++#   GNSS_LB_LO_HZ    LO for RX and TX         (default 1575420000)
++#   GNSS_LB_RATE_HZ  sample rate              (default 30720000)
++#   GNSS_LB_BW_HZ    RF bandwidth RX and TX   (default 18000000)
++
++PT_BASE=0x43C10000         # gnss_passthrough registers
++DAC_BASE=0x79024000        # AD9361 DAC core (cf-ad9361-dds-core-lpc)
++PT_ID_EXPECTED=0x47435031  # "GCP1"
++
++LO_HZ=${GNSS_LB_LO_HZ:-1575420000}
++RATE_HZ=${GNSS_LB_RATE_HZ:-30720000}
++BW_HZ=${GNSS_LB_BW_HZ:-18000000}
++DEFAULT_ATTEN_DB=70
++MIN_ATTEN_DB=30            # never louder than this (about -23 dBm)
++MAX_ATTEN_DB=89.75         # AD9361 maximum = quietest
++
++DEVMEM=${GNSS_LB_DEVMEM:-devmem}
++IIO=${GNSS_LB_IIO:-/sys/bus/iio/devices}
++
++die()  { echo "gnss_loopback: ERROR: $*" >&2; exit 1; }
++info() { echo "gnss_loopback: $*"; }
++
++hex()  { printf '0x%08X' "$1"; }
++rd()   { $DEVMEM "$(hex "$1")" 32; }
++wr()   { $DEVMEM "$(hex "$1")" 32 "$2"; }
++
++find_phy() {
++	for d in "$IIO"/iio:device*; do
++		[ "$(cat "$d/name" 2>/dev/null)" = "ad9361-phy" ] && { PHY=$d; return 0; }
++	done
++	die "ad9361-phy not found in $IIO (is the AD9361 driver loaded?)"
++}
++
++set_attr() {     # set_attr <file> <value>
++	echo "$2" > "$PHY/$1" 2>/dev/null || die "could not set $1 to $2"
++}
++
++get_attr() { cat "$PHY/$1" 2>/dev/null; }
++
++near() {         # near <a> <b> <tolerance>: |a-b| <= tol (integers)
++	d=$(( $1 - $2 )); [ $d -lt 0 ] && d=$(( -d )); [ $d -le "$3" ]
++}
++
++check_block() {
++	id=$(rd $PT_BASE) || die "cannot read $PT_BASE (devmem)"
++	[ $((id)) -eq $((PT_ID_EXPECTED)) ] || \
++		die "gnss_passthrough not found at $PT_BASE (read $id). Build the firmware with antsdr-fw-patch 0002."
++}
++
++dac_source() {   # dac_source <0=DDS|2=DMA>
++	for off in 0x418 0x458 0x498 0x4D8; do
++		wr $((DAC_BASE + off)) "$1"
++	done
++	wr $((DAC_BASE + 0x44)) 1        # sync
++}
++
++set_atten() {    # set_atten <dB>  (positive = attenuation)
++	set_attr out_voltage0_hardwaregain "-$1"
++}
++
++ramp_atten() {   # step down from the maximum to <dB> in 10 dB steps
++	target=$1
++	a=80
++	while awk "BEGIN{exit !($a > $target)}"; do
++		set_atten "$a"; sleep 0.2
++		a=$((a - 10))
++	done
++	set_atten "$target"
++}
++
++cmd_start() {
++	atten=${1:-$DEFAULT_ATTEN_DB}
++	awk "BEGIN{exit !($atten >= $MIN_ATTEN_DB && $atten <= $MAX_ATTEN_DB)}" || \
++		die "TX attenuation must be $MIN_ATTEN_DB..$MAX_ATTEN_DB dB (got $atten)"
++
++	find_phy
++	check_block
++
++	# 1. Quietest TX first, passthrough off while the radio is retuned
++	set_atten $MAX_ATTEN_DB
++	wr $((PT_BASE + 0x0C)) 0
++
++	# 2. Radio: FDD, L1 on both synthesisers, rate, bandwidth, RX AGC
++	set_attr ensm_mode fdd
++	set_attr out_altvoltage0_RX_LO_frequency "$LO_HZ"
++	set_attr out_altvoltage1_TX_LO_frequency "$LO_HZ"
++	set_attr in_voltage_sampling_frequency "$RATE_HZ"
++	set_attr in_voltage_rf_bandwidth "$BW_HZ"
++	set_attr out_voltage_rf_bandwidth "$BW_HZ"
++	set_attr in_voltage0_gain_control_mode slow_attack
++
++	rx_lo=$(get_attr out_altvoltage0_RX_LO_frequency)
++	tx_lo=$(get_attr out_altvoltage1_TX_LO_frequency)
++	near "$rx_lo" "$LO_HZ" 1000 || die "RX LO is $rx_lo Hz, wanted $LO_HZ"
++	near "$tx_lo" "$LO_HZ" 1000 || die "TX LO is $tx_lo Hz, wanted $LO_HZ"
++
++	# 3. Below 3 GHz the E310 uses the low-band path: AD9361 ports B.
++	#    The driver switches these with the LO (device tree band control).
++	if [ $(( LO_HZ < 3000000000 )) -eq 1 ]; then want_rx=B_BALANCED; want_tx=B
++	else want_rx=A_BALANCED; want_tx=A; fi
++	[ "$(get_attr in_voltage0_rf_port_select)" = "$want_rx" ] || set_attr in_voltage0_rf_port_select $want_rx
++	[ "$(get_attr out_voltage0_rf_port_select)" = "$want_tx" ] || set_attr out_voltage0_rf_port_select $want_tx
++
++	# 4. DAC takes the DMA-port data, which gnss_passthrough drives
++	dac_source 2
++
++	# 5. Passthrough on
++	wr $((PT_BASE + 0x0C)) 1
++	sleep 0.1
++	st=$(rd $((PT_BASE + 0x10)))
++	[ $(( (st >> 16) & 1 )) -eq 1 ] || die "passthrough did not turn on (STATUS $st)"
++	[ $(( (st >> 2) & 3 )) -eq 3 ]  || die "DAC did not accept the DMA source (STATUS $st)"
++	rx1=$(rd $((PT_BASE + 0x14))); sleep 0.1; rx2=$(rd $((PT_BASE + 0x14)))
++	[ $((rx2)) -ne $((rx1)) ] || die "no RX samples are reaching the passthrough (RX_COUNT stuck at $rx1)"
++
++	# 6. Bring TX up to the requested level
++	ramp_atten "$atten"
++
++	info "loopback ON: RX1 -> FPGA -> TX1 at $(get_attr out_altvoltage1_TX_LO_frequency) Hz"
++	info "TX attenuation $atten dB. TX1 must go to the receiver through coax and an attenuator."
++	cmd_status
++}
++
++cmd_stop() {
++	find_phy
++	set_atten $MAX_ATTEN_DB
++	check_block
++	wr $((PT_BASE + 0x0C)) 0
++	dac_source 0
++	info "loopback OFF (TX attenuation $MAX_ATTEN_DB dB, DAC back to its default source)"
++}
++
++cmd_status() {
++	find_phy
++	check_block
++	ctrl=$(rd $((PT_BASE + 0x0C)))
++	st=$(rd $((PT_BASE + 0x10)))
++	echo "passthrough   : $( [ $((ctrl & 1)) -eq 1 ] && echo ON || echo OFF ) (CONTROL $ctrl, STATUS $st)"
++	echo "DAC source    : $( [ $(( (st >> 2) & 3 )) -eq 3 ] && echo "DMA/passthrough" || echo "DDS/other" )"
++	echo "RX / TX count : $(( $(rd $((PT_BASE + 0x14))) )) / $(( $(rd $((PT_BASE + 0x18))) ))"
++	echo "over / under  : $(( $(rd $((PT_BASE + 0x1C))) )) / $(( $(rd $((PT_BASE + 0x20))) ))"
++	echo "RX LO / TX LO : $(get_attr out_altvoltage0_RX_LO_frequency) / $(get_attr out_altvoltage1_TX_LO_frequency) Hz"
++	echo "sample rate   : $(get_attr in_voltage_sampling_frequency) S/s, RF bandwidth $(get_attr in_voltage_rf_bandwidth) Hz"
++	echo "RX port / gain: $(get_attr in_voltage0_rf_port_select), $(get_attr in_voltage0_hardwaregain) ($(get_attr in_voltage0_gain_control_mode)), RSSI $(get_attr in_voltage0_rssi)"
++	echo "TX port / gain: $(get_attr out_voltage0_rf_port_select), $(get_attr out_voltage0_hardwaregain)"
++}
++
++case "$1" in
++	start)  shift; cmd_start "$@" ;;
++	stop)   cmd_stop ;;
++	status) cmd_status ;;
++	*)      sed -n '3,24p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
++esac
+diff --git a/board/ant/post-build.sh b/board/ant/post-build.sh
+index 03021a49..6d686c13 100755
+--- a/board/ant/post-build.sh
++++ b/board/ant/post-build.sh
+@@ -74,6 +74,7 @@ ${INSTALL} -D -m 0755 ${BOARD_DIR}/device_persistent_keys ${TARGET_DIR}/usr/sbin
+ ${INSTALL} -D -m 0755 ${BOARD_DIR}/device_format_jffs2 ${TARGET_DIR}/usr/sbin/
+ ${INSTALL} -D -m 0644 ${BOARD_DIR}/motd ${TARGET_DIR}/etc/
+ ${INSTALL} -D -m 0755 ${BOARD_DIR}/test_ensm_pinctrl.sh ${TARGET_DIR}/usr/sbin/
++${INSTALL} -D -m 0755 ${BOARD_DIR}/gnss_loopback ${TARGET_DIR}/usr/sbin/
+ ${INSTALL} -D -m 0644 ${BOARD_DIR}/device_config ${TARGET_DIR}/etc/
+ ${INSTALL} -D -m 0644 ${BOARD_DIR}/mdev.conf ${TARGET_DIR}/etc/
+ ${INSTALL} -D -m 0755 ${BOARD_DIR}/automounter.sh ${TARGET_DIR}/lib/mdev/automounter.sh
+-- 
+2.43.0
+
