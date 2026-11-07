@@ -6,7 +6,8 @@ of ADI `plutosdr-fw` v0.39:
 
 | Stage | Tool | Output |
 |---|---|---|
-| FPGA hardware design (AD9361 + ANTSDR VCXO/PPS logic, xc7z020clg400-2) | Vivado 2023.2 | `system_top.xsa`, `system_top.bit` |
+| SMI-PI anti-jam filter core `smi_pi` (E310 only) | Vitis HLS 2023.2 | `hdl/library/antsdr_ip/smi_pi` IP |
+| FPGA hardware design (AD9361 LVDS 2R2T + ANTSDR VCXO/PPS logic + GNSS anti-jam, xc7z020clg400-2) | Vivado 2023.2 | `system_top.xsa`, `system_top.bit` |
 | First-stage boot loader | Vitis 2023.2 (`xsct`) | `fsbl.elf` |
 | U-Boot, Linux 6.1, device tree, buildroot rootfs | Linaro GCC 7.3 (downloaded by buildroot) | `u-boot.elf`, `zImage`/`uImage`, `zynq-ant.dtb`, `rootfs.cpio.gz` |
 | Boot image | `bootgen` | **`boot.bin`** (QSPI) and **`BOOT.bin`** (SD card) |
@@ -22,7 +23,8 @@ In the build system the E310 is called **`ant`** (`TARGET=ant`).
   Ubuntu 20.04 also works.
 * **Vivado 2023.2 and Vitis 2023.2**, both exactly version 2023.2.
   * Use the AMD Unified Installer 2023.2 and choose the **Vitis** product. It
-    installs Vivado as well. You need Vitis for `xsct`, which builds the FSBL.
+    installs Vivado as well. You need Vitis for `xsct`, which builds the FSBL,
+    and for `vitis_hls`, which builds the anti-jam filter core.
   * Device selection must include **Zynq-7000**.
   * Default install root: `/tools/Xilinx`. `/opt/Xilinx` and `~/Xilinx` are also
     detected automatically. Otherwise set `XILINX_DIR`.
@@ -136,7 +138,7 @@ Makefile sources `xilinx_env.sh` only for the Vivado, xsct and bootgen steps.
 ./build.sh all
 ```
 
-That runs `check`, `fetch`, `patch`, `firmware` and `sdimg`, described below.
+That runs `check`, `fetch`, `patch`, `hls`, `firmware` and `sdimg`, described below.
 If Xilinx is not installed under `/tools/Xilinx`, `/opt/Xilinx` or `~/Xilinx`,
 export `XILINX_DIR` first:
 
@@ -157,7 +159,7 @@ Run these from `antsdr-fw-patch/`. Each step can be re-run safely.
 ```
 
 This checks the host tools, that `vivado -version` reports **2023.2**, that
-`xsct` and `bootgen` are available, and the free disk space.
+`xsct`, `bootgen` and `vitis_hls` are available, and the free disk space.
 
 ### Step 2: Fetch plutosdr-fw v0.39 and its submodules
 
@@ -189,7 +191,27 @@ It then does a shallow fetch of each submodule at the commit v0.39 pins:
 | `patch/ant/0001-add-support-buildroot.patch` | `buildroot` | `zynq_ant_defconfig`, `board/ant/*` |
 | `patch/ant/0001-add-support-makefile-scripts.patch` | `plutosdr-fw` | `TARGET=ant`, `scripts/ant.its`, `make sdimg` |
 | `patch/ant/0002-hdl-add-gnss-passthrough.patch` | `hdl` | `library/gnss_passthrough` and its place in the `ant` block design (GPS L1 loopback, section 7) |
-| `patch/ant/0002-buildroot-add-gnss-loopback.patch` | `buildroot` | `/usr/sbin/gnss_loopback` command (section 7) |
+| `patch/ant/0002-buildroot-add-gnss-loopback.patch` | `buildroot` | `/usr/sbin/gnss_loopback` command |
+| `patch/ant/0003-hdl-stap-antijam.patch` | `hdl` | SMI-PI v4.9.14 anti-jam: AD9361 **LVDS 2R2T** interface, `gnss_passthrough` v4.9.14, `smi_pi` filter between two clock-crossing FIFOs (section 7) |
+| `patch/ant/0003-linux-lvds-2r2t.patch` | `linux` | `zynq-ant.dtsi`: `adi,ad9361`, LVDS settings of the vendor E310 design |
+| `patch/ant/0003-uboot-mode-2r2t.patch` | `u-boot-xlnx` | default `mode=2r2t` (RX1 and RX2 both on) |
+| `patch/ant/0003-buildroot-gnss-crpa.patch` | `buildroot` | `gnss-crpa` package: the anti-jam firmware as a Linux service, the `gnss` console (section 7) |
+
+`patch` also copies `gnss_crpa/` (the firmware sources) into
+`plutosdr-fw/buildroot/package/gnss-crpa/src`.
+
+### Step 3b: Anti-jam filter core (Vitis HLS 2023.2)
+
+```bash
+./build.sh hls
+```
+
+Builds `hls/smi_pi` (C simulation of 14 jammer scenarios, synthesis at
+100 MHz, II=1) into `plutosdr-fw/hdl/library/antsdr_ip/smi_pi`. It takes
+10–20 minutes. It prints `SMI_PI_HLS: PASS` at the end, and its log is
+`hls/smi_pi/build/build_hls.log`. `SMI_PI_SKIP_CSIM=1 ./build.sh hls` skips
+the simulation. `hdl`, `fsbl` and `firmware` run this step themselves if the
+core is missing.
 
 ### Step 4: Hardware (Vivado 2023.2): bitstream and XSA
 
@@ -334,41 +356,42 @@ sudo dfu-util -a uboot-env.dfu -D ./uboot-env.dfu
 
 ---
 
-## 7. GPS L1 loopback: see satellites through a GNSS receiver
+## 7. GNSS anti-jam (SMI-PI v4.9.14): RX1 + RX2 -> FPGA -> TX1
 
-The two `0002` patches give the E310 firmware the same RF loopback as the
-bare-metal `LoopBack_Pipeline_noCRPA` design:
+The `0003` patches put the complete `LoopBack_Code_SMI_PI_STAP6x6_v4.9.14`
+design ("B") into this Linux firmware ("A"): the same FPGA datapath and the
+same firmware with all its console commands. One feature is new: **band 7,
+your own RF values, set at any time from PuTTY**.
 
 ```text
-GPS antenna -> RX1 -> AD9361 -> FPGA gnss_passthrough -> AD9361 -> TX1
-            -> coax + attenuator + DC block -> GNSS receiver -> USB -> GNSS Viewer
+antenna 1 -> RX1 \                    smi_pi space-time anti-jam
+                  AD9361 -> FPGA  gnss_passthrough (6 + 6 taps)  -> AD9361 -> TX1
+antenna 2 -> RX2 /  LVDS 2R2T         + pulse blanker               -> coax + attenuator + DC block
+                    61.44 MS/s                                         -> GNSS receiver -> GNSS Viewer
 ```
 
-* **FPGA:** `gnss_passthrough` sits between the `axi_ad9361` ADC outputs and
-  DAC inputs, and its registers are at `0x43C1_0000`. When it is off
-  (`pass_en = 0`, the power-up default), the DAC gets the normal DMA stream,
-  so IIO streaming works exactly as before.
-* **Linux:** `/usr/sbin/gnss_loopback` tunes RX and TX to 1575.42 MHz
-  (30.72 MS/s, 18 MHz bandwidth, FDD, slow AGC), points the DAC at the
-  passthrough, switches it on and steps TX down to 70 dB attenuation. The
-  device tree already selects the E310's low-band RF path below 3 GHz; the
-  command reads the ports back to confirm.
+* **FPGA (hdl 0003):** the AD9361 now runs over **LVDS** (pins and I/O
+  standards of the vendor E310 V1 design), so both receivers run at
+  61.44 MS/s. The CMOS interface of the stock design stops at 30.72 MS/s with
+  two channels. `gnss_passthrough` v4.9.14 (`0x43C1_0000`) feeds RX1+RX2 to
+  the `smi_pi` filter (Vitis HLS, 100 MHz) and its output to TX1. TX2 carries
+  a muted copy. The DMA paths stay, so IIO still works for the DDR replay.
+* **Linux (0003):** the device tree switches the driver to `adi,ad9361`
+  2R2T LVDS. U-Boot defaults to `mode=2r2t`.
+* **Firmware (buildroot 0003):** `gnss_crpa` is the SMI-PI firmware
+  (`app_gnss_e310`, v4.9.14) ported to Linux. The AD9361 calls go to the
+  Linux driver, and the anti-jam captures come from the Linux IIO buffer
+  instead of the DMA registers. It starts at boot like the bare-metal
+  firmware did: self-test, band, anti-jam on, TX1 on.
 
 ### Build it
-
-`./build.sh patch` applies both patches automatically for `TARGET=ant`. If
-your sources are already patched and built, rebuild everything:
 
 ```bash
 ./build.sh patch
 ```
 
 ```bash
-./build.sh hdl
-```
-
-```bash
-./build.sh fsbl
+./build.sh hls
 ```
 
 ```bash
@@ -379,62 +402,87 @@ your sources are already patched and built, rebuild everything:
 ./build.sh sdimg
 ```
 
-`./build.sh all` does the same in one go. The HDL step builds the new
-`gnss_passthrough` library first. Its log is
-`plutosdr-fw/hdl/library/gnss_passthrough/gnss_passthrough_ip.log`.
+or `./build.sh all`. Copy everything in `plutosdr-fw/build_sdimg/` to the
+FAT32 SD card. **`BOOT.bin` on the card is what changes the FPGA.**
 
 ### Connect
 
 | Port | Connect to |
 |---|---|
-| RX1 | Active GPS L1 antenna, with a bias-tee if it needs power |
-| TX1 | Attenuator, then a DC block, then the GNSS receiver's antenna input. Many receivers put about 3.3 V on that input. |
+| RX1 | GNSS antenna 1 (with a bias-tee if it needs power) |
+| RX2 | GNSS antenna 2, about half a wavelength (≈ 9.5 cm) from antenna 1 |
+| TX1 | Attenuator, then a DC block, then the GNSS receiver's antenna input |
+| TX2 | Nothing (muted), or a 50 Ω load |
 | Receiver USB | Laptop running GNSS Viewer |
+| USB-UART | PuTTY, 115200 8N1 |
 
 **TX1 must reach the receiver through coax and an attenuator, never an
 antenna.** Transmitting on GNSS frequencies over the air is illegal in most
-countries.
+countries. Do not test with a real jammer over the air for the same reason.
 
-### Run it
+### Run it (PuTTY)
 
-Boot the new firmware, then log in (`root` / `analog`) over SSH or the serial
-console:
+Power on. At the `login:` prompt use `root` / `analog`. The anti-jam is
+already running. Attach to it:
 
 ```bash
-ssh root@192.168.1.10
+gnss
 ```
 
-On the board:
+You now type the firmware's commands exactly as on the bare-metal console
+(`?` = menu, `help?` = every command). `Ctrl-D` or `exit` returns to the
+shell, and the anti-jam keeps running. You can also give one command
+directly from the shell, e.g. `gnss gnss_band?`.
 
 | Command | Does |
 |---|---|
-| `gnss_loopback start` | Starts the loopback at 70 dB TX attenuation (about −63 dBm) |
-| `gnss_loopback start 60` | Same, at 60 dB. Allowed range is 30–89.75 dB; a larger number is quieter. |
-| `gnss_loopback status` | LO, rate, ports, gain, RSSI, passthrough state and sample counters |
-| `gnss_loopback stop` | TX to minimum, passthrough off, normal TX path back |
+| `gnss_band?` | Current band, which GNSS signals it carries, the 8 profiles |
+| `gnss_band=0` … `gnss_band=6` | The SMI-PI fixed profiles (0 = default, 1569.42 MHz) |
+| **`gnss_band=7,1575.42,61.44,56,30,50`** | **Band 7 = your values**: LO MHz, MS/s, RF bandwidth MHz, TX1 attenuation dB, RX gain dB. Applied to RX and TX at once and saved. |
+| `gnss_band=7` | Back to band 7 with the stored values |
+| `gnss_band7=1575.42,30.72,27` | Change band 7 (leave out the tail to keep it). Applied at once if band 7 is in use. |
+| `gnss_band7?` | Band 7 values, whether it is in use, where they are saved |
+| `gnss_band_boot=7` / `gnss_band_boot?` | Band used at power-on (saved; 0 = SMI-PI default) |
+| `gnss_aj?` / `gnss_report?` | Anti-jam state / everything in one block |
+| `gnss_smi=0` / `gnss_smi=1` | Anti-jam off (TX1 = RX1) / on |
+| `gnss_tx=0` / `gnss_tx=1` | Silence TX1 / switch it back on |
+| `tx1_attenuation=40000` | TX1 attenuation in mdB (bigger = quieter) |
+| `gnss_rx_gain=45` | RX1 and RX2 gain |
 
-To start the loopback at every boot (the file is kept in flash):
+Band 7 limits: LO 70–6000 MHz, 2.084–61.44 MS/s, bandwidth 0.2–56 MHz,
+TX1 attenuation 0–89.75 dB, RX gain 0–76 dB. A value outside them is
+refused and nothing changes. Values are saved in `/mnt/jffs2/gnss_crpa.conf`
+(or on the SD card if the flash partition is missing), so they survive a
+reboot.
 
-```bash
-echo "gnss_loopback start" > /mnt/jffs2/autorun.sh
-```
+Jammer events appear as `[AJ …] *** JAMMER ON ***` / `NULLED` lines. Like the
+bare-metal firmware, they are held back for 20 s after you type. The full
+service log is `/var/log/gnss_crpa.log`. Snapshots (every 60 s) go to the SD
+card under `LOG/`.
 
-GNSS Viewer should then show the satellites, as it does with the bare-metal
-loopback. 18 MHz of bandwidth around 1575.42 MHz passes GPS L1 and Galileo
-E1. GLONASS (about 1602 MHz) and BeiDou B1I (1561 MHz) fall outside it.
+The service:
+
+| Command (shell) | Does |
+|---|---|
+| `/etc/init.d/S95gnss_crpa status` | Running or not |
+| `/etc/init.d/S95gnss_crpa stop` | Stops it; TX1 goes to 89.75 dB and is muted |
+| `/etc/init.d/S95gnss_crpa restart` | Restart (runs the self-test again) |
+| `touch /mnt/jffs2/gnss_crpa.disable` | Do not start at boot (RF-silent board) |
+| `gnss_crpa` | With the service stopped: run it in this terminal, like the bare-metal console |
+
+`gnss_loopback start|stop|status` still works and forwards to `gnss`.
 
 ### If it doesn't work
 
 | Message or symptom | Meaning / fix |
 |---|---|
-| `gnss_passthrough not found at 0x43C10000` | The board runs a bitstream without the `0002` patch. Rebuild and flash/copy the new files. |
-| `DAC did not accept the DMA source` | The DAC core ignored the data-source write. Run `gnss_loopback status` and report it. |
-| `the AD9361 is not delivering RX samples` | The AD9361 is not streaming. Check `ensm_mode` is `fdd` and the radio initialised (`dmesg | grep ad9361`). |
-| `RX1 channels are disabled in the AD9361 ADC core` | An IIO capture switched RX1 off and the command could not switch it back on. Report the `gnss_loopback status` output. |
-| `passthrough buffer is empty` or `TX samples are not changing` | Samples are not flowing through `gnss_passthrough`. Report the `gnss_loopback status` output. |
-| `could not set in_voltage0_rf_port_select` | The driver did not move to the low-band port. Report the `gnss_loopback status` output. |
-| Viewer shows no satellites | Check RSSI and gain in `gnss_loopback status`. Try `gnss_loopback start 60`, check the antenna gets power, and check that the DC block and attenuator are in the TX1 path. |
-| Loopback stops after using IIO Oscilloscope or another IIO app | Those tools change the DAC source, and a capture that leaves out RX1 switches RX1 off in the ADC core. Run `gnss_loopback start` again; it sets both back. |
+| `gnss: the gnss_crpa service is not running` | `/etc/init.d/S95gnss_crpa start`, then `tail /var/log/gnss_crpa.log` |
+| `hardware not available` | The board runs an older bitstream. Copy the new `BOOT.bin` to the SD card. |
+| `gnss_pt: … version` mismatch in the self-test | Same: old `BOOT.bin`. |
+| `no RX capture` | Another program (IIO Oscilloscope, `iio_readdev`) holds the RX buffer. Close it and restart the service. |
+| `dmesg | grep ad9361` shows a tuning failure | The LVDS interface did not train. Report the `dmesg` output. |
+| Only one RX channel in `iio_info` | U-Boot kept an old `mode=1r1t`. At the `ant>` prompt: `setenv mode 2r2t; saveenv; boot` |
+| Viewer shows no satellites | `gnss gnss_report?`, check RSSI and gain, try `gnss_band=1`, check the DC block and attenuator in the TX1 path. |
 
 ---
 
@@ -478,8 +526,10 @@ E1. GLONASS (about 1602 MHz) and BeiDou B1I (1561 MHz) fall outside it.
 
 The vendor patches are **unchanged**. This folder adds:
 
-* `patch/ant/0002-*.patch`: the GPS L1 RX1 -> FPGA -> TX1 loopback
-  (section 7). With the loopback off, the firmware behaves as before.
+* `patch/ant/0002-*.patch`: the GPS L1 RX1 -> FPGA -> TX1 loopback.
+* `patch/ant/0003-*.patch`, `hls/smi_pi/`, `gnss_crpa/`: the SMI-PI v4.9.14
+  anti-jam (section 7): LVDS 2R2T, `gnss_passthrough` v4.9.14 + `smi_pi`,
+  and the firmware as the `gnss_crpa` Linux service with custom band 7.
 
 * `build.sh`: fetches sources at the pinned commits (the vendor zip has no
   `plutosdr-fw` submodule content), applies patches so they can be re-run,

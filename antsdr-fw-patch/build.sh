@@ -4,17 +4,20 @@
 #
 # Default target is the ANTSDR E310 (TARGET=ant). E200 / E310v2 work the same
 # way with TARGET=e200 / TARGET=e310v2. For TARGET=ant the firmware also
-# includes the GPS L1 RX1 -> FPGA -> TX1 loopback (BUILD_E310.md section 7).
+# includes the SMI-PI v4.9.14 GNSS anti-jam (RX1+RX2 -> FPGA -> TX1, AD9361
+# LVDS 2R2T) and the gnss_crpa service with its "gnss" console (BUILD_E310.md
+# sections 7 and 8).
 #
 #   ./build.sh deps       install Ubuntu build packages (uses sudo apt-get)
 #   ./build.sh check      check host tools and Vivado/Vitis 2023.2
 #   ./build.sh fetch      clone plutosdr-fw v0.39 + submodules at pinned commits
 #   ./build.sh patch      apply the ANTSDR patches (safe to re-run)
+#   ./build.sh hls        Vitis HLS: the smi_pi anti-jam filter IP (ant only)
 #   ./build.sh hdl        Vivado only: build/system_top.xsa (+ bitstream)
 #   ./build.sh fsbl       Vitis/xsct: build/sdk/fsbl/Release/fsbl.elf
 #   ./build.sh firmware   full firmware: boot.bin, ant.frm/.dfu, boot.frm/.dfu ...
 #   ./build.sh sdimg      SD-card image: build_sdimg/BOOT.bin + uImage + ...
-#   ./build.sh all        check + fetch + patch + firmware + sdimg
+#   ./build.sh all        check + fetch + patch + hls + firmware + sdimg
 #   ./build.sh outputs    list the generated files
 #   ./build.sh reset      restore pristine v0.39 sources (drops patches and builds)
 #   ./build.sh make ARGS  run plutosdr-fw's make with the right environment
@@ -24,6 +27,8 @@
 #   XILINX_DIR       Xilinx install root (auto: /tools/Xilinx, /opt/Xilinx, ~/Xilinx)
 #   VIVADO_SETTINGS  settings script sourced for Xilinx tools (default: ./xilinx_env.sh)
 #   SKIP_LEGAL=1     skip buildroot legal-info (faster; no legal-info tarball)
+#   SMI_PI_SKIP_CSIM=1  hls: skip the 14 C-simulation scenarios (faster)
+#   FORCE_HLS=1      hls: rebuild the smi_pi IP even if it is up to date
 
 set -euo pipefail
 
@@ -139,13 +144,15 @@ cmd_check() {
 		*"$REQUIRED_XILINX_VERSION"*) ok "vivado: $vver" ;;
 		*) die "found '$vver' but Vivado $REQUIRED_XILINX_VERSION is required (ADI hdl refuses other versions)" ;;
 	esac
-	for t in xsct bootgen; do
+	local tools=(xsct bootgen)
+	[ "$TARGET" = ant ] && tools+=(vitis_hls)
+	for t in "${tools[@]}"; do
 		local p
 		p="$(xilinx_run "command -v $t" || true)"
 		if [ -n "$p" ]; then
 			ok "$t: $p"
 		else
-			die "$t not found after sourcing $VIVADO_SETTINGS - install Vitis $REQUIRED_XILINX_VERSION (it provides xsct for the FSBL)"
+			die "$t not found after sourcing $VIVADO_SETTINGS - install Vitis $REQUIRED_XILINX_VERSION (it provides xsct for the FSBL and vitis_hls for the anti-jam filter)"
 		fi
 	done
 
@@ -258,29 +265,94 @@ cmd_patch() {
 	info "Applying ANTSDR patches for TARGET=$TARGET"
 	# 0002-* (ant only): GPS L1 RX1 -> FPGA -> TX1 loopback (gnss_passthrough
 	# in the FPGA, /usr/sbin/gnss_loopback in Linux). See BUILD_E310.md.
+	# 0003-* (ant only): SMI-PI v4.9.14 anti-jam. hdl: AD9361 LVDS 2R2T,
+	# gnss_passthrough v4.9.14 + smi_pi HLS core; linux: LVDS 2R2T device
+	# tree; u-boot: mode=2r2t; buildroot: gnss-crpa package (gnss_crpa
+	# service + "gnss" console, gnss_loopback forwards to it).
 	local hdl_series=("$PATCH_DIR/0001-add-three-ant-hdl-support-bump-to-v0.39-v1.patch")
 	local br_series=("$PATCH_DIR/$TARGET/0001-add-support-buildroot.patch")
-	if [ -f "$PATCH_DIR/$TARGET/0002-hdl-add-gnss-passthrough.patch" ]; then
-		hdl_series+=("$PATCH_DIR/$TARGET/0002-hdl-add-gnss-passthrough.patch")
-	fi
+	local ub_series=("$PATCH_DIR/$TARGET/0001-add-support-uboot.patch")
+	local lx_series=("$PATCH_DIR/$TARGET/0001-add-support-linux.patch")
+	local f
+	for f in "$PATCH_DIR/$TARGET"/000[23]-hdl-*.patch; do [ -f "$f" ] && hdl_series+=("$f"); done
+	for f in "$PATCH_DIR/$TARGET"/000[23]-buildroot-*.patch; do [ -f "$f" ] && br_series+=("$f"); done
+	for f in "$PATCH_DIR/$TARGET"/0003-uboot-*.patch; do [ -f "$f" ] && ub_series+=("$f"); done
+	for f in "$PATCH_DIR/$TARGET"/0003-linux-*.patch; do [ -f "$f" ] && lx_series+=("$f"); done
 	if [ -f "$PATCH_DIR/$TARGET/0002-buildroot-add-gnss-loopback.patch" ]; then
-		br_series+=("$PATCH_DIR/$TARGET/0002-buildroot-add-gnss-loopback.patch")
-		# An earlier version of this patch installed an older gnss_loopback.
-		# Remove only what it added (the script and its install line), so
-		# the current version applies without resetting the whole tree.
-		local br="$FW_DIR/buildroot"
-		if [ -f "$br/board/ant/gnss_loopback" ] &&
-		   ! git -C "$br" apply --reverse --check "${br_series[-1]}" 2>/dev/null; then
+		# An earlier version of the 0002 patch installed an older
+		# gnss_loopback. Remove only what it added (the script and its
+		# install line), so the current series applies without a reset.
+		local br="$FW_DIR/buildroot" p applied=0
+		for p in "${br_series[@]:1}"; do
+			git -C "$br" apply --reverse --check "$p" 2>/dev/null && applied=1
+		done
+		if [ -f "$br/board/ant/gnss_loopback" ] && [ "$applied" = 0 ]; then
 			info "Replacing an earlier gnss_loopback with the current version"
 			rm -f "$br/board/ant/gnss_loopback"
 			sed -i '/BOARD_DIR}\/gnss_loopback /d' "$br/board/ant/post-build.sh"
 		fi
 	fi
 	apply_series "$FW_DIR/hdl"         "${hdl_series[@]}"
-	apply_series "$FW_DIR/u-boot-xlnx" "$PATCH_DIR/$TARGET/0001-add-support-uboot.patch"
-	apply_series "$FW_DIR/linux"       "$PATCH_DIR/$TARGET/0001-add-support-linux.patch"
+	apply_series "$FW_DIR/u-boot-xlnx" "${ub_series[@]}"
+	apply_series "$FW_DIR/linux"       "${lx_series[@]}"
 	apply_series "$FW_DIR/buildroot"   "${br_series[@]}"
 	apply_series "$FW_DIR"             "$PATCH_DIR/$TARGET/0001-add-support-makefile-scripts.patch"
+	sync_crpa
+}
+
+# --------------------------------------------------------------------------
+# gnss_crpa sources -> buildroot package (ant only)
+# --------------------------------------------------------------------------
+sync_crpa() {
+	local dst="$FW_DIR/buildroot/package/gnss-crpa"
+	[ -d "$dst" ] || return 0
+	if [ -d "$dst/src" ] && diff -q "$ROOT/gnss_crpa/Makefile" "$dst/src/Makefile" >/dev/null 2>&1 &&
+	   diff -rq "$ROOT/gnss_crpa/src" "$dst/src/src" >/dev/null 2>&1 &&
+	   diff -rq "$ROOT/gnss_crpa/linux" "$dst/src/linux" >/dev/null 2>&1; then
+		ok "gnss_crpa sources up to date in buildroot/package/gnss-crpa/src"
+		return 0
+	fi
+	rm -rf "$dst/src"
+	mkdir -p "$dst/src"
+	cp -a "$ROOT/gnss_crpa/Makefile" "$ROOT/gnss_crpa/src" "$ROOT/gnss_crpa/linux" "$dst/src/"
+	# buildroot copies a local package only once: make it build again
+	rm -rf "$FW_DIR"/buildroot/output/build/gnss-crpa-*
+	ok "gnss_crpa sources copied to buildroot/package/gnss-crpa/src"
+}
+
+# --------------------------------------------------------------------------
+# hls: the smi_pi space-time anti-jam filter (Vitis HLS), ant only
+# --------------------------------------------------------------------------
+cmd_hls() {
+	check_target
+	[ "$TARGET" = ant ] || { ok "hls: nothing to do for TARGET=$TARGET"; return 0; }
+	[ -d "$FW_DIR/hdl/library" ] || die "sources not fetched yet; run './build.sh fetch' and './build.sh patch'"
+	local src="$ROOT/hls/smi_pi" out="$FW_DIR/hdl/library/antsdr_ip/smi_pi"
+	if [ -z "${FORCE_HLS:-}" ] && [ -f "$out/component.xml" ] &&
+	   [ -z "$(find "$src" "$ROOT/gnss_crpa/src/gnss_aj_math.c" "$ROOT/gnss_crpa/src/gnss_aj_math.h" \
+		-newer "$out/component.xml" -type f -not -path '*/build/*' 2>/dev/null)" ]; then
+		ok "smi_pi IP up to date: $out (FORCE_HLS=1 rebuilds it)"
+		return 0
+	fi
+	xilinx_run 'command -v vitis_hls' >/dev/null 2>&1 ||
+		die "vitis_hls not found via VIVADO_SETTINGS=$VIVADO_SETTINGS (install Vitis $REQUIRED_XILINX_VERSION)"
+	info "Vitis HLS: smi_pi -> $out (about 10-20 min; SMI_PI_SKIP_CSIM=1 skips the C simulation)"
+	local log="$src/build/build_hls.log"
+	mkdir -p "$src/build"
+	if ! xilinx_run "cd '$src' && GNSS_CRPA_IP_REPO='$FW_DIR/hdl/library/antsdr_ip' SMI_PI_FW_DIR='$ROOT/gnss_crpa/src' SMI_PI_SKIP_CSIM='${SMI_PI_SKIP_CSIM:-0}' vitis_hls -f build_hls.tcl" 2>&1 | tee "$log" ||
+	   ! grep -q "SMI_PI_HLS: PASS" "$log"; then
+		die "smi_pi HLS build failed (see $log)"
+	fi
+	ok "smi_pi IP: $out"
+}
+
+require_hls() {
+	[ "$TARGET" = ant ] || return 0
+	[ -d "$FW_DIR/buildroot/package/gnss-crpa" ] && sync_crpa
+	if [ -f "$PATCH_DIR/$TARGET/0003-hdl-stap-antijam.patch" ] &&
+	   [ ! -f "$FW_DIR/hdl/library/antsdr_ip/smi_pi/component.xml" ]; then
+		cmd_hls
+	fi
 }
 
 # --------------------------------------------------------------------------
@@ -314,6 +386,7 @@ run_make() {
 
 cmd_hdl() {
 	require_ready
+	require_hls
 	run_make build/system_top.xsa
 	ok "HW platform: $FW_DIR/build/system_top.xsa"
 	ok "Vivado project: $FW_DIR/hdl/projects/$TARGET/$TARGET.xpr"
@@ -321,6 +394,7 @@ cmd_hdl() {
 
 cmd_fsbl() {
 	require_ready
+	require_hls
 	run_make build/sdk/fsbl/Release/fsbl.elf
 	ok "FSBL: $FW_DIR/build/sdk/fsbl/Release/fsbl.elf"
 	ok "Bitstream: $FW_DIR/build/system_top.bit"
@@ -328,6 +402,7 @@ cmd_fsbl() {
 
 cmd_firmware() {
 	require_ready
+	require_hls
 	run_make
 	cmd_outputs
 }
@@ -401,11 +476,12 @@ case "$cmd" in
 	check)    cmd_check ;;
 	fetch)    cmd_fetch ;;
 	patch)    cmd_patch ;;
+	hls)      cmd_hls ;;
 	hdl)      cmd_hdl ;;
 	fsbl)     cmd_fsbl ;;
 	firmware) cmd_firmware ;;
 	sdimg)    cmd_sdimg ;;
-	all)      cmd_check; cmd_fetch; cmd_patch; cmd_firmware; cmd_sdimg ;;
+	all)      cmd_check; cmd_fetch; cmd_patch; cmd_hls; cmd_firmware; cmd_sdimg ;;
 	outputs)  cmd_outputs ;;
 	reset)    cmd_reset "$@" ;;
 	make)     require_ready; run_make "$@" ;;

@@ -1,0 +1,25 @@
+From 382e56a97c3cf856f9572acff7d0725fb678355c Mon Sep 17 00:00:00 2001
+From: antsdr-fw-patch <antsdr-fw-patch@localhost>
+Date: Sat, 7 Nov 2026 11:59:50 +0000
+Subject: [PATCH] ant: default mode=2r2t (SMI-PI anti-jam uses RX1 and RX2)
+
+---
+ include/configs/zynq-common.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/include/configs/zynq-common.h b/include/configs/zynq-common.h
+index 3caaaec..62d4313 100644
+--- a/include/configs/zynq-common.h
++++ b/include/configs/zynq-common.h
+@@ -269,7 +269,7 @@
+ 			"fi; " \
+ 		"fi; \0" \
+ 	"refclk_source=internal\0" \
+-	"mode=1r1t\0" \
++	"mode=2r2t\0" \
+ 	"adi_loadvals_pluto=if test -n \"${ad936x_ext_refclk}\" && test ! -n \"${ad936x_skip_ext_refclk}\"; then " \
+ 			"fdt set /clocks/clock@0 clock-frequency ${ad936x_ext_refclk}; " \
+ 		"fi; " \
+-- 
+2.43.0
+

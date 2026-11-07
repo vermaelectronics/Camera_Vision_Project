@@ -1,0 +1,392 @@
+From 12af5cc7ff080ac0fe215c45275cfdbe9b03bf07 Mon Sep 17 00:00:00 2001
+From: antsdr-fw-patch <antsdr-fw-patch@localhost>
+Date: Sat, 7 Nov 2026 12:57:09 +0000
+Subject: [PATCH] ant: gnss-crpa package (SMI-PI anti-jam service),
+ gnss_loopback forwards to it
+
+package/gnss-crpa builds the Linux port of the SMI-PI v4.9.14 E310
+firmware (sources copied in by antsdr-fw-patch/build.sh) and starts it at
+boot as S95gnss_crpa; 'gnss' talks to it.
+---
+ board/ant/gnss_loopback        | 204 ++-------------------------------
+ configs/zynq_ant_defconfig     |   1 +
+ package/Config.in              |   1 +
+ package/gnss-crpa/.gitignore   |   1 +
+ package/gnss-crpa/Config.in    |  11 ++
+ package/gnss-crpa/S95gnss_crpa |  66 +++++++++++
+ package/gnss-crpa/gnss-crpa.mk |  31 +++++
+ 7 files changed, 122 insertions(+), 193 deletions(-)
+ create mode 100644 package/gnss-crpa/.gitignore
+ create mode 100644 package/gnss-crpa/Config.in
+ create mode 100755 package/gnss-crpa/S95gnss_crpa
+ create mode 100644 package/gnss-crpa/gnss-crpa.mk
+
+diff --git a/board/ant/gnss_loopback b/board/ant/gnss_loopback
+index e1d8ae5a..e28c62d8 100755
+--- a/board/ant/gnss_loopback
++++ b/board/ant/gnss_loopback
+@@ -1,196 +1,14 @@
+ #!/bin/sh
+-#
+-# gnss_loopback - ANTSDR E310 GPS L1 RF loopback (RX1 -> FPGA -> TX1)
+-#
+-# Uses the gnss_passthrough block in the FPGA (antsdr-fw-patch 0002). The
+-# samples never pass through Linux: this script only configures the AD9361 and
+-# switches the passthrough on or off.
+-#
+-#   gnss_loopback start [TX_ATTEN_DB]   start the loopback (default 70 dB)
+-#   gnss_loopback stop                  TX to minimum, normal TX path back
+-#   gnss_loopback status                show radio and passthrough state
+-#
+-# Connect TX1 to the GNSS receiver through coax and an attenuator, never to an
+-# antenna. Transmitting on GNSS frequencies over the air is illegal in most
+-# countries.
+-#
+-# To start it at every boot:
+-#   echo "gnss_loopback start" > /mnt/jffs2/autorun.sh
+-#
+-# Optional environment overrides:
+-#   GNSS_LB_LO_HZ    LO for RX and TX         (default 1575420000)
+-#   GNSS_LB_RATE_HZ  sample rate              (default 30720000)
+-#   GNSS_LB_BW_HZ    RF bandwidth RX and TX   (default 18000000)
+-
+-PT_BASE=0x43C10000         # gnss_passthrough registers
+-ADC_BASE=0x79020000        # AD9361 ADC core (cf-ad9361-lpc)
+-DAC_BASE=0x79024000        # AD9361 DAC core (cf-ad9361-dds-core-lpc)
+-PT_ID_EXPECTED=0x47435031  # "GCP1"
+-
+-LO_HZ=${GNSS_LB_LO_HZ:-1575420000}
+-RATE_HZ=${GNSS_LB_RATE_HZ:-30720000}
+-BW_HZ=${GNSS_LB_BW_HZ:-18000000}
+-DEFAULT_ATTEN_DB=70
+-MIN_ATTEN_DB=30            # never louder than this (about -23 dBm)
+-MAX_ATTEN_DB=89.75         # AD9361 maximum = quietest
+-
+-DEVMEM=${GNSS_LB_DEVMEM:-devmem}
+-IIO=${GNSS_LB_IIO:-/sys/bus/iio/devices}
+-
+-die()  { echo "gnss_loopback: ERROR: $*" >&2; exit 1; }
+-info() { echo "gnss_loopback: $*"; }
+-
+-hex()  { printf '0x%08X' "$1"; }
+-rd()   { $DEVMEM "$(hex "$1")" 32; }
+-wr()   { $DEVMEM "$(hex "$1")" 32 "$2"; }
+-
+-find_phy() {
+-	for d in "$IIO"/iio:device*; do
+-		[ "$(cat "$d/name" 2>/dev/null)" = "ad9361-phy" ] && { PHY=$d; return 0; }
+-	done
+-	die "ad9361-phy not found in $IIO (is the AD9361 driver loaded?)"
+-}
+-
+-set_attr() {     # set_attr <file> <value>
+-	echo "$2" > "$PHY/$1" 2>/dev/null || die "could not set $1 to $2"
+-}
+-
+-get_attr() { cat "$PHY/$1" 2>/dev/null; }
+-
+-near() {         # near <a> <b> <tolerance>: |a-b| <= tol (integers)
+-	d=$(( $1 - $2 )); [ $d -lt 0 ] && d=$(( -d )); [ $d -le "$3" ]
+-}
+-
+-check_block() {
+-	id=$(rd $PT_BASE) || die "cannot read $PT_BASE (devmem)"
+-	[ $((id)) -eq $((PT_ID_EXPECTED)) ] || \
+-		die "gnss_passthrough not found at $PT_BASE (read $id). Build the firmware with antsdr-fw-patch 0002."
+-}
+-
+-dac_source() {   # dac_source <0=DDS|2=DMA>
+-	for off in 0x418 0x458 0x498 0x4D8; do
+-		wr $((DAC_BASE + off)) "$1"
+-	done
+-	wr $((DAC_BASE + 0x44)) 1        # sync
+-}
+-
+-adc_rx1_enable() {
+-	# gnss_passthrough only buffers RX samples while the ADC core's channel
+-	# enable is set (adc_enable_i0/q0). Linux sets it for every channel at
+-	# boot, but an IIO capture that leaves out RX1 clears it and keeps it
+-	# cleared. Set ENABLE (bit 0) on channels 0 and 1, keep the other bits.
+-	for c in 0 1; do
+-		a=$((ADC_BASE + 0x400 + c * 0x40))
+-		v=$(rd $a) || die "cannot read ADC channel $c control"
+-		wr $a $(( v | 1 ))
+-	done
+-}
+-
+-set_atten() {    # set_atten <dB>  (positive = attenuation)
+-	set_attr out_voltage0_hardwaregain "-$1"
+-}
+-
+-ramp_atten() {   # step down from the maximum to <dB> in 10 dB steps
+-	target=$1
+-	a=80
+-	while awk "BEGIN{exit !($a > $target)}"; do
+-		set_atten "$a"; sleep 0.2
+-		a=$((a - 10))
+-	done
+-	set_atten "$target"
+-}
+-
+-cmd_start() {
+-	atten=${1:-$DEFAULT_ATTEN_DB}
+-	awk "BEGIN{exit !($atten >= $MIN_ATTEN_DB && $atten <= $MAX_ATTEN_DB)}" || \
+-		die "TX attenuation must be $MIN_ATTEN_DB..$MAX_ATTEN_DB dB (got $atten)"
+-
+-	find_phy
+-	check_block
+-
+-	# 1. Quietest TX first, passthrough off while the radio is retuned
+-	set_atten $MAX_ATTEN_DB
+-	wr $((PT_BASE + 0x0C)) 0
+-
+-	# 2. Radio: FDD, L1 on both synthesisers, rate, bandwidth, RX AGC
+-	set_attr ensm_mode fdd
+-	set_attr out_altvoltage0_RX_LO_frequency "$LO_HZ"
+-	set_attr out_altvoltage1_TX_LO_frequency "$LO_HZ"
+-	set_attr in_voltage_sampling_frequency "$RATE_HZ"
+-	set_attr in_voltage_rf_bandwidth "$BW_HZ"
+-	set_attr out_voltage_rf_bandwidth "$BW_HZ"
+-	set_attr in_voltage0_gain_control_mode slow_attack
+-
+-	rx_lo=$(get_attr out_altvoltage0_RX_LO_frequency)
+-	tx_lo=$(get_attr out_altvoltage1_TX_LO_frequency)
+-	near "$rx_lo" "$LO_HZ" 1000 || die "RX LO is $rx_lo Hz, wanted $LO_HZ"
+-	near "$tx_lo" "$LO_HZ" 1000 || die "TX LO is $tx_lo Hz, wanted $LO_HZ"
+-
+-	# 3. Below 3 GHz the E310 uses the low-band path: AD9361 ports B.
+-	#    The driver switches these with the LO (device tree band control).
+-	if [ $(( LO_HZ < 3000000000 )) -eq 1 ]; then want_rx=B_BALANCED; want_tx=B
+-	else want_rx=A_BALANCED; want_tx=A; fi
+-	[ "$(get_attr in_voltage0_rf_port_select)" = "$want_rx" ] || set_attr in_voltage0_rf_port_select $want_rx
+-	[ "$(get_attr out_voltage0_rf_port_select)" = "$want_tx" ] || set_attr out_voltage0_rf_port_select $want_tx
+-
+-	# 4. RX1 I/Q enabled in the ADC core; DAC takes the DMA-port data,
+-	#    which gnss_passthrough drives
+-	adc_rx1_enable
+-	dac_source 2
+-
+-	# 5. Passthrough on, then prove samples really go through it
+-	wr $((PT_BASE + 0x0C)) 1
+-	sleep 0.1
+-	st=$(rd $((PT_BASE + 0x10)))
+-	[ $(( (st >> 16) & 1 )) -eq 1 ] || die "passthrough did not turn on (STATUS $st)"
+-	[ $(( st & 3 )) -eq 3 ]         || die "RX1 channels are disabled in the AD9361 ADC core (STATUS $st)"
+-	[ $(( (st >> 2) & 3 )) -eq 3 ]  || die "DAC did not accept the DMA source (STATUS $st)"
+-	rx1=$(rd $((PT_BASE + 0x14))); sleep 0.1; rx2=$(rd $((PT_BASE + 0x14)))
+-	[ $((rx2)) -ne $((rx1)) ] || die "the AD9361 is not delivering RX samples (RX_COUNT stuck at $rx1)"
+-	lvl=$(( $(rd $((PT_BASE + 0x2C))) & 0x3F ))
+-	[ "$lvl" -gt 0 ] || die "passthrough buffer is empty: RX samples are not being written into it"
+-	tx1=$(rd $((PT_BASE + 0x28))); sleep 0.05; tx2=$(rd $((PT_BASE + 0x28)))
+-	[ $((tx1)) -ne $((tx2)) ] || die "TX samples are not changing (TX_SNAPSHOT stuck at $tx1)"
+-	u1=$(rd $((PT_BASE + 0x20))); sleep 0.1; u2=$(rd $((PT_BASE + 0x20)))
+-	[ $((u1)) -eq $((u2)) ] || info "WARNING: buffer underflows are still counting ($((u1)) -> $((u2))); RX and TX rates differ"
+-
+-	# 6. Bring TX up to the requested level
+-	ramp_atten "$atten"
+-
+-	info "loopback ON: RX1 -> FPGA -> TX1 at $(get_attr out_altvoltage1_TX_LO_frequency) Hz"
+-	info "TX attenuation $atten dB. TX1 must go to the receiver through coax and an attenuator."
+-	cmd_status
+-}
+-
+-cmd_stop() {
+-	find_phy
+-	set_atten $MAX_ATTEN_DB
+-	check_block
+-	wr $((PT_BASE + 0x0C)) 0
+-	dac_source 0
+-	info "loopback OFF (TX attenuation $MAX_ATTEN_DB dB, DAC back to its default source)"
+-}
+-
+-cmd_status() {
+-	find_phy
+-	check_block
+-	ctrl=$(rd $((PT_BASE + 0x0C)))
+-	st=$(rd $((PT_BASE + 0x10)))
+-	echo "passthrough   : $( [ $((ctrl & 1)) -eq 1 ] && echo ON || echo OFF ) (CONTROL $ctrl, STATUS $st)"
+-	echo "RX1 in ADC    : $( [ $(( st & 3 )) -eq 3 ] && echo enabled || echo DISABLED )"
+-	echo "DAC source    : $( [ $(( (st >> 2) & 3 )) -eq 3 ] && echo "DMA/passthrough" || echo "DDS/other" )"
+-	echo "buffer level  : $(( $(rd $((PT_BASE + 0x2C))) & 0x3F )) of 32"
+-	echo "RX / TX count : $(( $(rd $((PT_BASE + 0x14))) )) / $(( $(rd $((PT_BASE + 0x18))) ))"
+-	echo "over / under  : $(( $(rd $((PT_BASE + 0x1C))) )) / $(( $(rd $((PT_BASE + 0x20))) ))"
+-	echo "RX LO / TX LO : $(get_attr out_altvoltage0_RX_LO_frequency) / $(get_attr out_altvoltage1_TX_LO_frequency) Hz"
+-	echo "sample rate   : $(get_attr in_voltage_sampling_frequency) S/s, RF bandwidth $(get_attr in_voltage_rf_bandwidth) Hz"
+-	echo "RX port / gain: $(get_attr in_voltage0_rf_port_select), $(get_attr in_voltage0_hardwaregain) ($(get_attr in_voltage0_gain_control_mode)), RSSI $(get_attr in_voltage0_rssi)"
+-	echo "TX port / gain: $(get_attr out_voltage0_rf_port_select), $(get_attr out_voltage0_hardwaregain)"
+-}
+-
++# gnss_loopback -- kept for compatibility with antsdr-fw-patch 0002.
++# Since 0003 the RX1 -> TX1 path is driven by the gnss_crpa service
++# (SMI-PI anti-jam, starts at boot). This only forwards to it:
++#   gnss_loopback start   -> gnss gnss_tx=1
++#   gnss_loopback stop    -> gnss gnss_tx=0
++#   gnss_loopback status  -> gnss gnss_status?
++# TX1 IS CONDUCTED, ATTENUATED COAX ONLY -- never an antenna.
+ case "$1" in
+-	start)  shift; cmd_start "$@" ;;
+-	stop)   cmd_stop ;;
+-	status) cmd_status ;;
+-	*)      sed -n '3,24p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
++start)  exec gnss gnss_tx=1 ;;
++stop)   exec gnss gnss_tx=0 ;;
++status) exec gnss 'gnss_status?' ;;
++*)      echo "usage: gnss_loopback start|stop|status   (or just: gnss)"; exit 1 ;;
+ esac
+diff --git a/configs/zynq_ant_defconfig b/configs/zynq_ant_defconfig
+index 3c88c4ae..1bfe472b 100644
+--- a/configs/zynq_ant_defconfig
++++ b/configs/zynq_ant_defconfig
+@@ -62,3 +62,4 @@ BR2_TARGET_ROOTFS_CPIO_UIMAGE=y
+ BR2_PACKAGE_HOST_DOSFSTOOLS=y
+ BR2_PACKAGE_HOST_GENIMAGE=y
+ BR2_PACKAGE_HOST_MTOOLS=y
++BR2_PACKAGE_GNSS_CRPA=y
+diff --git a/package/Config.in b/package/Config.in
+index 1a57ab80..ba877744 100644
+--- a/package/Config.in
++++ b/package/Config.in
+@@ -2761,6 +2761,7 @@ endmenu
+ 
+ menu "Applications and Tools for the JESD204B Interface Framework"
+ 	source "package/jesd204b_status/Config.in"
++	source "package/gnss-crpa/Config.in"
+ endmenu
+ 
+ endmenu
+diff --git a/package/gnss-crpa/.gitignore b/package/gnss-crpa/.gitignore
+new file mode 100644
+index 00000000..8eba6c8d
+--- /dev/null
++++ b/package/gnss-crpa/.gitignore
+@@ -0,0 +1 @@
++src/
+diff --git a/package/gnss-crpa/Config.in b/package/gnss-crpa/Config.in
+new file mode 100644
+index 00000000..e884dc5b
+--- /dev/null
++++ b/package/gnss-crpa/Config.in
+@@ -0,0 +1,11 @@
++config BR2_PACKAGE_GNSS_CRPA
++	bool "gnss-crpa"
++	select BR2_PACKAGE_LIBIIO
++	help
++	  SMI-PI v4.9.14 space-time GNSS anti-jam firmware for the ANTSDR
++	  E310 (antsdr-fw-patch 0003), ported from bare metal to Linux.
++	  Runs at boot as the gnss_crpa service; "gnss" in a terminal
++	  talks to it (gnss_band=7,... sets a custom band at any time).
++
++	  The sources are copied into package/gnss-crpa/src by
++	  antsdr-fw-patch/build.sh.
+diff --git a/package/gnss-crpa/S95gnss_crpa b/package/gnss-crpa/S95gnss_crpa
+new file mode 100755
+index 00000000..403d4b2f
+--- /dev/null
++++ b/package/gnss-crpa/S95gnss_crpa
+@@ -0,0 +1,66 @@
++#!/bin/sh
++#
++# gnss_crpa: SMI-PI v4.9.14 GNSS anti-jam service (antsdr-fw-patch 0003).
++# Starts the RX1/RX2 -> anti-jam -> TX1 retransmission at boot, like the
++# bare-metal firmware did. Talk to it with:  gnss   (Ctrl-D leaves)
++#
++# TX1 IS CONDUCTED, ATTENUATED COAX ONLY -- never an antenna.
++#
++# Not started at boot if /mnt/jffs2/gnss_crpa.disable exists
++# (touch it to keep the board RF-silent after the next reboot).
++
++DAEMON=/usr/bin/gnss_crpa
++PIDFILE=/var/run/gnss_crpa.pid
++
++conf_location() {
++	# Settings (custom band 7, start-up band) go to the QSPI jffs2
++	# partition; without it, to the SD card's FAT partition.
++	grep -q " /mnt/jffs2 " /proc/mounts && return
++	if [ -b /dev/mmcblk0p1 ]; then
++		mkdir -p /mnt/sd
++		grep -q " /mnt/sd " /proc/mounts ||
++			mount -t vfat -o noatime,flush /dev/mmcblk0p1 /mnt/sd 2>/dev/null
++		grep -q " /mnt/sd " /proc/mounts && export GNSS_CRPA_CONF=/mnt/sd/gnss_crpa.conf
++	fi
++}
++
++running() {
++	[ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null
++}
++
++case "$1" in
++start)
++	if [ -f /mnt/jffs2/gnss_crpa.disable ] && [ "$2" != "force" ]; then
++		echo "gnss_crpa: not started (/mnt/jffs2/gnss_crpa.disable); '$0 start force' starts it"
++		exit 0
++	fi
++	if running; then
++		echo "gnss_crpa: already running"
++		exit 0
++	fi
++	conf_location
++	printf "Starting gnss_crpa (SMI-PI anti-jam): "
++	if "$DAEMON" -d; then echo "OK"; else echo "FAIL"; fi
++	;;
++stop)
++	printf "Stopping gnss_crpa (TX1 silenced): "
++	if running; then
++		kill "$(cat "$PIDFILE")"
++		i=0
++		while running && [ $i -lt 20 ]; do sleep 0.2; i=$((i + 1)); done
++	fi
++	echo "OK"
++	;;
++restart|reload)
++	"$0" stop
++	"$0" start force
++	;;
++status)
++	if running; then echo "gnss_crpa: running (pid $(cat "$PIDFILE"))"; else echo "gnss_crpa: stopped"; exit 1; fi
++	;;
++*)
++	echo "Usage: $0 {start|stop|restart|status}"
++	exit 1
++esac
++
++exit 0
+diff --git a/package/gnss-crpa/gnss-crpa.mk b/package/gnss-crpa/gnss-crpa.mk
+new file mode 100644
+index 00000000..d15ad867
+--- /dev/null
++++ b/package/gnss-crpa/gnss-crpa.mk
+@@ -0,0 +1,31 @@
++################################################################################
++#
++# gnss-crpa (antsdr-fw-patch 0003)
++#
++################################################################################
++
++GNSS_CRPA_VERSION = 4.9.14-linux1
++GNSS_CRPA_SITE = $(TOPDIR)/package/gnss-crpa/src
++GNSS_CRPA_SITE_METHOD = local
++GNSS_CRPA_DEPENDENCIES = libiio
++GNSS_CRPA_LICENSE = Proprietary (SMI-PI firmware) / ADI no-OS (BSD-3-Clause)
++
++ifeq ($(BR2_PACKAGE_GNSS_CRPA)$(wildcard $(GNSS_CRPA_SITE)/Makefile),y)
++$(error gnss-crpa: $(GNSS_CRPA_SITE) is empty; build with antsdr-fw-patch/build.sh, which copies the sources there)
++endif
++
++define GNSS_CRPA_BUILD_CMDS
++	$(TARGET_MAKE_ENV) $(MAKE) -C $(@D) CC="$(TARGET_CC)" \
++		CFLAGS="$(TARGET_CFLAGS)" LDFLAGS="$(TARGET_LDFLAGS)"
++endef
++
++define GNSS_CRPA_INSTALL_TARGET_CMDS
++	$(TARGET_MAKE_ENV) $(MAKE) -C $(@D) DESTDIR=$(TARGET_DIR) install
++endef
++
++define GNSS_CRPA_INSTALL_INIT_SYSV
++	$(INSTALL) -D -m 0755 $(GNSS_CRPA_PKGDIR)/S95gnss_crpa \
++		$(TARGET_DIR)/etc/init.d/S95gnss_crpa
++endef
++
++$(eval $(generic-package))
+-- 
+2.43.0
+

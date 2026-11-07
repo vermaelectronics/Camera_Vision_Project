@@ -1,0 +1,73 @@
+From a1062b4033ecb5f9020037d7b052a792d9cd3d8d Mon Sep 17 00:00:00 2001
+From: antsdr-fw-patch <antsdr-fw-patch@localhost>
+Date: Sat, 7 Nov 2026 11:59:29 +0000
+Subject: [PATCH] ant: AD9361 LVDS 2R2T for the SMI-PI anti-jam bitstream
+
+adi,ad9361 instead of adi,ad9364, LVDS interface settings of the vendor
+E310 V1 design, RX-only digital interface tuning (no DAC IODELAYs) and no
+HDL decimation/interpolation cores.
+---
+ arch/arm/boot/dts/zynq-ant.dtsi | 26 +++++++++++++++-----------
+ 1 file changed, 15 insertions(+), 11 deletions(-)
+
+diff --git a/arch/arm/boot/dts/zynq-ant.dtsi b/arch/arm/boot/dts/zynq-ant.dtsi
+index 28d95f782..bb2f04be1 100644
+--- a/arch/arm/boot/dts/zynq-ant.dtsi
++++ b/arch/arm/boot/dts/zynq-ant.dtsi
+@@ -190,7 +190,6 @@ cf_ad9364_adc_core_0: cf-ad9361-lpc@79020000 {
+ 			dmas = <&rx_dma 0>;
+ 			dma-names = "rx";
+ 			spibus-connected = <&adc0_ad9364>;
+-			adi,axi-decimation-core-available;
+ 		};
+ 
+ 		cf_ad9364_dac_core_0: cf-ad9361-dds-core-lpc@79024000 {
+@@ -200,7 +199,6 @@ cf_ad9364_dac_core_0: cf-ad9361-dds-core-lpc@79024000 {
+ 			clock-names = "sampl_clk";
+ 			dmas = <&tx_dma 0>;
+ 			dma-names = "tx";
+-			adi,axi-interpolation-core-available;
+ 			adi,axi-dds-default-scale = <0>;
+ 		};
+ 
+@@ -218,7 +216,7 @@ adc0_ad9364: ad9361-phy@0 {
+ 		#address-cells = <1>;
+ 		#size-cells = <0>;
+ 		#clock-cells = <1>;
+-		compatible = "adi,ad9364";
++		compatible = "adi,ad9361"; /* antsdr-fw-patch 0003: E310 2R2T */
+ 
+ 		/* SPI Setup */
+ 		reg = <0>;
+@@ -245,14 +243,20 @@ adc0_ad9364: ad9361-phy@0 {
+ 
+ 		adi,xo-disable-use-ext-refclk-enable;
+ 
+-		/* Enable CMOS Mode */
+-		adi,full-port-enable;
+-		adi,digital-interface-tune-fir-disable;
+-
+-		adi,digital-interface-tune-skip-mode = <0>; /* TUNE RX & TX */
+-		adi,tx-fb-clock-delay = <0>;
+-		adi,tx-data-delay = <9>;
+-		adi,swap-ports-enable;
++		/* antsdr-fw-patch 0003: LVDS interface, 2R2T at up to 61.44 MS/s.
++		 * Values of the vendor E310 V1 / SMI-PI v4.9.14 firmware
++		 * (ADI_RF_SOM, lvds_mode_enable 1). The HDL has no DAC IODELAYs
++		 * (DAC_IODELAY_ENABLE 0), so only the RX side is tuned. */
++		adi,lvds-mode-enable;
++		adi,lvds-bias-mV = <150>;
++		adi,lvds-rx-onchip-termination-enable;
++		adi,lvds-invert1-control = <0xFF>;
++		adi,lvds-invert2-control = <0x0F>;
++		adi,digital-interface-tune-skip-mode = <1>; /* TUNE RX only */
++		adi,rx-data-clock-delay = <0>;
++		adi,rx-data-delay = <4>;
++		adi,tx-fb-clock-delay = <7>;
++		adi,tx-data-delay = <0>;
+ 
+ 		/* Mode Setup */
+ 
+-- 
+2.43.0
+
