@@ -159,6 +159,8 @@ command cmd_list[] = {
 	{"gnss_band=", "0..6 = fixed preset (LO, rate, bandwidth, TX attenuation, RX gain), 0 = default 1569.42 MHz / 61.44 / 56 / 30 / 50; gnss_band? lists them. TX is switched on (gnss_tx=1) every time.", "gnss_band=0", set_gnss_band},
 	{"gnss_rx_gain?", "Gets RX1/RX2 gain mode and gain [dB].", "", get_gnss_rx_gain},
 	{"gnss_rx_gain=", "Sets RX1 AND RX2 to the same gain [dB] (also the auto reference).", "gnss_rx_gain=40", set_gnss_rx_gain},
+	{"gnss_lb=", "1 = TX1 carries RX1 through the ADI axi_ad9361 core's own loopback (DAC data select 8): gnss_passthrough, anti-jam and DMA bypassed; 0 = back to the gnss_passthrough path.", "gnss_lb=1", set_gnss_lb},
+	{"gnss_lb?", "Shows which loopback path TX1 uses.", "", get_gnss_lb},
 	{"gnss_rx_agc=", "0 = manual locked, 1 = AD9361 AGC per channel, 2 = matched auto (SMI-PI).", "gnss_rx_agc=2", set_gnss_rx_agc},
 	/* GNSS-CRPA MOD-7: the DDR round trip. Exercises axi_ad9361_dac_dma,
 	 * util_upack2 and the util_rfifo DATA path, none of which had ever moved a
@@ -177,6 +179,7 @@ extern struct ad9361_rf_phy *ad9361_phy;
 /* GNSS-CRPA MOD-6: tracks whether the console has enabled retransmission.
  * Mirrors what was commanded; gnss_status? reports what the HARDWARE says. */
 static int gnss_tx_on = 0;
+static int gnss_lb_on = 0;   /* 4.9.12 fw: 1 = ADI core loopback (DAC data select 8) instead of gnss_passthrough */
 
 /**************************************************************************//***
  * @brief GNSS-CRPA MOD-6. Enable or disable the RX1 -> PL -> TX1 retransmit.
@@ -246,6 +249,19 @@ void set_gnss_tx(double* param, char param_no)
 		}
 
 		gnss_tx_on = 1;
+		if(gnss_lb_on) {
+			/* gnss_lb=1: the ADI core's own RX->TX loopback, gnss_passthrough bypassed */
+			if(gnss_aj_enabled()) gnss_aj_enable(0);
+			axi_dac_set_datasel(ad9361_phy->tx_dac, 0, AXI_DAC_DATA_SEL_LB);
+			axi_dac_set_datasel(ad9361_phy->tx_dac, 1, AXI_DAC_DATA_SEL_LB);
+			axi_dac_set_datasel(ad9361_phy->tx_dac, 2, AXI_DAC_DATA_SEL_ZERO);
+			axi_dac_set_datasel(ad9361_phy->tx_dac, 3, AXI_DAC_DATA_SEL_ZERO);
+			console_print("GNSS_TX: ON  - RX1 retransmitted on TX1 by the ADI core loopback (gnss_lb=1); "
+				      "anti-jam and gnss_passthrough bypassed.\n");
+			gnss_aj_note_tx(1);
+			gnss_log_print_state();
+			return;
+		}
 		/* Anti-jam comes with the transmitter unless the operator switched
 		 * it off (gnss_smi=0): one command, gnss_tx=1, is the whole start. */
 		if(!gnss_aj_user_off() && !gnss_aj_enabled())
@@ -538,6 +554,50 @@ void gnss_tx_always(void)
 		set_gnss_tx(&one, 1);
 	if(gnss_tx_on)
 		gnss_band_levels();
+}
+
+/* 4.9.12 fw: gnss_lb= -- loopback WITHOUT gnss_passthrough.
+ * axi_ad9361_tx_channel.v: dac_data_sel 4'h8 -> dac_data_out <= adc_data, the raw 12-bit RX sample of the same
+ * channel, inside the ADI core (a few clock cycles, no DMA, no custom logic). TX1 I/Q = RX1 I/Q; TX2 is set to
+ * zero. RX gain and TX attenuation stay the band's values (level lock). The anti-jam filter is NOT in this path,
+ * so it is switched off. The digital level is unity: this path adds no gain (and no noise). */
+void set_gnss_lb(double* param, char param_no)
+{
+	double one = 1.0;
+	if(param_no < 1 || (param[0] != 0.0 && param[0] != 1.0)) {
+		console_print("gnss_lb= needs 1 (ADI core loopback) or 0 (gnss_passthrough path)\n");
+		return;
+	}
+	if(!ad9361_phy) return;
+	if((int)param[0] == 1) {
+		gnss_lb_on = 1;
+		if(!gnss_tx_on) {
+			set_gnss_tx(&one, 1);           /* safe start, attenuation; applies the loopback (gnss_lb_on) */
+			if(gnss_tx_on) gnss_band_levels();
+			return;
+		}
+		if(gnss_aj_enabled()) gnss_aj_enable(0);
+		axi_dac_set_datasel(ad9361_phy->tx_dac, 0, AXI_DAC_DATA_SEL_LB);
+		axi_dac_set_datasel(ad9361_phy->tx_dac, 1, AXI_DAC_DATA_SEL_LB);
+		axi_dac_set_datasel(ad9361_phy->tx_dac, 2, AXI_DAC_DATA_SEL_ZERO);
+		axi_dac_set_datasel(ad9361_phy->tx_dac, 3, AXI_DAC_DATA_SEL_ZERO);
+		console_print("gnss_lb=1: TX1 = RX1 through the ADI axi_ad9361 core loopback (gnss_passthrough and anti-jam bypassed).\n"
+			      "          TX attenuation / RX gain unchanged. gnss_lb=0 to go back.\n");
+	} else {
+		gnss_lb_on = 0;
+		if(gnss_tx_on) {
+			gnss_tx_on = 0;                 /* full restart of the normal path: DMA source, passthrough, anti-jam */
+			gnss_tx_always();
+		}
+		console_print("gnss_lb=0: TX1 back on the gnss_passthrough path (anti-jam as configured).\n");
+	}
+}
+
+void get_gnss_lb(double* param, char param_no)
+{
+	console_print("gnss_lb=%d: %s\n", (long)gnss_lb_on,
+		      (char*)(gnss_lb_on ? "TX1 = RX1 by the ADI axi_ad9361 core loopback (no gnss_passthrough, no anti-jam)"
+				         : "TX1 from gnss_passthrough (anti-jam path)"));
 }
 
 /**************************************************************************//***

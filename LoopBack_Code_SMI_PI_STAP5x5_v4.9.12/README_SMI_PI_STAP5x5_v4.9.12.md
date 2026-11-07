@@ -1,3 +1,9 @@
+# Firmware: `gnss_lb=` loopback without gnss_passthrough (bitstream unchanged, 4.9.12)
+
+`gnss_lb=1` switches TX1 to the ADI `axi_ad9361` core's own RX->TX loopback: DAC data select 8 (`axi_ad9361_tx_channel.v`: `dac_data_out <= adc_data`), the raw 12-bit RX1 sample, a few clock cycles, no DMA, no custom logic. gnss_passthrough and the anti-jam filter are bypassed (anti-jam switched off), TX2 is zero. RX gain and TX attenuation stay at the band values (level lock). `gnss_lb=0` restarts the normal gnss_passthrough path. `gnss_lb?` shows the mode. Unity digital gain: this path adds no amplification. Not tested on the board (syntax-checked only).
+
+---
+
 # Firmware update (level lock), bitstream unchanged (4.9.12)
 
 RX1/RX2 gain and TX1/TX2 attenuation now stay at the values of the selected `gnss_band=N` (the table in `gnss_aj.c`, e.g. band 1: TX 30 dB, RX 50 dB).
