@@ -17,7 +17,10 @@
 #   ./build.sh fsbl       Vitis/xsct: build/sdk/fsbl/Release/fsbl.elf
 #   ./build.sh firmware   full firmware: boot.bin, ant.frm/.dfu, boot.frm/.dfu ...
 #   ./build.sh sdimg      SD-card image: build_sdimg/BOOT.bin + uImage + ...
+#   ./build.sh baremetal  design A WITHOUT Linux (ant only): FPGA + the SMI-PI
+#                         firmware on bare metal -> build_baremetal/BOOT.bin
 #   ./build.sh all        check + fetch + patch + hls + firmware + sdimg
+#   ./build.sh all-baremetal  check + fetch + patch + hls + baremetal (no Linux)
 #   ./build.sh outputs    list the generated files
 #   ./build.sh reset      restore pristine v0.39 sources (drops patches and builds)
 #   ./build.sh make ARGS  run plutosdr-fw's make with the right environment
@@ -29,6 +32,8 @@
 #   SKIP_LEGAL=1     skip buildroot legal-info (faster; no legal-info tarball)
 #   SMI_PI_SKIP_CSIM=1  hls: skip the 14 C-simulation scenarios (faster)
 #   FORCE_HLS=1      hls: rebuild the smi_pi IP even if it is up to date
+#   BM_DEFINES=...   baremetal: firmware build defines (default GNSS_LOG_SD;
+#                    BM_DEFINES= (empty) builds without SD logging / saving)
 
 set -euo pipefail
 
@@ -435,6 +440,42 @@ cmd_sdimg() {
 	cmd_outputs
 }
 
+# --------------------------------------------------------------------------
+# baremetal: design-A FPGA + SMI-PI firmware without Linux (ant only)
+# --------------------------------------------------------------------------
+cmd_baremetal() {
+	require_ready
+	[ "$TARGET" = ant ] || die "baremetal is for TARGET=ant (E310) only"
+	require_hls
+	local xsa="$FW_DIR/build/system_top.xsa" out="$ROOT/build_baremetal"
+	local scripts="$ROOT/baremetal/Scripts" src="$ROOT/baremetal/app_gnss_e310"
+	[ -d "$src" ] || die "missing $src"
+	if [ ! -f "$xsa" ]; then
+		info "No FPGA build yet: building the hardware first (Vivado)"
+		run_make build/system_top.xsa
+	fi
+	mkdir -p "$out"
+	(cd "$out" && unzip -o -q "$xsa" system_top.bit) || die "no system_top.bit in $xsa"
+
+	info "Bare-metal firmware (Vitis xsct, classic BSP, SD logging + band 7 on SD)"
+	xilinx_run "xsct '$scripts/build_software.tcl' '$xsa' '$out/vitis_ws' '$src' '$out/e310_gnss_app.elf' '${BM_DEFINES-GNSS_LOG_SD}'" \
+		2>&1 | tee "$out/build_software.log"
+	grep -q "SW_RESULT: PASS" "$out/build_software.log" || die "firmware build failed (see $out/build_software.log)"
+
+	info "FSBL (Vitis xsct)"
+	xilinx_run "xsct '$scripts/build_fsbl.tcl' '$xsa' '$out/fsbl_ws' '$out/fsbl.elf'" 2>&1 | tee "$out/build_fsbl.log"
+	grep -q "FSBL_RESULT: PASS" "$out/build_fsbl.log" || die "FSBL build failed (see $out/build_fsbl.log)"
+
+	info "BOOT.bin = FSBL + bitstream + firmware (bootgen)"
+	printf 'the_ROM_image:\n{\n\t[bootloader] %s\n\t%s\n\t%s\n}\n' \
+		"$out/fsbl.elf" "$out/system_top.bit" "$out/e310_gnss_app.elf" > "$out/boot.bif"
+	rm -f "$out/BOOT.bin"
+	xilinx_run "bootgen -arch zynq -image '$out/boot.bif' -o '$out/BOOT.bin' -w on" || die "bootgen failed"
+	[ -f "$out/BOOT.bin" ] || die "bootgen produced no BOOT.bin"
+	ok "Bare-metal boot image: $out/BOOT.bin ($(du -h "$out/BOOT.bin" | cut -f1))"
+	ok "Copy ONLY BOOT.bin to the SD card (no uImage, devicetree, ramdisk or uEnv.txt)."
+}
+
 cmd_outputs() {
 	local b="$FW_DIR/build" s="$FW_DIR/build_sdimg" f
 	info "QSPI-flash firmware ($b)"
@@ -496,6 +537,8 @@ case "$cmd" in
 	firmware) cmd_firmware ;;
 	sdimg)    cmd_sdimg ;;
 	all)      cmd_check; cmd_fetch; cmd_patch; cmd_hls; cmd_firmware; cmd_sdimg ;;
+	baremetal) cmd_baremetal ;;
+	all-baremetal) cmd_check; cmd_fetch; cmd_patch; cmd_hls; cmd_baremetal ;;
 	outputs)  cmd_outputs ;;
 	reset)    cmd_reset "$@" ;;
 	make)     require_ready; run_make "$@" ;;

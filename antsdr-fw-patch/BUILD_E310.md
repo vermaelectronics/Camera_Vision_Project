@@ -486,6 +486,66 @@ The service:
 
 ---
 
+## 7b. Design A on bare metal (no Linux)
+
+`./build.sh baremetal` builds the same design-A FPGA (LVDS 2R2T,
+`gnss_passthrough` v4.9.14, `smi_pi` 6 + 6 taps, `axi_vcxo_ctrl`) but runs the
+SMI-PI v4.9.14 firmware directly on the ARM, like design B. There is no
+U-Boot, Linux or root file system: the SD card holds only `BOOT.bin`.
+
+The firmware is B's `app_gnss_e310` (in `baremetal/app_gnss_e310`) adapted to
+the design-A FPGA:
+
+| Item | Design B FPGA | Design A FPGA (this build) |
+|---|---|---|
+| `gnss_passthrough` | `0x43C0_0000` | `0x43C1_0000` (set in `app_config.h`, never guessed) |
+| AD9361 RESETB | GPIO 100 (EMIO 46) | GPIO 67 (EMIO 13) |
+| RF band switches | GPIO 54–61 (EMIO 0–7) | GPIO 86–93 (EMIO 32–39) |
+| 40 MHz VCXO | no control core | `axi_vcxo_ctrl` set to 23000 at power-on, as Linux does |
+
+Added to the firmware: band 7 (`gnss_band=7,LO,rate,BW,att,gain`,
+`gnss_band7?`, `gnss_band_boot=`) saved on the SD card in `GNSSCRPA.CFG`, and
+`vcxo?`, `vcxo_dac=`, `vcxo_ref=` for the reference oscillator.
+
+### Build it
+
+```bash
+./build.sh patch
+```
+
+```bash
+./build.sh hls
+```
+
+```bash
+./build.sh baremetal
+```
+
+`baremetal` builds the FPGA first if `plutosdr-fw/build/system_top.xsa` does
+not exist yet (about 30–60 min), then the firmware and the FSBL with Vitis
+`xsct`, then `build_baremetal/BOOT.bin` with `bootgen`. Linux and buildroot are
+not built. `./build.sh all-baremetal` runs check, fetch, patch, hls and
+baremetal in one go. Logs: `build_baremetal/build_software.log`,
+`build_baremetal/build_fsbl.log`.
+
+### SD card and console
+
+Copy **only** `build_baremetal/BOOT.bin` to the FAT32 SD card (remove
+`uImage`, `devicetree.dtb`, `uramdisk.image.gz` and `uEnv.txt` if they are
+there). Open PuTTY at 115200 and power on: the firmware console appears
+directly, with the same commands as design B (`?`, `help?`, `gnss_aj?`,
+`gnss_report?`, `gnss_band=7,1575.42,61.44,56,30,50`, …). At power-on TX1 is
+on and TX2 is muted.
+
+| Message or symptom | Meaning / fix |
+|---|---|
+| Nothing in PuTTY | Wrong baud rate (115200), or the board did not boot from SD (boot switch, FAT32 card, `BOOT.bin` at the top level). |
+| `ad9361_init failed` | The AD9361 did not start: check `vcxo?` and the 40 MHz reference. |
+| `gnss_band7: values set; not saved` | No SD card mounted: values stay until power-off. |
+| `gnss_pt: … not found` | The board runs another bitstream: copy the new `BOOT.bin`. |
+
+---
+
 ## 8. Rebuilding and cleaning
 
 * Re-running `./build.sh firmware` is incremental for Vivado, Linux and

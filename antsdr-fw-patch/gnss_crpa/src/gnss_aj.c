@@ -1464,8 +1464,10 @@ void gnss_band_custom_set(uint64_t lo, uint32_t fs, uint32_t bw, uint32_t att_md
 {
 	struct band_cfg *c = &bands[GNSS_BAND_CUSTOM];
 	c->lo = lo; c->fs = fs; c->bw = bw; c->att_mdb = att_mdb; c->rxg_db = rxg_db;
-	snprintf(band7_name, sizeof(band7_name), "custom: %.3f MHz, %.2f MS/s, %.1f MHz, TX1 %.2f dB, RX %ld dB",
-		 (double)lo / 1e6, (double)fs / 1e6, (double)bw / 1e6, (double)att_mdb / 1000.0, (long)rxg_db);
+	/* fmt(): no printf %f on bare metal */
+	snprintf(band7_name, sizeof(band7_name), "custom: %s MHz, %s MS/s, %s MHz, TX1 %s dB, RX %ld dB",
+		 fmt((double)lo / 1e6, 3, 0), fmt((double)fs / 1e6, 2, 0), fmt((double)bw / 1e6, 1, 0),
+		 fmt((double)att_mdb / 1000.0, 2, 0), (long)rxg_db);
 	c->name = band7_name;
 }
 

@@ -174,7 +174,7 @@ static void info_hardware(struct ad9361_rf_phy *phy)
     rule();
 
     console_print(" CUSTOM IP -- gnss_passthrough                          [live]\n");
-    console_print("   base address    : 0x43C10000, 4 kB aperture (Linux design A; 0x43C00000 = AD5660 DAC)\n");
+    console_print("   base address    : 0x43C10000, 4 kB aperture (design A; 0x43C00000 = axi_vcxo_ctrl)\n");
     console_print("   ID register     : 0x%08x  (expect 0x47435031, ASCII 'GCP1')\n",
                   (long)gnss_pt_read(GNSS_PT_REG_ID));
     console_print("   VERSION         : 0x%08x  (expect 0x00040001 = v4.1)\n",
@@ -316,15 +316,12 @@ static void info_ps(void)
     rule();
 
     console_print(" AXI-LITE ADDRESS MAP (M_AXI_GP0)                        [cfg]\n");
-    console_print("   0x41200000  axi_gpreg\n");
-    console_print("   0x41600000  axi_iic_main\n");
+    console_print("   0x43C00000  axi_vcxo_ctrl      40 MHz VCXO trim (design A)\n");
     console_print("   0x43C10000  gnss_passthrough   <- assigned by THIS project\n");
-    console_print("   0x45000000  axi_sysid_0\n");
     console_print("   0x79020000  axi_ad9361\n");
     console_print("   0x7C400000  axi_ad9361_adc_dma\n");
     console_print("   0x7C420000  axi_ad9361_dac_dma\n");
-    console_print("   0x43C0_0000 is the conventional free Zynq-7000 GP0 slot and\n");
-    console_print("   collides with none of the vendor apertures.\n");
+    console_print("   (design A FPGA: antsdr-fw-patch projects/ant + 0002/0003)\n");
     rule();
 
     console_print(" INTERRUPTS                                              [cfg]\n");
