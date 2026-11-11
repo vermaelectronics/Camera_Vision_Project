@@ -156,7 +156,7 @@ command cmd_list[] = {
 	{"gnss_log_now=", "1 = write one snapshot right now.", "gnss_log_now=1", set_gnss_log_now},
 	{"gnss_time=", "Set the clock used for the log time stamps (no real-time clock on the board): gnss_time=2026 11 5 14 30 0", "gnss_time=2026 11 5 14 30 0", set_gnss_time},
 	{"gnss_band?", "RF profile and which GNSS signals it carries (GPS, Galileo, BeiDou, GLONASS).", "", get_gnss_band},
-	{"gnss_band=", "0..6 = fixed preset; 7 = your own values: gnss_band=7, LO MHz, MS/s, BW MHz, TX att dB, RX gain dB (gnss_band=7 alone re-applies the last ones). In band 7 nothing is lowered automatically. 0 = default 1569.42 / 61.44 / 56 / 30 / 50. TX is switched on every time.", "gnss_band=7, 1575.42, 61.44, 56, 30, 50", set_gnss_band},
+	{"gnss_band=", "0..6 = fixed preset; 7 = MANUAL, no predefined values: gnss_band=7, LO MHz, MS/s, BW MHz, TX att dB, RX gain dB (afterwards gnss_band=7 alone re-applies them). In band 7 nothing is lowered automatically. 0 = default 1569.42 / 61.44 / 56 / 30 / 50. TX is switched on every time.", "gnss_band=7, 1575.42, 61.44, 56, 30, 50", set_gnss_band},
 	{"gnss_rx_gain?", "Gets RX1/RX2 gain mode and gain [dB].", "", get_gnss_rx_gain},
 	{"gnss_rx_gain=", "Sets RX1 AND RX2 to the same gain [dB] (also the auto reference).", "gnss_rx_gain=40", set_gnss_rx_gain},
 	{"gnss_lb=", "1 = TX1 carries RX1 through the ADI axi_ad9361 core's own loopback (DAC data select 8): gnss_passthrough, anti-jam and DMA bypassed; 0 = back to the gnss_passthrough path.", "gnss_lb=1", set_gnss_lb},
@@ -519,9 +519,10 @@ void set_gnss_band(double* param, char param_no)
 			}
 			if(param[4] < 10.0)
 				console_print("gnss_band=7: TX attenuation below 10 dB. CONDUCTED, ATTENUATED COAX ONLY.\n");
-		} else if(param_no != 1) {
-			console_print("gnss_band=7 needs all five values: gnss_band=7, LO MHz, MS/s, BW MHz, TX att dB, RX gain dB\n"
-				      "             (or gnss_band=7 alone for the last values). Nothing changed.\n");
+		} else if(param_no != 1 || !gnss_band7_is_set()) {
+			console_print("gnss_band=7 is manual, it has no predefined values. Give all five:\n"
+				      "    gnss_band=7, LO MHz, MS/s, BW MHz, TX att dB, RX gain dB   e.g. gnss_band=7, 1575.42, 61.44, 56, 30, 50\n"
+				      "  (after that, gnss_band=7 alone re-applies them). Nothing changed.\n");
 			return;
 		}
 		/* band 7: the RX gain stays manual (no AD9361 AGC, no matched loop) */

@@ -1435,12 +1435,14 @@ static struct band_cfg bands[GNSS_BAND_COUNT] = {
 	{1575420000ULL, 61440000U, 56000000U, 10000U, 40, "1575.42 MHz, TX 10 dB, RX 40 dB"},
 	{1582500000ULL, 61440000U, 56000000U, 20000U, 40, "1582.50 MHz, TX 20 dB, RX 40 dB"},
 	{1575420000ULL, 61440000U, 56000000U, 30000U, 50, "1575.42 MHz, TX 30 dB, RX 50 dB"},
-	/* firmware b7: band 7 = the operator's own values (gnss_band=7, LO, MS/s, BW, TX att, RX gain). Until they
-	 * are given it holds the band-0 values. In band 7 nothing lowers a value by itself: the RX gain stays
-	 * manual (no AGC, no matched loop), and the level lock and the radio guard put back exactly these values. */
-	{1569420000ULL, 61440000U, 56000000U, 30000U, 50, "manual (gnss_band=7): not set yet, band-0 values"},
+	/* firmware b7: band 7 = the operator's own values ONLY (gnss_band=7, LO, MS/s, BW, TX att, RX gain). There
+	 * are no predefined values: band 7 cannot be selected until they are given (band7_set). In band 7 nothing
+	 * lowers a value by itself: the RX gain stays manual (no AGC, no matched loop), and the level lock and the
+	 * radio guard put back exactly these values. The numbers below are placeholders that are never applied. */
+	{0ULL, 0U, 0U, 0U, 0, "manual: NOT SET (gnss_band=7, LO MHz, MS/s, BW MHz, TX att dB, RX gain dB)"},
 };
 static char band7_name[96];
+static int  band7_set;          /* 1 once the operator gave the band-7 values */
 static int band_applied;
 static int radio_manual, manual_warn;   /* the operator set LO / rate / FIR by hand: the guard keeps its hands off */
 
@@ -1511,8 +1513,11 @@ int gnss_band7_values(uint64_t lo, uint32_t fs, uint32_t bw, uint32_t att_mdb, i
 		band7_name[n] = 0;
 	}
 	c->name = band7_name;
+	band7_set = 1;
 	return 0;
 }
+
+int gnss_band7_is_set(void) { return band7_set; }
 
 static int radio_recal(void)
 {
@@ -1622,6 +1627,7 @@ int gnss_band_set(int b)
 	const struct band_cfg *c;
 	int r = 0;
 	if(b < 0 || b >= GNSS_BAND_COUNT || !ad9361_phy) return -1;
+	if(b == GNSS_BAND_MANUAL && !band7_set) return -1;   /* band 7 has no predefined values */
 	c = &bands[b];
 	gnss_aj_dma_release();
 	/* The vendor start-up code LOADS a band-pass FIR (passband 0.15-0.25 fs)
@@ -1865,6 +1871,9 @@ void gnss_band_print(void)
 	}
 	console_print("  profiles (gnss_band=N), LO / rate / RF bandwidth / TX attenuation / RX gain:\n");
 	for(i = 0; i < GNSS_BAND_COUNT; i++)
+		if(i == GNSS_BAND_MANUAL && !band7_set)
+			console_print("    7 = manual, NOT SET: gnss_band=7, LO MHz, MS/s, BW MHz, TX att dB, RX gain dB\n");
+		else
 		console_print("    %d = %s MHz, %s MS/s, %s MHz, %s dB, %d dB%s\n", (long)i, f3u((double)bands[i].lo / 1e6),
 			      f2u((double)bands[i].fs / 1e6), f1u((double)bands[i].bw / 1e6),
 			      fmt((double)bands[i].att_mdb / 1000.0, 0, 0), (long)bands[i].rxg_db,

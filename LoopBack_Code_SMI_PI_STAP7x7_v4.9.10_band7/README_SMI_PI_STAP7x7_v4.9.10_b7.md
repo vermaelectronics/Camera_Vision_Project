@@ -6,11 +6,12 @@
 ## Band 7: your own values
 ```
 gnss_band=7, 1575.42, 61.44, 56, 30, 50      LO MHz, MS/s, RF bandwidth MHz, TX attenuation dB, RX gain dB
-gnss_band=7                                    re-apply the last band-7 values
+gnss_band=7                                    re-apply your band-7 values (only after you gave them once)
 gnss_band?                                     shows all bands, band 7 with your values
 ```
 Limits: LO 70..6000 MHz, 2.084..61.44 MS/s, 0.2..56 MHz, TX attenuation 0..89.75 dB (0.25 dB steps), RX gain 0..76 dB.
-A value out of range is reported and nothing is changed. Values are kept until the board is reset (power-on = band 0).
+Band 7 is **manual only: it has no predefined values**. `gnss_band=7` without values is refused until you have given all five once (`gnss_band?` shows "7 = manual, NOT SET").
+A value out of range is reported and nothing is changed. Values are kept until the board is reset (power-on = band 0; give the band-7 values again).
 
 **In band 7 nothing is lowered (or raised) automatically:**
 * RX gain stays manual: no AD9361 AGC, no matched gain loop (`gnss_rx_agc=1/2` is refused in band 7).

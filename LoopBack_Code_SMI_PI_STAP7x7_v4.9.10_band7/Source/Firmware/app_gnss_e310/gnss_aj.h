@@ -75,6 +75,7 @@ void gnss_aj_dma_release(void);
 /* RF profile; returns 0 on success. */
 int  gnss_band_set(int band);
 int  gnss_band_get(void);
+int  gnss_band7_is_set(void);        /* 1 once gnss_band=7, ... values were given */
 int  gnss_band7_values(uint64_t lo, uint32_t fs, uint32_t bw, uint32_t att_mdb, int32_t rxg_db);  /* store band 7 (not applied) */
 void gnss_band_levels(void);
 void gnss_levels_adopt(void);        /* 4.9.13: the present RX gain / TX attenuation become the locked values */
