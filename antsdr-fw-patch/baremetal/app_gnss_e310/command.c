@@ -157,7 +157,7 @@ command cmd_list[] = {
 	{"gnss_notch?", "CW notch (crpa5): automatic / off / fixed, on or off, its frequency and the tone detector.", "", get_gnss_notch},
 	{"gnss_notch=", "CW notch: 1 = automatic (default: on while a CW tone is seen), 0 = off.", "gnss_notch=1", set_gnss_notch},
 	{"gnss_notch_rf=", "CW notch fixed at this RF frequency [MHz] (gnss_notch=1 back to automatic).", "gnss_notch_rf=1575.42", set_gnss_notch_rf},
-	{"gnss_aj_mode=", "0 = space-time 63 + 2 image taps (default), 1 = RX2 taps, 2 = one weight (v3), 3 = no image taps (v4.0).", "gnss_aj_mode=0", set_gnss_aj_mode},
+	{"gnss_aj_mode=", "0 = SFAP: a weight + 2 image taps in every frequency bin (default), 1 = no image taps, 2 = one weight for all bins (v3).", "gnss_aj_mode=0", set_gnss_aj_mode},
 	{"gnss_log=", "Snapshot of status, band, rx gain, report, ... every N seconds (default 60; 0 = off; 300 = 5 min), saved with a time stamp (SD build) or printed between GNSS_LOG BEGIN/END lines.", "gnss_log=60", set_gnss_log},
 	{"gnss_log?", "Snapshot logger state: period, target, count, last file, clock.", "", get_gnss_log},
 	{"gnss_log_now=", "1 = write one snapshot right now.", "gnss_log_now=1", set_gnss_log_now},
@@ -488,9 +488,9 @@ void set_gnss_aj_log(double* param, char param_no)
 
 void set_gnss_aj_mode(double* param, char param_no)
 {
-	if(param_no < 1 || param[0] < 0.0 || param[0] > 3.0) {
-		console_print("gnss_aj_mode= needs 0 (space-time 63 + 2 image taps), 1 (RX2 taps), 2 (one weight, v3)\n"
-			      "              or 3 (space-time without image taps, v4.0)\n");
+	if(param_no < 1 || param[0] < 0.0 || param[0] > (double)(AJ_NMODES - 1)) {
+		console_print("gnss_aj_mode= needs 0 (SFAP: a weight + 2 image taps per frequency bin), 1 (no image taps)\n"
+			      "              or 2 (one weight for all bins, v3)\n");
 		return;
 	}
 	gnss_aj_set_mode((int)param[0]);

@@ -36,6 +36,7 @@
  *
  * app_config.h has its own include guard, so including it here is harmless. */
 #include "app_config.h"
+#include "gnss_sfap_cfg.h"      /* crpa6: AJ_LOG2N (SFAP-PI FFT size) */
 
 #ifdef XILINX_PLATFORM
 #include <xparameters.h>
@@ -70,16 +71,16 @@
 #define GNSS_PT_REG_TX_COUNT_CH1    0x34U   /* RO                             */
 #define GNSS_PT_REG_RX_SNAPSHOT_CH1 0x38U   /* RO                             */
 #define GNSS_PT_REG_CRPA_COEF(n)    (0x40U + ((n) * 4U))  /* RW, n = 0..15    */
-/* SMI-PI v4 space-time weights (see gnss_aj_math.h for the layout).
- * AJ_W, AJ_CFG, AJ_NORM and AJ_WC are SHADOW copies; a write to AJ_COMMIT
+/* crpa6: SFAP-PI per-bin weights (see gnss_aj_math.h for the layout): 3 x N words
+ * in one block from 0x200 (b_k, then c1_k, then c2_k; N = 2^AJ_LOG2N bins).
+ * They, AJ_CFG, AJ_NORM and AJ_BLK_THR are SHADOW copies; a write to AJ_COMMIT
  * hands all of them to the filter in one clock. AJ_COMMIT reads back a commit
  * counter. */
-#define GNSS_PT_REG_AJ_W(k)         (0x400U + ((k) * 4U)) /* RW, k = 0..63 (4.9: 32 taps per channel) */
+#define GNSS_PT_REG_AJ_WB(k)        (0x200U + ((k) * 4U)) /* WO, k = 0 .. 3N-1 */
 #define GNSS_PT_REG_AJ_COMMIT       0x180U  /* W: commit, R: count            */
 #define GNSS_PT_REG_AJ_INFO         0x184U  /* RO 0x10040C06                  */
-#define GNSS_PT_REG_AJ_CFG          0x188U  /* RW [0] bypass, [10:8] shift, [14:12] weight scale */
+#define GNSS_PT_REG_AJ_CFG          0x188U  /* RW [0] bypass, [10:8] shift 0..4, [15] pulse blanker */
 #define GNSS_PT_REG_AJ_NORM         0x18CU  /* RW g2, Q3.13 {im, re}          */
-#define GNSS_PT_REG_AJ_WC(k)        (0x190U + ((k) * 4U)) /* RW image taps 0,1 */
 #define GNSS_PT_REG_AJ_CFG_ACTIVE   0x198U  /* RO AJ_CFG as committed         */
 /* bitstream 4.6 (AJ_INFO layout 5): pulse blanker on the filter output, RX peak hold */
 #define GNSS_PT_REG_AJ_BLK_THR      0x19CU  /* RW shadow: blanker threshold (sum of 8 samples of I^2+Q^2), committed by AJ_COMMIT */
@@ -87,12 +88,14 @@
 #define GNSS_PT_REG_AJ_BLK_COUNT    0x1A4U  /* RO samples blanked since the counter clear */
 #define GNSS_PT_REG_AJ_BLK_BURSTS   0x1A8U  /* RO bursts blanked since the counter clear  */
 #define GNSS_PT_REG_AJ_RX_PEAK      0x1ACU  /* RO [15:0] largest |I|,|Q| of RX1/RX2 in the last window, [31:16] window counter */
-#define GNSS_PT_REG_AJ_NTC_PINC     0x1B0U  /* RW shadow (crpa5): CW notch NCO phase increment, f/fs * 2^32 */
-#define GNSS_PT_REG_AJ_NTC_CTRL     0x1B4U  /* RW shadow: [0] notch enable; both committed by AJ_COMMIT */
-#define GNSS_PT_REG_AJ_NTC_CTRL_ACT 0x1B8U  /* RO committed enable                */
-#define GNSS_PT_REG_AJ_NTC_PINC_ACT 0x1BCU  /* RO committed phase increment       */
-#define GNSS_PT_AJ_LAYOUT_NOTCH     8U            /* first layout with the CW notch (crpa5, smi_pi 2.6) */
-#define GNSS_PT_AJ_INFO_EXPECTED    0x08040C08U   /* crpa5: 8 taps per channel, reference delay 4, layout 8 (CW notch) */   /* layout 6 = v4.7 (reference delay 4); 5 = v4.6 (pulse blanker, peak hold); 4 = v4.5 */
+/* The CW notch of crpa5 (smi_pi 2.6, AJ_INFO layout 8 exactly) is not in the SFAP bitstream:
+ * SFAP nulls a CW in the one bin it falls in. The registers stay defined for gnss_notch.c. */
+#define GNSS_PT_REG_AJ_NTC_PINC     0x1B0U
+#define GNSS_PT_REG_AJ_NTC_CTRL     0x1B4U
+#define GNSS_PT_AJ_LAYOUT_NOTCH     8U
+#define GNSS_PT_AJ_LAYOUT_SFAP      9U            /* crpa6: SFAP-PI in the v4.9.14 passthrough */
+/* {bins N, hop N/2, 12 fraction bits, layout 9}: 0x80400C09 for 128 bins, 0x40200C09 for 64 */
+#define GNSS_PT_AJ_INFO_EXPECTED    (((uint32_t)(1U << AJ_LOG2N) << 24) | ((uint32_t)(1U << (AJ_LOG2N - 1)) << 16) | 0x0C09U)   /* layout 6 = v4.7 (reference delay 4); 5 = v4.6 (pulse blanker, peak hold); 4 = v4.5 */
 #define GNSS_PT_AJ_LAYOUT_BLANK     5U            /* first layout with the blanker and the peak hold */
 #define GNSS_PT_AJ_CFG_BLANK        0x8000U       /* AJ_CFG[15]: blanker enable (layout 5) */
 #define GNSS_PT_BLK_THR_OFF         0xFFFFFFFFU   /* threshold that never triggers */

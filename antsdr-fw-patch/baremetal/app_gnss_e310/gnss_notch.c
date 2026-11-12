@@ -100,7 +100,7 @@ void gnss_notch_init(void)
 {
 	uint32_t info = gnss_pt_read(GNSS_PT_REG_AJ_INFO);
 	XTime_GetTime(&nt_t_boot);
-	nt_hw = (info & 0xFFU) >= GNSS_PT_AJ_LAYOUT_NOTCH;
+	nt_hw = (info & 0xFFU) == GNSS_PT_AJ_LAYOUT_NOTCH;   /* crpa5 (smi_pi 2.6) only; not in the SFAP build */
 	nt_is_on = 0; nt_hits = 0;
 	if(nt_hw) hw_set(0, 0U);
 	if(nt_hw && nt_mode == GNSS_NOTCH_FIXED) gnss_notch_set_rf(nt_rf_fixed);
@@ -222,7 +222,7 @@ static const char *mode_txt(void)
 void gnss_notch_report_line(void)
 {
 	if(!nt_hw) {
-		console_print("cw notch      : not in this bitstream (needs AJ_INFO layout 8, crpa5)\n");
+		console_print("cw notch      : not used (SFAP-PI nulls a CW in the one frequency bin it falls in)\n");
 		return;
 	}
 	if(nt_is_on)
@@ -239,7 +239,7 @@ void gnss_notch_print(void)
 	uint32_t fs; uint64_t lo;
 	radio_now(&fs, &lo);
 	console_print("GNSS_NOTCH: %s, %s\n", (char*)mode_txt(),
-		      (char*)(!nt_hw ? "NOT in this bitstream (build crpa5: smi_pi 2.6, AJ_INFO layout 8)" :
+		      (char*)(!nt_hw ? "not used in the SFAP-PI build (a CW is nulled in its own frequency bin)" :
 		              nt_is_on ? "notch ON" : "notch off"));
 	if(!nt_hw) return;
 	if(nt_is_on)

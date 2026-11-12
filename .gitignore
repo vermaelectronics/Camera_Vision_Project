@@ -29,3 +29,4 @@ xsim.dir/
 # ANTSDR firmware: sources fetched by antsdr-fw-patch/build.sh and build outputs
 antsdr-fw-patch/plutosdr-fw/
 antsdr-fw-patch/build_baremetal/
+antsdr-fw-patch/.sfap_bins

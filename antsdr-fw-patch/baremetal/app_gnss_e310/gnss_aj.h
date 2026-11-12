@@ -35,7 +35,13 @@
 #define GNSS_AJ_BUF_ADDR   0x11000000U
 #endif
 
-#define GNSS_AJ_VERSION_STR  "4.9.14 (8 + 8 taps, automatic CW notch, low-DSP bitstream, level lock, TX2 = CRPA copy, muted, 89.75 dB)"
+#define GNSS_AJ_VERSION_STR  "SFAP-PI 5.0, " GNSS_AJ_BINS_STR " frequency bins (firmware 4.9.14: band 7, level lock, TX2 = CRPA copy, muted, 89.75 dB)"
+#include "gnss_sfap_cfg.h"
+#if AJ_LOG2N == 7
+#define GNSS_AJ_BINS_STR "128"
+#else
+#define GNSS_AJ_BINS_STR "64"
+#endif
 
 /* RF profiles (gnss_band=). RX and TX are always set together, so the
  * retransmitted signal comes out on the frequency it came in on and the

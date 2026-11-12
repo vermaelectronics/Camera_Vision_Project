@@ -6,7 +6,7 @@ of ADI `plutosdr-fw` v0.39:
 
 | Stage | Tool | Output |
 |---|---|---|
-| SMI-PI anti-jam filter core `smi_pi` (E310 only) | Vitis HLS 2023.2 | `hdl/library/antsdr_ip/smi_pi` IP |
+| SFAP-PI anti-jam filter core `sfap_pi` (E310 only) | Vitis HLS 2023.2 | `hdl/library/antsdr_ip/sfap_pi` IP |
 | FPGA hardware design (AD9361 LVDS 2R2T + ANTSDR VCXO/PPS logic + GNSS anti-jam, xc7z020clg400-2) | Vivado 2023.2 | `system_top.xsa`, `system_top.bit` |
 | First-stage boot loader | Vitis 2023.2 (`xsct`) | `fsbl.elf` |
 | U-Boot, Linux 6.1, device tree, buildroot rootfs | Linaro GCC 7.3 (downloaded by buildroot) | `u-boot.elf`, `zImage`/`uImage`, `zynq-ant.dtb`, `rootfs.cpio.gz` |
@@ -192,7 +192,8 @@ It then does a shallow fetch of each submodule at the commit v0.39 pins:
 | `patch/ant/0001-add-support-makefile-scripts.patch` | `plutosdr-fw` | `TARGET=ant`, `scripts/ant.its`, `make sdimg` |
 | `patch/ant/0002-hdl-add-gnss-passthrough.patch` | `hdl` | `library/gnss_passthrough` and its place in the `ant` block design (GPS L1 loopback, section 7) |
 | `patch/ant/0002-buildroot-add-gnss-loopback.patch` | `buildroot` | `/usr/sbin/gnss_loopback` command |
-| `patch/ant/0003-hdl-stap-antijam.patch` | `hdl` | SMI-PI v4.9.14 anti-jam: AD9361 **LVDS 2R2T** interface, `gnss_passthrough` v4.9.14, `smi_pi` filter between two clock-crossing FIFOs (section 7) |
+| `patch/ant/0003-hdl-stap-antijam.patch` | `hdl` | Anti-jam: AD9361 **LVDS 2R2T** interface, `gnss_passthrough` v4.9.14, the `sfap_pi` filter (128 frequency bins) between two clock-crossing FIFOs (section 7) |
+| `patch/ant/0004-hdl-sfap-64bins.patch` | `hdl` | Only with `SFAP_BINS=64`: 64 frequency bins instead of 128 |
 | `patch/ant/0003-linux-lvds-2r2t.patch` | `linux` | `zynq-ant.dtsi`: `adi,ad9361`, LVDS settings of the vendor E310 design |
 | `patch/ant/0003-uboot-mode-2r2t.patch` | `u-boot-xlnx` | default `mode=2r2t` (RX1 and RX2 both on) |
 | `patch/ant/0003-buildroot-gnss-crpa.patch` | `buildroot` | `gnss-crpa` package: the anti-jam firmware as a Linux service, the `gnss` console (section 7) |
@@ -206,11 +207,12 @@ It then does a shallow fetch of each submodule at the commit v0.39 pins:
 ./build.sh hls
 ```
 
-Builds `hls/smi_pi` (C simulation of 14 jammer scenarios, synthesis at
-100 MHz, II=1) into `plutosdr-fw/hdl/library/antsdr_ip/smi_pi`. It takes
-10–20 minutes. It prints `SMI_PI_HLS: PASS` at the end, and its log is
-`hls/smi_pi/build/build_hls.log`. `SMI_PI_SKIP_CSIM=1 ./build.sh hls` skips
-the simulation. `hdl`, `fsbl` and `firmware` run this step themselves if the
+Builds `hls/sfap_pi` (C simulation of 9 jammer scenarios, synthesis at
+100 MHz, II=1) into `plutosdr-fw/hdl/library/antsdr_ip/sfap_pi`. It takes
+15–30 minutes. It prints `SFAP_PI_HLS: PASS` at the end, and its log is
+`hls/sfap_pi/build/build_hls.log`. `SFAP_SKIP_CSIM=1 ./build.sh hls` skips
+the simulation. The FFT size comes from `SFAP_BINS` (128 by default, 64 =
+SFAP-PI v5.0; section 7). `hdl`, `fsbl` and `firmware` run this step themselves if the
 core is missing.
 
 ### Step 4: Hardware (Vivado 2023.2): bitstream and XSA
@@ -356,16 +358,18 @@ sudo dfu-util -a uboot-env.dfu -D ./uboot-env.dfu
 
 ---
 
-## 7. GNSS anti-jam (SMI-PI v4.9.14): RX1 + RX2 -> FPGA -> TX1
+## 7. GNSS anti-jam (SFAP-PI, firmware 4.9.14): RX1 + RX2 -> FPGA -> TX1
 
-The `0003` patches put the complete `LoopBack_Code_SMI_PI_STAP7x7_v4.9.14`
-design ("B", here with 8 + 8 taps) into this Linux firmware ("A"): the same FPGA datapath and the
-same firmware with all its console commands. One feature is new: **band 7,
-your own RF values, set at any time from PuTTY**.
+The `0003` patches put the anti-jam of the bare-metal designs ("B") into this
+Linux firmware ("A"): the pass-through datapath of
+`LoopBack_Code_SMI_PI_STAP7x7_v4.9.14` with its firmware and all its console
+commands, and (since crpa6) the **SFAP-PI** filter of `SFAP_PassLVDS` as the
+anti-jam algorithm. One feature is new: **band 7, your own RF values, set at
+any time from PuTTY**.
 
 ```text
-antenna 1 -> RX1 \                    smi_pi space-time anti-jam
-                  AD9361 -> FPGA  gnss_passthrough (8 + 8 taps)  -> AD9361 -> TX1
+antenna 1 -> RX1 \                    SFAP-PI anti-jam, 128 bins
+                  AD9361 -> FPGA  gnss_passthrough + sfap_pi     -> AD9361 -> TX1
 antenna 2 -> RX2 /  LVDS 2R2T         + pulse blanker               -> coax + attenuator + DC block
                     61.44 MS/s                                         -> GNSS receiver -> GNSS Viewer
 ```
@@ -374,114 +378,105 @@ antenna 2 -> RX2 /  LVDS 2R2T         + pulse blanker               -> coax + at
   standards of the vendor E310 V1 design), so both receivers run at
   61.44 MS/s. The CMOS interface of the stock design stops at 30.72 MS/s with
   two channels. `gnss_passthrough` v4.9.14 (`0x43C1_0000`) feeds RX1+RX2 to
-  the `smi_pi` filter (Vitis HLS, 100 MHz) and its output to TX1. TX2 carries
+  the `sfap_pi` filter (Vitis HLS, 100 MHz) and its output to TX1. TX2 carries
   a muted copy. The DMA paths stay, so IIO still works for the DDR replay.
 * **Linux (0003):** the device tree switches the driver to `adi,ad9361`
   2R2T LVDS. U-Boot defaults to `mode=2r2t`.
 * **Firmware (buildroot 0003):** `gnss_crpa` is the SMI-PI firmware
-  (`app_gnss_e310`, v4.9.14) ported to Linux. The AD9361 calls go to the
+  (`app_gnss_e310`, v4.9.14) ported to Linux, with the SFAP-PI weight solver. The AD9361 calls go to the
   Linux driver, and the anti-jam captures come from the Linux IIO buffer
   instead of the DMA registers. It starts at boot like the bare-metal
   firmware did: self-test, band, anti-jam on, TX1 on.
 
-### Filter size: 8 + 8 taps (crpa4)
+### The filter: SFAP-PI, 128 frequency bins (crpa6)
 
-Since `crpa4` the filter has **8 taps per antenna (8 + 8)**, reference tap at
-delay 4 (4 taps before it, 3 after). It is the 7 + 7 core of
-`LoopBack_Code_SMI_PI_STAP7x7_v4.9.14` with one more tap per antenna. The FPGA
-core and the firmware must agree:
+Since `crpa6` the anti-jam filter in the FPGA is **SFAP-PI** (space-frequency
+adaptive power inversion, the core of the `SFAP_PassLVDS` project, v5.0)
+instead of the SMI-PI space-time filter of crpa1 to crpa5:
 
-| Where | 8 + 8 (crpa4, now) | 7 + 7 (crpa3) | 6 + 6 (crpa1, crpa2) |
-|---|---|---|---|
-| `hls/smi_pi/smi_pi.h` `SMI_NT` / `SMI_REF` | 8 / 4 | 7 / 4 | 6 / 3 |
-| `gnss_passthrough.v` `AJ_INFO` (hdl 0003) | `0x08040C07` | `0x07040C07` | `0x06030C07` |
-| `gnss_aj_math.h` `AJ_NT` / `AJ_REF` (Linux and bare metal) | 8 / 4 | 7 / 4 | 6 / 3 |
-| adaptive weights | 15 + 2 image | 13 + 2 image | 11 + 2 image |
-| DSP48 in `smi_pi` | 53 | 47 | 41 |
+```text
+RX1, RX2 -> window -> FFT (128 bins, 50 % overlap) -> per bin k:
+            Y_k = X1_k - b_k X2n_k - c1_k conj(X1_-k) - c2_k conj(X2n_-k)
+         -> inverse FFT -> window, overlap-add -> TX1
+```
 
-C simulation of the core with the firmware maths (`hls/smi_pi/testbench.cpp`,
-suppression in dB):
+* Every frequency bin has its **own two-antenna null** (`b_k`) and two image
+  taps (`c1_k`, `c2_k`, for the AD9361 I/Q mirror of the jammer). A wideband
+  jammer whose RX2/RX1 ratio changes across the band (cables, antenna
+  spacing, the analog filters, reflections) is nulled bin by bin; a CW only
+  costs the one bin it falls in.
+* 128 bins: 0.24 MHz per bin at 30.72 MS/s, 0.48 MHz at 61.44 MS/s. Latency
+  382 samples, the same with the filter in and in bypass.
+* The **firmware is the 4.9.14 one** (`gnss_crpa`, and `baremetal/`): band 7,
+  `gnss_rx_agc=`, `gnss_aj_avg=`, level lock, logs, `gnss_report?` and all the
+  other commands work as before. Only the weight solver (`gnss_aj_math.c`,
+  from SFAP-PI v5.0) and the weight registers changed.
+* `gnss_aj_mode=0` a weight + 2 image taps per bin (default), `1` no image
+  taps, `2` one weight for all bins (the old v3 SMI-PI).
+* The CW notch of crpa5 is not in this build (`gnss_notch?` says so).
 
-| Scenario | 6 + 6 | 7 + 7 | 8 + 8 |
-|---|---|---|---|
-| 2: wideband jammer, J/N 30 dB | 36.7 | 37.2 | 39.5 |
-| 5: jammer with a reflection on RX2 | 20.4 | 20.7 | 37.4 |
-| 8: wideband jammer 60 dB, I/Q imbalance | 51.0 | 51.7 | 53.6 |
-| 11: field case, J/N 61 dB | 53.4 | 54.1 | 56.2 |
-| 13: field case, J/N 41 dB | 45.7 | 46.5 | 48.9 |
+The FFT size is one build setting, **`SFAP_BINS`** (128 by default, 64 = the
+size of SFAP-PI v5.0), kept in `.sfap_bins` once given:
 
-With 8 + 8 the reference delay 5 (5 before, 2 after, the rule of 5 + 5 to
-7 + 7) was also simulated. Delay 4 was better in 8 of the 11 jammer
-scenarios (scenario 5: 37.4 dB against 20.9 dB), equal in 2 and 0.4 dB worse
-in 1 (CW jammer, 66.8 against 67.2 dB), so 8 + 8 uses delay 4.
+```bash
+SFAP_BINS=64 ./build.sh all
+```
+
+`build.sh` then switches the three places together and builds the filter IP
+and the FPGA again:
+
+| Where | 128 bins (default) | 64 bins |
+|---|---|---|
+| `hls/sfap_pi/sfap_pi.h` `SFAP_LOG2N` | 7 | 6 (`-DSFAP_LOG2N=6`) |
+| `gnss_passthrough.v` `` `AJ_LOG2N `` | 7 | 6 (`patch/ant/0004-hdl-sfap-64bins.patch`) |
+| firmware `gnss_sfap_cfg.h` `AJ_LOG2N` | 7 | 6 (set in the copy that is built) |
+| weight words `AJ_WB/WC1/WC2` | 0x200..0x7FC (3 x 128) | 0x200..0x4FC (3 x 64) |
+| `AJ_INFO` (0x184) | `0x80400C09` | `0x40200C09` |
+| latency | 382 samples | 190 samples |
+| DSP48 in `sfap_pi` | about 160 (estimate) | 136 (Vitis HLS report of v5.0) |
 
 The firmware reads `AJ_INFO` at start-up and does not start the anti-jam if
-the bitstream has a different tap count or reference delay; the console then
-says so ("Anti-jam NOT started").
+the bitstream has another filter or another FFT size ("Anti-jam NOT
+started").
 
-To build 8 + 8 in a folder that was already patched for another size or an
-older package (crpa1 to crpa4), start from clean sources; `./build.sh patch`
-stops with "does not apply" otherwise:
+**Resources.** The 64-bin core was synthesised by Vitis HLS in the v5.0
+project (8.34 ns at the 10 ns target, 136 DSP48, 32 k FF, 16 k LUT). The
+128-bin core has one more FFT stage, twice the delay lines and weight
+registers: roughly 160 of the 220 DSP48 and well over half of the
+flip-flops of the XC7Z020 together with the rest of design A. If `./build.sh
+hls` reports a clock above 10 ns, or Vivado cannot place the design or fails
+timing, build with `SFAP_BINS=64`.
+
+C simulation of the core with the firmware's solver (`./build.sh hls` runs
+it; suppression in dB):
+
+| Scenario | 64 bins | 128 bins |
+|---|---|---|
+| 2: wideband jammer, J/N 30 dB | 46.2 | 44.6 |
+| 4: CW jammer, J/N 40 dB | 62.8 | 63.6 |
+| 5: jammer with a reflection on RX2 | 35.1 | 41.9 |
+| 6: wideband 50 dB, I/Q imbalance | 56.6 | 57.9 |
+| 8: wideband 60 dB, I/Q imbalance | 56.7 | 58.5 |
+| 9: CW on the satellite | 60.8 | 63.0 |
+
+All 9 scenarios pass for both sizes. For comparison, the 8 + 8 space-time
+filter of crpa4 gave 39.5 dB in scenario 2 and 37.4 dB with the reflection.
+
+Earlier packages: crpa1/crpa2 SMI-PI 6 + 6 taps, crpa3 7 + 7, crpa4 8 + 8,
+crpa5 8 + 8 with an automatic CW notch (all in the git history).
+
+To build crpa6 in a folder that was patched for an older package, start
+from clean sources:
 
 ```bash
 ./build.sh reset && ./build.sh all
 ```
 
-### Automatic CW notch (crpa5)
-
-Since `crpa5` the FPGA filter core (`smi_pi` 2.6) has a **notch for one CW
-tone** in front of the 8 + 8 space-time filter, on RX1 and RX2 alike:
-
-```text
-RX1, RX2 -> [CW notch: NCO mixes the tone to 0 Hz, moving average of 128 samples,
-             mixed back, subtracted]  ->  8 + 8 space-time filter  ->  TX1
-```
-
-* **Automatic** (`gnss_notch=1`, the default): every 50 ms the firmware looks for
-  a CW tone in the capture (1024-point FFTs: a bin 25 dB above the median and
-  20 dB above its neighbours 5 to 12 bins away). Seen 3 times in a row at the
-  same frequency: notch **ON** at that frequency (measured to a few Hz),
-  followed if it drifts; gone for 2 s: notch **OFF**.
-* A **wideband or partial-band jammer is never taken for a tone**: with it the
-  notch stays off and the anti-jam is exactly the crpa4 one (the bypassed notch
-  passes the samples bit for bit, without delay).
-* While the notch is on, the weights are computed from the capture with the
-  tone removed (a software model of the same notch), so the space-time filter
-  keeps its one spatial null for what is left, e.g. a wideband jammer.
-* Notch width about 0.886 x rate / 128: 213 kHz at 30.72 MS/s, 425 kHz at
-  61.44 MS/s. No delay is added, so switching it never moves the GNSS signal
-  in time.
-* Registers: `AJ_NTC_PINC` 0x1B0 (NCO step = f / rate x 2^32), `AJ_NTC_CTRL`
-  0x1B4 (bit 0 = on), committed with the weights; `AJ_INFO` layout 8.
-
-| Command | Does |
-|---|---|
-| `gnss_notch?` | Mode, on/off, notch frequency, the detector's last result |
-| `gnss_notch=1` | Automatic (default) |
-| `gnss_notch=0` | Off |
-| `gnss_notch_rf=1575.42` | Fixed notch at this RF frequency [MHz] |
-
-C simulation (`hls/smi_pi/testbench.cpp`, part of `./build.sh hls`):
-
-| Scenario | Result |
-|---|---|
-| 23: CW alone, J/N 50 dB | tone found to 1e-9 x fs, suppression 65 dB, residual 0.1 dB |
-| 24: CW **on a satellite's frequency** + wideband jammer from another direction | STAP alone: satellite SNR loss 24-27 dB (its few taps make a notch MHz wide). Notch + STAP: **1.5-2.6 dB**, suppression 55 dB |
-| 25: wideband alone | no tone found in any capture, notch off, results as crpa4 |
-| 26: the notch bit for bit against an integer model | 30000 samples, 0 mismatches |
-
-Also new in crpa5:
-
-* `gnss_rx_agc=` and `gnss_aj_avg=` are **saved** with the band 7 values and set
-  again at start-up.
-* With **manual** RX gain the firmware now watches the ADC peak and prints
-  `[RXG] ADC CLIPPING ...` when the jammer clips it (a clipped jammer cannot be
-  nulled); `gnss_rx_agc=2` or a lower gain cures it.
-* `gnss_band=` while a jammer is on warns that the noise floor is learned again
-  (switch the jammer off for about 10 s, or it may be taken for background).
-* The level lock no longer puts TX1 back while `gnss_rx_agc=2` holds the output
-  level.
-* Console: `%lu` values (e.g. `LEVEL LOCK ... repair #u`) print correctly.
+Also in the firmware since crpa5: `gnss_rx_agc=` and `gnss_aj_avg=` are saved
+with the band 7 values; with manual RX gain an `[RXG] ADC CLIPPING` warning
+appears when the jammer clips the ADC (a clipped jammer cannot be nulled:
+use `gnss_rx_agc=2` or a lower gain); `gnss_band=` with a jammer on warns
+that the noise floor is learned again.
 
 ### Build it
 
@@ -549,7 +544,7 @@ directly from the shell, e.g. `gnss gnss_band?`.
 | `gnss_rx_gain=45` | RX1 and RX2 gain |
 | `gnss_rx_agc=2` | RX1 and RX2 gain together, automatic against clipping (saved) |
 | `gnss_aj_avg=0.98` | Weight averaging (0 = automatic; saved) |
-| `gnss_notch?` / `gnss_notch=1` / `gnss_notch=0` | CW notch (crpa5): state / automatic / off |
+| `gnss_aj_mode=0` | SFAP mode: 0 = weight + image taps per bin (default), 1 = no image taps, 2 = one weight |
 
 Band 7 limits: LO 70–6000 MHz, 2.084–61.44 MS/s, bandwidth 0.2–56 MHz,
 TX1 attenuation 0–89.75 dB, RX gain 0–76 dB. A value outside them is
@@ -591,7 +586,7 @@ The service:
 ## 7b. Design A on bare metal (no Linux)
 
 `./build.sh baremetal` builds the same design-A FPGA (LVDS 2R2T,
-`gnss_passthrough` v4.9.14, `smi_pi` 8 + 8 taps, `axi_vcxo_ctrl`) but runs the
+`gnss_passthrough` v4.9.14, `sfap_pi` 128 bins, `axi_vcxo_ctrl`) but runs the
 SMI-PI v4.9.14 firmware directly on the ARM, like design B. There is no
 U-Boot, Linux or root file system: the SD card holds only `BOOT.bin`.
 
@@ -690,8 +685,8 @@ on and TX2 is muted.
 The vendor patches are **unchanged**. This folder adds:
 
 * `patch/ant/0002-*.patch`: the GPS L1 RX1 -> FPGA -> TX1 loopback.
-* `patch/ant/0003-*.patch`, `hls/smi_pi/`, `gnss_crpa/`: the SMI-PI v4.9.14
-  anti-jam (section 7): LVDS 2R2T, `gnss_passthrough` v4.9.14 + `smi_pi`,
+* `patch/ant/0003-*.patch`, `0004-*.patch`, `hls/sfap_pi/`, `gnss_crpa/`: the
+  anti-jam (section 7): LVDS 2R2T, `gnss_passthrough` v4.9.14 + `sfap_pi`,
   and the firmware as the `gnss_crpa` Linux service with custom band 7.
 
 * `build.sh`: fetches sources at the pinned commits (the vendor zip has no
