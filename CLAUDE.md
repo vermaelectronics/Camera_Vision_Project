@@ -10,7 +10,9 @@ Name each new design-A (pass-through + CRPA) package with the next number:
 - `crpa2` (2026-11-10): crpa1 + design A on bare metal (`./build.sh baremetal`,
   `antsdr-fw-patch/baremetal/`): SMI-PI firmware on the design-A FPGA, GPIO 67 /
   86..93, gnss_passthrough 0x43C10000, VCXO 23000, band 7 saved on SD.
-- Next package: `crpa3`.
+- `crpa3` (2026-11-12): crpa2 with SMI-PI 7 + 7 taps (reference delay 4,
+  AJ_INFO 0x07040C07) instead of 6 + 6, Linux and bare metal. Commit 7fb1b60.
+- Next package: `crpa4`.
 
 Files per package: `crpaN-full-src.zip.part1`, `crpaN-full-src.zip.part2`,
 `crpaN-kit.zip`, `SHA256SUMS-crpaN.txt`.
