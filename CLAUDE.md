@@ -21,6 +21,9 @@ Files per package: `crpaN-full-src.zip.part1`, `crpaN-full-src.zip.part2`,
 
 ## Field results (user's tests, keep for comparisons)
 
+Both crpa1 tests below were started with a **cold start** in GNSS Viewer, so
+the TTFF values are cold-start times and can be compared directly.
+
 - 2026-11-11, rooftop, `crpa1` (design A Linux, SMI-PI 6 + 6 taps), at the
   user's "5 dB" setting: **3D fix** in GNSS Viewer (TTFF 99 s, scatter about
   +-2 m, GPS L1 C/A and BeiDou B1I tracked at C/N0 about 30-38 dB-Hz).
