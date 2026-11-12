@@ -419,13 +419,69 @@ The firmware reads `AJ_INFO` at start-up and does not start the anti-jam if
 the bitstream has a different tap count or reference delay; the console then
 says so ("Anti-jam NOT started").
 
-To build 8 + 8 in a folder that was already patched for another size (crpa1,
-crpa2 or crpa3), start from clean sources; `./build.sh patch` stops with "does not
-apply" otherwise:
+To build 8 + 8 in a folder that was already patched for another size or an
+older package (crpa1 to crpa4), start from clean sources; `./build.sh patch`
+stops with "does not apply" otherwise:
 
 ```bash
 ./build.sh reset && ./build.sh all
 ```
+
+### Automatic CW notch (crpa5)
+
+Since `crpa5` the FPGA filter core (`smi_pi` 2.6) has a **notch for one CW
+tone** in front of the 8 + 8 space-time filter, on RX1 and RX2 alike:
+
+```text
+RX1, RX2 -> [CW notch: NCO mixes the tone to 0 Hz, moving average of 128 samples,
+             mixed back, subtracted]  ->  8 + 8 space-time filter  ->  TX1
+```
+
+* **Automatic** (`gnss_notch=1`, the default): every 50 ms the firmware looks for
+  a CW tone in the capture (1024-point FFTs: a bin 25 dB above the median and
+  20 dB above its neighbours 5 to 12 bins away). Seen 3 times in a row at the
+  same frequency: notch **ON** at that frequency (measured to a few Hz),
+  followed if it drifts; gone for 2 s: notch **OFF**.
+* A **wideband or partial-band jammer is never taken for a tone**: with it the
+  notch stays off and the anti-jam is exactly the crpa4 one (the bypassed notch
+  passes the samples bit for bit, without delay).
+* While the notch is on, the weights are computed from the capture with the
+  tone removed (a software model of the same notch), so the space-time filter
+  keeps its one spatial null for what is left, e.g. a wideband jammer.
+* Notch width about 0.886 x rate / 128: 213 kHz at 30.72 MS/s, 425 kHz at
+  61.44 MS/s. No delay is added, so switching it never moves the GNSS signal
+  in time.
+* Registers: `AJ_NTC_PINC` 0x1B0 (NCO step = f / rate x 2^32), `AJ_NTC_CTRL`
+  0x1B4 (bit 0 = on), committed with the weights; `AJ_INFO` layout 8.
+
+| Command | Does |
+|---|---|
+| `gnss_notch?` | Mode, on/off, notch frequency, the detector's last result |
+| `gnss_notch=1` | Automatic (default) |
+| `gnss_notch=0` | Off |
+| `gnss_notch_rf=1575.42` | Fixed notch at this RF frequency [MHz] |
+
+C simulation (`hls/smi_pi/testbench.cpp`, part of `./build.sh hls`):
+
+| Scenario | Result |
+|---|---|
+| 23: CW alone, J/N 50 dB | tone found to 1e-9 x fs, suppression 65 dB, residual 0.1 dB |
+| 24: CW **on a satellite's frequency** + wideband jammer from another direction | STAP alone: satellite SNR loss 24-27 dB (its few taps make a notch MHz wide). Notch + STAP: **1.5-2.6 dB**, suppression 55 dB |
+| 25: wideband alone | no tone found in any capture, notch off, results as crpa4 |
+| 26: the notch bit for bit against an integer model | 30000 samples, 0 mismatches |
+
+Also new in crpa5:
+
+* `gnss_rx_agc=` and `gnss_aj_avg=` are **saved** with the band 7 values and set
+  again at start-up.
+* With **manual** RX gain the firmware now watches the ADC peak and prints
+  `[RXG] ADC CLIPPING ...` when the jammer clips it (a clipped jammer cannot be
+  nulled); `gnss_rx_agc=2` or a lower gain cures it.
+* `gnss_band=` while a jammer is on warns that the noise floor is learned again
+  (switch the jammer off for about 10 s, or it may be taken for background).
+* The level lock no longer puts TX1 back while `gnss_rx_agc=2` holds the output
+  level.
+* Console: `%lu` values (e.g. `LEVEL LOCK ... repair #u`) print correctly.
 
 ### Build it
 
@@ -491,6 +547,9 @@ directly from the shell, e.g. `gnss gnss_band?`.
 | `gnss_tx=0` / `gnss_tx=1` | Silence TX1 / switch it back on |
 | `tx1_attenuation=40000` | TX1 attenuation in mdB (bigger = quieter) |
 | `gnss_rx_gain=45` | RX1 and RX2 gain |
+| `gnss_rx_agc=2` | RX1 and RX2 gain together, automatic against clipping (saved) |
+| `gnss_aj_avg=0.98` | Weight averaging (0 = automatic; saved) |
+| `gnss_notch?` / `gnss_notch=1` / `gnss_notch=0` | CW notch (crpa5): state / automatic / off |
 
 Band 7 limits: LO 70–6000 MHz, 2.084–61.44 MS/s, bandwidth 0.2–56 MHz,
 TX1 attenuation 0–89.75 dB, RX gain 0–76 dB. A value outside them is

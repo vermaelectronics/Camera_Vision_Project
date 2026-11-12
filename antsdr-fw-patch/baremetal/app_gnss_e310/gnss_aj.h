@@ -35,7 +35,7 @@
 #define GNSS_AJ_BUF_ADDR   0x11000000U
 #endif
 
-#define GNSS_AJ_VERSION_STR  "4.9.14 (8 + 8 taps, low-DSP bitstream, level lock, TX2 = CRPA copy, muted, 89.75 dB)"
+#define GNSS_AJ_VERSION_STR  "4.9.14 (8 + 8 taps, automatic CW notch, low-DSP bitstream, level lock, TX2 = CRPA copy, muted, 89.75 dB)"
 
 /* RF profiles (gnss_band=). RX and TX are always set together, so the
  * retransmitted signal comes out on the frequency it came in on and the
@@ -78,6 +78,10 @@ int  gnss_band_set(int band);
  * checks and saves them (/mnt/jffs2/gnss_crpa.conf). */
 void gnss_band_custom_set(uint64_t lo, uint32_t fs, uint32_t bw, uint32_t att_mdb, int32_t rxg_db);
 void gnss_band_custom_get(uint64_t *lo, uint32_t *fs, uint32_t *bw, uint32_t *att_mdb, int32_t *rxg_db);
+/* crpa5: gnss_rx_agc= and gnss_aj_avg= are saved with the band 7 values and restored at start-up.
+ * rx_agc: 0..2, -1 = leave; avg_milli: 0 = automatic, 50..990 = manual factor x 1000, -1 = leave. */
+void gnss_settings_save(int rx_agc, int avg_milli);
+void gnss_settings_apply(void);      /* after gnss_aj_enable(1) */
 int  gnss_band_get(void);
 void gnss_band_levels(void);
 void gnss_levels_adopt(void);        /* 4.9.13: the present RX gain / TX attenuation become the locked values */

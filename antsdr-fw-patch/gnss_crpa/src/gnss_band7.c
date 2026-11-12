@@ -47,8 +47,11 @@
 #include "console.h"
 #include "command.h"
 #include "gnss_aj.h"
+#include "gnss_smi_agc.h"
 
 static int boot_band = GNSS_BAND_DEFAULT;
+static int saved_agc = -1;      /* crpa5: gnss_rx_agc=, -1 = never set   */
+static int saved_avg = -1;      /* crpa5: gnss_aj_avg= x 1000, 0 = auto  */
 static char conf_file[256];
 
 static const char *conf_path(void)
@@ -88,6 +91,8 @@ static int conf_save(void)
 		"band7_rxg_db=%ld\nband_boot=%d\n",
 		(unsigned long long)lo, (unsigned long)fs, (unsigned long)bw,
 		(unsigned long)att, (long)g, boot_band);
+	if (saved_agc >= 0) fprintf(f, "rx_agc=%d\n", saved_agc);
+	if (saved_avg >= 0) fprintf(f, "aj_avg_milli=%d\n", saved_avg);
 	fflush(f);
 	fsync(fileno(f));
 	fclose(f);
@@ -116,6 +121,8 @@ void gnss_band7_load(void)
 			else if (!strcmp(line, "band7_att_mdb")) att = (uint32_t)strtoul(eq, NULL, 10);
 			else if (!strcmp(line, "band7_rxg_db"))  g = (int32_t)strtol(eq, NULL, 10);
 			else if (!strcmp(line, "band_boot"))     boot_band = atoi(eq);
+			else if (!strcmp(line, "rx_agc"))        saved_agc = atoi(eq);
+			else if (!strcmp(line, "aj_avg_milli"))  saved_avg = atoi(eq);
 		}
 		fclose(f);
 	}
@@ -231,4 +238,29 @@ void set_gnss_band_boot(double *param, char param_no)
 	if (conf_save())
 		console_print("gnss_band_boot: could not write %s\n", (char *)conf_path());
 	get_gnss_band_boot(param, param_no);
+}
+
+/* ---- crpa5: gnss_rx_agc= and gnss_aj_avg= kept with the band 7 values ---------------- */
+void gnss_settings_save(int rx_agc, int avg_milli)
+{
+	if (rx_agc >= 0) saved_agc = rx_agc;
+	if (avg_milli >= 0) saved_avg = avg_milli;
+	if (conf_save() != 0)
+		console_print("  (setting active; not saved: %s)\n", (char *)conf_path());
+	else
+		console_print("  (saved in %s, used again at the next start)\n", (char *)conf_path());
+}
+
+void gnss_settings_apply(void)
+{
+	if (saved_agc >= 0 && saved_agc <= 2) {
+		console_print("settings: gnss_rx_agc=%d (saved)\n", (long)saved_agc);
+		gnss_rxg_set_mode(saved_agc);
+	}
+	if (saved_avg == 0) {
+		gnss_aj_set_avg(0.0, 1);
+	} else if (saved_avg >= 50 && saved_avg <= 990) {
+		console_print("settings: gnss_aj_avg=%s (saved)\n", gnss_fmt((double)saved_avg / 1000.0, 2));
+		gnss_aj_set_avg((double)saved_avg / 1000.0, 0);
+	}
 }

@@ -58,6 +58,8 @@
 #include <complex>
 #include "smi_pi.h"
 #include "gnss_aj_math.h"
+#include "gnss_notch_math.h"
+#include "smi_pi_nco.h"
 
 typedef std::complex<double> cd;
 typedef std::vector<cd> cvec;
@@ -117,6 +119,7 @@ static ap_uint<2048> g_w = 0;
 static ap_uint<64>   g_wcj = 0;
 static ap_uint<32>   g_cfg = SMI_CFG_BYPASS;
 static ap_uint<32>   g_nrm = 1 << SMI_GFRAC;
+static ap_uint<64>   g_ntc = 0;           // CW notch (crpa5): [31:0] phase increment, [32] enable
 
 static void set_weights(const int16_t *wre, const int16_t *wim) {
     g_w = 0;
@@ -148,7 +151,7 @@ static void push(hls::stream<ap_uint<64> > &xs, hls::stream<ap_uint<32> > &ys,
     ap_uint<64> w = 0;
     for (int k = 0; k < 4; k++) w(16 * k + 15, 16 * k) = (ap_uint<16>)(ap_int<16>)v[k];
     xs.write(w);
-    smi_pi(xs, ys, g_w, g_wcj, g_cfg, g_nrm);
+    smi_pi(xs, ys, g_w, g_wcj, g_cfg, g_nrm, g_ntc);
     if (ys.empty()) { std::printf("core produced no output\n"); std::exit(2); }
     ap_uint<32> o = ys.read();
     if (out) *out = cd((double)(ap_int<16>)o(15, 0), (double)(ap_int<16>)o(31, 16));
@@ -641,6 +644,216 @@ static int test_jammer(int id, Scen sc) {
     return ok;
 }
 
+// ---- crpa5: CW notch -------------------------------------------------------------
+static void set_ntc(int en, uint32_t pinc) {
+    g_ntc = 0;
+    g_ntc(31, 0) = pinc;
+    g_ntc[SMI_NTC_EN_BIT] = en ? 1 : 0;
+}
+
+// Integer model of notch_ch() in smi_pi.cpp (XW = 12 or 18, F = SMI_NOTCH_F).
+struct NotchRef {
+    int xw; long long accr = 0, acci = 0; std::vector<long long> dr, di;
+    explicit NotchRef(int w) : xw(w), dr(1 << SMI_NOTCH_LOG2L, 0), di(1 << SMI_NOTCH_LOG2L, 0) {}
+    static long long rsh(long long v, int k) { return (v + (1LL << (k - 1))) >> k; }   // round, arithmetic shift
+    void step(long long xr, long long xi, int c, int sn, bool en, int p, long long &yr, long long &yi) {
+        const int SH = 15 - SMI_NOTCH_F;
+        long long d_r = rsh(xr * c + xi * sn, SH), d_i = rsh(xi * c - xr * sn, SH);
+        accr += d_r - dr[p]; acci += d_i - di[p];
+        dr[p] = d_r; di[p] = d_i;
+        long long mr = rsh(accr, SMI_NOTCH_LOG2L), mi = rsh(acci, SMI_NOTCH_LOG2L);
+        long long qr = rsh(mr * c - mi * sn, 15), qi = rsh(mi * c + mr * sn, 15);
+        long long hr = rsh((xr << SMI_NOTCH_F) - qr, SMI_NOTCH_F), hi = rsh((xi << SMI_NOTCH_F) - qi, SMI_NOTCH_F);
+        long long lim = (1LL << (xw - 1)) - 1;
+        hr = sat_ll(hr, -lim - 1, lim); hi = sat_ll(hi, -lim - 1, lim);
+        yr = en ? hr : xr; yi = en ? hi : xi;
+    }
+};
+
+// scenario 26: the notch bit for bit (random data, random NCO steps, notch on and off,
+// bypass and filter, g2 not 1), against the integer model through the whole core
+// (bypass output: y = 2^s x1'[n-R], with x1' the notched RX1).
+static int test_notch_bitexact() {
+    hls::stream<ap_uint<64> > xs;
+    hls::stream<ap_uint<32> > ys;
+    const int SEG = 3000, NSEG = 10, n = SEG * NSEG;
+    NotchRef n1(12), n2(18);
+    std::vector<long long> y1r(n), y1i(n);
+    uint32_t ph = 0, pinc = 0;
+    int bad = 0, en = 0, ens = 0, sat = 0;
+    int16_t z[AJ_NW] = {0};
+    set_weights(z, z);
+    for (int i = 0; i < n; i++) {
+        if (i % SEG == 0) {
+            int seg = i / SEG;
+            pinc = (uint32_t)(urand() * 4294967296.0);
+            en = (seg % 3) != 2;
+            if (seg == 4) pinc = 0;
+            set_ntc(en, pinc);
+            set_cfg(1, seg % 4);                   // bypass: y = 2^s x1'[n-R]
+            set_g2((seg % 2) ? 8192 : 11000, 0);
+        }
+        bool ext = (i % 101) < 15;
+        int a = ext ? (urand() < 0.5 ? -2048 : 2047) : (int)(urand() * 4096) - 2048;
+        int b = ext ? (urand() < 0.5 ? -2048 : 2047) : (int)(urand() * 4096) - 2048;
+        int c = (int)(urand() * 4096) - 2048, d = (int)(urand() * 4096) - 2048;
+        int ix = (int)(ph >> (32 - SMI_NCO_BITS));
+        int co = SMI_NCO_COS[ix], sn = SMI_NCO_SIN[ix];
+        long long qr, qi, q2r, q2i;
+        int g2r = (i / SEG % 2) ? 8192 : 11000;
+        const int S = SMI_GFRAC - SMI_XFRAC;
+        long long x2r = ((long long)g2r * c + (1LL << (S - 1))) >> S, x2i = ((long long)g2r * d + (1LL << (S - 1))) >> S;
+        n1.step(a, b, co, sn, en, i & ((1 << SMI_NOTCH_LOG2L) - 1), qr, qi);
+        n2.step(x2r, x2i, co, sn, en, i & ((1 << SMI_NOTCH_LOG2L) - 1), q2r, q2i);
+        if (en && (qr != a || qi != b)) ens++;
+        if (std::llabs(qr) == 2047 || qr == -2048) sat++;
+        y1r[i] = qr; y1i[i] = qi;
+        ph += pinc;
+        cd y;
+        push(xs, ys, a, b, c, d, &y);
+        int sh = (i / SEG) % 4;
+        long long er = (i >= SMI_REF) ? y1r[i - SMI_REF] : 0, ei = (i >= SMI_REF) ? y1i[i - SMI_REF] : 0;
+        er = sat_ll(er << sh, -32768, 32767); ei = sat_ll(ei << sh, -32768, 32767);
+        if (i >= SMI_REF + 32 && ((long long)y.real() != er || (long long)y.imag() != ei)) {
+            if (bad < 5) std::printf("  mismatch at %d: core (%g,%g) ref (%lld,%lld)\n", i, y.real(), y.imag(), er, ei);
+            bad++;
+        }
+    }
+    set_ntc(0, 0);
+    std::printf("notch bit-exact: %d samples, %d mismatches, %d samples changed by the notch, %d at the 12-bit limit\n",
+                n, bad, ens, sat);
+    return bad == 0 && ens > n / 2;
+}
+
+// scenarios 23 (CW alone), 24 (CW and a wideband jammer from two directions), 25 (wideband
+// alone: the detector must stay quiet and the notch off). The firmware's flow: tone detector
+// on each capture, software model of the notch on the capture before the solver, the FPGA
+// notch at the same NCO step.
+static int test_notch(int id, double cw_jn, double wb_jn, double cwf = 0.0731) {
+    const int NBLK = 4, N = NBLK * AJ_NSAMP + 20000;
+    const double nrms = 20.0, fsat = -9.08 / 50.0, chip_step = 1.023 / 50.0;
+    cvec W(N), W2, C(N), C2(N), n1(N), n2(N), s1(N), s2(N);
+    double pn = 2 * nrms * nrms;
+    for (int i = 0; i < N; i++) W[i] = cd(grand(), grand());
+    W = fir(W, lowpass(0.42, 41), 20);
+    W2 = fir(W, frac_delay(0.15, 21), 10);
+    cd gw = std::polar(std::pow(10, 0.8 / 20), 40 * M_PI / 180), gc = std::polar(1.0, -95 * M_PI / 180);
+    for (auto &v : W2) v *= gw;
+    double ws = (wb_jn > -90) ? std::sqrt(pn * std::pow(10, wb_jn / 10) / pwr(W, 0)) : 0.0;
+    double cs = (cw_jn > -90) ? std::sqrt(pn * std::pow(10, cw_jn / 10)) : 0.0;
+    for (int i = 0; i < N; i++) {
+        W[i] *= ws; W2[i] *= ws;
+        C[i] = cs * std::polar(1.0, 2 * M_PI * cwf * i + 0.3);
+        C2[i] = C[i] * gc;
+    }
+    int chip = 1; double cph = 0;
+    for (int i = 0; i < N; i++) {
+        n1[i] = cd(grand(), grand()) * nrms;
+        n2[i] = cd(grand(), grand()) * nrms;
+        cph += chip_step; if (cph >= 1) { cph -= 1; chip = urand() < 0.5 ? -1 : 1; }
+        s1[i] = std::polar(0.1 * nrms * chip, 2 * M_PI * fsat * i);
+        s2[i] = s1[i] * std::polar(1.0, -1.1);
+    }
+    cvec x1(N), x2(N);
+    double pk = 0;
+    for (int i = 0; i < N; i++) {
+        x1[i] = W[i] + C[i] + n1[i] + s1[i]; x2[i] = W2[i] + C2[i] + n2[i] + s2[i];
+        pk = std::max(pk, std::max(std::max(std::fabs(x1[i].real()), std::fabs(x1[i].imag())),
+                                   std::max(std::fabs(x2[i].real()), std::fabs(x2[i].imag()))));
+    }
+    double g = 1.0;
+    while (pk * g > 1850) g *= std::pow(10, -1.0 / 20);
+    cvec j1(N), j2(N), m1(N), m2(N);
+    for (int i = 0; i < N; i++) {
+        j1[i] = (W[i] + C[i]) * g; j2[i] = (W2[i] + C2[i]) * g;
+        m1[i] = n1[i] * g; m2[i] = n2[i] * g; s1[i] *= g; n1[i] *= g;
+        x1[i] = cd(q12((x1[i] * g).real()), q12((x1[i] * g).imag()));
+        x2[i] = cd(q12((x2[i] * g).real()), q12((x2[i] * g).imag()));
+    }
+    double noise = pn * g * g + 0.17;
+    std::printf("scenario %d: CW J/N %.0f dB at %+.4f fs, wideband J/N %.0f dB (another direction), RX gain cut %.1f dB\n",
+                id, cw_jn, cwf, wb_jn, -20 * std::log10(g));
+
+    static uint32_t buf[2 * AJ_NSAMP], nbuf[2 * AJ_NSAMP];
+    auto pack = [&](int b) {
+        for (int t = 0; t < AJ_NSAMP; t++) {
+            cd a = x1[b * AJ_NSAMP + t], c = x2[b * AJ_NSAMP + t];
+            buf[2 * t]     = (uint32_t)(uint16_t)(int16_t)a.real() | ((uint32_t)(uint16_t)(int16_t)a.imag() << 16);
+            buf[2 * t + 1] = (uint32_t)(uint16_t)(int16_t)c.real() | ((uint32_t)(uint16_t)(int16_t)c.imag() << 16);
+        }
+    };
+    // 1. the detector on every capture
+    int hits = 0; double fest = 0;
+    nt_tone_t tn;
+    for (int b = 0; b < NBLK; b++) {
+        pack(b);
+        if (nt_find_tone(buf, AJ_NSAMP, noise, &tn)) { hits++; fest = tn.f; }
+        std::printf("  detector, capture %d: %s (peak %+.1f dB over the median, %+.1f dB over the shoulders",
+                    b, tn.found ? "CW TONE" : "no tone", tn.peak_db, tn.shoulder_db);
+        if (tn.found) std::printf(", f %+.6f fs, error %.2e fs, tone %+.1f dB over the noise", tn.f, tn.f - cwf, tn.tone_db);
+        std::printf(")\n");
+    }
+    bool use_notch = hits == NBLK;
+    uint32_t pinc = nt_pinc(fest);
+    // 2. the solver on the captures (notched in software when the notch is on)
+    auto solve = [&](bool notch, aj_result_t &r) {
+        std::memset(&r, 0, sizeof r);
+        r.mode = AJ_MODE_STAP; r.sig2_prev = -1; r.noise_ref = noise; r.g2 = 1.0; r.rx2_noise = 1.0;
+        aj_reset();
+        for (int b = 0; b < NBLK; b++) {
+            pack(b);
+            if (notch) nt_apply(buf, nbuf, AJ_NSAMP, pinc);
+            if (aj_compute(notch ? nbuf : buf, AJ_NSAMP, &r) != 0 || !r.ok) return false;
+            r.sig2_prev = r.sig2;
+        }
+        return true;
+    };
+    // 3. the FPGA core on the evaluation segment
+    const int e0 = NBLK * AJ_NSAMP, SK = 600;
+    auto seg = [&](const cvec &v) { return cvec(v.begin() + e0, v.end()); };
+    struct M { double supp, loss, res; };
+    auto measure = [&](const aj_result_t &r, bool notch) {
+        M m;
+        set_weights(r.wre, r.wim); set_g2(8192, 0); set_cfg(0, 0, r.ws);
+        set_ntc(notch, pinc);
+        cvec yj = run_core_c(seg(j1), seg(j2)), yx = run_core_c(seg(x1), seg(x2)), yn = run_core_c(seg(m1), seg(m2));
+        set_ntc(0, 0);
+        m.supp = 10 * std::log10(pwr(seg(j1), 0) / std::max(pwr(yj, SK), 1e-9));
+        m.res = 10 * std::log10(pwr(yx, SK) / std::max(pwr(yn, SK), 1e-9));
+        cvec ref = seg(s1), cl(ref.size()), ns = seg(n1);
+        for (size_t i = 0; i < ref.size(); i++) cl[i] = ns[i] + ref[i];
+        auto snr = [&](const cvec &y, int dly) {
+            cd c = 0; double pr = 0, py = 0; int cnt = 0;
+            for (size_t i = SK; i < y.size(); i++) {
+                cd rr = ref[i - dly]; c += y[i] * std::conj(rr); pr += std::norm(rr); py += std::norm(y[i]); cnt++;
+            }
+            double ps = std::norm(c) / pr;
+            return (ps / cnt) / (py / cnt - ps / cnt);
+        };
+        m.loss = 10 * std::log10(snr(cl, 0) / snr(yx, SMI_REF));
+        return m;
+    };
+    aj_result_t r0, r1;
+    if (!solve(false, r0)) { std::printf("solver failed\n"); return 0; }
+    M a = measure(r0, false);
+    std::printf("  STAP alone        : suppression %.1f dB, residual %+.2f dB, satellite SNR loss %.2f dB\n", a.supp, a.res, a.loss);
+    M b = a;
+    if (use_notch) {
+        if (!solve(true, r1)) { std::printf("solver failed\n"); return 0; }
+        b = measure(r1, true);
+        std::printf("  notch + STAP      : suppression %.1f dB, residual %+.2f dB, satellite SNR loss %.2f dB (firmware residual %+.1f dB)\n",
+                    b.supp, b.res, b.loss, r1.res_db);
+    }
+    int ok = 0;
+    if (id == 23) ok = use_notch && std::fabs(fest - cwf) < 2e-6 && b.supp >= 50 && b.res <= 1.0 && b.loss <= 1.0;
+    // a CW on the satellite's main lobe plus a wideband jammer from another direction: the space-time
+    // filter alone has one spatial null for two directions and notches the CW with its few taps, a notch
+    // MHz wide that takes the satellite with it; the narrow notch keeps it
+    if (id == 24) ok = use_notch && std::fabs(fest - cwf) < 2e-6 && b.supp >= 35 && b.res <= 3.0 && b.loss <= 3.0 && b.loss <= a.loss - 10;
+    if (id == 25) ok = hits == 0 && a.supp >= 35;
+    return ok;
+}
+
 int main(int argc, char **argv) {
     int scen = (argc > 1) ? std::atoi(argv[1]) : 2;
     int ok;
@@ -694,6 +907,13 @@ int main(int argc, char **argv) {
         sc.nblk = 12; sc.jc = -5.5 / fs; sc.jbw = 36.0 / fs; sc.echod = (argc > 4) ? std::atoi(argv[4]) : 3;
         ok = test_jammer(22, sc); break; }
     case 18: { Scen sc = {40, false, 0, 0, true, 0, 0, 0, 0}; sc.nblk = 30; sc.avg = -1; ok = test_jammer(18, sc); break; }
+    // crpa5 CW notch: 23 CW alone, 24 CW + wideband from another direction, 25 wideband alone, 26 bit-exact.
+    // argv: CW J/N, wideband J/N [dB, -99 = none]
+    case 23: ok = test_notch(23, (argc > 2) ? std::atof(argv[2]) : 50, -99); break;
+    case 24: ok = test_notch(24, (argc > 2) ? std::atof(argv[2]) : 50, (argc > 3) ? std::atof(argv[3]) : 40,
+                             (argc > 4) ? std::atof(argv[4]) : -9.08 / 50.0 + 0.0021); break;   // CW on the satellite's main lobe
+    case 25: ok = test_notch(25, -99, (argc > 2) ? std::atof(argv[2]) : 40); break;
+    case 26: ok = test_notch_bitexact(); break;
     default: std::printf("unknown scenario %d\n", scen); ok = 0;
     }
     std::printf("SMI_PI_CSIM: %s (scenario %d)\n", ok ? "PASS" : "FAIL", scen);

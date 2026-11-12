@@ -95,6 +95,7 @@ set_top smi_pi
 add_files $hls_src -cflags "-I$here"
 add_files -tb [file join $here testbench.cpp] -cflags "-I$here -I$fw_dir -Wno-unknown-pragmas"
 add_files -tb [file join $fw_dir gnss_aj_math.c] -cflags "-I$fw_dir"
+add_files -tb [file join $fw_dir gnss_notch_math.c] -cflags "-I$fw_dir"
 open_solution -reset sol -flow_target vivado
 set_part {xc7z020clg400-2}
 create_clock -period $clk_period -name default
@@ -102,7 +103,7 @@ set_clock_uncertainty $clk_uncertainty
 
 # ---- 1 C simulation -------------------------------------------------------------
 if {![info exists ::env(SMI_PI_SKIP_CSIM)] || $::env(SMI_PI_SKIP_CSIM) eq "0"} {
-  foreach scen {1 2 3 4 5 6 7 8 9 10 11 12 13 14} {
+  foreach scen {1 2 3 4 5 6 7 8 9 10 11 12 13 14 23 24 25 26} {
     puts "SMI_PI_HLS: csim scenario $scen"
     if {[catch {csim_design -argv $scen} err]} {
       puts "SMI_PI_HLS: FAIL - C simulation scenario $scen: $err"
@@ -143,7 +144,7 @@ if {$ii eq "" || $ii > $pipeline_ii} {
 
 # ---- 4 package as a Vivado IP ------------------------------------------------------
 export_design -format ip_catalog -rtl verilog \
-  -vendor antsdr -library gnss -version 2.5 -ipname smi_pi \
+  -vendor antsdr -library gnss -version 2.6 -ipname smi_pi \
   -display_name "SMI power inversion, space-time" \
   -description "Two-element space-time SMI power-inversion anti-jam filter (Vitis HLS): RX2 normalised to RX1 at the input, 8 taps on RX1 (reference tap at delay 4 fixed at 1), 8 on RX2 and 2 image (conjugate) taps; real RX2 gain g2, bypass and output make-up gain; weights from the ARM via gnss_passthrough. s_axis_x = RX1 and RX2 IQ, m_axis_y = filtered RX1."
 

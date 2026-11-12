@@ -89,7 +89,12 @@
 #define GNSS_PT_REG_AJ_BLK_COUNT    0x1A4U  /* RO samples blanked since the counter clear */
 #define GNSS_PT_REG_AJ_BLK_BURSTS   0x1A8U  /* RO bursts blanked since the counter clear  */
 #define GNSS_PT_REG_AJ_RX_PEAK      0x1ACU  /* RO [15:0] largest |I|,|Q| of RX1/RX2 in the last window, [31:16] window counter */
-#define GNSS_PT_AJ_INFO_EXPECTED    0x08040C07U   /* crpa4: 8 taps per channel, reference delay 4 */   /* layout 6 = v4.7 (reference delay 4); 5 = v4.6 (pulse blanker, peak hold); 4 = v4.5 */
+#define GNSS_PT_REG_AJ_NTC_PINC     0x1B0U  /* RW shadow (crpa5): CW notch NCO phase increment, f/fs * 2^32 */
+#define GNSS_PT_REG_AJ_NTC_CTRL     0x1B4U  /* RW shadow: [0] notch enable; both committed by AJ_COMMIT */
+#define GNSS_PT_REG_AJ_NTC_CTRL_ACT 0x1B8U  /* RO committed enable                */
+#define GNSS_PT_REG_AJ_NTC_PINC_ACT 0x1BCU  /* RO committed phase increment       */
+#define GNSS_PT_AJ_LAYOUT_NOTCH     8U            /* first layout with the CW notch (crpa5, smi_pi 2.6) */
+#define GNSS_PT_AJ_INFO_EXPECTED    0x08040C08U   /* crpa5: 8 taps per channel, reference delay 4, layout 8 (CW notch) */   /* layout 6 = v4.7 (reference delay 4); 5 = v4.6 (pulse blanker, peak hold); 4 = v4.5 */
 #define GNSS_PT_AJ_LAYOUT_BLANK     5U            /* first layout with the blanker and the peak hold */
 #define GNSS_PT_AJ_CFG_BLANK        0x8000U       /* AJ_CFG[15]: blanker enable (layout 5) */
 #define GNSS_PT_BLK_THR_OFF         0xFFFFFFFFU   /* threshold that never triggers */

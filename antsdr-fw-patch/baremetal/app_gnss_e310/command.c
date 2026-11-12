@@ -54,6 +54,7 @@
 #include "gnss_smi_agc.h"
 #include "gnss_aj.h"
 #include "gnss_aj_math.h"
+#include "gnss_notch.h"
 /* GNSS-CRPA MOD-7 */
 #include "gnss_txdma.h"
 #include "axi_dmac.h"
@@ -153,6 +154,9 @@ command cmd_list[] = {
 	{"gnss_aj_blank=", "Pulse blanker (bitstream 4.6): 0 = off (default since 4.9.3), 1 = automatic, 2 = always on.", "gnss_aj_blank=0", set_gnss_aj_blank},
 	{"gnss_aj_blank_db=", "Pulse blanker threshold above the output noise [dB], 3..30, default 7.", "gnss_aj_blank_db=7", set_gnss_aj_blank_db},
 	{"gnss_aj_sweep=", "1 = detect a moving (chirping) jammer and average over about 50 solves (default), 0 = off.", "gnss_aj_sweep=1", set_gnss_aj_sweep},
+	{"gnss_notch?", "CW notch (crpa5): automatic / off / fixed, on or off, its frequency and the tone detector.", "", get_gnss_notch},
+	{"gnss_notch=", "CW notch: 1 = automatic (default: on while a CW tone is seen), 0 = off.", "gnss_notch=1", set_gnss_notch},
+	{"gnss_notch_rf=", "CW notch fixed at this RF frequency [MHz] (gnss_notch=1 back to automatic).", "gnss_notch_rf=1575.42", set_gnss_notch_rf},
 	{"gnss_aj_mode=", "0 = space-time 63 + 2 image taps (default), 1 = RX2 taps, 2 = one weight (v3), 3 = no image taps (v4.0).", "gnss_aj_mode=0", set_gnss_aj_mode},
 	{"gnss_log=", "Snapshot of status, band, rx gain, report, ... every N seconds (default 60; 0 = off; 300 = 5 min), saved with a time stamp (SD build) or printed between GNSS_LOG BEGIN/END lines.", "gnss_log=60", set_gnss_log},
 	{"gnss_log?", "Snapshot logger state: period, target, count, last file, clock.", "", get_gnss_log},
@@ -436,6 +440,7 @@ void set_gnss_aj_avg(double* param, char param_no)
 		return;
 	}
 	gnss_aj_set_avg(param[0], param[0] == 0.0);
+	gnss_settings_save(-1, (int)(param[0] * 1000.0 + 0.5));   /* crpa5 */
 }
 
 void get_gnss_aj_avg(double* param, char param_no)
@@ -625,11 +630,39 @@ void set_gnss_rx_agc(double* param, char param_no)
 	}
 	gnss_rxg_set_mode((int)param[0]);
 	gnss_rxg_print();
+	gnss_settings_save((int)param[0], -1);   /* crpa5 */
 }
 
 /**************************************************************************//***
  * @brief SMI-PI v4.1. Hold (1) the filter as it is, or automatic (0).
 *******************************************************************************/
+/* crpa5: CW notch */
+void get_gnss_notch(double* param, char param_no)
+{
+	(void)param; (void)param_no;
+	gnss_notch_print();
+}
+
+void set_gnss_notch(double* param, char param_no)
+{
+	if(param_no < 1 || param[0] < 0.0 || param[0] > 1.0) {
+		console_print("gnss_notch= needs 1 (automatic) or 0 (off); a fixed notch: gnss_notch_rf=<RF MHz>\n");
+		return;
+	}
+	gnss_notch_set_mode((int)param[0]);
+	gnss_notch_print();
+}
+
+void set_gnss_notch_rf(double* param, char param_no)
+{
+	if(param_no < 1 || param[0] < 70.0 || param[0] > 6000.0) {
+		console_print("gnss_notch_rf= needs an RF frequency in MHz, e.g. gnss_notch_rf=1575.42\n");
+		return;
+	}
+	if(gnss_notch_set_rf(param[0]) != 0) return;
+	gnss_notch_print();
+}
+
 void set_gnss_smi_freeze(double* param, char param_no)
 {
 	if(param_no < 1) {

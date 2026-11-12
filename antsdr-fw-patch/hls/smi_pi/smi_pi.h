@@ -1,5 +1,5 @@
 // ============================================================================
-//  smi_pi.h  --  space-time SMI power inversion core (SMI-PI v4.4; antsdr-fw-patch crpa4: 8 + 8 taps)
+//  smi_pi.h  --  space-time SMI power inversion core (SMI-PI v4.4; antsdr-fw-patch crpa5: 8 + 8 taps + CW notch)
 //  ANTSDR E310 V1 / GNSS CRPA project, Vitis HLS 2023.2
 //
 //  See smi_pi.cpp for the filter, the fixed-point formats and why the
@@ -67,13 +67,31 @@
 // nrm      : g2 = real[15:0], signed Q3.13 (1.0 = 0x2000). 4.9.13: g2 is real; nrm[31:16]
 //            is ignored (the firmware always wrote 0 there: gnss_pt_write_aj), which
 //            saves the two g2i multipliers with the same x2n bit for bit.
-// wts, wcj, cfg and nrm come from gnss_passthrough's committed registers, in the
-// same clock domain as this core, so a commit changes all three at once.
+// ntc      : CW notch (crpa5, smi_pi 2.6): [31:0] NCO phase increment = f / fs * 2^32
+//            (f = the tone's offset from the LO, signed), [32] enable. Applied to RX1
+//            and to the normalised RX2 BEFORE the space-time filter, identically on
+//            both, so the spatial structure the weights see is kept:
+//              d[n]  = x[n] * exp(-j theta[n])              (tone moved to 0 Hz)
+//              m[n]  = (1/L) sum_{k=0}^{L-1} d[n-k]          (moving average, L = 2^SMI_NOTCH_LOG2L)
+//              x'[n] = x[n] - m[n] * exp(+j theta[n])        (tone removed)
+//            theta = the 32-bit NCO phase, its top 12 bits index SMI_NCO_COS/SIN
+//            (smi_pi_nco.h). No added delay: switching the notch on or off never
+//            moves the GNSS signal in time. [32] = 0: x' = x, bit for bit (the
+//            moving average keeps running, so it is ready when switched on).
+//            Notch 3 dB width about 0.886 fs / L (L = 128: 213 kHz at 30.72 MS/s).
+// wts, wcj, cfg, nrm and ntc come from gnss_passthrough's committed registers, in the
+// same clock domain as this core, so a commit changes all of them at once.
+#ifndef SMI_NOTCH_LOG2L
+#define SMI_NOTCH_LOG2L 7     /* moving-average length L = 128 */
+#endif
+#define SMI_NOTCH_F     4     /* extra fractional bits kept inside the notch */
+#define SMI_NTC_EN_BIT  32
 void smi_pi(hls::stream<ap_uint<64> > &s_axis_x,
             hls::stream<ap_uint<32> > &m_axis_y,
             ap_uint<2048> wts,
             ap_uint<64>   wcj,
             ap_uint<32>   cfg,
-            ap_uint<32>   nrm);
+            ap_uint<32>   nrm,
+            ap_uint<64>   ntc);
 
 #endif

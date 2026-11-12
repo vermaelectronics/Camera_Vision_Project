@@ -261,12 +261,56 @@ void gnss_rxg_set_gain(int32_t db)
 	}
 }
 
+/* crpa5: in MANUAL gain the loop does not run, so nothing looked at the ADC: a jammer that
+ * clips it cannot be nulled (it leaks 10-30 dB) and gnss_report? showed "ADC peak 0". Every
+ * 100 ms the hardware peak hold (bitstream layout >= 5) is read; three clipped windows in a
+ * row give a warning (at most every 10 s) that names the cure. */
+#define RXG_CLIP_PEAK      2040
+#define RXG_MON_US       100000U
+#define RXG_WARN_US    10000000U
+static void manual_monitor(void)
+{
+	static XTime t_next, t_warn;
+	static int   clip_run, init;
+	XTime now;
+	int   pk;
+	XTime_GetTime(&now);
+	if(now < t_next) return;
+	t_next = now + (XTime)((uint64_t)COUNTS_PER_SECOND * RXG_MON_US / 1000000U);
+	if(!init) {
+		init = 1;
+		hw_peak_ok = ((gnss_pt_read(GNSS_PT_REG_AJ_INFO) & 0xFFU) >= GNSS_PT_AJ_LAYOUT_BLANK);
+		hw_idx_last = (uint16_t)(gnss_pt_read(GNSS_PT_REG_AJ_RX_PEAK) >> 16);
+		hw_idx_ignore = hw_idx_last;
+		return;
+	}
+	if(hw_peak_ok) {
+		pk = hw_peak_new();
+		if(pk < 0) return;                  /* no new window yet */
+	} else {
+		int p0 = rx_peak(GNSS_PT_REG_RX_SNAPSHOT_CH0), p1 = rx_peak(GNSS_PT_REG_RX_SNAPSHOT_CH1);
+		pk = p0 > p1 ? p0 : p1;
+	}
+	last_peak = pk;
+	clip_run = (pk >= RXG_CLIP_PEAK) ? clip_run + 1 : 0;
+	if(clip_run >= 3 && (t_warn == 0 || now - t_warn >= (XTime)((uint64_t)COUNTS_PER_SECOND * RXG_WARN_US / 1000000U))) {
+		int32_t g = 0;
+		t_warn = now;
+		ad9361_get_rx_rf_gain(ad9361_phy, 0, &g);
+		console_print("\n[RXG] ADC CLIPPING: RX peak %d of 2047 at %d dB MANUAL gain. A clipped jammer cannot be\n"
+			      "      nulled (it leaks 10-30 dB through the filter). Use gnss_rx_agc=2 (both gains cut\n"
+			      "      together, output level kept) or a lower RX gain (last value of gnss_band=7,...).\n",
+			      (long)pk, (long)g);
+	}
+}
+
 void gnss_rxg_poll(void)
 {
 	XTime now;
 	int p0, p1, peak;
 	uint32_t cur = 0;
 
+	if(rxg_mode == GNSS_RXG_MANUAL && ad9361_phy) manual_monitor();
 	if(rxg_mode != GNSS_RXG_MATCHED || !ad9361_phy) return;
 	XTime_GetTime(&now);
 	if(now < rxg_next) return;

@@ -248,8 +248,22 @@ void console_print(char* str, ...)
 				string_ptr++;
 			}
 		}
+		/* crpa5: length modifiers (%lu, %ld, %lx) were not understood: the letter after 'l'
+		 * was printed and its argument left on the list, so every later argument was
+		 * shifted (a following %s then read a number as a pointer). */
+		while(*string_ptr == 'l' || *string_ptr == 'h' || *string_ptr == 'z')
+			string_ptr++;
 		switch(*string_ptr)
 		{
+		case 'u':
+		{
+			unsigned long u = va_arg(argp, unsigned long);
+			char ub[24];
+			int  un = 0;
+			do { ub[un++] = (char)('0' + (int)(u % 10UL)); u /= 10UL; } while(u && un < 23);
+			while(un) uart_write_char(ub[--un]);
+			break;
+		}
 		case 'c':
 			long_arg = va_arg(argp, long);
 			uart_write_char((char)long_arg);

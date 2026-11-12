@@ -1,5 +1,5 @@
 // ============================================================================
-//  smi_pi.cpp  --  space-time SMI power inversion core (SMI-PI v4.4; antsdr-fw-patch crpa4: 8 + 8 taps)
+//  smi_pi.cpp  --  space-time SMI power inversion core (SMI-PI v4.4; antsdr-fw-patch crpa5: 8 + 8 taps + CW notch)
 //  ANTSDR E310 V1 / GNSS CRPA project, Vitis HLS 2023.2
 //
 //  PIPELINE (one sample pair per clock)
@@ -77,6 +77,7 @@
 //              rounded to nearest after the make-up shift, saturated to 16 bits.
 // ============================================================================
 #include "smi_pi.h"
+#include "smi_pi_nco.h"
 
 typedef ap_int<12> s12_t;
 typedef ap_int<18> s18_t;            // normalised RX2, Q2
@@ -123,18 +124,70 @@ static void cmul3_fab(w16_t wr, w16_t wi, ap_int<12> xr, ap_int<12> xi,
     pi = ap_int<31>(k1) + ap_int<31>(k2);
 }
 
+// ---- CW notch (crpa5), one channel ------------------------------------------------
+// XW = input width (12 for RX1, 18 for the normalised RX2), F = SMI_NOTCH_F extra bits.
+//   d  = round((x * conj(e)) / 2^(15-F))        mixed down, Q(F) on x's scale
+//   m  = round(acc / L), acc = sum of the last L values of d (kept exactly: the value
+//        that leaves the window is read back from the delay line it was stored in)
+//   e' = m * e / 2^15                           mixed back up, Q(F)
+//   x' = sat_XW(round((x * 2^F - e') / 2^F))
+// e = (c + j s) is the NCO value (Q1.15) of this sample. The caller passes the delay-line
+// value that leaves the window (old) and stores the returned d.
+template <int XW>
+struct notch_t {
+    typedef ap_int<XW + 6>  d_t;    // |x| * 2^F * 2^0.5 < 2^(XW-1+4+1)
+    typedef ap_int<XW + 14> a_t;    // L = 2^7 .. 2^8 values of d_t
+};
+
+template <int XW>
+static void notch_ch(ap_int<XW> xr, ap_int<XW> xi, ap_int<16> c, ap_int<16> s, bool en,
+                     typename notch_t<XW>::d_t old_r, typename notch_t<XW>::d_t old_i,
+                     typename notch_t<XW>::a_t &acc_r, typename notch_t<XW>::a_t &acc_i,
+                     typename notch_t<XW>::d_t &d_r, typename notch_t<XW>::d_t &d_i,
+                     ap_int<XW> &yr, ap_int<XW> &yi) {
+#pragma HLS INLINE
+    typedef typename notch_t<XW>::d_t d_t;
+    typedef typename notch_t<XW>::a_t a_t;
+    const int SH = 15 - SMI_NOTCH_F;
+    // mix down: x * (c - j s)
+    ap_int<XW + 17> pr = ap_int<XW + 17>(xr * c) + ap_int<XW + 17>(xi * s);
+    ap_int<XW + 17> pi = ap_int<XW + 17>(xi * c) - ap_int<XW + 17>(xr * s);
+    d_r = (d_t)((pr + (ap_int<XW + 17>(1) << (SH - 1))) >> SH);
+    d_i = (d_t)((pi + (ap_int<XW + 17>(1) << (SH - 1))) >> SH);
+    acc_r = acc_r + (a_t(d_r) - a_t(old_r));
+    acc_i = acc_i + (a_t(d_i) - a_t(old_i));
+    // mean (Q F) and mix up: m * (c + j s)
+    d_t mr = (d_t)((acc_r + (a_t(1) << (SMI_NOTCH_LOG2L - 1))) >> SMI_NOTCH_LOG2L);
+    d_t mi = (d_t)((acc_i + (a_t(1) << (SMI_NOTCH_LOG2L - 1))) >> SMI_NOTCH_LOG2L);
+    ap_int<XW + 23> er = ap_int<XW + 23>(mr * c) - ap_int<XW + 23>(mi * s);
+    ap_int<XW + 23> ei = ap_int<XW + 23>(mi * c) + ap_int<XW + 23>(mr * s);
+    ap_int<XW + 9> qr = (ap_int<XW + 9>)((er + (ap_int<XW + 23>(1) << 14)) >> 15);   // Q F
+    ap_int<XW + 9> qi = (ap_int<XW + 9>)((ei + (ap_int<XW + 23>(1) << 14)) >> 15);
+    ap_int<XW + 10> zr = (ap_int<XW + 10>(xr) << SMI_NOTCH_F) - ap_int<XW + 10>(qr);
+    ap_int<XW + 10> zi = (ap_int<XW + 10>(xi) << SMI_NOTCH_F) - ap_int<XW + 10>(qi);
+    ap_int<XW + 10> hr = (zr + (ap_int<XW + 10>(1) << (SMI_NOTCH_F - 1))) >> SMI_NOTCH_F;
+    ap_int<XW + 10> hi = (zi + (ap_int<XW + 10>(1) << (SMI_NOTCH_F - 1))) >> SMI_NOTCH_F;
+    const ap_int<XW + 10> lim = (ap_int<XW + 10>(1) << (XW - 1)) - 1;
+    if (hr > lim) hr = lim; if (hr < -lim - 1) hr = -lim - 1;
+    if (hi > lim) hi = lim; if (hi < -lim - 1) hi = -lim - 1;
+    yr = en ? (ap_int<XW>)hr : xr;
+    yi = en ? (ap_int<XW>)hi : xi;
+}
+
 void smi_pi(hls::stream<ap_uint<64> > &s_axis_x,
             hls::stream<ap_uint<32> > &m_axis_y,
             ap_uint<2048> wts,
             ap_uint<64>   wcj,
             ap_uint<32>   cfg,
-            ap_uint<32>   nrm) {
+            ap_uint<32>   nrm,
+            ap_uint<64>   ntc) {
 #pragma HLS INTERFACE axis port=s_axis_x
 #pragma HLS INTERFACE axis port=m_axis_y
 #pragma HLS INTERFACE ap_none port=wts
 #pragma HLS INTERFACE ap_none port=wcj
 #pragma HLS INTERFACE ap_none port=cfg
 #pragma HLS INTERFACE ap_none port=nrm
+#pragma HLS INTERFACE ap_none port=ntc
 #pragma HLS INTERFACE ap_ctrl_none port=return
 #pragma HLS PIPELINE II=1
 
@@ -168,6 +221,36 @@ void smi_pi(hls::stream<ap_uint<64> > &s_axis_x,
     const ap_int<32> nhalf = ap_int<32>(1) << (SMI_GFRAC - SMI_XFRAC - 1);
     s18_t x2nr = (s18_t)((nr + nhalf) >> (SMI_GFRAC - SMI_XFRAC));
     s18_t x2ni = (s18_t)((ni + nhalf) >> (SMI_GFRAC - SMI_XFRAC));
+
+    // ---- 1b. CW notch (crpa5), the same on RX1 and on the normalised RX2 -----
+    // NCO phase and moving-average state are NOT reset (no RESET pragma): the sums and
+    // their delay lines start together at 0 from the bitstream and always stay consistent.
+    static ap_uint<32> nco_ph = 0;
+    static ap_uint<SMI_NOTCH_LOG2L> nt_p = 0;
+    static notch_t<12>::d_t n1r_dl[1 << SMI_NOTCH_LOG2L], n1i_dl[1 << SMI_NOTCH_LOG2L];
+    static notch_t<18>::d_t n2r_dl[1 << SMI_NOTCH_LOG2L], n2i_dl[1 << SMI_NOTCH_LOG2L];
+    static notch_t<12>::a_t n1r_acc = 0, n1i_acc = 0;
+    static notch_t<18>::a_t n2r_acc = 0, n2i_acc = 0;
+#pragma HLS DEPENDENCE variable=n1r_dl type=inter dependent=false
+#pragma HLS DEPENDENCE variable=n1i_dl type=inter dependent=false
+#pragma HLS DEPENDENCE variable=n2r_dl type=inter dependent=false
+#pragma HLS DEPENDENCE variable=n2i_dl type=inter dependent=false
+    {
+        ap_uint<SMI_NCO_BITS> ix = nco_ph(31, 32 - SMI_NCO_BITS);
+        ap_int<16> nc = SMI_NCO_COS[ix], ns = SMI_NCO_SIN[ix];
+        bool nen = ntc[SMI_NTC_EN_BIT];
+        notch_t<12>::d_t o1r = n1r_dl[nt_p], o1i = n1i_dl[nt_p], d1r, d1i;
+        notch_t<18>::d_t o2r = n2r_dl[nt_p], o2i = n2i_dl[nt_p], d2r, d2i;
+        s12_t y1r, y1i;
+        s18_t y2r, y2i;
+        notch_ch<12>(x1r, x1i, nc, ns, nen, o1r, o1i, n1r_acc, n1i_acc, d1r, d1i, y1r, y1i);
+        notch_ch<18>(x2nr, x2ni, nc, ns, nen, o2r, o2i, n2r_acc, n2i_acc, d2r, d2i, y2r, y2i);
+        n1r_dl[nt_p] = d1r; n1i_dl[nt_p] = d1i;
+        n2r_dl[nt_p] = d2r; n2i_dl[nt_p] = d2i;
+        nt_p = nt_p + 1;
+        nco_ph = nco_ph + (ap_uint<32>)ntc(31, 0);
+        x1r = y1r; x1i = y1i; x2nr = y2r; x2ni = y2i;
+    }
 
     for (int k = SMI_NT - 1; k > 0; k--) {
 #pragma HLS UNROLL

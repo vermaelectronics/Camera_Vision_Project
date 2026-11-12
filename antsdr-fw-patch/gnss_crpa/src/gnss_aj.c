@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include "gnss_aj.h"
 #include "gnss_aj_math.h"
+#include "gnss_notch.h"
 #include "gnss_smi_agc.h"
 #include "gnss_passthrough.h"
 #include "gnss_l1.h"          /* 4.9.13: GNSS_L1_TX2_ATTEN_MDB */
@@ -94,6 +95,9 @@ static int      g2_src;          /* 0 default (1.0), 1 noise floors, 2 jammer */
 static int      band = GNSS_BAND_DEFAULT;
 
 static void print_band_cover(void);       /* RF profiles section, below */
+/* crpa5: the capture the detector and the solver use: the DMA buffer, or its copy with the
+ * CW tone removed by the software model of the FPGA notch (gnss_notch.c). */
+static const uint32_t *cap;
 
 struct aj_event { uint32_t ms; int type; double v1, v2, v3; };
 static struct aj_event ev[AJ_NEV];
@@ -768,7 +772,7 @@ static int detect_capture(XTime now)
 	res.noise_ref = noise_now();
 	res.rho_noise_re = rho_n_re;
 	res.rho_noise_im = rho_n_im;
-	if(aj_detect(GNSS_AJ_BUF_PTR, AJ_NSAMP, &res) != 0 || !res.ok) {
+	if(aj_detect(cap, AJ_NSAMP, &res) != 0 || !res.ok) {
 		n_fail++;
 		return 0;
 	}
@@ -876,7 +880,7 @@ static void solve_capture(XTime now)
 	res.gate = pulsed(now);                         /* a pulsed jammer: skip the blocks in its gaps */
 	res.gate_coh_db = AJ_OFF_COH_DB;
 	res.gate_pwr = 1.0 + db2lin(AJ_OFF_DB);
-	rc = aj_compute(GNSS_AJ_BUF_PTR, AJ_NSAMP, &res);
+	rc = aj_compute(cap, AJ_NSAMP, &res);
 	if(rc == 1 && res.gated) {
 		n_gate++;
 		res_valid = 1;
@@ -1011,6 +1015,14 @@ void gnss_aj_poll(void)
 	}
 	Xil_DCacheInvalidateRange((uintptr_t)GNSS_AJ_BUF_ADDR, AJ_BYTES);
 
+	/* crpa5: CW notch -- tone search, switching, and the notched copy for the solver */
+	cap = gnss_notch_capture(GNSS_AJ_BUF_PTR, AJ_NSAMP, noise_now());
+	if(gnss_notch_take_change()) {
+		/* the statistics before the switch hold the tone: start again from this block */
+		aj_reset();
+		res.sig2_prev = -1.0;
+	}
+
 	if(state == ST_CLEAR) {
 		/* the capture that confirmed the jammer is solved straight away */
 		if(detect_capture(now))
@@ -1128,9 +1140,11 @@ void gnss_aj_enable(int on)
 			add_event(now, EV_START, 0.0, 0.0, 0.0);
 		}
 		aj_on = 1;
+		gnss_notch_init();
 		gnss_pt_set_smi(1);
 	} else {
 		gnss_aj_dma_release();
+		gnss_notch_off();
 		aj_on = 0;
 		gnss_rxg_stop_tx_hold();
 		gnss_rxg_set_digital_db(0);
@@ -1281,6 +1295,10 @@ void gnss_aj_print(void)
 			      (char*)(nf0 > 0.0 ? f1(res.jn_db < -9.9 ? -9.9 : res.jn_db) : "(learning)"),
 			      f1u(AJ_ON_DB));
 	}
+	if(gnss_notch_available() && gnss_notch_on()) {
+		console_print("  ");
+		gnss_notch_report_line();
+	}
 	console_print("  more        : gnss_report? prints everything (paste it into a report)\n");
 }
 
@@ -1347,6 +1365,7 @@ void gnss_aj_report(void)
 			      (unsigned long)gnss_pt_read(GNSS_PT_REG_AJ_BLK_BURSTS), (unsigned long)n_gate,
 			      (char*)(pulsed(now) ? "SEEN" : "not seen"),
 			      (long)(gnss_pt_read(GNSS_PT_REG_AJ_RX_PEAK) & 0xFFFFU));
+	gnss_notch_report_line();
 	console_print("sweep         : %s (gnss_aj_sweep=%d)\n",
 		      (char*)(!sweep_en ? "detector OFF" : sweep_avg > 0.0 ? "MOVING JAMMER (chirp): long memory ON, 0.98 = about 50 solves" : "none seen (fixed or fast jammer, memory 0.5)"),
 		      sweep_en);
@@ -1592,6 +1611,8 @@ static void levels_guard(void)
 	}
 	for(ch = 0; ch < 2; ch++) {
 		ad9361_get_tx_attenuation(ad9361_phy, (uint8_t)ch, &a[ch]);
+		/* crpa5: with gnss_rx_agc=2 the TX level hold moves TX1 on purpose (gnss_smi_agc.c) */
+		if(ch == 0 && gnss_rxg_mode() == GNSS_RXG_MATCHED) continue;
 		if(a[ch] + 250U < lvl_att_mdb[ch] || a[ch] > lvl_att_mdb[ch] + 250U) bad_a = 1;
 	}
 	if(!bad_g && !bad_a) return;
@@ -1637,6 +1658,12 @@ int gnss_band_set(int b)
 	int r = 0;
 	if(b < 0 || b >= GNSS_BAND_COUNT || !ad9361_phy) return -1;
 	c = &bands[b];
+	if(aj_on && state == ST_JAMMED)
+		/* crpa5: the noise floor is learned again after the band change; with the jammer on
+		 * it would be learned WITH the jammer, which is then taken for background. */
+		console_print("gnss_band: WARNING a jammer is on. The noise floor is learned again for the new band;\n"
+			      "           switch the jammer OFF for about 10 s after this, then on again, or the\n"
+			      "           jammer may be learned as background and not nulled.\n");
 	gnss_aj_dma_release();
 	/* The vendor start-up code LOADS a band-pass FIR (passband 0.15-0.25 fs)
 	 * into both the RX and the TX filter. It is bypassed by default and must
@@ -1661,6 +1688,7 @@ int gnss_band_set(int b)
 	ratio12 = -1.0; g2 = 1.0; rx2n = 1.0; g2_src = 0;
 	res.sig2_prev = -1.0;
 	aj_reset();
+	gnss_notch_off();          /* crpa5: the tone is searched again at the new LO / rate */
 	return r ? -1 : 0;
 }
 
@@ -1683,6 +1711,7 @@ void gnss_aj_radio_manual(void)
 	ratio12 = -1.0; g2 = 1.0; rx2n = 1.0; g2_src = 0;
 	res.sig2_prev = -1.0;
 	aj_reset();
+	gnss_notch_off();
 }
 
 /* ---- radio= / radio?: every value filled in by hand ----------------------------------- */
