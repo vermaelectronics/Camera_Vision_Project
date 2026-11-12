@@ -1,5 +1,5 @@
 // ============================================================================
-//  smi_pi.h  --  space-time SMI power inversion core (SMI-PI v4.4; 4.9.13: 7 + 7 taps)
+//  smi_pi.h  --  space-time SMI power inversion core (SMI-PI v4.4; antsdr-fw-patch crpa4: 8 + 8 taps)
 //  ANTSDR E310 V1 / GNSS CRPA project, Vitis HLS 2023.2
 //
 //  See smi_pi.cpp for the filter, the fixed-point formats and why the
@@ -17,13 +17,13 @@
 
 // Taps per channel (delays 0..31, 4.9: was 16) and the RX1 reference delay. Must match
 // AJ_NT / AJ_REF in Source/Firmware/app_gnss_e310/gnss_aj_math.h.
-#define SMI_NT    7    /* 4.9.13: 7 taps per antenna (7 + 7 = 14 taps); was 5 (4.9.12), 6 (4.9.11), 7 (4.9.10), 16, 32 */
+#define SMI_NT    8    /* antsdr-fw-patch crpa4: 8 taps per antenna (8 + 8 = 16 taps); 4.9.13/4.9.14: 7, 6, 5 */
 #ifndef SMI_REF
-#define SMI_REF    4    /* 4.9.13: reference tap at delay 4 (as 4.9.10): 4 pre-cursor taps, reach NT-1-REF = 2 samples */
+#define SMI_REF    4    /* crpa4: reference tap at delay 4: 4 pre-cursor taps, 3 after (reach NT-1-REF = 3 samples). Delay 4 beats 5 in C simulation, e.g. a jammer reflection 37 dB instead of 21 dB */
 #endif
-// DSP48 budget of this core (4.9.13, 7 + 7): 6 RX1 taps + 7 RX2 taps + 2 image taps = 15 complex
-// multipliers x 3 (Gauss form) = 45, plus 2 for the real RX2 gain g2 = 47 DSP48 (4.9.12 5 + 5: 37,
-// 4.9.11 6 + 6: 43, both with 4 for g2).
+// DSP48 budget of this core (crpa4, 8 + 8): 7 RX1 taps + 8 RX2 taps + 2 image taps = 17 complex
+// multipliers x 3 (Gauss form) = 51, plus 2 for the real RX2 gain g2 = 53 DSP48 (7 + 7: 47, 6 + 6: 41,
+// 5 + 5: 35; 4.9.11 / 4.9.12 had 4 for a complex g2).
 // RX1 taps (the highest delays) whose multipliers are built from LUTs, not DSP48 (4.9.1: the 32-tap build needed 229 DSP48 of 220).
 // 12 taps = 36 multipliers = about 36 DSP48 saved, about 8000 LUT spent. 0 = all DSP48.
 #ifndef SMI_NFAB

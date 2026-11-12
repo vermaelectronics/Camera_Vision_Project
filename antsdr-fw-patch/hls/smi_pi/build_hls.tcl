@@ -26,7 +26,7 @@
 #  USAGE (from this directory; normally run by ../../build.sh hls)
 #    vitis_hls -f build_hls.tcl
 #
-#  antsdr-fw-patch: copied from LoopBack_Code_SMI_PI_STAP7x7_v4.9.14
+#  antsdr-fw-patch: copied from LoopBack_Code_SMI_PI_STAP7x7_v4.9.14, set to 8 + 8 taps (crpa4)
 #  Source/HLS/smi_pi. Only the default paths differ: the IP goes to
 #  plutosdr-fw/hdl/library/antsdr_ip/smi_pi (found by the ADI project through
 #  ip_repo_paths = hdl/library) and the weight solver for the C simulation
@@ -40,7 +40,7 @@
 #    SMI_PI_FW_DIR=<dir>  directory holding gnss_aj_math.c/.h
 #
 #  OUTPUT
-#    $GNSS_CRPA_IP_REPO/smi_pi/component.xml, VLNV antsdr:gnss:smi_pi:2.5 (4.9.13/4.9.14, here 7 + 7 taps; 2.4 = 4.9.12 and older)
+#    $GNSS_CRPA_IP_REPO/smi_pi/component.xml, VLNV antsdr:gnss:smi_pi:2.5 (4.9.13/4.9.14, here 8 + 8 taps; 2.4 = 4.9.12 and older)
 #    $GNSS_CRPA_IP_REPO/smi_pi/smi_pi_csynth.rpt
 #
 #  SUCCESS MARKER
@@ -145,7 +145,7 @@ if {$ii eq "" || $ii > $pipeline_ii} {
 export_design -format ip_catalog -rtl verilog \
   -vendor antsdr -library gnss -version 2.5 -ipname smi_pi \
   -display_name "SMI power inversion, space-time" \
-  -description "Two-element space-time SMI power-inversion anti-jam filter (Vitis HLS): RX2 normalised to RX1 at the input, 7 taps on RX1 (reference tap at delay 4 fixed at 1), 7 on RX2 and 2 image (conjugate) taps; real RX2 gain g2, bypass and output make-up gain; weights from the ARM via gnss_passthrough. s_axis_x = RX1 and RX2 IQ, m_axis_y = filtered RX1."
+  -description "Two-element space-time SMI power-inversion anti-jam filter (Vitis HLS): RX2 normalised to RX1 at the input, 8 taps on RX1 (reference tap at delay 4 fixed at 1), 8 on RX2 and 2 image (conjugate) taps; real RX2 gain g2, bypass and output make-up gain; weights from the ARM via gnss_passthrough. s_axis_x = RX1 and RX2 IQ, m_axis_y = filtered RX1."
 
 set impl_dir [file join $work smi_pi_hls sol impl]
 set ip_src   [file join $impl_dir ip]

@@ -1,5 +1,5 @@
 // ============================================================================
-//  smi_pi.cpp  --  space-time SMI power inversion core (SMI-PI v4.4; 4.9.13: 7 + 7 taps)
+//  smi_pi.cpp  --  space-time SMI power inversion core (SMI-PI v4.4; antsdr-fw-patch crpa4: 8 + 8 taps)
 //  ANTSDR E310 V1 / GNSS CRPA project, Vitis HLS 2023.2
 //
 //  PIPELINE (one sample pair per clock)
@@ -12,7 +12,7 @@
 //       (|w| < 8), and the null would fail. x2n keeps 2 fractional bits so the
 //       scaling adds no rounding noise of its own.
 //    2. SPACE-TIME FILTER     SMI_NT taps on RX1 and SMI_NT on the normalised RX2
-//       (4.9.13: 7 + 7, reference R = SMI_REF = 4; 32 + 32 in 4.9.7, 16 + 16 before):
+//       (crpa4: 8 + 8, reference R = SMI_REF = 4; 32 + 32 in 4.9.7, 16 + 16 before):
 //         y[n] = x1[n-R] - sum_{k != R} a_k x1[n-k] - sum_k b_k x2n[n-k]
 //                        - c1 conj(x1[n-R]) - c2 conj(x2n[n-R])
 //       The RX1 tap at delay R is the reference, fixed at 1 (power
@@ -70,7 +70,7 @@
 //    x2n     : 18-bit signed, Q2 (g2 x2, |g2| < 4)
 //    weights : 16-bit signed Q3.12, complex multiply with 3 real multipliers
 //              (k1 = wr (xr + xi), k2 = xr (wi - wr), k3 = xi (wr + wi);
-//               re = k1 - k3, im = k1 + k2): 4.9.13 (7 + 7): 45 multipliers + 2 for the real g2 = 47 DSP48;
+//               re = k1 - k3, im = k1 + k2): crpa4 (8 + 8): 51 multipliers + 2 for the real g2 = 53 DSP48;
 //               (4.9, 32 taps: 195 + 4 for g2, SMI_NFAB = 12 RX1 taps (36 multipliers) built from LUTs)
 //    sum     : 48 bits, Q14; the weighted taps are summed first, divided by
 //              2^ws (weight scale, v4.4), then subtracted from the reference;

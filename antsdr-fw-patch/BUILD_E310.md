@@ -359,13 +359,13 @@ sudo dfu-util -a uboot-env.dfu -D ./uboot-env.dfu
 ## 7. GNSS anti-jam (SMI-PI v4.9.14): RX1 + RX2 -> FPGA -> TX1
 
 The `0003` patches put the complete `LoopBack_Code_SMI_PI_STAP7x7_v4.9.14`
-design ("B") into this Linux firmware ("A"): the same FPGA datapath and the
+design ("B", here with 8 + 8 taps) into this Linux firmware ("A"): the same FPGA datapath and the
 same firmware with all its console commands. One feature is new: **band 7,
 your own RF values, set at any time from PuTTY**.
 
 ```text
 antenna 1 -> RX1 \                    smi_pi space-time anti-jam
-                  AD9361 -> FPGA  gnss_passthrough (7 + 7 taps)  -> AD9361 -> TX1
+                  AD9361 -> FPGA  gnss_passthrough (8 + 8 taps)  -> AD9361 -> TX1
 antenna 2 -> RX2 /  LVDS 2R2T         + pulse blanker               -> coax + attenuator + DC block
                     61.44 MS/s                                         -> GNSS receiver -> GNSS Viewer
 ```
@@ -384,26 +384,43 @@ antenna 2 -> RX2 /  LVDS 2R2T         + pulse blanker               -> coax + at
   instead of the DMA registers. It starts at boot like the bare-metal
   firmware did: self-test, band, anti-jam on, TX1 on.
 
-### Filter size: 7 + 7 taps (crpa3)
+### Filter size: 8 + 8 taps (crpa4)
 
-Since `crpa3` the filter has **7 taps per antenna (7 + 7)**, reference tap at
-delay 4, as in `LoopBack_Code_SMI_PI_STAP7x7_v4.9.14`. `crpa1` and `crpa2`
-had 6 + 6 (reference delay 3). The FPGA core and the firmware must agree:
+Since `crpa4` the filter has **8 taps per antenna (8 + 8)**, reference tap at
+delay 4 (4 taps before it, 3 after). It is the 7 + 7 core of
+`LoopBack_Code_SMI_PI_STAP7x7_v4.9.14` with one more tap per antenna. The FPGA
+core and the firmware must agree:
 
-| Where | 7 + 7 (now) | 6 + 6 (crpa1, crpa2) |
-|---|---|---|
-| `hls/smi_pi/smi_pi.h` `SMI_NT` / `SMI_REF` | 7 / 4 | 6 / 3 |
-| `gnss_passthrough.v` `AJ_INFO` (hdl 0003) | `0x07040C07` | `0x06030C07` |
-| `gnss_aj_math.h` `AJ_NT` / `AJ_REF` (Linux and bare metal) | 7 / 4 | 6 / 3 |
-| adaptive weights | 13 + 2 image | 11 + 2 image |
-| DSP48 in `smi_pi` | 47 | 41 |
+| Where | 8 + 8 (crpa4, now) | 7 + 7 (crpa3) | 6 + 6 (crpa1, crpa2) |
+|---|---|---|---|
+| `hls/smi_pi/smi_pi.h` `SMI_NT` / `SMI_REF` | 8 / 4 | 7 / 4 | 6 / 3 |
+| `gnss_passthrough.v` `AJ_INFO` (hdl 0003) | `0x08040C07` | `0x07040C07` | `0x06030C07` |
+| `gnss_aj_math.h` `AJ_NT` / `AJ_REF` (Linux and bare metal) | 8 / 4 | 7 / 4 | 6 / 3 |
+| adaptive weights | 15 + 2 image | 13 + 2 image | 11 + 2 image |
+| DSP48 in `smi_pi` | 53 | 47 | 41 |
+
+C simulation of the core with the firmware maths (`hls/smi_pi/testbench.cpp`,
+suppression in dB):
+
+| Scenario | 6 + 6 | 7 + 7 | 8 + 8 |
+|---|---|---|---|
+| 2: wideband jammer, J/N 30 dB | 36.7 | 37.2 | 39.5 |
+| 5: jammer with a reflection on RX2 | 20.4 | 20.7 | 37.4 |
+| 8: wideband jammer 60 dB, I/Q imbalance | 51.0 | 51.7 | 53.6 |
+| 11: field case, J/N 61 dB | 53.4 | 54.1 | 56.2 |
+| 13: field case, J/N 41 dB | 45.7 | 46.5 | 48.9 |
+
+With 8 + 8 the reference delay 5 (5 before, 2 after, the rule of 5 + 5 to
+7 + 7) was also simulated. Delay 4 was better in 8 of the 11 jammer
+scenarios (scenario 5: 37.4 dB against 20.9 dB), equal in 2 and 0.4 dB worse
+in 1 (CW jammer, 66.8 against 67.2 dB), so 8 + 8 uses delay 4.
 
 The firmware reads `AJ_INFO` at start-up and does not start the anti-jam if
 the bitstream has a different tap count or reference delay; the console then
 says so ("Anti-jam NOT started").
 
-To build 7 + 7 in a folder that was already patched for 6 + 6 (crpa1 or
-crpa2), start from clean sources; `./build.sh patch` stops with "does not
+To build 8 + 8 in a folder that was already patched for another size (crpa1,
+crpa2 or crpa3), start from clean sources; `./build.sh patch` stops with "does not
 apply" otherwise:
 
 ```bash
@@ -515,7 +532,7 @@ The service:
 ## 7b. Design A on bare metal (no Linux)
 
 `./build.sh baremetal` builds the same design-A FPGA (LVDS 2R2T,
-`gnss_passthrough` v4.9.14, `smi_pi` 7 + 7 taps, `axi_vcxo_ctrl`) but runs the
+`gnss_passthrough` v4.9.14, `smi_pi` 8 + 8 taps, `axi_vcxo_ctrl`) but runs the
 SMI-PI v4.9.14 firmware directly on the ARM, like design B. There is no
 U-Boot, Linux or root file system: the SD card holds only `BOOT.bin`.
 
