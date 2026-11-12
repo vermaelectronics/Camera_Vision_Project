@@ -41,8 +41,11 @@ the TTFF values are cold-start times and can be compared directly.
   overflow count the same sticky value as in the 5 dB test (83654138), so no
   new overflows between the two tests.
 - 2026-11-12, user's report (no photos), same band command, cold starts:
-  `crpa3` (7 + 7) at 5 dB: fix in 86 s with 5 BeiDou + 1 GPS, struggled to
-  keep the lock even without a cold start. `crpa4` (8 + 8) at 5 dB: cold fix in
+  `crpa3` (7 + 7) at 5 dB (corrected by the user): cold-start fix in **83 s**
+  with 6 BeiDou used + 1 GPS seen but not used; it struggled to keep the lock
+  even without a cold start. (The photo sent with this correction, 2026-11-12
+  05:31 UTC, shows TTFF 47 s and only BeiDou bars at C/N0 about 27-39 dB-Hz,
+  no GPS bars; asked the user which build it was.) `crpa4` (8 + 8) at 5 dB: cold fix in
   **47 s**; at 10 dB it kept an existing lock (5 BeiDou + 1 GPS) but after a
   cold start no fix (only 2 BeiDou seen, not locked).
   User's targets: 5 dB faster than before, 10 dB cold fix in 80-90 s, 15 dB
