@@ -18,7 +18,14 @@ Name each new design-A (pass-through + CRPA) package with the next number:
   0x08040C08, regs 0x1B0/0x1B4, gnss_notch? / gnss_notch=0|1 / gnss_notch_rf=),
   gnss_rx_agc / gnss_aj_avg saved, manual-gain clipping warning, %lu fix.
   Commit eaa2d1a.
-- Next package: `crpa6`.
+- `crpa6` (2026-11-12): design A with **SFAP-PI** (user's Source.zip, SFAP_PassLVDS
+  v5.0) instead of SMI-PI: 128 frequency bins by default, `SFAP_BINS=64` for 64
+  (hdl 0004 patch, HLS define, firmware gnss_sfap_cfg.h). 4.9.14 firmware kept
+  (band 7 etc.), solver = SFAP v5.0 with the 4.9.14 engine interface. AJ_INFO
+  0x80400C09 (64: 0x40200C09), weights from 0x200. hls/smi_pi removed. The user
+  asked 128, then "hold for 64 FFT", then 128 again: built switchable.
+  Commit 3b9e63e.
+- Next package: `crpa7`.
 
 Files per package: `crpaN-full-src.zip.part1`, `crpaN-full-src.zip.part2`,
 `crpaN-kit.zip`, `SHA256SUMS-crpaN.txt`.
