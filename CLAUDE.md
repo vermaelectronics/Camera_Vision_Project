@@ -57,4 +57,19 @@ All results below are with a **wideband** jammer (user, 2026-11-12); the
   lambda/2 (9.5 cm), LO 1568.26 with 24 MHz BW (or one constellation, narrow),
   smoother weights (gnss_aj_avg 0.95-0.98) and a gnss_smi_freeze=1 test,
   read J/N and residual from gnss_aj?, log with gnss_aj_csv.
+- 2026-11-12, PuTTY log from the user (crpa1 6 + 6, band 7 1568.5/30.72/18,
+  RX 50 dB MANUAL): J/N 39.6 -> suppression 26 dB, residual ~9 dB (ADC fine,
+  RX1 586510 LSB^2); J/N 43.3 -> residual 16-18 dB; RSSI 63.75 (J/N ~46) ->
+  residual 23-26 dB, RX samples at +-1600..2048. **Diagnosis: ADC clipping.**
+  A clipping simulation (12-bit, logged powers) gives residual 3.3 / 16.7 /
+  25.8 dB for the three levels, matching the log. Manual gain = no gain cut,
+  and `ADC peak 0 of 2047` because the peak is only measured with
+  gnss_rx_agc=2. Changing gnss_band while the jammer was on re-learned the
+  floor with the jammer ("NOT A JAMMER ... background") -> filter bypassed.
+  The same log also has two design-B runs (gnss_passthrough 0x44A00000, 7 + 7
+  and 5 + 5, band 0 61.44/56 MHz): RX1 5.08e6 LSB^2 (rms above full scale,
+  ~36 % clipped), residual 36 dB, SAMPLES DROPPED (STATUS[10]), FIFO ch0 16 vs
+  ch1 31, coherence peak at lag -1.
+  Advice: gnss_rx_agc=2 or gain cut so RX1 power stays < ~250000 LSB^2,
+  never change the band with the jammer on, then 8 + 8 for the residual.
 
