@@ -30,4 +30,11 @@ Files per package: `crpaN-full-src.zip.part1`, `crpaN-full-src.zip.part2`,
   filter), ADC/DAC enable 1/1, RX1 RSSI 69.5 dB, underflow 0, overflow count
   large. Log: `[AJ ...] WARNING residual +9.3 dB ... Two antennas null ONE
   direction`. Compare crpa3 (7 + 7) and crpa4 (8 + 8) with the same command.
+- 2026-11-11, same place and band command, `crpa1` (6 + 6), jammer at the
+  user's "10 dB" setting: **still a 3D fix**, but TTFF 225 s (99 s at 5 dB),
+  fewer GPS satellites and lower C/N0 (GPS about 25-29, BeiDou B1I about
+  28-33 dB-Hz), scatter still about +-2 m. RX1 RSSI 66.0 dB (69.5 at 5 dB;
+  the AD9361 RSSI number falls when the input gets stronger), underflow 0,
+  overflow count the same sticky value as in the 5 dB test (83654138), so no
+  new overflows between the two tests.
 
