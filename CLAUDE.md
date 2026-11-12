@@ -18,3 +18,16 @@ Name each new design-A (pass-through + CRPA) package with the next number:
 
 Files per package: `crpaN-full-src.zip.part1`, `crpaN-full-src.zip.part2`,
 `crpaN-kit.zip`, `SHA256SUMS-crpaN.txt`.
+
+## Field results (user's tests, keep for comparisons)
+
+- 2026-11-11, rooftop, `crpa1` (design A Linux, SMI-PI 6 + 6 taps), at the
+  user's "5 dB" setting: **3D fix** in GNSS Viewer (TTFF 99 s, scatter about
+  +-2 m, GPS L1 C/A and BeiDou B1I tracked at C/N0 about 30-38 dB-Hz).
+  Band set by hand: `gnss_band=7,1568.5,30.72,18,30,50` (LO 1568.5 MHz between
+  BeiDou B1I 1561.098 and GPS L1 1575.42, 30.72 MS/s, 18 MHz RF bandwidth,
+  TX1 30 dB, RX 50 dB). Status: passthrough ON, smi-pi ON (TX1 = space-time
+  filter), ADC/DAC enable 1/1, RX1 RSSI 69.5 dB, underflow 0, overflow count
+  large. Log: `[AJ ...] WARNING residual +9.3 dB ... Two antennas null ONE
+  direction`. Compare crpa3 (7 + 7) and crpa4 (8 + 8) with the same command.
+
