@@ -43,9 +43,11 @@ the TTFF values are cold-start times and can be compared directly.
 - 2026-11-12, user's report (no photos), same band command, cold starts:
   `crpa3` (7 + 7) at 5 dB (corrected by the user): cold-start fix in **83 s**
   with 6 BeiDou used + 1 GPS seen but not used; it struggled to keep the lock
-  even without a cold start. (The photo sent with this correction, 2026-11-12
-  05:31 UTC, shows TTFF 47 s and only BeiDou bars at C/N0 about 27-39 dB-Hz,
-  no GPS bars; asked the user which build it was.) `crpa4` (8 + 8) at 5 dB: cold fix in
+  even without a cold start. Photo 2026-11-12 05:18 UTC: TTFF 83 s, console
+  shows `layout 0x07040c07` (7 + 7, so crpa3; the user labelled it crpa4),
+  BeiDou C/N0 37/38/35/39/40/36 dB-Hz (PRN 7, 10, 24, 26, 33, 42), one GPS
+  at 27 dB-Hz tracked but not used, 16588 weight commits. The photo at
+  05:31 UTC with TTFF 47 s (BeiDou only, C/N0 about 27-39) is the crpa4 run. `crpa4` (8 + 8) at 5 dB: cold fix in
   **47 s**; at 10 dB it kept an existing lock (5 BeiDou + 1 GPS) but after a
   cold start no fix (only 2 BeiDou seen, not locked).
   User's targets: 5 dB faster than before, 10 dB cold fix in 80-90 s, 15 dB
