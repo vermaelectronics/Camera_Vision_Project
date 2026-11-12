@@ -40,4 +40,14 @@ the TTFF values are cold-start times and can be compared directly.
   the AD9361 RSSI number falls when the input gets stronger), underflow 0,
   overflow count the same sticky value as in the 5 dB test (83654138), so no
   new overflows between the two tests.
+- 2026-11-12, user's report (no photos), same band command, cold starts:
+  `crpa3` (7 + 7) at 5 dB: fix in 86 s with 5 BeiDou + 1 GPS, struggled to
+  keep the lock even without a cold start. `crpa4` (8 + 8) at 5 dB: cold fix in
+  **47 s**; at 10 dB it kept an existing lock (5 BeiDou + 1 GPS) but after a
+  cold start no fix (only 2 BeiDou seen, not locked).
+  User's targets: 5 dB faster than before, 10 dB cold fix in 80-90 s, 15 dB
+  cold fix within 120 s. Advice given: antenna baseline towards the jammer at
+  lambda/2 (9.5 cm), LO 1568.26 with 24 MHz BW (or one constellation, narrow),
+  smoother weights (gnss_aj_avg 0.95-0.98) and a gnss_smi_freeze=1 test,
+  read J/N and residual from gnss_aj?, log with gnss_aj_csv.
 
