@@ -14,7 +14,11 @@ Name each new design-A (pass-through + CRPA) package with the next number:
   AJ_INFO 0x07040C07) instead of 6 + 6, Linux and bare metal. Commit 7fb1b60.
 - `crpa4` (2026-11-12): crpa3 with SMI-PI 8 + 8 taps (reference delay 4,
   AJ_INFO 0x08040C07), Linux and bare metal. Commit 9917160.
-- Next package: `crpa5`.
+- `crpa5` (2026-11-12): crpa4 (8 + 8) + automatic CW notch (smi_pi 2.6, AJ_INFO
+  0x08040C08, regs 0x1B0/0x1B4, gnss_notch? / gnss_notch=0|1 / gnss_notch_rf=),
+  gnss_rx_agc / gnss_aj_avg saved, manual-gain clipping warning, %lu fix.
+  Commit eaa2d1a.
+- Next package: `crpa6`.
 
 Files per package: `crpaN-full-src.zip.part1`, `crpaN-full-src.zip.part2`,
 `crpaN-kit.zip`, `SHA256SUMS-crpaN.txt`.
