@@ -1,7 +1,7 @@
 From 2aa0a2fc1d7b958661eaf2b73ee5abd69ade40a1 Mon Sep 17 00:00:00 2001
 From: antsdr-fw-patch <antsdr-fw-patch@localhost>
 Date: Sat, 7 Nov 2026 11:57:58 +0000
-Subject: [PATCH] ant: SMI-PI STAP 6x6 v4.9.14 anti-jam, AD9361 LVDS 2R2T
+Subject: [PATCH] ant: SMI-PI STAP 7x7 v4.9.14 anti-jam, AD9361 LVDS 2R2T
 
 Converts the E310 AD9361 interface to LVDS (pins and standards of the
 vendor E310 V1 design) so 2R2T runs at 61.44 MS/s, adds the fmcomms2-style
@@ -236,8 +236,8 @@ index feca02d..b0ae598 100644
 +  //         raw RX2 (CONTROL[3] is now ch1_raw, 0 = CRPA), and is MUTED unless
 +  //         CONTROL[4] tx2_on = 1. Both reset values give a silent TX2 whose
 +  //         source is the CRPA output. smi_pi_0 and AJ_INFO are unchanged.
-+  localparam [31:0] CORE_VERSION = 32'h0004090E;   // 4.9.14 (6 taps per channel, low-DSP axi_ad9361, TX2 = CRPA copy, muted)
-+  localparam [31:0] AJ_INFO      = 32'h06030C07;   // 4.9.14 6x6: 6 taps per channel, reference delay 3   // 32 taps per channel, reference delay 4, layout 7 (4.9: 64 weight words at 0x400)
++  localparam [31:0] CORE_VERSION = 32'h0004090E;   // 4.9.14 (7 taps per channel, low-DSP axi_ad9361, TX2 = CRPA copy, muted)
++  localparam [31:0] AJ_INFO      = 32'h07040C07;   // 4.9.13/4.9.14: 7 taps per channel, reference delay 4   // 32 taps per channel, reference delay 4, layout 7 (4.9: 64 weight words at 0x400)
 +  localparam [31:0] AJ_CFG_RESET = 32'h00000001;   // bypass
 +  localparam [31:0] AJ_NRM_RESET = 32'h00002000;   // g2 = 1.0
    localparam        AW           = FIFO_ADDR_WIDTH;
@@ -753,7 +753,7 @@ index 424bf66..769752d 100644
 -## gnss_passthrough.v and gnss_passthrough_constr.xdc are copied unchanged
 -## from LoopBack_Pipeline_noCRPA (Source/HDL, Source/IP/gnss_passthrough).
 +## gnss_passthrough.v, gnss_pulse_blank.v and gnss_passthrough_constr.xdc are
-+## copied unchanged from LoopBack_Code_SMI_PI_STAP6x6_v4.9.14 (Source/HDL,
++## copied unchanged from LoopBack_Code_SMI_PI_STAP7x7_v4.9.14 (Source/HDL,
 +## Source/IP/gnss_passthrough). The AXI-Stream and reset interface definitions
 +## below are the ones of that project's gnss_passthrough_ip.tcl.
  ###############################################################################
@@ -1160,7 +1160,7 @@ index b091f87..667f234 100644
 -create_bd_port -dir I -from 11 -to 0 rx_data_in
 +# ---------------------------------------------------------------------------
 +# STAP ANTI-JAM (antsdr-fw-patch 0003) BEGIN
-+#   Ported from LoopBack_Code_SMI_PI_STAP6x6_v4.9.14 (Source/BlockDesign/
++#   Ported from LoopBack_Code_SMI_PI_STAP7x7_v4.9.14 (Source/BlockDesign/
 +#   system_bd.tcl, MOD-1 and MOD-2), into the ANTSDR E310 "ant" design:
 +#     - AD9361 interface: LVDS, 2R2T, up to 61.44 MS/s (rx_clk 245.76 MHz),
 +#       same pins as the vendor E310 V1 design. Replaces the Pluto-style CMOS
@@ -1171,7 +1171,7 @@ index b091f87..667f234 100644
 +#       sees the same cores at the same addresses as before.
 +#     - gnss_passthrough v4.9.14 (registers at 0x43C1_0000) between the
 +#       axi_ad9361 ADC outputs and DAC inputs, feeding the SMI-PI space-time
-+#       filter smi_pi_0 (Vitis HLS, 6 + 6 taps, sys_cpu_clk) through two
++#       filter smi_pi_0 (Vitis HLS, 7 + 7 taps, sys_cpu_clk) through two
 +#       asynchronous AXI-Stream FIFOs.
 +#   The HDL x8 FIR interpolator/decimator of the Pluto design are removed.
 +#   The axi_ad9361 DDS is kept (the Linux DDS driver and the dds_* console
@@ -1525,7 +1525,7 @@ index b091f87..667f234 100644
 -ad_connect  logic_or_1/Op1  axi_ad9361/rst
 -ad_connect  logic_or_1/Op2  axi_tdd_0/tdd_channel_2
 -ad_connect  logic_or_1/Res  tx_upack/reset
-+# SMI-PI space-time power-inversion filter (Vitis HLS IP smi_pi 2.5, 6 + 6
++# SMI-PI space-time power-inversion filter (Vitis HLS IP smi_pi 2.5, 7 + 7
 +# taps, II = 1) on sys_cpu_clk (100 MHz), so its timing does not depend on
 +# the sample rate. Weights, image taps, cfg and RX2 normalisation come from
 +# gnss_passthrough's AJ_* registers, written by gnss_crpa on the ARM.

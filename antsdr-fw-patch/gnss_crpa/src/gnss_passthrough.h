@@ -87,7 +87,7 @@
 #define GNSS_PT_REG_AJ_BLK_COUNT    0x1A4U  /* RO samples blanked since the counter clear */
 #define GNSS_PT_REG_AJ_BLK_BURSTS   0x1A8U  /* RO bursts blanked since the counter clear  */
 #define GNSS_PT_REG_AJ_RX_PEAK      0x1ACU  /* RO [15:0] largest |I|,|Q| of RX1/RX2 in the last window, [31:16] window counter */
-#define GNSS_PT_AJ_INFO_EXPECTED    0x06030C07U   /* 4.9.14 6x6: 6 taps per channel, reference delay 3 */   /* layout 6 = v4.7 (reference delay 4); 5 = v4.6 (pulse blanker, peak hold); 4 = v4.5 */
+#define GNSS_PT_AJ_INFO_EXPECTED    0x07040C07U   /* 4.9.13: 7 taps per channel, reference delay 4 */   /* layout 6 = v4.7 (reference delay 4); 5 = v4.6 (pulse blanker, peak hold); 4 = v4.5 */
 #define GNSS_PT_AJ_LAYOUT_BLANK     5U            /* first layout with the blanker and the peak hold */
 #define GNSS_PT_AJ_CFG_BLANK        0x8000U       /* AJ_CFG[15]: blanker enable (layout 5) */
 #define GNSS_PT_BLK_THR_OFF         0xFFFFFFFFU   /* threshold that never triggers */

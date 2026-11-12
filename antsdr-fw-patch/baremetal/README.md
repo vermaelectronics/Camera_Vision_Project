@@ -1,7 +1,7 @@
 # Design A on bare metal
 
-`app_gnss_e310/` is the SMI-PI v4.9.14 (6 + 6 taps) firmware of
-LoopBack_Code_SMI_PI_STAP6x6_v4.9.14 (`Source/Firmware/app_gnss_e310`),
+`app_gnss_e310/` is the SMI-PI v4.9.14 (7 + 7 taps) firmware of
+LoopBack_Code_SMI_PI_STAP7x7_v4.9.14 (`Source/Firmware/app_gnss_e310`),
 adapted to the design-A FPGA of this repository:
 
 - `app_config.h`: `ANTSDR_DESIGN_A`, `gnss_passthrough` at `0x43C10000`,

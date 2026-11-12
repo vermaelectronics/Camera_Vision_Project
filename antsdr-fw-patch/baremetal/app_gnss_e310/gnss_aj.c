@@ -1098,14 +1098,14 @@ void gnss_aj_enable(int on)
 			uint32_t info = gnss_pt_read(GNSS_PT_REG_AJ_INFO);
 			if(((info >> 24) & 0xFFU) != (uint32_t)AJ_NT) {
 				console_print("gnss_aj: the bitstream has %d taps per channel, this firmware needs %d (AJ_INFO 0x%x).\n"
-					      "         Anti-jam NOT started: rebuild the WHOLE project (build_all.sh --from smi) so the\n"
+					      "         Anti-jam NOT started: rebuild the WHOLE project (./build.sh reset && ./build.sh all-baremetal) so the\n"
 					      "         bitstream and the firmware match.\n",
 					      (long)((info >> 24) & 0xFFU), (long)AJ_NT, (unsigned long)info);
 				return;
 			}
 			if(((info >> 16) & 0xFFU) != (uint32_t)AJ_REF) {
 				console_print("gnss_aj: the bitstream's reference tap is at delay %d, this firmware needs %d (AJ_INFO 0x%x).\n"
-					      "         Anti-jam NOT started: rebuild the WHOLE project (build_all.sh --from smi) so the\n"
+					      "         Anti-jam NOT started: rebuild the WHOLE project (./build.sh reset && ./build.sh all-baremetal) so the\n"
 					      "         bitstream and the firmware match.\n",
 					      (long)((info >> 16) & 0xFFU), (long)AJ_REF, (unsigned long)info);
 				return;

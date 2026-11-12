@@ -21,6 +21,7 @@
 #include <unistd.h>
 
 #include "lx_platform.h"
+#include "gnss_passthrough.h"   /* GNSS_PT_AJ_INFO_EXPECTED (taps, reference delay) */
 
 #define WIN_SIZE  0x10000U
 #define MAX_WIN   16
@@ -86,7 +87,7 @@ volatile uint32_t *lx_reg(uint32_t phys)
 			volatile uint32_t *r = (volatile uint32_t *)win[nwin].virt;
 			r[0x00 / 4] = 0x47435031U;
 			r[0x04 / 4] = 0x0004090EU;
-			r[0x184 / 4] = 0x06030C07U;
+			r[0x184 / 4] = GNSS_PT_AJ_INFO_EXPECTED;
 			r[0x10 / 4] = 0x0005000FU;   /* STATUS: ADC/DAC enables, pass/smi synced */
 		}
 		if (win[nwin].virt && base == (LX_ADC_BASE & ~(WIN_SIZE - 1))) {

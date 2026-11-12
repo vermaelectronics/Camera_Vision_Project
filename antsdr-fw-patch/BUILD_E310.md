@@ -358,14 +358,14 @@ sudo dfu-util -a uboot-env.dfu -D ./uboot-env.dfu
 
 ## 7. GNSS anti-jam (SMI-PI v4.9.14): RX1 + RX2 -> FPGA -> TX1
 
-The `0003` patches put the complete `LoopBack_Code_SMI_PI_STAP6x6_v4.9.14`
+The `0003` patches put the complete `LoopBack_Code_SMI_PI_STAP7x7_v4.9.14`
 design ("B") into this Linux firmware ("A"): the same FPGA datapath and the
 same firmware with all its console commands. One feature is new: **band 7,
 your own RF values, set at any time from PuTTY**.
 
 ```text
 antenna 1 -> RX1 \                    smi_pi space-time anti-jam
-                  AD9361 -> FPGA  gnss_passthrough (6 + 6 taps)  -> AD9361 -> TX1
+                  AD9361 -> FPGA  gnss_passthrough (7 + 7 taps)  -> AD9361 -> TX1
 antenna 2 -> RX2 /  LVDS 2R2T         + pulse blanker               -> coax + attenuator + DC block
                     61.44 MS/s                                         -> GNSS receiver -> GNSS Viewer
 ```
@@ -383,6 +383,32 @@ antenna 2 -> RX2 /  LVDS 2R2T         + pulse blanker               -> coax + at
   Linux driver, and the anti-jam captures come from the Linux IIO buffer
   instead of the DMA registers. It starts at boot like the bare-metal
   firmware did: self-test, band, anti-jam on, TX1 on.
+
+### Filter size: 7 + 7 taps (crpa3)
+
+Since `crpa3` the filter has **7 taps per antenna (7 + 7)**, reference tap at
+delay 4, as in `LoopBack_Code_SMI_PI_STAP7x7_v4.9.14`. `crpa1` and `crpa2`
+had 6 + 6 (reference delay 3). The FPGA core and the firmware must agree:
+
+| Where | 7 + 7 (now) | 6 + 6 (crpa1, crpa2) |
+|---|---|---|
+| `hls/smi_pi/smi_pi.h` `SMI_NT` / `SMI_REF` | 7 / 4 | 6 / 3 |
+| `gnss_passthrough.v` `AJ_INFO` (hdl 0003) | `0x07040C07` | `0x06030C07` |
+| `gnss_aj_math.h` `AJ_NT` / `AJ_REF` (Linux and bare metal) | 7 / 4 | 6 / 3 |
+| adaptive weights | 13 + 2 image | 11 + 2 image |
+| DSP48 in `smi_pi` | 47 | 41 |
+
+The firmware reads `AJ_INFO` at start-up and does not start the anti-jam if
+the bitstream has a different tap count or reference delay; the console then
+says so ("Anti-jam NOT started").
+
+To build 7 + 7 in a folder that was already patched for 6 + 6 (crpa1 or
+crpa2), start from clean sources; `./build.sh patch` stops with "does not
+apply" otherwise:
+
+```bash
+./build.sh reset && ./build.sh all
+```
 
 ### Build it
 
@@ -489,7 +515,7 @@ The service:
 ## 7b. Design A on bare metal (no Linux)
 
 `./build.sh baremetal` builds the same design-A FPGA (LVDS 2R2T,
-`gnss_passthrough` v4.9.14, `smi_pi` 6 + 6 taps, `axi_vcxo_ctrl`) but runs the
+`gnss_passthrough` v4.9.14, `smi_pi` 7 + 7 taps, `axi_vcxo_ctrl`) but runs the
 SMI-PI v4.9.14 firmware directly on the ARM, like design B. There is no
 U-Boot, Linux or root file system: the SD card holds only `BOOT.bin`.
 
