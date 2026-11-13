@@ -450,7 +450,7 @@ steps), and at the jammer's 10 / 15 dB settings the ADC clipped. crpa8 adds:
 | **ADC clip counters** (FPGA) | Every RX1 / RX2 sample with I or Q at 2047 / -2048 is counted (wraps; cleared with CONTROL[8]). | `AJ_CLIP1` 0x1B8, `AJ_CLIP2` 0x1BC |
 | Smoothing control (ARM) | `gnss_aj_ramp=` (default 10). The first weights after the bypass go in with k = 1 (256 samples), so a new jammer is still nulled at once; every later set glides with k. | firmware |
 | Anti-clipping (ARM) | `gnss_rx_agc=2`: more than 100 ppm of the samples clipped in a 5 ms poll = the largest gain step at once (the peak hold could miss it for up to 8.5 ms). Manual gain: the `[RXG] ADC CLIPPING` warning now gives the exact clip rate. `gnss_aj?`, `gnss_report?` and the CSV (`clip_ppm`) show it. | firmware |
-| Second ARM core (Linux) | The solver runs in a worker thread on the second Cortex-A9; the console, the capture and the gain loop stay responsive. `gnss_report?` shows the solve time. Bare metal stays single-core. | firmware (`-DGNSS_AJ_THREAD`) |
+| ~~Second ARM core (Linux)~~ | crpa8 to crpa11 ran the solver in a worker thread on the second Cortex-A9. **Removed in crpa12**: one thread, pinned to CPU 0, as crpa1 to crpa7; the second core is not used. `gnss_report?` still shows the solve time. | firmware |
 | Smaller weight file | 20 words instead of 64 (about 2,700 flip-flops fewer). | `gnss_passthrough.v` |
 
 `AJ_INFO` is `0x0A050C0A` (layout 10); the crpa8 firmware starts the anti-jam
@@ -484,8 +484,8 @@ satellite loss) and sensitive to its threshold, so power inversion stays.
 
 ### Hardware NLMS (crpa10)
 
-crpa10 = crpa9 (image taps, power meters, smoothing, fine gain, clip counters,
-second core) with **8 + 8 taps** and the **hardware NLMS** of the RTL review
+crpa10 = crpa9 (image taps, power meters, smoothing, fine gain, clip counters)
+with **8 + 8 taps** and the **hardware NLMS** of the RTL review
 (item 7).
 
 The ARM solves the SMI weights from a capture a few hundred times a second.

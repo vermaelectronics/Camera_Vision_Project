@@ -5,10 +5,6 @@
 #include <stdio.h>
 #include "gnss_aj.h"
 #include "gnss_aj_math.h"
-#ifdef GNSS_AJ_THREAD
-#include <pthread.h>
-#include <string.h>
-#endif
 #include "gnss_smi_agc.h"
 #include "gnss_passthrough.h"
 #include "gnss_l1.h"          /* 4.9.13: GNSS_L1_TX2_ATTEN_MDB */
@@ -116,28 +112,14 @@ static int      nlms_on;
 static double   nlms_mu = AJ_NLMS_MU_DEFAULT;
 static uint32_t nlms_word;                 /* the last word committed */
 
-/* ---- crpa8: the ARM's work per capture in three steps: prepare (here), compute (aj_detect /
- * aj_compute: pure maths on a copy), finish (here). On Linux the compute step runs on the
- * second Cortex-A9 core (GNSS_AJ_THREAD) while this thread keeps the console, the capture
- * and the gain loop going; bare metal runs the three steps in a row as before. */
+/* ---- the ARM's work per capture: prepare, compute (aj_detect / aj_compute), finish, all
+ * on one core in the main loop (crpa12: the crpa8-crpa11 worker thread on the second
+ * Cortex-A9 is gone, as the user asked; the Linux process is pinned to CPU 0). */
 #define JOB_DETECT 1
 #define JOB_SOLVE  2
-static uint32_t solve_us_last, solve_us_max, job_gen;
-#ifdef GNSS_AJ_THREAD
-static pthread_mutex_t math_mx = PTHREAD_MUTEX_INITIALIZER;   /* the solver's statistics */
-static pthread_mutex_t job_mx = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t  job_cv = PTHREAD_COND_INITIALIZER;
-static int             job_started, job_pending, job_running, job_done, job_kind, job_rc;
-static uint32_t        job_gen_at, n_busy;
-static XTime           job_now;
-static aj_result_t     job_res;
-static uint32_t        job_buf[2 * AJ_NSAMP];
-#define MATH_LOCK()   pthread_mutex_lock(&math_mx)
-#define MATH_UNLOCK() pthread_mutex_unlock(&math_mx)
-#else
+static uint32_t solve_us_last, solve_us_max;
 #define MATH_LOCK()   do { } while(0)
 #define MATH_UNLOCK() do { } while(0)
-#endif
 
 struct aj_event { uint32_t ms; int type; double v1, v2, v3; };
 static struct aj_event ev[AJ_NEV];
@@ -158,7 +140,6 @@ static void stats_reset(void)
 {
 	MATH_LOCK();
 	aj_reset();
-	job_gen++;                 /* a compute step still running is from before: its result is dropped */
 	MATH_UNLOCK();
 }
 
@@ -1050,80 +1031,6 @@ static void solve_capture(XTime now)
 	finish_solve(now, run_math(JOB_SOLVE, GNSS_AJ_BUF_PTR, &res));
 }
 
-#ifdef GNSS_AJ_THREAD
-/* ---- crpa8: the worker thread (second core) ------------------------------------------ */
-static void *job_worker(void *arg)
-{
-	(void)arg;
-	for(;;) {
-		int kind;
-		pthread_mutex_lock(&job_mx);
-		while(!job_pending) pthread_cond_wait(&job_cv, &job_mx);
-		job_pending = 0; job_running = 1; kind = job_kind;
-		pthread_mutex_unlock(&job_mx);
-		{
-			int rc = run_math(kind, job_buf, &job_res);
-			pthread_mutex_lock(&job_mx);
-			job_rc = rc; job_running = 0; job_done = 1;
-			pthread_mutex_unlock(&job_mx);
-		}
-	}
-	return 0;
-}
-
-static int job_idle(void)
-{
-	int idle;
-	pthread_mutex_lock(&job_mx);
-	idle = !job_pending && !job_running && !job_done;
-	pthread_mutex_unlock(&job_mx);
-	return idle;
-}
-
-/* hand res (prepared) and the capture in job_buf to the worker */
-static void job_start(int kind, XTime now)
-{
-	if(!job_started) {
-		pthread_t t;
-		if(pthread_create(&t, 0, job_worker, 0) != 0) {      /* no thread: do it here */
-			if(kind == JOB_DETECT) { if(finish_detect(now, run_math(JOB_DETECT, job_buf, &res))) { prep_solve(now); finish_solve(now, run_math(JOB_SOLVE, job_buf, &res)); } }
-			else finish_solve(now, run_math(JOB_SOLVE, job_buf, &res));
-			return;
-		}
-		pthread_detach(t);
-		job_started = 1;
-	}
-	pthread_mutex_lock(&job_mx);
-	job_res = res;
-	job_kind = kind; job_now = now; job_gen_at = job_gen;
-	job_pending = 1;
-	pthread_cond_signal(&job_cv);
-	pthread_mutex_unlock(&job_mx);
-}
-
-/* a finished compute step: take its result and do the finish step here */
-static void job_poll(void)
-{
-	int done, rc, kind;
-	XTime now;
-	pthread_mutex_lock(&job_mx);
-	done = job_done; rc = job_rc; kind = job_kind; now = job_now;
-	if(done) { job_done = 0; }
-	pthread_mutex_unlock(&job_mx);
-	if(!done) return;
-	if(job_gen_at != job_gen || !aj_on) { n_skip++; return; }   /* reset / band change / off meanwhile */
-	res = job_res;
-	if(kind == JOB_DETECT) {
-		if(finish_detect(now, rc)) {                 /* confirmed: solve the same capture */
-			prep_solve(now);
-			job_start(JOB_SOLVE, now);
-		}
-	} else {
-		finish_solve(now, rc);
-	}
-}
-#endif
-
 /* Rewrite the threshold (and the enable) without new weights. */
 static void blk_refresh(void)
 {
@@ -1207,9 +1114,6 @@ void gnss_aj_poll(void)
 
 	if(!aj_on || !rx_dmac || !ad9361_phy) return;
 	if(gnss_txdma_is_running()) return;       /* the DDR replay owns the DMA */
-#ifdef GNSS_AJ_THREAD
-	job_poll();
-#endif
 	XTime_GetTime(&now);
 
 	if(!dma_busy) {
@@ -1234,15 +1138,6 @@ void gnss_aj_poll(void)
 	}
 	Xil_DCacheInvalidateRange((uintptr_t)GNSS_AJ_BUF_ADDR, AJ_BYTES);
 
-#ifdef GNSS_AJ_THREAD
-	if(!job_idle()) {
-		n_busy++;                                 /* the second core is still solving the last one */
-	} else {
-		memcpy(job_buf, (const void *)GNSS_AJ_BUF_PTR, sizeof(job_buf));
-		if(state == ST_CLEAR) { prep_detect(); job_start(JOB_DETECT, now); }
-		else                  { prep_solve(now); job_start(JOB_SOLVE, now); }
-	}
-#else
 	if(state == ST_CLEAR) {
 		/* the capture that confirmed the jammer is solved straight away */
 		if(detect_capture(now))
@@ -1250,7 +1145,6 @@ void gnss_aj_poll(void)
 	} else {
 		solve_capture(now);
 	}
-#endif
 
 	XTime_GetTime(&now);
 	if(now - t_rate >= us(1000000U)) {
@@ -1670,12 +1564,7 @@ void gnss_aj_report(void)
 		MATH_LOCK();
 		sl = solve_us_last; sm = solve_us_max;
 		MATH_UNLOCK();
-#ifdef GNSS_AJ_THREAD
-		console_print("solve time    : %s ms last, %s ms max per capture (second core; %d captures skipped while busy)\n",
-			      f2u((double)sl / 1000.0), f2u((double)sm / 1000.0), (long)n_busy);
-#else
-		console_print("solve time    : %s ms last, %s ms max per capture\n", f2u((double)sl / 1000.0), f2u((double)sm / 1000.0));
-#endif
+		console_print("solve time    : %s ms last, %s ms max per capture (one ARM core)\n", f2u((double)sl / 1000.0), f2u((double)sm / 1000.0));
 	}
 	console_print("sweep         : %s (gnss_aj_sweep=%d)\n",
 		      (char*)(!sweep_en ? "detector OFF" : sweep_avg > 0.0 ? "MOVING JAMMER (chirp): long memory ON, 0.98 = about 50 solves" : "none seen (fixed or fast jammer, memory 0.5)"),

@@ -20,7 +20,7 @@ adapted to the design-A FPGA of this repository:
   CW notch is not in this build.
 - crpa8: weight smoothing (`gnss_aj_ramp=`, saved in `GNSSCRPA.CFG`), fine output
   gain, ADC clip counters (`AJ_INFO` 0x0A050C0A). The solver runs on one core here
-  (the Linux firmware uses the second core).
+  (crpa12: the Linux firmware too).
 - crpa9: 3 + 3 image taps (`AJ_NIMG` 3), FPGA power meters (`AJ_INFO` 0x0A050C0B).
 - crpa10: 8 + 8 taps (`AJ_NT` 8, `AJ_REF` 4), hardware NLMS (`gnss_aj_nlms=`,
   `gnss_aj_nlms_mu=`, saved in `GNSSCRPA.CFG`), `AJ_INFO` 0x08040C0C.

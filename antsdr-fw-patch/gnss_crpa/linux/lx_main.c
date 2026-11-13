@@ -20,6 +20,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <sched.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -716,6 +717,14 @@ int main(int argc, char **argv)
 	signal(SIGTERM, on_signal);
 	signal(SIGINT, on_signal);
 	signal(SIGHUP, on_signal);
+
+	{   /* crpa12: the anti-jam runs on the first Cortex-A9 only (no second core) */
+		cpu_set_t one;
+		CPU_ZERO(&one);
+		CPU_SET(0, &one);
+		if (sched_setaffinity(0, sizeof(one), &one) != 0)
+			printf("gnss_crpa: note: could not pin to CPU 0 (%s)\n", strerror(errno));
+	}
 
 	if (lx_io_init() || lx_ad9361_open(&ad9361_phy)) {
 		printf("gnss_crpa: hardware not available -- is this the antsdr-fw-patch 0003 (SMI-PI) bitstream?\n");
