@@ -206,7 +206,7 @@ It then does a shallow fetch of each submodule at the commit v0.39 pins:
 ./build.sh hls
 ```
 
-Builds `hls/smi_pi` (C simulation of scenarios 1-14 and 23-25, synthesis at
+Builds `hls/smi_pi` (C simulation of scenarios 1-14 and 23-27, synthesis at
 100 MHz, II=1) into `plutosdr-fw/hdl/library/antsdr_ip/smi_pi`. It takes
 10–20 minutes. It prints `SMI_PI_HLS: PASS` at the end, and its log is
 `hls/smi_pi/build/build_hls.log`. `SMI_PI_SKIP_CSIM=1 ./build.sh hls` skips
@@ -384,21 +384,22 @@ antenna 2 -> RX2 /  LVDS 2R2T         + pulse blanker               -> coax + at
   instead of the DMA registers. It starts at boot like the bare-metal
   firmware did: self-test, band, anti-jam on, TX1 on.
 
-### Filter size: 10 + 10 taps (crpa7)
+### Filter size: 8 + 8 taps (crpa10); 10 + 10 in crpa7 to crpa9
 
-Since `crpa7` the filter has **10 taps per antenna (10 + 10)**, reference tap
+**crpa10 is back to 8 taps per antenna (8 + 8), reference delay 4**, to leave room
+for the hardware NLMS (below). crpa7 to crpa9 have **10 taps per antenna (10 + 10)**, reference tap
 at delay 5 (5 taps before it, 4 after). It is the space-time core of
 `LoopBack_Code_SMI_PI_STAP7x7_v4.9.14` with three more taps per antenna. The
 FPGA core and the firmware must agree:
 
-| Where | 10 + 10 (crpa7 to crpa9) | 8 + 8 (crpa4, crpa5) | 7 + 7 (crpa3) | 6 + 6 (crpa1, crpa2) |
+| Where | 10 + 10 (crpa7 to crpa9) | 8 + 8 (crpa4, crpa5; crpa10 with NLMS) | 7 + 7 (crpa3) | 6 + 6 (crpa1, crpa2) |
 |---|---|---|---|---|
 | `hls/smi_pi/smi_pi.h` `SMI_NT` / `SMI_REF` | 10 / 5 | 8 / 4 | 7 / 4 | 6 / 3 |
-| `gnss_passthrough.v` `AJ_INFO` (hdl 0003) | `0x0A050C0B` (crpa9; crpa8 `0x0A050C0A`, crpa7 `0x0A050C07`) | `0x08040C07` | `0x07040C07` | `0x06030C07` |
+| `gnss_passthrough.v` `AJ_INFO` (hdl 0003) | `0x0A050C0B` (crpa9; crpa8 `0x0A050C0A`, crpa7 `0x0A050C07`) | `0x08040C07` (crpa10: `0x08040C0C`) | `0x07040C07` | `0x06030C07` |
 | `gnss_aj_math.h` `AJ_NT` / `AJ_REF` (Linux and bare metal) | 10 / 5 | 8 / 4 | 7 / 4 | 6 / 3 |
-| adaptive weights | 19 + 6 image (crpa9; 19 + 2 before) | 15 + 2 image | 13 + 2 image | 11 + 2 image |
+| adaptive weights | 19 + 6 image (crpa9; 19 + 2 before) | 15 + 2 image (crpa10: 15 + 6) | 13 + 2 image | 11 + 2 image |
 | weight words at 0x400 | 0..9 RX1, 10..19 RX2 | 0..7, 8..15 | 0..6, 7..13 | 0..5, 6..11 |
-| DSP48 in `smi_pi` | 79 (crpa9: + 12 image taps; crpa8 67, crpa7 65) | 53 | 47 | 41 |
+| DSP48 in `smi_pi` | 79 (crpa9: + 12 image taps; crpa8 67, crpa7 65) | 53 (crpa10: 132 with NLMS) | 47 | 41 |
 
 The image taps and the other registers are unchanged; since crpa8 the weight
 file holds the 20 words in use (0x400-0x44C; 0x450-0x4FC read 0). 67 of the
@@ -427,8 +428,8 @@ The firmware reads `AJ_INFO` at start-up and does not start the anti-jam if
 the bitstream has a different tap count or reference delay; the console then
 says so ("Anti-jam NOT started").
 
-To build 10 + 10 in a folder that was already patched for another size or an
-older package (crpa1 to crpa8), start from clean sources; `./build.sh patch`
+To build in a folder that was already patched for another size or an
+older package (crpa1 to crpa9), start from clean sources; `./build.sh patch`
 stops with "does not apply" otherwise:
 
 ```bash
@@ -480,6 +481,57 @@ instead of power inversion. In the C simulation it was better in 5 scenarios
 (e.g. the reflection case 48.2 instead of 37.4 dB) but worse with a 60 dB
 jammer and I/Q imbalance (scenario 8: 1.7 dB less suppression, 1.6 dB more
 satellite loss) and sensitive to its threshold, so power inversion stays.
+
+### Hardware NLMS (crpa10)
+
+crpa10 = crpa9 (image taps, power meters, smoothing, fine gain, clip counters,
+second core) with **8 + 8 taps** and the **hardware NLMS** of the RTL review
+(item 7).
+
+The ARM solves the SMI weights from a capture a few hundred times a second.
+Between two solves a moving jammer (or a moving platform) changes its
+direction and the weights are out of date. The NLMS loop in the FPGA corrects
+them on **every sample**:
+
+```text
+w <- w + step x e[n-D] x conj(u[n-D])      e = filter output, u = the tap's input, D = 24
+     + smoothing towards the ARM's SMI weights (anchors NLMS to the SMI solution)
+```
+
+* Delayed LMS (D = 24 samples) so the loop runs at one sample per clock
+  (100 MHz), 3 DSP48 per weight: **+65 DSP48, 132 in `smi_pi`**, about 166 of
+  the 220 in the whole design (estimate; check `./build.sh hls`).
+* The step is normalised by the RX1 power the FPGA meter measures; the ARM
+  writes it with every weight commit (`AJ_NLMS` 0x1E0: mantissa, shift,
+  enable; 0x1E4 = committed).
+* **Off by default.** `gnss_aj_nlms=1` switches it on (saved),
+  `gnss_aj_nlms_mu=` sets the step (default 0.031). NLMS needs the smoothing:
+  with `gnss_aj_ramp=0` it uses 10. `gnss_smi_freeze=1` stops it as well.
+* `AJ_INFO` `0x08040C0C` (layout 12); the crpa10 firmware needs it.
+
+C simulation (scenarios 26 / 27, J/N 50 dB, residual above the noise, NLMS off / on):
+
+| Jammer | NLMS off | NLMS on (step 0.031) |
+|---|---|---|
+| direction drifting 10 deg after the SMI solve | +24.9 dB | **+1.7 dB** |
+| direction drifting 60 deg (extreme) | +40.3 dB | +9.2 dB (step 0.12: +3.8 dB) |
+| fixed (no drift) | +0.99 dB | +1.08 dB |
+
+Larger steps follow faster but cost a little on a fixed jammer (0.06: +0.2 dB,
+0.12: +0.5 dB). The NLMS core is checked bit for bit against an integer model
+(scenario 23, 60000 samples, NLMS on in half of them: 0 mismatches). All 19
+scenarios pass (1-14, 23-27).
+
+**If the build does not meet timing** (the NLMS update is the longest path at
+100 MHz): build the core without NLMS, the rest of crpa10 stays:
+
+```bash
+SMI_NLMS=0 ./build.sh hls
+```
+
+```bash
+./build.sh hdl && ./build.sh firmware && ./build.sh sdimg
+```
 
 ### 3 + 3 image taps, power meters (crpa9)
 
@@ -603,6 +655,7 @@ directly from the shell, e.g. `gnss gnss_band?`.
 | `gnss_rx_agc=2` | RX1 and RX2 gain together, automatic against clipping (saved) |
 | `gnss_aj_avg=0.98` | Weight averaging (0 = automatic; saved) |
 | `gnss_aj_ramp=10` / `gnss_aj_ramp?` | crpa8: smoothing of new weights, 0 = off, 1..15 (saved) |
+| `gnss_aj_nlms=1` / `gnss_aj_nlms_mu=0.031` / `gnss_aj_nlms?` | crpa10: hardware NLMS on / off (default off), step (saved) |
 
 Band 7 limits: LO 70–6000 MHz, 2.084–61.44 MS/s, bandwidth 0.2–56 MHz,
 TX1 attenuation 0–89.75 dB, RX gain 0–76 dB. A value outside them is
@@ -644,7 +697,7 @@ The service:
 ## 7b. Design A on bare metal (no Linux)
 
 `./build.sh baremetal` builds the same design-A FPGA (LVDS 2R2T,
-`gnss_passthrough` v4.9.14, `smi_pi` 10 + 10 taps, 3 + 3 image taps, smoothing, `axi_vcxo_ctrl`) but runs the
+`gnss_passthrough` v4.9.14, `smi_pi` 8 + 8 taps, 3 + 3 image taps, NLMS, smoothing, `axi_vcxo_ctrl`) but runs the
 SMI-PI v4.9.14 firmware directly on the ARM, like design B. There is no
 U-Boot, Linux or root file system: the SD card holds only `BOOT.bin`.
 

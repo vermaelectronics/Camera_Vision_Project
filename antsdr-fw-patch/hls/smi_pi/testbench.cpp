@@ -118,6 +118,7 @@ static ap_uint<32 * 2 * SMI_NIMG> g_wcj = 0;   // crpa9: 2 x SMI_NIMG image taps
 static ap_uint<32>   g_cfg = SMI_CFG_BYPASS;
 static ap_uint<32>   g_nrm = 1 << SMI_GFRAC;
 static ap_uint<32>   g_gain = SMI_GAIN_ONE;     // crpa8: fine output gain, Q2.14
+static ap_uint<32>   g_nlms = 0;                // crpa10: hardware NLMS word (0 = off)
 
 static void set_weights(const int16_t *wre, const int16_t *wim) {
     g_w = 0;
@@ -149,7 +150,7 @@ static void push(hls::stream<ap_uint<64> > &xs, hls::stream<ap_uint<32> > &ys,
     ap_uint<64> w = 0;
     for (int k = 0; k < 4; k++) w(16 * k + 15, 16 * k) = (ap_uint<16>)(ap_int<16>)v[k];
     xs.write(w);
-    smi_pi(xs, ys, g_w, g_wcj, g_cfg, g_nrm, g_gain);
+    smi_pi(xs, ys, g_w, g_wcj, g_cfg, g_nrm, g_gain, g_nlms);
     if (ys.empty()) { std::printf("core produced no output\n"); std::exit(2); }
     ap_uint<32> o = ys.read();
     if (out) *out = cd((double)(ap_int<16>)o(15, 0), (double)(ap_int<16>)o(31, 16));
@@ -281,6 +282,8 @@ static int test_bitexact_ramp() {
     int bad = 0, ramped = 0, gained = 0, bypassed = 0;
     int16_t wr[AJ_NW], wi[AJ_NW];
     int g2r = 1 << SMI_GFRAC, byp = 0, sh = 0, wsc = 0, rk = 0, gn = SMI_GAIN_ONE;
+    unsigned nlw = 0; int nlms_on = 0;
+    long long ehr_m[SMI_NLMS_D] = {0}, ehi_m[SMI_NLMS_D] = {0};   // the model's NLMS error history
     // the model's running values (same widths and rules as the core)
     long long cr[2 * SMI_NT + 2 * SMI_NIMG] = {0}, ci[2 * SMI_NT + 2 * SMI_NIMG] = {0}, cg = (long long)SMI_GAIN_ONE << SMI_RAMP_RF;
     int cnt = 0, ws_prev = 0, sh_prev = 0;
@@ -309,6 +312,9 @@ static int test_bitexact_ramp() {
             if (seg == 7) gn = 65535;
             set_weights(wr, wi); set_cfg(byp, sh, wsc, rk); set_g2(g2r, 0);
             g_gain = (unsigned)gn;
+            // crpa10: NLMS on in about half the segments, random step (also huge ones: saturation)
+            nlw = (seg % 2 == 1) ? (0x80000000u | ((unsigned)(urand() * 32) << 16) | (unsigned)(urand() * 65536)) : 0u;
+            g_nlms = nlw;
         }
         const int S = SMI_GFRAC - SMI_XFRAC;
         long long nr = (long long)g2r * c[i], ni = (long long)g2r * d[i];
@@ -316,6 +322,8 @@ static int test_bitexact_ramp() {
         cd y;
         push(xs, ys, a[i], b[i], c[i], d[i], &y);
 
+        auto at  = [&](const std::vector<int> &v, int j) { return j >= 0 ? (long long)v[j] : 0LL; };
+        auto atl = [&](const std::vector<long long> &v, int j) { return j >= 0 ? v[j] : 0LL; };
         // ---- the model: smoothing
         int wse = wsc > SMI_MAXWS ? SMI_MAXWS : wsc, se = sh > SMI_MAXSH ? SMI_MAXSH : sh;
         int mask = rk ? (1 << (rk - 1)) - 1 : 0;
@@ -324,15 +332,38 @@ static int test_bitexact_ramp() {
         bool wsnap = rk == 0 || wse != ws_prev, gsnap = rk == 0 || se != sh_prev;
         ws_prev = wse; sh_prev = se;
         long long w_r[2 * SMI_NT + 2 * SMI_NIMG], w_i[2 * SMI_NT + 2 * SMI_NIMG];
+        // crpa10: NLMS step of each weight from the error and inputs of the sample D ago
+        const bool nl = SMI_NLMS && (nlw >> 31) && !byp && rk != 0;
+        if (nl) nlms_on++;
+        auto zin = [&](int j, long long &zr, long long &zi) {
+            auto A = [&](int k) { return at(a, i - k); }; auto B = [&](int k) { return at(b, i - k); };
+            auto C = [&](int k) { return atl(x2nr, i - k); }; auto D = [&](int k) { return atl(x2ni, i - k); };
+            const int Dl = SMI_NLMS_D;
+            if (j < SMI_NT)          { zr = A(j + Dl) * 2; zi = -(B(j + Dl) * 2); }
+            else if (j < 2 * SMI_NT) { zr = C(j - SMI_NT + Dl) >> 1; zi = -(D(j - SMI_NT + Dl) >> 1); }
+            else if (j < 2 * SMI_NT + SMI_NIMG) { int q = SMI_REF - SMI_IMGH + (j - 2 * SMI_NT) + Dl; zr = A(q) * 2; zi = B(q) * 2; }
+            else { int q = SMI_REF - SMI_IMGH + (j - 2 * SMI_NT - SMI_NIMG) + Dl; zr = C(q) >> 1; zi = D(q) >> 1; }
+        };
+        const long long CLHI = 32767LL << SMI_RAMP_RF, CLLO = -(32768LL << SMI_RAMP_RF);
         for (int j = 0; j < NWV; j++) {
             long long tr = wr[j];                     // core order = firmware order (AJ_IMG0 = 2 * SMI_NT)
             long long ti = wi[j];
             if (byp || j == SMI_REF) { tr = 0; ti = 0; }
             tr <<= SMI_RAMP_RF; ti <<= SMI_RAMP_RF;
             if (wsnap) { cr[j] = tr; ci[j] = ti; }
-            else if (tick) {
-                cr[j] += (tr - cr[j] + (1LL << (SMI_RAMP_RS - 1))) >> SMI_RAMP_RS;
-                ci[j] += (ti - ci[j] + (1LL << (SMI_RAMP_RS - 1))) >> SMI_RAMP_RS;
+            else {
+                long long vr = cr[j], vi = ci[j];
+                if (tick) {
+                    vr += (tr - cr[j] + (1LL << (SMI_RAMP_RS - 1))) >> SMI_RAMP_RS;
+                    vi += (ti - ci[j] + (1LL << (SMI_RAMP_RS - 1))) >> SMI_RAMP_RS;
+                }
+                if (nl && j != SMI_REF) {
+                    long long zr, zi, er = ehr_m[SMI_NLMS_D - 1], ei = ehi_m[SMI_NLMS_D - 1];
+                    zin(j, zr, zi);
+                    long long pr = er * zr - ei * zi, pi = er * zi + ei * zr, h = 1LL << (SMI_NLMS_CS - 1);
+                    vr += (pr + h) >> SMI_NLMS_CS; vi += (pi + h) >> SMI_NLMS_CS;
+                }
+                cr[j] = std::min(CLHI, std::max(CLLO, vr)); ci[j] = std::min(CLHI, std::max(CLLO, vi));
             }
             w_r[j] = (cr[j] + (1LL << (SMI_RAMP_RF - 1))) >> SMI_RAMP_RF;
             w_i[j] = (ci[j] + (1LL << (SMI_RAMP_RF - 1))) >> SMI_RAMP_RF;
@@ -348,8 +379,6 @@ static int test_bitexact_ramp() {
         if (byp) bypassed++;
 
         // ---- the model: filter
-        auto at  = [&](const std::vector<int> &v, int j) { return j >= 0 ? (long long)v[j] : 0LL; };
-        auto atl = [&](const std::vector<long long> &v, int j) { return j >= 0 ? v[j] : 0LL; };
         const int Q = SMI_WFRAC + SMI_XFRAC;
         long long sr = at(a, i - SMI_REF) << Q, si = at(b, i - SMI_REF) << Q;
         long long tr = 0, ti = 0;
@@ -373,6 +402,15 @@ static int test_bitexact_ramp() {
         }
         long long rnd = wse ? (1LL << (wse - 1)) : 0;
         sr -= (tr + rnd) >> wse; si -= (ti + rnd) >> wse;
+        {   // crpa10: the model's NLMS error of this sample, into the history
+            long long yr = sat_ll((sr + (1LL << (Q - 1))) >> Q, -131072, 131071), yi = sat_ll((si + (1LL << (Q - 1))) >> Q, -131072, 131071);
+            long long m = nlw & 0xFFFF; int nsh = (nlw >> 16) & 31;
+            long long rh = nsh ? (1LL << (nsh - 1)) : 0;
+            long long emax = (1LL << (SMI_NLMS_EW - 1)) - 1, emin = -(1LL << (SMI_NLMS_EW - 1));
+            long long er = sat_ll((yr * m + rh) >> nsh, emin, emax), ei = sat_ll((yi * m + rh) >> nsh, emin, emax);
+            for (int k = SMI_NLMS_D - 1; k > 0; k--) { ehr_m[k] = ehr_m[k - 1]; ehi_m[k] = ehi_m[k - 1]; }
+            ehr_m[0] = er; ehi_m[0] = ei;
+        }
         long long er, ei;
         if (g16 == SMI_GAIN_ONE) {
             long long half = 1LL << (Q - 1);
@@ -390,9 +428,10 @@ static int test_bitexact_ramp() {
             bad++;
         }
     }
-    std::printf("bit-exact with smoothing and fine gain: %d samples, %d mismatches; %d weight values in a ramp,\n"
-                "           %d samples with a gain other than 1.0, %d bypassed\n", n, bad, ramped, gained, bypassed);
-    return bad == 0 && ramped > 1000 && gained > 1000 && bypassed > 0;
+    std::printf("bit-exact with smoothing, fine gain and NLMS: %d samples, %d mismatches; %d weight values in a ramp,\n"
+                "           %d samples with a gain other than 1.0, %d bypassed, %d with NLMS on\n", n, bad, ramped, gained, bypassed, nlms_on);
+    g_nlms = 0;
+    return bad == 0 && ramped > 1000 && gained > 1000 && bypassed > 0 && (nlms_on > 1000 || !SMI_NLMS);
 }
 
 // ---- scenario 24 (crpa8): what the smoothing does to a jammer null ------------------------
@@ -473,6 +512,85 @@ static int test_ramp_behaviour() {
     if (g0 > 1.01 || std::fabs(g1 - 1.6321) > 0.02 || std::fabs(g6 - 1.9975) > 0.005) ok = 0;
     g_gain = SMI_GAIN_ONE;
     return ok;
+}
+
+// ---- scenarios 26 / 27 (crpa10): hardware NLMS against stale SMI weights ---------------
+// A wideband jammer; the ARM solves its weights from three captures, then the jammer's
+// RX2/RX1 phase (its direction) drifts by drift_deg over the next nev samples (a moving
+// jammer or platform: the SMI weights get out of date until the next solve). The core runs
+// with the SMI weights and smoothing k = 10, NLMS off and on; residual = output power over
+// the output power of the same weights on the noise alone (0 dB = fully nulled).
+static int test_nlms(int id, double drift_deg, double jn_db, double alpha, int nev) {
+    const int NTR = 3 * AJ_NSAMP, N = NTR + nev;
+    const double nrms = 20.0;
+    cvec J(N), x1(N), x2(N), n1(N), n2(N);
+    for (int i = 0; i < N; i++) J[i] = cd(grand(), grand());
+    J = fir(J, lowpass(0.42, 41), 20);
+    cvec J2 = fir(J, frac_delay(0.15, 21), 10);
+    double pj = pwr(J, 0), pn = 2 * nrms * nrms, js = std::sqrt(pn * std::pow(10, jn_db / 10) / pj);
+    for (int i = 0; i < N; i++) {
+        double ph = 40.0 + (i < NTR ? 0.0 : drift_deg * (double)(i - NTR) / nev);
+        n1[i] = cd(grand(), grand()) * nrms; n2[i] = cd(grand(), grand()) * nrms;
+        x1[i] = J[i] * js + n1[i];
+        x2[i] = J2[i] * js * std::polar(std::pow(10, 0.8 / 20), ph * M_PI / 180) + n2[i];
+    }
+    double pk = 0;
+    for (int i = 0; i < N; i++) pk = std::max(pk, std::max(std::max(std::fabs(x1[i].real()), std::fabs(x1[i].imag())), std::max(std::fabs(x2[i].real()), std::fabs(x2[i].imag()))));
+    double g = 1.0; while (pk * g > 1850) g *= std::pow(10, -1.0 / 20);
+    for (int i = 0; i < N; i++) {
+        x1[i] = cd(q12((x1[i] * g).real()), q12((x1[i] * g).imag())); x2[i] = cd(q12((x2[i] * g).real()), q12((x2[i] * g).imag()));
+        n1[i] *= g; n2[i] *= g;
+    }
+    // the ARM's SMI solve on the three training captures
+    aj_result_t r; std::memset(&r, 0, sizeof r);
+    r.mode = AJ_MODE_STAP; r.sig2_prev = -1; r.noise_ref = pn * g * g + 0.17; r.g2 = 1.0; r.rx2_noise = 1.0;
+    aj_reset();
+    static uint32_t buf[2 * AJ_NSAMP];
+    for (int b = 0; b < 3; b++) {
+        for (int t = 0; t < AJ_NSAMP; t++) {
+            cd a = x1[b * AJ_NSAMP + t], c = x2[b * AJ_NSAMP + t];
+            buf[2 * t] = (uint32_t)(uint16_t)(int16_t)a.real() | ((uint32_t)(uint16_t)(int16_t)a.imag() << 16);
+            buf[2 * t + 1] = (uint32_t)(uint16_t)(int16_t)c.real() | ((uint32_t)(uint16_t)(int16_t)c.imag() << 16);
+        }
+        if (aj_compute(buf, AJ_NSAMP, &r) != 0 || !r.ok) { std::printf("solver failed\n"); return 0; }
+        r.sig2_prev = r.sig2;
+    }
+    double p_in = pwr(cvec(x1.begin(), x1.begin() + NTR), 0);
+    uint32_t nw = aj_nlms_word(alpha, p_in, r.ws, AJ_MAXDIM);
+    set_weights(r.wre, r.wim); set_g2(1 << SMI_GFRAC, 0);
+    cvec ev1(x1.begin() + NTR - 4096, x1.end()), ev2(x2.begin() + NTR - 4096, x2.end());
+    cvec nv1(n1.begin() + NTR - 4096, n1.end()), nv2(n2.begin() + NTR - 4096, n2.end());
+    // noise-only reference: the SMI weights, no NLMS, no smoothing
+    g_nlms = 0; set_cfg(0, 0, r.ws, 0);
+    cvec yn = run_core_c(nv1, nv2);
+    double pnoise = pwr(yn, 4096);
+    auto run = [&](bool on, std::vector<double> &res) {
+        g_nlms = 0; set_cfg(0, 0, r.ws, 0);                 // load the SMI weights (snap)
+        hls::stream<ap_uint<64> > xs; hls::stream<ap_uint<32> > ys;
+        for (int i = 0; i < 64; i++) push(xs, ys, 0, 0, 0, 0, 0);
+        set_cfg(0, 0, r.ws, 10); g_nlms = on ? nw : 0;
+        cvec y(ev1.size());
+        for (size_t i = 0; i < ev1.size(); i++)
+            push(xs, ys, (int)ev1[i].real(), (int)ev1[i].imag(), (int)ev2[i].real(), (int)ev2[i].imag(), &y[i]);
+        g_nlms = 0;
+        res.clear();
+        for (int w = 0; w < 4; w++) {                      // the evaluation in four quarters
+            int a = 4096 + w * nev / 4;
+            res.push_back(10 * std::log10(pwr(cvec(y.begin() + a, y.begin() + a + nev / 4), 0) / pnoise));
+        }
+    };
+    std::vector<double> off, on;
+    run(false, off); run(true, on);
+    std::printf("scenario %d: wideband jammer J/N %.0f dB, direction drifting %.0f deg over %d samples after the SMI solve,\n"
+                "  NLMS step alpha %.5f (word 0x%08x, weight scale 2^%d)\n", id, jn_db, drift_deg, nev, alpha, nw, r.ws);
+    std::printf("  residual per quarter  NLMS off: %+6.2f %+6.2f %+6.2f %+6.2f dB\n", off[0], off[1], off[2], off[3]);
+    std::printf("                        NLMS on : %+6.2f %+6.2f %+6.2f %+6.2f dB\n", on[0], on[1], on[2], on[3]);
+    double m_off = (off[0] + off[1] + off[2] + off[3]) / 4, m_on = (on[0] + on[1] + on[2] + on[3]) / 4;
+    std::printf("  mean: off %+.2f dB, on %+.2f dB\n", m_off, m_on);
+    if (!SMI_NLMS) { std::printf("  (core built with SMI_NLMS=0: no hardware NLMS, nothing to compare)\n"); return 1; }
+    if (id == 26) return m_on <= m_off - 10.0 && on[3] <= 3.0;    // NLMS must follow the drift (10 deg: +24.9 -> +1.8 dB)
+    if (id == 27) return m_on <= m_off + 0.3;                      // and cost nothing on a fixed jammer
+    return 1;
 }
 
 // ---- scenario 14: the output make-up rule ---------------------------------------
@@ -934,6 +1052,12 @@ int main(int argc, char **argv) {
         sc.iqfd = (argc > 3) ? std::atof(argv[3]) : 0.03;
         ok = test_jammer(25, sc); break; }
     case 23: ok = test_bitexact_ramp(); break;      // crpa8: smoothing and fine gain, bit for bit
+    // crpa10: hardware NLMS. argv: drift [deg], J/N [dB], alpha, evaluation samples
+    case 26: case 27: {
+        double drift = (argc > 2) ? std::atof(argv[2]) : (scen == 26 ? 10.0 : 0.0);
+        double jn = (argc > 3) ? std::atof(argv[3]) : 50.0, al = (argc > 4) ? std::atof(argv[4]) : 1.0 / 32;   // the firmware's default step
+        int nev = (argc > 5) ? std::atoi(argv[5]) : 80000;
+        ok = test_nlms(scen, drift, jn, al, nev); break; }
     case 24: ok = test_ramp_behaviour(); break;     // crpa8: what smoothing does to a null
     default: std::printf("unknown scenario %d\n", scen); ok = 0;
     }

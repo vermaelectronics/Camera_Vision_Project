@@ -22,6 +22,8 @@ adapted to the design-A FPGA of this repository:
   gain, ADC clip counters (`AJ_INFO` 0x0A050C0A). The solver runs on one core here
   (the Linux firmware uses the second core).
 - crpa9: 3 + 3 image taps (`AJ_NIMG` 3), FPGA power meters (`AJ_INFO` 0x0A050C0B).
+- crpa10: 8 + 8 taps (`AJ_NT` 8, `AJ_REF` 4), hardware NLMS (`gnss_aj_nlms=`,
+  `gnss_aj_nlms_mu=`, saved in `GNSSCRPA.CFG`), `AJ_INFO` 0x08040C0C.
 
 `Scripts/build_software.tcl` and `Scripts/build_fsbl.tcl` are the Vitis 2023.2
 `xsct` scripts of the same project, unchanged.

@@ -492,6 +492,19 @@ double aj_makeup_fine_db(int cut_db, double out_db, int shift)
 	return f;
 }
 
+uint32_t aj_nlms_word(double alpha, double p_in, int ws, int nw)
+{
+	/* m 2^-sh = alpha 2^(12 + ws + RF - 1 + CS) / (nw p_in)   (the -1: u is in Q1) */
+	double t;
+	int sh = 0, e = 12 + ws + AJ_NLMS_RF - 1 + AJ_NLMS_CS;
+	if(alpha <= 0.0 || p_in <= 0.0 || nw <= 0) return 0U;
+	t = alpha / ((double)nw * p_in);
+	while(e > 0) { t *= 2.0; e--; }
+	while(t < 32768.0 && sh < 31) { t *= 2.0; sh++; }
+	if(t > 65535.0) t = 65535.0;
+	return 0x80000000U | ((uint32_t)sh << 16) | (uint32_t)(t + 0.5);
+}
+
 int aj_makeup_shift(int cut_db, double out_db, int max_shift)
 {
 	/* Output relative to the clean level, in dB: -cut + 6 s + out_db. The target is

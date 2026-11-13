@@ -51,11 +51,11 @@ extern "C" {
 #endif
 
 #ifndef AJ_NT
-#define AJ_NT       10    /* crpa7: 10 taps per antenna (10 + 10 = 20 taps); must match SMI_NT (crpa4/5: 8, crpa3: 7, crpa1/2: 6) */
+#define AJ_NT        8    /* crpa10: 8 taps per antenna (8 + 8 = 16 taps); must match SMI_NT (crpa7-9: 10, crpa4/5: 8, crpa3: 7, crpa1/2: 6) */
 #endif
 /* AJ_NT: taps per channel, delays 0..31 (4.9; 16 before) */
 #ifndef AJ_REF
-#define AJ_REF        5     /* crpa7: 5; must match SMI_REF (crpa3-5: 4, 4.9.12: 2). RX1 reference delay (4.8: was 8; echoes up to 11 samples can be cancelled) */
+#define AJ_REF        4     /* crpa10: 4; must match SMI_REF (crpa7-9: 5, crpa3-5: 4, 4.9.12: 2). RX1 reference delay (4.8: was 8; echoes up to 11 samples can be cancelled) */
 #endif
 #define AJ_NSPT      (2 * AJ_NT)       /* space-time weight words: RX1 AJ_NT, then RX2 AJ_NT */
 /* crpa9: AJ_NIMG image (conjugate) taps per channel at delays REF-1, REF, REF+1 (crpa8 and
@@ -248,6 +248,14 @@ int  aj_makeup_shift(int cut_db, double out_db, int max_shift);
 /* crpa8: the rest of the make-up in dB (0 .. 5.99) on top of 6 x shift, by the same rule:
  * restore the RX gain cut, never more than AJ_OUT_HEADROOM_DB above the clean level. */
 double aj_makeup_fine_db(int cut_db, double out_db, int shift);
+/* crpa10: hardware NLMS step. The core moves each weight word (x 2^ws) by
+ * (y m 2^-sh) conj(u) 2^-AJ_NLMS_CS in units of 2^-AJ_NLMS_RF word LSB, u in Q1; this
+ * returns the nlms register word ([15:0] m, [20:16] sh, [31] enable) for a normalised step
+ * alpha: dw = alpha y conj(u) / (nw p_in), p_in = mean |u|^2 [LSB^2] (the RX1 power),
+ * nw = the number of adaptive weights. 0 when off (alpha <= 0 or no power). */
+#define AJ_NLMS_RF   16     /* must match SMI_RAMP_RF */
+#define AJ_NLMS_CS    8     /* must match SMI_NLMS_CS */
+uint32_t aj_nlms_word(double alpha, double p_in, int ws, int nw);
 /* Expected excess of the receiver's noise floor, in dB, from the 12-bit ADC's own
  * quantisation noise when a jammer jn_db above the noise has to be kept off full scale
  * (about 0 below J/N 54, +1.8 dB at 61, +4 dB at 66, +8 dB at 71). */

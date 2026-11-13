@@ -15,7 +15,8 @@
 #       62 and 68 dB above the noise: the weight scale of v4.4), 11-14 (field cases,
 #       make-up rule), 23 (crpa8: smoothing and fine gain bit for bit) and 24 (crpa8:
 #       what the smoothing does to a null and to the gain), 25 (crpa9: I/Q error that changes
-#       across the band, the reason for 3 image taps per channel).
+#       across the band, the reason for 3 image taps per channel), 26 and 27 (crpa10: hardware NLMS
+#       with a drifting and with a fixed jammer).
 #       The weights come from the firmware's solver
 #       (Source/Firmware/app_gnss_e310/gnss_aj_math.c), compiled into the
 #       testbench. Each scenario needs a freshly reset core, so each is a
@@ -29,7 +30,7 @@
 #  USAGE (from this directory; normally run by ../../build.sh hls)
 #    vitis_hls -f build_hls.tcl
 #
-#  antsdr-fw-patch: copied from LoopBack_Code_SMI_PI_STAP7x7_v4.9.14, set to 10 + 10 taps (crpa7)
+#  antsdr-fw-patch: copied from LoopBack_Code_SMI_PI_STAP7x7_v4.9.14, set to 8 + 8 taps with NLMS (crpa10)
 #  Source/HLS/smi_pi. Only the default paths differ: the IP goes to
 #  plutosdr-fw/hdl/library/antsdr_ip/smi_pi (found by the ADI project through
 #  ip_repo_paths = hdl/library) and the weight solver for the C simulation
@@ -43,7 +44,7 @@
 #    SMI_PI_FW_DIR=<dir>  directory holding gnss_aj_math.c/.h
 #
 #  OUTPUT
-#    $GNSS_CRPA_IP_REPO/smi_pi/component.xml, VLNV antsdr:gnss:smi_pi:2.8 (crpa9: 10 + 10 taps, 3 + 3 image taps, weight smoothing, fine gain; 2.7 = crpa8; 2.5 = 4.9.13/4.9.14 and crpa1-4, crpa7; 2.6 = crpa5)
+#    $GNSS_CRPA_IP_REPO/smi_pi/component.xml, VLNV antsdr:gnss:smi_pi:3.0 (crpa10: 8 + 8 taps, 3 + 3 image taps, smoothing, fine gain, hardware NLMS; 2.8 = crpa9; 2.7 = crpa8; 2.5 = 4.9.13/4.9.14 and crpa1-4, crpa7; 2.6 = crpa5)
 #    $GNSS_CRPA_IP_REPO/smi_pi/smi_pi_csynth.rpt
 #
 #  SUCCESS MARKER
@@ -95,8 +96,15 @@ close $fh
 cd $work
 open_project -reset smi_pi_hls
 set_top smi_pi
-add_files $hls_src -cflags "-I$here"
-add_files -tb [file join $here testbench.cpp] -cflags "-I$here -I$fw_dir -Wno-unknown-pragmas"
+# crpa10: SMI_NLMS=0 builds the core without the hardware NLMS (fallback if it does not meet
+# timing); the firmware's gnss_aj_nlms= then has no effect.
+set nlms_def ""
+if {[info exists ::env(SMI_NLMS)] && $::env(SMI_NLMS) eq "0"} {
+  set nlms_def " -DSMI_NLMS=0"
+  puts "SMI_PI_HLS: SMI_NLMS=0: hardware NLMS left out"
+}
+add_files $hls_src -cflags "-I$here$nlms_def"
+add_files -tb [file join $here testbench.cpp] -cflags "-I$here -I$fw_dir -Wno-unknown-pragmas$nlms_def"
 add_files -tb [file join $fw_dir gnss_aj_math.c] -cflags "-I$fw_dir"
 open_solution -reset sol -flow_target vivado
 set_part {xc7z020clg400-2}
@@ -105,7 +113,7 @@ set_clock_uncertainty $clk_uncertainty
 
 # ---- 1 C simulation -------------------------------------------------------------
 if {![info exists ::env(SMI_PI_SKIP_CSIM)] || $::env(SMI_PI_SKIP_CSIM) eq "0"} {
-  foreach scen {1 2 3 4 5 6 7 8 9 10 11 12 13 14 23 24 25} {
+  foreach scen {1 2 3 4 5 6 7 8 9 10 11 12 13 14 23 24 25 26 27} {
     puts "SMI_PI_HLS: csim scenario $scen"
     if {[catch {csim_design -argv $scen} err]} {
       puts "SMI_PI_HLS: FAIL - C simulation scenario $scen: $err"
@@ -146,9 +154,9 @@ if {$ii eq "" || $ii > $pipeline_ii} {
 
 # ---- 4 package as a Vivado IP ------------------------------------------------------
 export_design -format ip_catalog -rtl verilog \
-  -vendor antsdr -library gnss -version 2.8 -ipname smi_pi \
+  -vendor antsdr -library gnss -version 3.0 -ipname smi_pi \
   -display_name "SMI power inversion, space-time" \
-  -description "Two-element space-time SMI power-inversion anti-jam filter (Vitis HLS): RX2 normalised to RX1 at the input, 10 taps on RX1 (reference tap at delay 5 fixed at 1), 10 on RX2 and 3 + 3 image (conjugate) taps; real RX2 gain g2, bypass, output make-up gain and fine gain, weights and gain smoothed (cfg[19:16]); weights from the ARM via gnss_passthrough. s_axis_x = RX1 and RX2 IQ, m_axis_y = filtered RX1."
+  -description "Two-element space-time SMI power-inversion anti-jam filter (Vitis HLS): RX2 normalised to RX1 at the input, 8 taps on RX1 (reference tap at delay 4 fixed at 1), 8 on RX2 and 3 + 3 image (conjugate) taps, hardware NLMS refinement; real RX2 gain g2, bypass, output make-up gain and fine gain, weights and gain smoothed (cfg[19:16]); weights from the ARM via gnss_passthrough. s_axis_x = RX1 and RX2 IQ, m_axis_y = filtered RX1."
 
 set impl_dir [file join $work smi_pi_hls sol impl]
 set ip_src   [file join $impl_dir ip]
@@ -173,6 +181,6 @@ file delete -force $out_ip
 file copy -force $ip_src $out_ip
 if {[file exists $rpt_txt]} { file copy -force $rpt_txt $out_ip }
 
-puts "SMI_PI_HLS: IP antsdr:gnss:smi_pi:2.8 -> $out_ip"
+puts "SMI_PI_HLS: IP antsdr:gnss:smi_pi:3.0 -> $out_ip"
 puts "SMI_PI_HLS: PASS"
 exit 0

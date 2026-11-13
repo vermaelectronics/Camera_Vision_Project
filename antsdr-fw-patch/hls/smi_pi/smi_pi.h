@@ -1,5 +1,5 @@
 // ============================================================================
-//  smi_pi.h  --  space-time SMI power inversion core (SMI-PI v4.4; antsdr-fw-patch crpa9: 10 + 10 taps, 3 + 3 image taps, weight smoothing)
+//  smi_pi.h  --  space-time SMI power inversion core (SMI-PI v4.4; antsdr-fw-patch crpa10: 8 + 8 taps, 3 + 3 image taps, weight smoothing, hardware NLMS)
 //  ANTSDR E310 V1 / GNSS CRPA project, Vitis HLS 2023.2
 //
 //  See smi_pi.cpp for the filter, the fixed-point formats and why the
@@ -18,15 +18,15 @@
 // Taps per channel (delays 0..31, 4.9: was 16) and the RX1 reference delay. Must match
 // AJ_NT / AJ_REF in Source/Firmware/app_gnss_e310/gnss_aj_math.h.
 #ifndef SMI_NT
-#define SMI_NT   10    /* antsdr-fw-patch crpa7: 10 taps per antenna (10 + 10 = 20 taps); crpa4/5: 8, crpa3: 7, crpa1/2: 6 */
+#define SMI_NT    8    /* antsdr-fw-patch crpa10: 8 taps per antenna (8 + 8 = 16 taps); crpa7-9: 10, crpa4/5: 8, crpa3: 7, crpa1/2: 6 */
 #endif
 #ifndef SMI_REF
-#define SMI_REF    5    /* crpa7: reference tap at delay 5: 5 pre-cursor taps, 4 after. In C simulation delay 5 is never below 8 + 8 (delay 4); delay 4 lost 2.5 dB on the reflection case (34.9 against 37.4 dB). crpa4/5 (8 + 8): 4 */
+#define SMI_REF    4    /* crpa10 (8 + 8): reference delay 4, as crpa4 (4 before, 3 after). crpa7-9 (10 + 10): reference tap at delay 5: 5 pre-cursor taps, 4 after. In C simulation delay 5 is never below 8 + 8 (delay 4); delay 4 lost 2.5 dB on the reflection case (34.9 against 37.4 dB). crpa4/5 (8 + 8): 4 */
 #endif
-// DSP48 budget of this core (crpa7, 10 + 10): 9 RX1 taps + 10 RX2 taps + 2 image taps = 21 complex
-// multipliers x 3 (Gauss form) = 63, plus 2 for the real RX2 gain g2 = 65 DSP48, plus 2 for the crpa8 fine
-// output gain = 67, plus 4 image taps x 3 = 79 (crpa9) (8 + 8: 53, 7 + 7: 47, 6 + 6: 41,
-// 5 + 5: 35; 4.9.11 / 4.9.12 had 4 for a complex g2).
+// DSP48 budget of this core (crpa10, 8 + 8): 7 RX1 taps + 8 RX2 taps + 6 image taps = 21 complex
+// multipliers x 3 (Gauss form) = 63, plus 2 for the real RX2 gain g2, plus 2 for the fine output gain
+// = 67; NLMS: 21 complex updates x 3 + 2 for the step = 65; in all 132.
+// (crpa9, 10 + 10 without NLMS: 79; crpa4 8 + 8: 53, 7 + 7: 47, 6 + 6: 41, 5 + 5: 35.)
 // RX1 taps (the highest delays) whose multipliers are built from LUTs, not DSP48 (4.9.1: the 32-tap build needed 229 DSP48 of 220).
 // 12 taps = 36 multipliers = about 36 DSP48 saved, about 8000 LUT spent. 0 = all DSP48.
 #ifndef SMI_NFAB
@@ -53,9 +53,23 @@
                                //   gain move 1/256 of the way to the committed value every 2^(k-1)
                                //   samples, time constant 2^(k+7) samples (k = 10: 131072 = 4.3 ms at 30.72 MS/s)
 #define SMI_RAMP_RS      8     // 1/256 of the remaining step per tick
-#define SMI_RAMP_RF      9     // fractional bits of the running values (settles within 0.25 LSB)
+#define SMI_RAMP_RF     16     // fractional bits of the running values (crpa10: 16, for the NLMS steps; crpa8/9: 9)
 #define SMI_GAIN_FRAC   14     // crpa8: fine output gain, unsigned Q2.14 (1.0 = 16384), after the make-up shift
 #define SMI_GAIN_ONE    16384
+
+// crpa10: hardware NLMS (delayed LMS) on top of the ARM's SMI weights.
+// Every sample each adaptive weight moves by e[n-D] conj(u[n-D]) >> SMI_NLMS_CS, where
+// e = (y m) >> sh is the filter output (before the make-up gain) times the normalised step
+// m 2^-sh set by the ARM, and u the tap's input; the weights are still pulled to the ARM's
+// committed set by the smoothing (cfg[19:16] must be > 0), so NLMS refines the SMI solution
+// between two ARM solves. The delay D lets the loop run at one sample per clock.
+// nlms port: [15:0] m (unsigned), [20:16] sh (0..31), [31] enable (only with the filter in).
+#ifndef SMI_NLMS
+#define SMI_NLMS         1     // 0: core without the NLMS hardware (SMI_NLMS=0 ./build.sh hls)
+#endif
+#define SMI_NLMS_D      24     // delay of the error / inputs used for the update [samples]
+#define SMI_NLMS_CS      8     // fixed shift of e conj(u)
+#define SMI_NLMS_EW     24     // bits of e (saturated)
 
 // s_axis_x : {rx2_q, rx2_i, rx1_q, rx1_i}, each a 16-bit word holding a
 //            12-bit RX sample right-aligned ([11:0] is used).
@@ -87,6 +101,7 @@
 // nrm      : g2 = real[15:0], signed Q3.13 (1.0 = 0x2000). 4.9.13: g2 is real; nrm[31:16]
 //            is ignored (the firmware always wrote 0 there: gnss_pt_write_aj), which
 //            saves the two g2i multipliers with the same x2n bit for bit.
+// nlms     : crpa10: [15:0] step mantissa m, [20:16] step shift sh, [31] enable (see SMI_NLMS_D).
 // gain     : crpa8: [15:0] fine output gain, unsigned Q2.14 (1.0 = 0x4000), applied after
 //            the make-up shift and smoothed like the weights. Exactly 1.0 gives the crpa7
 //            output bit for bit.
@@ -98,6 +113,7 @@ void smi_pi(hls::stream<ap_uint<64> > &s_axis_x,
             ap_uint<32 * 2 * SMI_NIMG> wcj,
             ap_uint<32>   cfg,
             ap_uint<32>   nrm,
-            ap_uint<32>   gain);
+            ap_uint<32>   gain,
+            ap_uint<32>   nlms);
 
 #endif

@@ -413,7 +413,7 @@ static void info_pl(void)
     console_print("   When a jammer appears the ARM computes the %d weights from\n", (long)AJ_MAXDIM);
     console_print("   %d-sample DMA captures of both channels (gnss_aj.c), a few\n", (long)AJ_NSAMP);
     console_print("   hundred times a second, and commits weights, bypass, make-up\n");
-    console_print("   gain and g2 all at once (weights 0x400-0x44C, the rest 0x180-0x1CC, AJ_COMMIT 0x180).\n");
+    console_print("   gain and g2 all at once (weights 0x400-0x43C, the rest 0x180-0x1E0, AJ_COMMIT 0x180).\n");
     console_print("   CONTROL[5] puts it on TX1. TX2 carries a copy of the TX1 output\n");
     console_print("   (never raw RX2) and is MUTED unless gnss_tx2=1 (4.9.14).\n");
     rule();
@@ -579,7 +579,7 @@ static void info_registers(void)
     console_print("   0x34  TX_COUNT_CH1    RO\n");
     console_print("   0x38  RX_SNAPSHOT_CH1 RO\n");
     console_print("   0x40  CRPA_COEF0..15  RW  0x40-0x7C, stored but unused\n");
-    console_print("   0x400 AJ_W0..19       RW  SMI-PI weights (shadow), Q3.12: 0..9 RX1, 10..19 RX2 (crpa8)\n");
+    console_print("   0x400 AJ_W0..15       RW  SMI-PI weights (shadow), Q3.12: 0..7 RX1, 8..15 RX2 (crpa10)\n");
     console_print("                             {imag, real}; 0-15 RX1, 16-31 RX2\n");
     console_print("   0x180 AJ_COMMIT       W/R write: all AJ_* -> filter; read: count\n");
     console_print("   0x184 AJ_INFO         RO  0x20040C07 (32 taps, ref 4, Q3.12, v4.9)\n");
@@ -599,6 +599,8 @@ static void info_registers(void)
     console_print("   0x1D0 AJ_PWR_IN       RO  mean RX1 I^2+Q^2 over 2^16 samples (crpa9)\n");
     console_print("   0x1D4 AJ_PWR_OUT      RO  mean filter output I^2+Q^2 over 2^16 samples\n");
     console_print("   0x1D8 AJ_PWR_IDX      RO  [15:0] RX1 window counter, [31:16] output window counter\n");
+    console_print("   0x1E0 AJ_NLMS         RW  hardware NLMS (crpa10): [15:0] step m, [20:16] shift, [31] enable\n");
+    console_print("   0x1E4 AJ_NLMS_ACT     RO  committed NLMS word\n");
     rule();
     console_print(" STATUS BITS [2] AND [3] ARE THE IMPORTANT ONES.\n");
     console_print("   They are axi_ad9361's read-back of (dac_data_sel == 4'h2),\n");

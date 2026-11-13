@@ -140,7 +140,7 @@ int gnss_pt_tx2_on(void)
 }
 
 void gnss_pt_write_aj(const int16_t *re, const int16_t *im,
-                      uint32_t cfg, int32_t g2_q13, uint32_t blk_thr, uint32_t gain)
+                      uint32_t cfg, int32_t g2_q13, uint32_t blk_thr, uint32_t gain, uint32_t nlms)
 {
     uint32_t k;
     if (re && im) {
@@ -164,6 +164,7 @@ void gnss_pt_write_aj(const int16_t *re, const int16_t *im,
     gnss_pt_write(GNSS_PT_REG_AJ_NORM, (uint32_t)(uint16_t)(int16_t)g2_q13);
     gnss_pt_write(GNSS_PT_REG_AJ_BLK_THR, blk_thr);   /* harmless on a 4.5 bitstream: no such register */
     gnss_pt_write(GNSS_PT_REG_AJ_GAIN, gain);          /* crpa8: fine output gain, committed with the rest */
+    gnss_pt_write(GNSS_PT_REG_AJ_NLMS, nlms);          /* crpa10: hardware NLMS step / enable */
     gnss_pt_write(GNSS_PT_REG_AJ_COMMIT, 1U);
 }
 

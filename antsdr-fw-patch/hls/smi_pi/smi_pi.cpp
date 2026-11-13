@@ -1,5 +1,5 @@
 // ============================================================================
-//  smi_pi.cpp  --  space-time SMI power inversion core (SMI-PI v4.4; antsdr-fw-patch crpa9: 10 + 10 taps, 3 + 3 image taps, weight smoothing, fine gain)
+//  smi_pi.cpp  --  space-time SMI power inversion core (SMI-PI v4.4; antsdr-fw-patch crpa10: 8 + 8 taps, 3 + 3 image taps, smoothing, fine gain, hardware NLMS)
 //  ANTSDR E310 V1 / GNSS CRPA project, Vitis HLS 2023.2
 //
 //  PIPELINE (one sample pair per clock)
@@ -12,7 +12,7 @@
 //       (|w| < 8), and the null would fail. x2n keeps 2 fractional bits so the
 //       scaling adds no rounding noise of its own.
 //    2. SPACE-TIME FILTER     SMI_NT taps on RX1 and SMI_NT on the normalised RX2
-//       (crpa7: 10 + 10, reference R = SMI_REF = 5; 32 + 32 in 4.9.7, 16 + 16 before):
+//       (crpa10: 8 + 8, reference R = SMI_REF = 4; crpa7-9: 10 + 10, R = 5; 32 + 32 in 4.9.7, 16 + 16 before):
 //         y[n] = x1[n-R] - sum_{k != R} a_k x1[n-k] - sum_k b_k x2n[n-k]
 //                        - sum_d c1_d conj(x1[n-R-d]) - sum_d c2_d conj(x2n[n-R-d])   (crpa9: d = -1, 0, 1)
 //       The RX1 tap at delay R is the reference, fixed at 1 (power
@@ -54,6 +54,13 @@
 //       time constant of 2^(k+7) samples instead of in one clock, so a new weight
 //       set does not make a phase or gain step in the satellites the GNSS receiver
 //       is tracking. k = 0 is the crpa7 behaviour, bit for bit.
+//    7. HARDWARE NLMS (crpa10) nlms[31] = 1 with the filter in and the smoothing on: every
+//       sample each adaptive weight also moves by e[n-D] conj(u[n-D]) >> SMI_NLMS_CS
+//       (delayed LMS, D = SMI_NLMS_D, so the loop runs at one sample per clock); e is the
+//       output before the make-up gain times the normalised step the ARM sets
+//       (nlms[15:0] x 2^-nlms[20:16], from the measured input power). The smoothing
+//       keeps pulling the weights to the ARM's SMI solution, so NLMS only refines it
+//       between two solves (a moving or sweeping jammer). Off: the crpa9 core.
 //    6. FINE GAIN (crpa8)     gain[15:0], Q2.14, after the 6 dB make-up shift
 //       (2 DSP48), so the firmware can hold the level into the receiver within
 //       a fraction of a dB. 1.0 gives the crpa7 output bit for bit.
@@ -147,13 +154,41 @@ static void cmul3_fab(w16_t wr, w16_t wi, ap_int<12> xr, ap_int<12> xi,
 // used by the multipliers ends exactly on the target.
 typedef ap_int<16 + SMI_RAMP_RF + 1> rv_t;
 
-static rv_t ramp_step(rv_t cur, w16_t target, bool snap, bool tick) {
+// crpa10: weight update = smoothing towards the committed word (as crpa8) plus the NLMS step,
+// saturated to the weight-word range.
+typedef ap_int<SMI_NLMS_EW> e_t;              // NLMS error e = y m 2^-sh
+typedef ap_int<17>          z_t;              // NLMS input conj(u) (Q1)
+typedef ap_int<16 + SMI_RAMP_RF + 22> dl_t;   // one NLMS step in running-value units
+
+static rv_t w_update(rv_t cur, w16_t target, bool snap, bool tick, bool nl, dl_t dlt) {
 #pragma HLS INLINE
-    const rv_t t = rv_t(target) << SMI_RAMP_RF;
-    if (snap) return t;
-    if (!tick) return cur;
-    const ap_int<16 + SMI_RAMP_RF + 2> d = ap_int<16 + SMI_RAMP_RF + 2>(t) - cur;
-    return cur + rv_t((d + (1 << (SMI_RAMP_RS - 1))) >> SMI_RAMP_RS);
+    if (snap) return rv_t(target) << SMI_RAMP_RF;
+    ap_int<16 + SMI_RAMP_RF + 24> v = cur;
+    if (tick) {
+        const ap_int<16 + SMI_RAMP_RF + 2> d = ap_int<16 + SMI_RAMP_RF + 2>(rv_t(target) << SMI_RAMP_RF) - cur;
+        v += (d + (1 << (SMI_RAMP_RS - 1))) >> SMI_RAMP_RS;
+    }
+    if (nl) v += dlt;
+    const ap_int<16 + SMI_RAMP_RF + 24> hi = ap_int<16 + SMI_RAMP_RF + 24>(32767) << SMI_RAMP_RF;
+    const ap_int<16 + SMI_RAMP_RF + 24> lo = -(ap_int<16 + SMI_RAMP_RF + 24>(32768) << SMI_RAMP_RF);
+    if (v > hi) v = hi;
+    if (v < lo) v = lo;
+    return (rv_t)v;
+}
+
+// crpa10: e z with 3 multipliers (pre-adds on z, 17-bit: 25 x 18 DSP48), rounded >> SMI_NLMS_CS
+static void nlms_step(e_t er, e_t ei, z_t zr, z_t zi, dl_t &dr, dl_t &di) {
+#pragma HLS INLINE
+    const ap_int<SMI_NLMS_EW + 1> es = ap_int<SMI_NLMS_EW + 1>(er) + ap_int<SMI_NLMS_EW + 1>(ei);
+    const ap_int<18> zd = ap_int<18>(zi) - ap_int<18>(zr), zs = ap_int<18>(zr) + ap_int<18>(zi);
+    const ap_int<SMI_NLMS_EW + 19> k1 = zr * es;     // zr (er + ei)
+    const ap_int<SMI_NLMS_EW + 19> k2 = er * zd;     // er (zi - zr)
+    const ap_int<SMI_NLMS_EW + 19> k3 = ei * zs;     // ei (zr + zi)
+    const ap_int<SMI_NLMS_EW + 20> pr = ap_int<SMI_NLMS_EW + 20>(k1) - k3;   // re(e z)
+    const ap_int<SMI_NLMS_EW + 20> pi = ap_int<SMI_NLMS_EW + 20>(k1) + k2;   // im(e z)
+    const ap_int<SMI_NLMS_EW + 20> h = ap_int<SMI_NLMS_EW + 20>(1) << (SMI_NLMS_CS - 1);
+    dr = (dl_t)((pr + h) >> SMI_NLMS_CS);
+    di = (dl_t)((pi + h) >> SMI_NLMS_CS);
 }
 
 static w16_t ramp_val(rv_t cur) {
@@ -167,7 +202,8 @@ void smi_pi(hls::stream<ap_uint<64> > &s_axis_x,
             ap_uint<32 * 2 * SMI_NIMG> wcj,
             ap_uint<32>   cfg,
             ap_uint<32>   nrm,
-            ap_uint<32>   gain) {
+            ap_uint<32>   gain,
+            ap_uint<32>   nlms) {
 #pragma HLS INTERFACE axis port=s_axis_x
 #pragma HLS INTERFACE axis port=m_axis_y
 #pragma HLS INTERFACE ap_none port=wts
@@ -175,12 +211,15 @@ void smi_pi(hls::stream<ap_uint<64> > &s_axis_x,
 #pragma HLS INTERFACE ap_none port=cfg
 #pragma HLS INTERFACE ap_none port=nrm
 #pragma HLS INTERFACE ap_none port=gain
+#pragma HLS INTERFACE ap_none port=nlms
 #pragma HLS INTERFACE ap_ctrl_none port=return
 #pragma HLS PIPELINE II=1
 
-    // Delay lines: index k holds the sample from k samples ago (0 = now).
-    static s12_t h1r[SMI_NT], h1i[SMI_NT];
-    static s18_t h2r[SMI_NT], h2i[SMI_NT];
+    // Delay lines: index k holds the sample from k samples ago (0 = now). crpa10: SMI_NLMS_D
+    // longer, for the NLMS inputs of the sample D ago.
+    const int NTD = SMI_NT + SMI_NLMS_D;
+    static s12_t h1r[SMI_NT + SMI_NLMS_D], h1i[SMI_NT + SMI_NLMS_D];
+    static s18_t h2r[SMI_NT + SMI_NLMS_D], h2i[SMI_NT + SMI_NLMS_D];
 #pragma HLS ARRAY_PARTITION variable=h1r complete
 #pragma HLS ARRAY_PARTITION variable=h1i complete
 #pragma HLS ARRAY_PARTITION variable=h2r complete
@@ -202,6 +241,12 @@ void smi_pi(hls::stream<ap_uint<64> > &s_axis_x,
 #pragma HLS RESET variable=rcnt
 #pragma HLS RESET variable=ws_prev
 #pragma HLS RESET variable=sh_prev
+    // crpa10: the NLMS error of the last SMI_NLMS_D samples (index k = k+1 samples ago)
+    static e_t ehr[SMI_NLMS_D], ehi[SMI_NLMS_D];
+#pragma HLS ARRAY_PARTITION variable=ehr complete
+#pragma HLS ARRAY_PARTITION variable=ehi complete
+#pragma HLS RESET variable=ehr
+#pragma HLS RESET variable=ehi
 
     if (s_axis_x.empty()) return;
     ap_uint<64> in = s_axis_x.read();
@@ -222,7 +267,7 @@ void smi_pi(hls::stream<ap_uint<64> > &s_axis_x,
     s18_t x2nr = (s18_t)((nr + nhalf) >> (SMI_GFRAC - SMI_XFRAC));
     s18_t x2ni = (s18_t)((ni + nhalf) >> (SMI_GFRAC - SMI_XFRAC));
 
-    for (int k = SMI_NT - 1; k > 0; k--) {
+    for (int k = NTD - 1; k > 0; k--) {
 #pragma HLS UNROLL
         h1r[k] = h1r[k - 1]; h1i[k] = h1i[k - 1];
         h2r[k] = h2r[k - 1]; h2i[k] = h2i[k - 1];
@@ -245,6 +290,11 @@ void smi_pi(hls::stream<ap_uint<64> > &s_axis_x,
     const bool wsnap = (rk == 0) || (ws != ws_prev);    // weight words of another scale: no ramp across
     const bool gsnap = (rk == 0) || (s != sh_prev);     // 6 dB make-up step: the fine gain jumps with it
     ws_prev = ws; sh_prev = s;
+    // crpa10: NLMS on (needs the filter in and the smoothing on, which anchors the weights)
+    const bool nl = SMI_NLMS && nlms[31] && !byp && rk != 0;
+    const ap_uint<16> nm = nlms(15, 0);
+    const ap_uint<5>  nsh = nlms(20, 16);
+    const e_t eor = ehr[SMI_NLMS_D - 1], eoi = ehi[SMI_NLMS_D - 1];   // e of the sample D ago
     w16_t wtr[2 * SMI_NT + 2 * SMI_NIMG], wti[2 * SMI_NT + 2 * SMI_NIMG];
 #pragma HLS ARRAY_PARTITION variable=wtr complete
 #pragma HLS ARRAY_PARTITION variable=wti complete
@@ -254,8 +304,23 @@ void smi_pi(hls::stream<ap_uint<64> > &s_axis_x,
         if (j < 2 * SMI_NT) { tr = (w16_t)wts(32 * j + 15, 32 * j); ti = (w16_t)wts(32 * j + 31, 32 * j + 16); }
         else { const int c = j - 2 * SMI_NT; tr = (w16_t)wcj(32 * c + 15, 32 * c); ti = (w16_t)wcj(32 * c + 31, 32 * c + 16); }
         if (byp || j == SMI_REF) { tr = 0; ti = 0; }       // word SMI_REF (RX1 reference) is never used
-        cwr[j] = ramp_step(cwr[j], tr, wsnap, tick);
-        cwi[j] = ramp_step(cwi[j], ti, wsnap, tick);
+        // the NLMS input of this weight, D samples ago: conj(u) (Q1); the image taps take conj(x),
+        // so their conj(u) is x itself
+        z_t zr, zi;
+        if (j < SMI_NT)            { zr = z_t(h1r[j + SMI_NLMS_D]) << 1;          zi = -(z_t(h1i[j + SMI_NLMS_D]) << 1); }
+        else if (j < 2 * SMI_NT)   { zr = z_t(h2r[j - SMI_NT + SMI_NLMS_D] >> 1); zi = -z_t(h2i[j - SMI_NT + SMI_NLMS_D] >> 1); }
+        else if (j < 2 * SMI_NT + SMI_NIMG) {
+            const int a = SMI_REF - SMI_IMGH + (j - 2 * SMI_NT) + SMI_NLMS_D;
+            zr = z_t(h1r[a]) << 1; zi = z_t(h1i[a]) << 1;
+        } else {
+            const int a = SMI_REF - SMI_IMGH + (j - 2 * SMI_NT - SMI_NIMG) + SMI_NLMS_D;
+            zr = z_t(h2r[a] >> 1); zi = z_t(h2i[a] >> 1);
+        }
+        dl_t dr, di;
+        nlms_step(eor, eoi, zr, zi, dr, di);
+        const bool nlj = nl && j != SMI_REF;
+        cwr[j] = w_update(cwr[j], tr, wsnap, tick, nlj, dr);
+        cwi[j] = w_update(cwi[j], ti, wsnap, tick, nlj, di);
         wtr[j] = ramp_val(cwr[j]);
         wti[j] = ramp_val(cwi[j]);
     }
@@ -310,6 +375,26 @@ void smi_pi(hls::stream<ap_uint<64> > &s_axis_x,
     const acc_t wrnd = (ws == 0) ? acc_t(0) : (acc_t(1) << (ws - 1));
     acc_t ar = ref_r - ((sr + wrnd) >> ws);
     acc_t ai = ref_i - ((si + wrnd) >> ws);
+
+    // ---- crpa10: NLMS error of this sample: e = y m 2^-sh (y = the output before the make-up
+    // gain, rounded to LSB and held in 18 bits), into the history for the update D samples later
+    {
+        const acc_t qh = acc_t(1) << (Q - 1);
+        acc_t yr = (ar + qh) >> Q, yi = (ai + qh) >> Q;
+        if (yr > 131071) yr = 131071; if (yr < -131072) yr = -131072;
+        if (yi > 131071) yi = 131071; if (yi < -131072) yi = -131072;
+        const ap_int<36> pr = ap_int<18>(yr) * ap_int<17>(nm), pi = ap_int<18>(yi) * ap_int<17>(nm);
+        const ap_int<36> rh = (nsh == 0) ? ap_int<36>(0) : ap_int<36>(ap_int<36>(1) << (nsh - 1));
+        ap_int<36> er = (pr + rh) >> nsh, ei = (pi + rh) >> nsh;
+        const ap_int<36> emax = (ap_int<36>(1) << (SMI_NLMS_EW - 1)) - 1, emin = -(ap_int<36>(1) << (SMI_NLMS_EW - 1));
+        if (er > emax) er = emax; if (er < emin) er = emin;
+        if (ei > emax) ei = emax; if (ei < emin) ei = emin;
+        for (int k = SMI_NLMS_D - 1; k > 0; k--) {
+#pragma HLS UNROLL
+            ehr[k] = ehr[k - 1]; ehi[k] = ehi[k - 1];
+        }
+        ehr[0] = (e_t)er; ehi[0] = (e_t)ei;
+    }
 
     // ---- 3. make-up shift, 4. fine gain (crpa8) and rounding --------------------
     // (bypass: all weights 0 above, so ar = ref exactly once they have faded out)

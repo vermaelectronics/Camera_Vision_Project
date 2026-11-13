@@ -91,8 +91,10 @@
 #define GNSS_PT_REG_AJ_BLK_COUNT    0x1A4U  /* RO samples blanked since the counter clear */
 #define GNSS_PT_REG_AJ_BLK_BURSTS   0x1A8U  /* RO bursts blanked since the counter clear  */
 #define GNSS_PT_REG_AJ_RX_PEAK      0x1ACU  /* RO [15:0] largest |I|,|Q| of RX1/RX2 in the last window, [31:16] window counter */
-#define GNSS_PT_AJ_INFO_EXPECTED    0x0A050C0BU   /* crpa9: 10 taps per channel, reference delay 5, layout 11 (3 + 3 image taps, AJ_PWR_IN/OUT) */
-#define GNSS_PT_AJ_LAYOUT_NEEDED    11U           /* crpa9 firmware: 3 + 3 image taps, power meters */
+#define GNSS_PT_AJ_INFO_EXPECTED    0x08040C0CU   /* crpa10: 8 taps per channel, reference delay 4, layout 12 (hardware NLMS) */
+#define GNSS_PT_AJ_LAYOUT_NEEDED    12U           /* crpa10 firmware: hardware NLMS + everything of layout 11 */
+#define GNSS_PT_REG_AJ_NLMS         0x1E0U  /* RW shadow (crpa10): [15:0] step m, [20:16] shift, [31] enable */
+#define GNSS_PT_REG_AJ_NLMS_ACT     0x1E4U  /* RO committed NLMS word */
 #define GNSS_PT_AJ_LAYOUT_RAMP      10U           /* crpa8: AJ_CFG[19:16] smoothing, AJ_GAIN, AJ_CLIP1/2 */
 #define GNSS_PT_REG_AJ_GAIN         0x1B0U  /* RW shadow (crpa8): fine output gain [15:0] Q2.14, 1.0 = 0x4000 */
 #define GNSS_PT_REG_AJ_GAIN_ACT     0x1B4U  /* RO committed gain                  */
@@ -195,7 +197,7 @@ int      gnss_pt_tx2_on(void);
  * never runs a half-written set. re/im may be NULL to keep the weights that
  * are in the shadow registers (bypass switching). */
 void     gnss_pt_write_aj(const int16_t *re, const int16_t *im,  /* crpa8: + gain (AJ_GAIN, Q2.14) */
-                          uint32_t cfg, int32_t g2_q13, uint32_t blk_thr, uint32_t gain);
+                          uint32_t cfg, int32_t g2_q13, uint32_t blk_thr, uint32_t gain, uint32_t nlms);
 
 /* Snapshot of everything worth observing at runtime (requirement 58). */
 typedef struct {

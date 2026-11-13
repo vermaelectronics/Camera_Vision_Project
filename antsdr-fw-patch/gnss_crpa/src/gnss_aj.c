@@ -110,6 +110,11 @@ static int      ramp_from_bypass = 1;    /* the committed set is the bypass (all
 static int      ramp_hw;                 /* bitstream has the smoothing (AJ_INFO layout 10) */
 static double   fine_db;                 /* fine output gain on top of the 6 dB make-up shift [dB] */
 static uint32_t gain_q14 = GNSS_PT_AJ_GAIN_ONE;
+/* crpa10: hardware NLMS in the FPGA, refining the SMI weights between two solves (off by default) */
+#define AJ_NLMS_MU_DEFAULT  (1.0 / 32.0)   /* normalised step: C simulation 26/27 */
+static int      nlms_on;
+static double   nlms_mu = AJ_NLMS_MU_DEFAULT;
+static uint32_t nlms_word;                 /* the last word committed */
 
 /* ---- crpa8: the ARM's work per capture in three steps: prepare (here), compute (aj_detect /
  * aj_compute: pure maths on a copy), finish (here). On Linux the compute step runs on the
@@ -337,8 +342,9 @@ static void commit_bypass(void)
 	gnss_rxg_set_digital_db(0);
 	blk_thr_set = blk_threshold(0);
 	/* crpa8: with smoothing the filter fades out (the weights glide to 0) */
+	nlms_word = 0;
 	gnss_pt_write_aj(zero_w, zero_w, GNSS_PT_AJ_CFG_BYPASS | blk_cfg_bit(blk_thr_set) | GNSS_PT_AJ_CFG_RAMP(ramp_hw ? ramp_k : 0),
-	                 g2_q13(), blk_thr_set, gain_q14);
+	                 g2_q13(), blk_thr_set, gain_q14, 0U);
 	ramp_from_bypass = 1;
 }
 
@@ -347,10 +353,19 @@ static void commit_weights(void)
 	/* crpa8: the first set after the bypass goes in fast (a new jammer is nulled at once),
 	 * every later one glides in with the time constant of gnss_aj_ramp= */
 	int k = !ramp_hw ? 0 : ramp_from_bypass ? (ramp_k ? AJ_RAMP_FAST : 0) : ramp_k;
+	/* crpa10: NLMS needs the smoothing (it anchors the weights to this SMI set); its step is
+	 * normalised by the RX1 power the FPGA meter measures now (else the capture's) */
+	nlms_word = 0;
+	if(nlms_on && ramp_hw && !aj_frozen) {
+		double p = (double)gnss_pt_read(GNSS_PT_REG_AJ_PWR_IN);
+		if(p <= 0.0) p = res.p1;
+		if(k == 0) k = AJ_RAMP_DEFAULT;
+		nlms_word = aj_nlms_word(nlms_mu, p, res.ws, AJ_MAXDIM);
+	}
 	gnss_rxg_set_digital_db(6 * shift + (int)(fine_db + 0.5));
 	blk_thr_set = blk_threshold(1);
 	gnss_pt_write_aj(res.wre, res.wim, GNSS_PT_AJ_CFG_SHIFT(shift) | GNSS_PT_AJ_CFG_WS(res.ws) | blk_cfg_bit(blk_thr_set) |
-	                 GNSS_PT_AJ_CFG_RAMP(k), g2_q13(), blk_thr_set, ramp_hw ? gain_q14 : GNSS_PT_AJ_GAIN_ONE);
+	                 GNSS_PT_AJ_CFG_RAMP(k), g2_q13(), blk_thr_set, ramp_hw ? gain_q14 : GNSS_PT_AJ_GAIN_ONE, nlms_word);
 	ramp_from_bypass = 0;
 }
 
@@ -1323,8 +1338,8 @@ void gnss_aj_enable(int on)
 				return;
 			}
 			if((info & 0xFFU) != GNSS_PT_AJ_LAYOUT_NEEDED) {
-				console_print("gnss_aj: the bitstream's AJ_INFO layout is %d, this firmware (crpa9) needs %d: 3 + 3 image\n"
-					      "         taps, smoothing, AJ_GAIN, clip counters, power meters (AJ_INFO 0x%x). Anti-jam NOT started:\n"
+				console_print("gnss_aj: the bitstream's AJ_INFO layout is %d, this firmware (crpa10) needs %d: hardware NLMS,\n"
+					      "         3 + 3 image taps, smoothing, AJ_GAIN, clip counters, power meters (AJ_INFO 0x%x). Anti-jam NOT started:\n"
 					      "         rebuild the WHOLE project (./build.sh reset, then the full build) so they match.\n",
 					      (long)(info & 0xFFU), (long)GNSS_PT_AJ_LAYOUT_NEEDED, (unsigned long)info);
 				return;
@@ -1381,7 +1396,15 @@ int  gnss_aj_enabled(void)   { return aj_on; }
 int  gnss_aj_user_off(void)  { return aj_user_off; }
 int  gnss_aj_jammer_on(void) { return state == ST_JAMMED; }
 
-void gnss_aj_freeze(int on)  { aj_frozen = on ? 1 : 0; }
+void gnss_aj_freeze(int on)
+{
+	aj_frozen = on ? 1 : 0;
+	if(on && nlms_word) {           /* crpa10: a frozen filter does not adapt in the FPGA either */
+		nlms_word = 0;
+		gnss_pt_write(GNSS_PT_REG_AJ_NLMS, 0U);
+		gnss_pt_write(GNSS_PT_REG_AJ_COMMIT, 1U);
+	}
+}
 
 void gnss_aj_set_mode(int mode)
 {
@@ -1429,6 +1452,27 @@ void gnss_aj_ramp_line(void)
 }
 
 int gnss_aj_ramp(void) { return ramp_k; }
+
+/* ---- crpa10: hardware NLMS ------------------------------------------------------------- */
+void gnss_aj_nlms_line(void)
+{
+	if(!ramp_hw) { console_print("nlms          : not in this bitstream\n"); return; }
+	console_print("nlms          : %s (gnss_aj_nlms=%d), step mu %s (gnss_aj_nlms_mu=), FPGA word 0x%x%s\n",
+		      (char*)(!nlms_on ? "OFF" : nlms_word ? "ON, refining the SMI weights every sample" : "ON, waiting for the filter (bypass or frozen)"),
+		      (long)nlms_on, f3u(nlms_mu), (unsigned long)gnss_pt_read(GNSS_PT_REG_AJ_NLMS_ACT),
+		      (char*)(nlms_on && ramp_k == 0 ? "; smoothing 0 -> 10 while NLMS is on" : ""));
+}
+
+int    gnss_aj_nlms(void)    { return nlms_on; }
+double gnss_aj_nlms_mu(void) { return nlms_mu; }
+
+void gnss_aj_set_nlms(int on, double alpha)
+{
+	if(on >= 0) nlms_on = on ? 1 : 0;
+	if(alpha > 0.0) nlms_mu = alpha;
+	blk_refresh();                 /* commit now (state unchanged) */
+	gnss_aj_nlms_line();
+}
 
 void gnss_aj_set_ramp(int k)
 {
@@ -1611,6 +1655,7 @@ void gnss_aj_report(void)
 			      (char*)(pulsed(now) ? "SEEN" : "not seen"),
 			      (long)(gnss_pt_read(GNSS_PT_REG_AJ_RX_PEAK) & 0xFFFFU));
 	gnss_aj_ramp_line();
+	gnss_aj_nlms_line();
 	{
 		double hres, hjn;
 		if(hw_levels(&hres, &hjn))
