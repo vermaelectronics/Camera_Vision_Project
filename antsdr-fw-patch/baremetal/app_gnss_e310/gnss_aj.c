@@ -5,6 +5,10 @@
 #include <stdio.h>
 #include "gnss_aj.h"
 #include "gnss_aj_math.h"
+#ifdef GNSS_AJ_THREAD
+#include <pthread.h>
+#include <string.h>
+#endif
 #include "gnss_smi_agc.h"
 #include "gnss_passthrough.h"
 #include "gnss_l1.h"          /* 4.9.13: GNSS_L1_TX2_ATTEN_MDB */
@@ -95,6 +99,41 @@ static int      band = GNSS_BAND_DEFAULT;
 
 static void print_band_cover(void);       /* RF profiles section, below */
 
+/* ---- crpa8: smoothing of the weights in the FPGA (AJ_CFG[19:16]) and the fine output gain ----
+ * ramp_k: 0 = off (a new weight set acts at once, as crpa7), 1..15 = time constant 2^(k+7)
+ * samples. The first weights after the bypass go in with AJ_RAMP_FAST so a new jammer is
+ * nulled at once; after that every new set glides in with ramp_k. */
+#define AJ_RAMP_DEFAULT   10       /* 2^17 samples: 4.3 ms at 30.72 MS/s, 2.1 ms at 61.44 MS/s */
+#define AJ_RAMP_FAST       1       /* 256 samples (8 us at 30.72 MS/s) */
+static int      ramp_k = AJ_RAMP_DEFAULT;
+static int      ramp_from_bypass = 1;    /* the committed set is the bypass (all weights 0) */
+static int      ramp_hw;                 /* bitstream has the smoothing (AJ_INFO layout 10) */
+static double   fine_db;                 /* fine output gain on top of the 6 dB make-up shift [dB] */
+static uint32_t gain_q14 = GNSS_PT_AJ_GAIN_ONE;
+
+/* ---- crpa8: the ARM's work per capture in three steps: prepare (here), compute (aj_detect /
+ * aj_compute: pure maths on a copy), finish (here). On Linux the compute step runs on the
+ * second Cortex-A9 core (GNSS_AJ_THREAD) while this thread keeps the console, the capture
+ * and the gain loop going; bare metal runs the three steps in a row as before. */
+#define JOB_DETECT 1
+#define JOB_SOLVE  2
+static uint32_t solve_us_last, solve_us_max, job_gen;
+#ifdef GNSS_AJ_THREAD
+static pthread_mutex_t math_mx = PTHREAD_MUTEX_INITIALIZER;   /* the solver's statistics */
+static pthread_mutex_t job_mx = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t  job_cv = PTHREAD_COND_INITIALIZER;
+static int             job_started, job_pending, job_running, job_done, job_kind, job_rc;
+static uint32_t        job_gen_at, n_busy;
+static XTime           job_now;
+static aj_result_t     job_res;
+static uint32_t        job_buf[2 * AJ_NSAMP];
+#define MATH_LOCK()   pthread_mutex_lock(&math_mx)
+#define MATH_UNLOCK() pthread_mutex_unlock(&math_mx)
+#else
+#define MATH_LOCK()   do { } while(0)
+#define MATH_UNLOCK() do { } while(0)
+#endif
+
 struct aj_event { uint32_t ms; int type; double v1, v2, v3; };
 static struct aj_event ev[AJ_NEV];
 static int      ev_n;
@@ -108,6 +147,14 @@ static XTime us(uint32_t u)
 static uint32_t ms_since(XTime t0, XTime now)
 {
 	return (uint32_t)((uint64_t)(now - t0) * 1000U / COUNTS_PER_SECOND);
+}
+
+static void stats_reset(void)
+{
+	MATH_LOCK();
+	aj_reset();
+	job_gen++;                 /* a compute step still running is from before: its result is dropped */
+	MATH_UNLOCK();
 }
 
 static double db2lin(double db)          /* 10^(db/10) without libm */
@@ -286,17 +333,34 @@ static void commit_bypass(void)
 	 * of its time in (no jammer). commit_weights() loads real weights again on a jammer. */
 	static const int16_t zero_w[AJ_NW] = {0};
 	shift = 0;
+	fine_db = 0.0; gain_q14 = GNSS_PT_AJ_GAIN_ONE;
 	gnss_rxg_set_digital_db(0);
 	blk_thr_set = blk_threshold(0);
-	gnss_pt_write_aj(zero_w, zero_w, GNSS_PT_AJ_CFG_BYPASS | blk_cfg_bit(blk_thr_set), g2_q13(), blk_thr_set);
+	/* crpa8: with smoothing the filter fades out (the weights glide to 0) */
+	gnss_pt_write_aj(zero_w, zero_w, GNSS_PT_AJ_CFG_BYPASS | blk_cfg_bit(blk_thr_set) | GNSS_PT_AJ_CFG_RAMP(ramp_hw ? ramp_k : 0),
+	                 g2_q13(), blk_thr_set, gain_q14);
+	ramp_from_bypass = 1;
 }
 
 static void commit_weights(void)
 {
-	gnss_rxg_set_digital_db(6 * shift);
+	/* crpa8: the first set after the bypass goes in fast (a new jammer is nulled at once),
+	 * every later one glides in with the time constant of gnss_aj_ramp= */
+	int k = !ramp_hw ? 0 : ramp_from_bypass ? (ramp_k ? AJ_RAMP_FAST : 0) : ramp_k;
+	gnss_rxg_set_digital_db(6 * shift + (int)(fine_db + 0.5));
 	blk_thr_set = blk_threshold(1);
-	gnss_pt_write_aj(res.wre, res.wim, GNSS_PT_AJ_CFG_SHIFT(shift) | GNSS_PT_AJ_CFG_WS(res.ws) | blk_cfg_bit(blk_thr_set),
-	                 g2_q13(), blk_thr_set);
+	gnss_pt_write_aj(res.wre, res.wim, GNSS_PT_AJ_CFG_SHIFT(shift) | GNSS_PT_AJ_CFG_WS(res.ws) | blk_cfg_bit(blk_thr_set) |
+	                 GNSS_PT_AJ_CFG_RAMP(k), g2_q13(), blk_thr_set, ramp_hw ? gain_q14 : GNSS_PT_AJ_GAIN_ONE);
+	ramp_from_bypass = 0;
+}
+
+/* crpa8: Q2.14 gain word for a fine gain of db (0 .. 6 dB) */
+static uint32_t gain_word(double db)
+{
+	double g = aj_sqrt(db2lin(db)) * 16384.0 + 0.5;
+	if(g < 1.0) g = 1.0;
+	if(g > 65535.0) g = 65535.0;
+	return (uint32_t)g;
 }
 
 /* ---- DMA --------------------------------------------------------------------- */
@@ -398,8 +462,8 @@ static void print_line(XTime now)
 		console_print("JAMMED  J/N %s dB  suppression %s dB  residual %s dB | ",
 			      f1(res.jn_db), supp_txt(res.supp_db), f1u(res_disp(res.res_db)));
 		print_type();
-		console_print(" | RX %d/%d dB  make-up +%d dB  TX att %s dB | %d solves/s%s\n",
-			      (long)cur_gain(), (long)gnss_rxg_ref(), (long)(6 * shift),
+		console_print(" | RX %d/%d dB  make-up +%s dB  TX att %s dB | %d solves/s%s\n",
+			      (long)cur_gain(), (long)gnss_rxg_ref(), f1u(6.0 * shift + fine_db),
 			      f2u(tx_att_db()), (long)upd_rate, (char*)(aj_frozen ? " FROZEN" : ""));
 	} else {
 		console_print("clear   noise %s LSB^2  coherence %s dB  power J/N %s | RX %d/%d dB"
@@ -418,10 +482,10 @@ static void print_csv(XTime now)
 	if(!csv_hdr) {
 		csv_hdr = 1;
 		console_print("AJCSV,t_s,state,jn_db,coh_db,supp_db,res_db,rx_gain_db,cut_db,"
-			      "makeup_db,tx_att_db,g2_db,rate_per_s,bw_mhz,centre_mhz\n");
+			      "makeup_db,tx_att_db,g2_db,rate_per_s,bw_mhz,centre_mhz,clip_ppm,fine_db\n");
 	}
 	radio(&fs, &lo);
-	console_print("AJCSV,%s,%s,%s,%s,%s,%s,%d,%d,%d,%s,%s,%d,%s,%s\n",
+	console_print("AJCSV,%s,%s,%s,%s,%s,%s,%d,%d,%d,%s,%s,%d,%s,%s,%d,%s\n",
 		      f3u((double)ms_since(t_boot, now) / 1000.0),
 		      (char*)(state == ST_JAMMED ? "JAMMED" : "CLEAR"),
 		      fmt(res.jn_db < -99.0 ? -99.0 : res.jn_db, 1, 0),
@@ -431,7 +495,8 @@ static void print_csv(XTime now)
 		      (long)cur_gain(), (long)cut_db(), (long)(6 * shift),
 		      f2u(tx_att_db()), fmt(aj_db10(g2 * g2), 1, 0),
 		      (long)(state == ST_JAMMED ? upd_rate : det_rate),
-		      fmt(res.bw * (double)fs / 1e6, 1, 0), fmt(res.foff * (double)fs / 1e6, 1, 0));
+		      fmt(res.bw * (double)fs / 1e6, 1, 0), fmt(res.foff * (double)fs / 1e6, 1, 0),
+		      (long)gnss_rxg_clip_ppm(), f2u(fine_db));
 }
 
 /* 4.9.6: the CSV header and one line, whatever gnss_aj_csv= says (for gnss_log.c); leaves the periodic CSV alone. */
@@ -660,7 +725,7 @@ static void enter_jammed(XTime now)
 		rx2n = 1.0;
 		g2_src = 2;
 	}
-	aj_reset();
+	stats_reset();
 	res.sig2_prev = -1.0;
 	gain_seen = gnss_rxg_changes();
 	aj_sweep_reset(&sweep);
@@ -674,7 +739,7 @@ static void leave_jammed(XTime now)
 	on_cnt = 0;
 	clear_t0 = now;
 	if(!aj_frozen) commit_bypass();
-	aj_reset();
+	stats_reset();
 	if(!jam_announced) announce(now);
 	if(!jam_silent && ev_print(now)) {
 		console_print("\n");
@@ -760,15 +825,38 @@ static int bg_track(XTime now, int jammed)
 	return 0;
 }
 
-/* CLEAR: detection only. Returns 1 when the jammer is confirmed. */
-static int detect_capture(XTime now)
+/* crpa8: the compute step (pure maths on buf and r; on Linux in the worker thread) */
+static int run_math(int kind, const uint32_t *buf, aj_result_t *r)
 {
-	int cut = cut_db(), why = 0, quiet;
+	XTime t0, t1;
+	uint32_t us_;
+	int rc;
+	MATH_LOCK();
+	XTime_GetTime(&t0);
+	rc = (kind == JOB_DETECT) ? aj_detect(buf, AJ_NSAMP, r) : aj_compute(buf, AJ_NSAMP, r);
+	XTime_GetTime(&t1);
+	us_ = (uint32_t)((uint64_t)(t1 - t0) * 1000000U / COUNTS_PER_SECOND);
+	if(kind == JOB_SOLVE) {                 /* read under the same lock (gnss_report?) */
+		solve_us_last = us_;
+		if(us_ > solve_us_max) solve_us_max = us_;
+	}
+	MATH_UNLOCK();
+	return rc;
+}
 
+static void prep_detect(void)
+{
 	res.noise_ref = noise_now();
 	res.rho_noise_re = rho_n_re;
 	res.rho_noise_im = rho_n_im;
-	if(aj_detect(GNSS_AJ_BUF_PTR, AJ_NSAMP, &res) != 0 || !res.ok) {
+}
+
+/* CLEAR: detection only. Returns 1 when the jammer is confirmed. */
+static int finish_detect(XTime now, int rc)
+{
+	int cut = cut_db(), why = 0, quiet;
+
+	if(rc != 0 || !res.ok) {
 		n_fail++;
 		return 0;
 	}
@@ -854,16 +942,20 @@ static void jammed_state(XTime now)
 	}
 }
 
-/* JAMMED: solve this capture and commit the weights. */
-static void solve_capture(XTime now)
+static int detect_capture(XTime now)
 {
-	int want, rc;
+	prep_detect();
+	return finish_detect(now, run_math(JOB_DETECT, GNSS_AJ_BUF_PTR, &res));
+}
 
+/* JAMMED: solve this capture and commit the weights. */
+static void prep_solve(XTime now)
+{
 	if(gnss_rxg_changes() != gain_seen) {
 		/* the RX gain stepped since the last solve: the two channels' phase
 		 * can step differently, so do not average across it */
 		gain_seen = gnss_rxg_changes();
-		aj_reset();
+		stats_reset();
 		res.sig2_prev = -1.0;
 	}
 	res.mode = aj_mode;
@@ -876,7 +968,12 @@ static void solve_capture(XTime now)
 	res.gate = pulsed(now);                         /* a pulsed jammer: skip the blocks in its gaps */
 	res.gate_coh_db = AJ_OFF_COH_DB;
 	res.gate_pwr = 1.0 + db2lin(AJ_OFF_DB);
-	rc = aj_compute(GNSS_AJ_BUF_PTR, AJ_NSAMP, &res);
+}
+
+static void finish_solve(XTime now, int rc)
+{
+	int want;
+
 	if(rc == 1 && res.gated) {
 		n_gate++;
 		res_valid = 1;
@@ -899,10 +996,93 @@ static void solve_capture(XTime now)
 	want = aj_makeup_shift(cut_db(), res.res_db + aj_db10(1.0 + res.wn2), sh_max);
 	if(want < shift)      shift = want;
 	else if(want > shift) shift++;
+	/* crpa8: the rest of the RX gain cut (0 .. 6 dB) through the fine gain, same headroom rule */
+	fine_db = ramp_hw ? aj_makeup_fine_db(cut_db(), res.res_db + aj_db10(1.0 + res.wn2), shift) : 0.0;
+	gain_q14 = gain_word(fine_db);
 	if(!aj_frozen)
 		commit_weights();
 	jammed_state(now);
 }
+
+static void solve_capture(XTime now)
+{
+	prep_solve(now);
+	finish_solve(now, run_math(JOB_SOLVE, GNSS_AJ_BUF_PTR, &res));
+}
+
+#ifdef GNSS_AJ_THREAD
+/* ---- crpa8: the worker thread (second core) ------------------------------------------ */
+static void *job_worker(void *arg)
+{
+	(void)arg;
+	for(;;) {
+		int kind;
+		pthread_mutex_lock(&job_mx);
+		while(!job_pending) pthread_cond_wait(&job_cv, &job_mx);
+		job_pending = 0; job_running = 1; kind = job_kind;
+		pthread_mutex_unlock(&job_mx);
+		{
+			int rc = run_math(kind, job_buf, &job_res);
+			pthread_mutex_lock(&job_mx);
+			job_rc = rc; job_running = 0; job_done = 1;
+			pthread_mutex_unlock(&job_mx);
+		}
+	}
+	return 0;
+}
+
+static int job_idle(void)
+{
+	int idle;
+	pthread_mutex_lock(&job_mx);
+	idle = !job_pending && !job_running && !job_done;
+	pthread_mutex_unlock(&job_mx);
+	return idle;
+}
+
+/* hand res (prepared) and the capture in job_buf to the worker */
+static void job_start(int kind, XTime now)
+{
+	if(!job_started) {
+		pthread_t t;
+		if(pthread_create(&t, 0, job_worker, 0) != 0) {      /* no thread: do it here */
+			if(kind == JOB_DETECT) { if(finish_detect(now, run_math(JOB_DETECT, job_buf, &res))) { prep_solve(now); finish_solve(now, run_math(JOB_SOLVE, job_buf, &res)); } }
+			else finish_solve(now, run_math(JOB_SOLVE, job_buf, &res));
+			return;
+		}
+		pthread_detach(t);
+		job_started = 1;
+	}
+	pthread_mutex_lock(&job_mx);
+	job_res = res;
+	job_kind = kind; job_now = now; job_gen_at = job_gen;
+	job_pending = 1;
+	pthread_cond_signal(&job_cv);
+	pthread_mutex_unlock(&job_mx);
+}
+
+/* a finished compute step: take its result and do the finish step here */
+static void job_poll(void)
+{
+	int done, rc, kind;
+	XTime now;
+	pthread_mutex_lock(&job_mx);
+	done = job_done; rc = job_rc; kind = job_kind; now = job_now;
+	if(done) { job_done = 0; }
+	pthread_mutex_unlock(&job_mx);
+	if(!done) return;
+	if(job_gen_at != job_gen || !aj_on) { n_skip++; return; }   /* reset / band change / off meanwhile */
+	res = job_res;
+	if(kind == JOB_DETECT) {
+		if(finish_detect(now, rc)) {                 /* confirmed: solve the same capture */
+			prep_solve(now);
+			job_start(JOB_SOLVE, now);
+		}
+	} else {
+		finish_solve(now, rc);
+	}
+}
+#endif
 
 /* Rewrite the threshold (and the enable) without new weights. */
 static void blk_refresh(void)
@@ -987,6 +1167,9 @@ void gnss_aj_poll(void)
 
 	if(!aj_on || !rx_dmac || !ad9361_phy) return;
 	if(gnss_txdma_is_running()) return;       /* the DDR replay owns the DMA */
+#ifdef GNSS_AJ_THREAD
+	job_poll();
+#endif
 	XTime_GetTime(&now);
 
 	if(!dma_busy) {
@@ -1011,6 +1194,15 @@ void gnss_aj_poll(void)
 	}
 	Xil_DCacheInvalidateRange((uintptr_t)GNSS_AJ_BUF_ADDR, AJ_BYTES);
 
+#ifdef GNSS_AJ_THREAD
+	if(!job_idle()) {
+		n_busy++;                                 /* the second core is still solving the last one */
+	} else {
+		memcpy(job_buf, (const void *)GNSS_AJ_BUF_PTR, sizeof(job_buf));
+		if(state == ST_CLEAR) { prep_detect(); job_start(JOB_DETECT, now); }
+		else                  { prep_solve(now); job_start(JOB_SOLVE, now); }
+	}
+#else
 	if(state == ST_CLEAR) {
 		/* the capture that confirmed the jammer is solved straight away */
 		if(detect_capture(now))
@@ -1018,6 +1210,7 @@ void gnss_aj_poll(void)
 	} else {
 		solve_capture(now);
 	}
+#endif
 
 	XTime_GetTime(&now);
 	if(now - t_rate >= us(1000000U)) {
@@ -1054,13 +1247,14 @@ void gnss_aj_init(void)
 	keys_seen = console_key_count();
 	t_key = now - us(AJ_KEY_QUIET_US);
 	res.sig2_prev = -1.0;
-	aj_reset();
+	stats_reset();
 	/* The weight scale (AJ_CFG[14:12]) exists from bitstream 4.4 (AJ_INFO layout 3).
 	 * An older bitstream would multiply the filter by 2^ws, so it is never used there. */
 	ws_hw = ((gnss_pt_read(GNSS_PT_REG_AJ_INFO) & 0xFFU) >= 3U);
 	aj_set_max_ws(ws_hw ? AJ_MAXWS : 0);
 	sh_max = ((gnss_pt_read(GNSS_PT_REG_AJ_INFO) & 0xFFU) >= 4U) ? AJ_MAXSH : 4;
 	blk_hw = ((gnss_pt_read(GNSS_PT_REG_AJ_INFO) & 0xFFU) >= GNSS_PT_AJ_LAYOUT_BLANK);
+	ramp_hw = ((gnss_pt_read(GNSS_PT_REG_AJ_INFO) & 0xFFU) == GNSS_PT_AJ_LAYOUT_RAMP);
 	blk_seeded = 0;
 	if(!blk_hw)
 		console_print("[AJ] NOTE: the bitstream has no pulse blanker (AJ_INFO layout %d, needs 5 = bitstream 4.6): pulsed\n"
@@ -1103,6 +1297,13 @@ void gnss_aj_enable(int on)
 					      (long)((info >> 24) & 0xFFU), (long)AJ_NT, (unsigned long)info);
 				return;
 			}
+			if((info & 0xFFU) != GNSS_PT_AJ_LAYOUT_RAMP) {
+				console_print("gnss_aj: the bitstream's AJ_INFO layout is %d, this firmware (crpa8) needs %d: weight\n"
+					      "         smoothing, AJ_GAIN and the clip counters (AJ_INFO 0x%x). Anti-jam NOT started:\n"
+					      "         rebuild the WHOLE project (./build.sh reset, then the full build) so they match.\n",
+					      (long)(info & 0xFFU), (long)GNSS_PT_AJ_LAYOUT_RAMP, (unsigned long)info);
+				return;
+			}
 			if(((info >> 16) & 0xFFU) != (uint32_t)AJ_REF) {
 				console_print("gnss_aj: the bitstream's reference tap is at delay %d, this firmware needs %d (AJ_INFO 0x%x).\n"
 					      "         Anti-jam NOT started: rebuild the WHOLE project (./build.sh reset && ./build.sh all-baremetal) so the\n"
@@ -1122,7 +1323,7 @@ void gnss_aj_enable(int on)
 			state = ST_CLEAR;
 			on_cnt = 0;
 			clear_t0 = now;
-			aj_reset();
+			stats_reset();
 			res.sig2_prev = -1.0;
 			commit_bypass();                 /* TX1 = RX1 until a jammer */
 			add_event(now, EV_START, 0.0, 0.0, 0.0);
@@ -1161,7 +1362,7 @@ void gnss_aj_set_mode(int mode)
 {
 	if(mode < 0 || mode >= AJ_NMODES) return;
 	aj_mode = mode;
-	aj_reset();                   /* the old taps are not comparable */
+	stats_reset();                   /* the old taps are not comparable */
 }
 
 void gnss_aj_set_sweep(int on)
@@ -1187,17 +1388,54 @@ void gnss_aj_set_log(int seconds)
 }
 
 /* 4.9.9: gnss_aj_avg= : manual averaging factor, or auto */
+/* ---- crpa8: smoothing of the weights / gain (gnss_aj_ramp=) ------------------------------- */
+void gnss_aj_ramp_line(void)
+{
+	uint32_t fs; uint64_t lo;
+	radio(&fs, &lo);
+	if(!ramp_hw)
+		console_print("smoothing     : not in this bitstream (needs AJ_INFO layout 10)\n");
+	else if(ramp_k == 0)
+		console_print("smoothing     : OFF (gnss_aj_ramp=0): every new weight set acts at once; fine gain +%s dB\n", f2u(fine_db));
+	else
+		console_print("smoothing     : gnss_aj_ramp=%d: time constant 2^%d = %d samples = %s ms at %s MS/s; fine gain +%s dB\n",
+			      (long)ramp_k, (long)(ramp_k + 7), (long)(1L << (ramp_k + 7)),
+			      f2u(fs ? (double)(1L << (ramp_k + 7)) * 1000.0 / (double)fs : 0.0), f2u((double)fs / 1e6), f2u(fine_db));
+}
+
+int gnss_aj_ramp(void) { return ramp_k; }
+
+void gnss_aj_set_ramp(int k)
+{
+	if(k < 0) k = 0;
+	if(k > 15) k = 15;
+	ramp_k = k;
+	blk_refresh();                 /* commit the new time constant now (state unchanged) */
+	gnss_aj_ramp_line();
+}
+
 void gnss_aj_set_avg(double v, int automatic)
 {
+	MATH_LOCK();
 	if(automatic) aj_set_av_auto(); else aj_set_av(v);
-	console_print("GNSS_AJ averaging factor: %s\n", aj_av_is_auto() ? "AUTO (adapted from the solves)" : "MANUAL");
+	MATH_UNLOCK();
+	MATH_LOCK();
+	{
+		int is_auto = aj_av_is_auto();
+		MATH_UNLOCK();
+		console_print("GNSS_AJ averaging factor: %s\n", is_auto ? "AUTO (adapted from the solves)" : "MANUAL");
+	}
 	gnss_aj_avg_print();
 }
 void gnss_aj_avg_print(void)
 {
+	int is_auto;
+	double av;
+	MATH_LOCK();
+	is_auto = aj_av_is_auto(); av = aj_av_value();
+	MATH_UNLOCK();
 	console_print("averaging     : %s, factor %s now (memory about %s solves; 0.5 = 2 solves, 0.9 = 10)\n",
-		      aj_av_is_auto() ? "AUTO" : "MANUAL", fmt(aj_av_value(), 3, 0),
-		      fmt(1.0 / (1.0 - aj_av_value()), 1, 0));
+		      is_auto ? "AUTO" : "MANUAL", fmt(av, 3, 0), fmt(1.0 / (1.0 - av), 1, 0));
 }
 
 void gnss_aj_set_csv(int ms)
@@ -1347,6 +1585,21 @@ void gnss_aj_report(void)
 			      (unsigned long)gnss_pt_read(GNSS_PT_REG_AJ_BLK_BURSTS), (unsigned long)n_gate,
 			      (char*)(pulsed(now) ? "SEEN" : "not seen"),
 			      (long)(gnss_pt_read(GNSS_PT_REG_AJ_RX_PEAK) & 0xFFFFU));
+	gnss_aj_ramp_line();
+	console_print("adc clipping  : %s (RX1 %d, RX2 %d samples clipped since start; AJ_CLIP1/2)\n",
+		      (char*)gnss_rxg_clip_txt(), (long)gnss_pt_read(GNSS_PT_REG_AJ_CLIP1), (long)gnss_pt_read(GNSS_PT_REG_AJ_CLIP2));
+	{
+		uint32_t sl, sm;
+		MATH_LOCK();
+		sl = solve_us_last; sm = solve_us_max;
+		MATH_UNLOCK();
+#ifdef GNSS_AJ_THREAD
+		console_print("solve time    : %s ms last, %s ms max per capture (second core; %d captures skipped while busy)\n",
+			      f2u((double)sl / 1000.0), f2u((double)sm / 1000.0), (long)n_busy);
+#else
+		console_print("solve time    : %s ms last, %s ms max per capture\n", f2u((double)sl / 1000.0), f2u((double)sm / 1000.0));
+#endif
+	}
 	console_print("sweep         : %s (gnss_aj_sweep=%d)\n",
 		      (char*)(!sweep_en ? "detector OFF" : sweep_avg > 0.0 ? "MOVING JAMMER (chirp): long memory ON, 0.98 = about 50 solves" : "none seen (fixed or fast jammer, memory 0.5)"),
 		      sweep_en);
@@ -1364,7 +1617,7 @@ void gnss_aj_report(void)
 		console_print("powers        : RX1 %s, RX2 %s LSB^2 (DC removed)\n", f1u(res.p1), f1u(res.p2));
 		{
 			double d1, d2;
-			aj_last_dc(&d1, &d2);
+			MATH_LOCK(); aj_last_dc(&d1, &d2); MATH_UNLOCK();
 			console_print("dc offset     : RX1 %s LSB, RX2 %s LSB (removed before detection)%s\n", f1u(d1), f1u(d2),
 				      (char*)((nf0 > 0.0 && d1 * d1 > noise_now()) ?
 					      "\n                LARGE: above the noise; AD9361 DC calibration/tracking not removing it" : ""));
@@ -1668,7 +1921,7 @@ int gnss_band_set(int b)
 	rho_n_re = rho_n_im = 0.0;
 	ratio12 = -1.0; g2 = 1.0; rx2n = 1.0; g2_src = 0;
 	res.sig2_prev = -1.0;
-	aj_reset();
+	stats_reset();
 	return r ? -1 : 0;
 }
 
@@ -1690,7 +1943,7 @@ void gnss_aj_radio_manual(void)
 	rho_n_re = rho_n_im = 0.0;
 	ratio12 = -1.0; g2 = 1.0; rx2n = 1.0; g2_src = 0;
 	res.sig2_prev = -1.0;
-	aj_reset();
+	stats_reset();
 }
 
 /* ---- radio= / radio?: every value filled in by hand ----------------------------------- */

@@ -12,7 +12,9 @@
 #       jammer, bypass), 4 (CW jammer), 5 (jammer + reflection), 6 (50 dB
 #       jammer with I/Q imbalance), 7 (RX2 25 dB weaker: normalisation) and
 #       8 (60 dB jammer with I/Q imbalance), 9 and 10 (CW on top of the GPS signal,
-#       62 and 68 dB above the noise: the weight scale of v4.4).
+#       62 and 68 dB above the noise: the weight scale of v4.4), 11-14 (field cases,
+#       make-up rule), 23 (crpa8: smoothing and fine gain bit for bit) and 24 (crpa8:
+#       what the smoothing does to a null and to the gain).
 #       The weights come from the firmware's solver
 #       (Source/Firmware/app_gnss_e310/gnss_aj_math.c), compiled into the
 #       testbench. Each scenario needs a freshly reset core, so each is a
@@ -40,7 +42,7 @@
 #    SMI_PI_FW_DIR=<dir>  directory holding gnss_aj_math.c/.h
 #
 #  OUTPUT
-#    $GNSS_CRPA_IP_REPO/smi_pi/component.xml, VLNV antsdr:gnss:smi_pi:2.5 (4.9.13/4.9.14, here 10 + 10 taps; 2.4 = 4.9.12 and older)
+#    $GNSS_CRPA_IP_REPO/smi_pi/component.xml, VLNV antsdr:gnss:smi_pi:2.7 (crpa8: 10 + 10 taps, weight smoothing, fine gain; 2.5 = 4.9.13/4.9.14 and crpa1-4, crpa7; 2.6 = crpa5)
 #    $GNSS_CRPA_IP_REPO/smi_pi/smi_pi_csynth.rpt
 #
 #  SUCCESS MARKER
@@ -102,7 +104,7 @@ set_clock_uncertainty $clk_uncertainty
 
 # ---- 1 C simulation -------------------------------------------------------------
 if {![info exists ::env(SMI_PI_SKIP_CSIM)] || $::env(SMI_PI_SKIP_CSIM) eq "0"} {
-  foreach scen {1 2 3 4 5 6 7 8 9 10 11 12 13 14} {
+  foreach scen {1 2 3 4 5 6 7 8 9 10 11 12 13 14 23 24} {
     puts "SMI_PI_HLS: csim scenario $scen"
     if {[catch {csim_design -argv $scen} err]} {
       puts "SMI_PI_HLS: FAIL - C simulation scenario $scen: $err"
@@ -143,9 +145,9 @@ if {$ii eq "" || $ii > $pipeline_ii} {
 
 # ---- 4 package as a Vivado IP ------------------------------------------------------
 export_design -format ip_catalog -rtl verilog \
-  -vendor antsdr -library gnss -version 2.5 -ipname smi_pi \
+  -vendor antsdr -library gnss -version 2.7 -ipname smi_pi \
   -display_name "SMI power inversion, space-time" \
-  -description "Two-element space-time SMI power-inversion anti-jam filter (Vitis HLS): RX2 normalised to RX1 at the input, 10 taps on RX1 (reference tap at delay 5 fixed at 1), 10 on RX2 and 2 image (conjugate) taps; real RX2 gain g2, bypass and output make-up gain; weights from the ARM via gnss_passthrough. s_axis_x = RX1 and RX2 IQ, m_axis_y = filtered RX1."
+  -description "Two-element space-time SMI power-inversion anti-jam filter (Vitis HLS): RX2 normalised to RX1 at the input, 10 taps on RX1 (reference tap at delay 5 fixed at 1), 10 on RX2 and 2 image (conjugate) taps; real RX2 gain g2, bypass, output make-up gain and fine gain, weights and gain smoothed (cfg[19:16]); weights from the ARM via gnss_passthrough. s_axis_x = RX1 and RX2 IQ, m_axis_y = filtered RX1."
 
 set impl_dir [file join $work smi_pi_hls sol impl]
 set ip_src   [file join $impl_dir ip]
@@ -170,6 +172,6 @@ file delete -force $out_ip
 file copy -force $ip_src $out_ip
 if {[file exists $rpt_txt]} { file copy -force $rpt_txt $out_ip }
 
-puts "SMI_PI_HLS: IP antsdr:gnss:smi_pi:2.5 -> $out_ip"
+puts "SMI_PI_HLS: IP antsdr:gnss:smi_pi:2.7 -> $out_ip"
 puts "SMI_PI_HLS: PASS"
 exit 0

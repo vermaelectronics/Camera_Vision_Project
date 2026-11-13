@@ -74,7 +74,7 @@
  * AJ_W, AJ_CFG, AJ_NORM and AJ_WC are SHADOW copies; a write to AJ_COMMIT
  * hands all of them to the filter in one clock. AJ_COMMIT reads back a commit
  * counter. */
-#define GNSS_PT_REG_AJ_W(k)         (0x400U + ((k) * 4U)) /* RW, k = 0..63 (4.9: 32 taps per channel) */
+#define GNSS_PT_REG_AJ_W(k)         (0x400U + ((k) * 4U)) /* RW, k = 0..2*AJ_NT-1 (crpa8: 20 words; the rest reads 0) */
 #define GNSS_PT_REG_AJ_COMMIT       0x180U  /* W: commit, R: count            */
 #define GNSS_PT_REG_AJ_INFO         0x184U  /* RO 0x10040C06                  */
 #define GNSS_PT_REG_AJ_CFG          0x188U  /* RW [0] bypass, [10:8] shift, [14:12] weight scale */
@@ -87,7 +87,14 @@
 #define GNSS_PT_REG_AJ_BLK_COUNT    0x1A4U  /* RO samples blanked since the counter clear */
 #define GNSS_PT_REG_AJ_BLK_BURSTS   0x1A8U  /* RO bursts blanked since the counter clear  */
 #define GNSS_PT_REG_AJ_RX_PEAK      0x1ACU  /* RO [15:0] largest |I|,|Q| of RX1/RX2 in the last window, [31:16] window counter */
-#define GNSS_PT_AJ_INFO_EXPECTED    0x0A050C07U   /* crpa7: 10 taps per channel, reference delay 5, layout 7 (no CW notch) */   /* layout 6 = v4.7 (reference delay 4); 5 = v4.6 (pulse blanker, peak hold); 4 = v4.5 */
+#define GNSS_PT_AJ_INFO_EXPECTED    0x0A050C0AU   /* crpa8: 10 taps per channel, reference delay 5, layout 10 (smoothing, AJ_GAIN, AJ_CLIP1/2) */
+#define GNSS_PT_AJ_LAYOUT_RAMP      10U           /* crpa8: AJ_CFG[19:16] smoothing, AJ_GAIN, AJ_CLIP1/2 */
+#define GNSS_PT_REG_AJ_GAIN         0x1B0U  /* RW shadow (crpa8): fine output gain [15:0] Q2.14, 1.0 = 0x4000 */
+#define GNSS_PT_REG_AJ_GAIN_ACT     0x1B4U  /* RO committed gain                  */
+#define GNSS_PT_REG_AJ_CLIP1        0x1B8U  /* RO RX1 samples at full scale (wraps) */
+#define GNSS_PT_REG_AJ_CLIP2        0x1BCU  /* RO RX2 samples at full scale (wraps) */
+#define GNSS_PT_AJ_GAIN_ONE         0x4000U
+#define GNSS_PT_AJ_CFG_RAMP(k)      ((uint32_t)((k) & 15) << 16)  /* crpa8: smoothing, time constant 2^(k+7) samples */   /* layout 6 = v4.7 (reference delay 4); 5 = v4.6 (pulse blanker, peak hold); 4 = v4.5 */
 #define GNSS_PT_AJ_LAYOUT_BLANK     5U            /* first layout with the blanker and the peak hold */
 #define GNSS_PT_AJ_CFG_BLANK        0x8000U       /* AJ_CFG[15]: blanker enable (layout 5) */
 #define GNSS_PT_BLK_THR_OFF         0xFFFFFFFFU   /* threshold that never triggers */
@@ -182,8 +189,8 @@ int      gnss_pt_tx2_on(void);
  * (Q3.13 real part; imaginary 0), and commits them in one go: the filter
  * never runs a half-written set. re/im may be NULL to keep the weights that
  * are in the shadow registers (bypass switching). */
-void     gnss_pt_write_aj(const int16_t *re, const int16_t *im,
-                          uint32_t cfg, int32_t g2_q13, uint32_t blk_thr);
+void     gnss_pt_write_aj(const int16_t *re, const int16_t *im,  /* crpa8: + gain (AJ_GAIN, Q2.14) */
+                          uint32_t cfg, int32_t g2_q13, uint32_t blk_thr, uint32_t gain);
 
 /* Snapshot of everything worth observing at runtime (requirement 58). */
 typedef struct {

@@ -148,6 +148,8 @@ command cmd_list[] = {
 	{"gnss_aj_events=", "1 = print JAMMER ON/NULLED/OFF events (default), 0 = console silent (gnss_report? still lists them).", "gnss_aj_events=0", set_gnss_aj_events},
 	{"gnss_aj_avg=", "Averaging factor of the STAP solver by hand: 0.05 .. 0.99 (0.5 = 2 solves of memory, 0.9 = 10); 0 = automatic (adapted from the solves).", "gnss_aj_avg=0.5", set_gnss_aj_avg},
 	{"gnss_aj_avg?", "Shows whether the averaging factor is manual or automatic, and its value.", "", get_gnss_aj_avg},
+	{"gnss_aj_ramp=", "crpa8: smoothing of new weights in the FPGA, 0 = off, 1..15 = time constant 2^(k+7) samples (10 = 4.3 ms at 30.72 MS/s, default; saved).", "gnss_aj_ramp=10", set_gnss_aj_ramp},
+	{"gnss_aj_ramp?", "crpa8: smoothing setting and time constant, fine output gain.", "", get_gnss_aj_ramp},
 	{"gnss_aj_csv=", "CSV line (AJCSV,...) every N ms, 100 to 60000; 0 = off (default).", "gnss_aj_csv=0", set_gnss_aj_csv},
 	{"gnss_aj_blank=", "Pulse blanker (bitstream 4.6): 0 = off (default since 4.9.3), 1 = automatic, 2 = always on.", "gnss_aj_blank=0", set_gnss_aj_blank},
 	{"gnss_aj_blank_db=", "Pulse blanker threshold above the output noise [dB], 3..30, default 7.", "gnss_aj_blank_db=7", set_gnss_aj_blank_db},
@@ -432,7 +434,24 @@ void set_gnss_aj_avg(double* param, char param_no)
 		return;
 	}
 	gnss_aj_set_avg(param[0], param[0] == 0.0);
-	gnss_settings_save(-1, (int)(param[0] * 1000.0 + 0.5));   /* crpa5 */
+	gnss_settings_save(-1, (int)(param[0] * 1000.0 + 0.5), -1);   /* crpa5 */
+}
+
+/* crpa8: smoothing of the weights / gain in the FPGA */
+void set_gnss_aj_ramp(double* param, char param_no)
+{
+	if(param_no < 1 || param[0] < 0.0 || param[0] > 15.0) {
+		console_print("gnss_aj_ramp= needs 0 (off) or 1..15 (time constant 2^(k+7) samples). Example: gnss_aj_ramp=10\n");
+		return;
+	}
+	gnss_aj_set_ramp((int)param[0]);
+	gnss_settings_save(-1, -1, (int)param[0]);
+}
+
+void get_gnss_aj_ramp(double* param, char param_no)
+{
+	(void)param; (void)param_no;
+	gnss_aj_ramp_line();
 }
 
 void get_gnss_aj_avg(double* param, char param_no)
@@ -622,7 +641,7 @@ void set_gnss_rx_agc(double* param, char param_no)
 	}
 	gnss_rxg_set_mode((int)param[0]);
 	gnss_rxg_print();
-	gnss_settings_save((int)param[0], -1);   /* crpa5 */
+	gnss_settings_save((int)param[0], -1, -1);   /* crpa5 */
 }
 
 /**************************************************************************//***

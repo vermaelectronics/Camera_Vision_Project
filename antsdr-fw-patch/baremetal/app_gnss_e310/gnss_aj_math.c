@@ -480,6 +480,16 @@ double aj_adc_excess_db(double jn_db)
 	return aj_db10(1.0 + x);
 }
 
+double aj_makeup_fine_db(int cut_db, double out_db, int shift)
+{
+	double want = (double)cut_db, safe = (double)cut_db - (out_db > 0.0 ? out_db : 0.0) + AJ_OUT_HEADROOM_DB, f;
+	if(cut_db <= 0) return 0.0;
+	f = (want < safe ? want : safe) - 6.0 * (double)shift;
+	if(f < 0.0) f = 0.0;
+	if(f > 5.99) f = 5.99;
+	return f;
+}
+
 int aj_makeup_shift(int cut_db, double out_db, int max_shift)
 {
 	/* Output relative to the clean level, in dB: -cut + 6 s + out_db. The target is

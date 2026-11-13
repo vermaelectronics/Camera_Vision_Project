@@ -236,6 +236,9 @@ void aj_reset(void);
  * noise (at the present gain, 0 = nothing but noise): restores the clean output level,
  * 6 dB per step, but never leaves the output more than AJ_OUT_HEADROOM_DB above it. */
 int  aj_makeup_shift(int cut_db, double out_db, int max_shift);
+/* crpa8: the rest of the make-up in dB (0 .. 5.99) on top of 6 x shift, by the same rule:
+ * restore the RX gain cut, never more than AJ_OUT_HEADROOM_DB above the clean level. */
+double aj_makeup_fine_db(int cut_db, double out_db, int shift);
 /* Expected excess of the receiver's noise floor, in dB, from the 12-bit ADC's own
  * quantisation noise when a jammer jn_db above the noise has to be kept off full scale
  * (about 0 below J/N 54, +1.8 dB at 61, +4 dB at 66, +8 dB at 71). */

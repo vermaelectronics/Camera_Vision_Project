@@ -413,7 +413,7 @@ static void info_pl(void)
     console_print("   When a jammer appears the ARM computes the %d weights from\n", (long)AJ_MAXDIM);
     console_print("   %d-sample DMA captures of both channels (gnss_aj.c), a few\n", (long)AJ_NSAMP);
     console_print("   hundred times a second, and commits weights, bypass, make-up\n");
-    console_print("   gain and g2 all at once (weights 0x400-0x4FC, the rest 0x180-0x194, AJ_COMMIT 0x180).\n");
+    console_print("   gain and g2 all at once (weights 0x400-0x44C, the rest 0x180-0x1B0, AJ_COMMIT 0x180).\n");
     console_print("   CONTROL[5] puts it on TX1. TX2 carries a copy of the TX1 output\n");
     console_print("   (never raw RX2) and is MUTED unless gnss_tx2=1 (4.9.14).\n");
     rule();
@@ -579,7 +579,7 @@ static void info_registers(void)
     console_print("   0x34  TX_COUNT_CH1    RO\n");
     console_print("   0x38  RX_SNAPSHOT_CH1 RO\n");
     console_print("   0x40  CRPA_COEF0..15  RW  0x40-0x7C, stored but unused\n");
-    console_print("   0x400 AJ_W0..63       RW  SMI-PI weights (shadow), Q3.12 (4.9)\n");
+    console_print("   0x400 AJ_W0..19       RW  SMI-PI weights (shadow), Q3.12: 0..9 RX1, 10..19 RX2 (crpa8)\n");
     console_print("                             {imag, real}; 0-15 RX1, 16-31 RX2\n");
     console_print("   0x180 AJ_COMMIT       W/R write: all AJ_* -> filter; read: count\n");
     console_print("   0x184 AJ_INFO         RO  0x20040C07 (32 taps, ref 4, Q3.12, v4.9)\n");
@@ -590,6 +590,11 @@ static void info_registers(void)
     console_print("   0x19C AJ_BLK_THR      RW  pulse blanker threshold (shadow; AJ_CFG[15] = enable), 0x1A0 active\n");
     console_print("   0x1A4 AJ_BLK_COUNT    RO  samples blanked,  0x1A8 AJ_BLK_BURSTS  RO  bursts blanked\n");
     console_print("   0x1AC AJ_RX_PEAK      RO  [15:0] RX peak of the last 8.5 ms window, [31:16] window counter\n");
+    console_print("   0x1B0 AJ_GAIN         RW  fine output gain (shadow), Q2.14, 1.0 = 0x4000 (crpa8)\n");
+    console_print("   0x1B4 AJ_GAIN_ACT     RO  committed fine gain\n");
+    console_print("   0x1B8 AJ_CLIP1        RO  RX1 samples at ADC full scale (wraps)\n");
+    console_print("   0x1BC AJ_CLIP2        RO  RX2 samples at ADC full scale (wraps)\n");
+    console_print("   AJ_CFG[19:16]             weight / gain smoothing k: 0 off, 1..15 = 2^(k+7) samples\n");
     rule();
     console_print(" STATUS BITS [2] AND [3] ARE THE IMPORTANT ONES.\n");
     console_print("   They are axi_ad9361's read-back of (dac_data_sel == 4'h2),\n");

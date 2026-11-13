@@ -7,8 +7,9 @@ CC      ?= gcc
 CFLAGS  ?= -O2
 GC_CFLAGS := -std=gnu99 -D_GNU_SOURCE -Wall -Wno-unused-function -Wno-pointer-sign \
              -Wno-unused-but-set-variable -DGNSS_LINUX -DGNSS_LOG_SD \
-             -Isrc -Ilinux -include linux/lx_force.h
-GC_LIBS := -lm
+             -Isrc -Ilinux -include linux/lx_force.h \
+             -DGNSS_AJ_THREAD
+GC_LIBS := -lm -lpthread
 ifeq ($(NO_LIBIIO),1)
 GC_CFLAGS += -DGNSS_CRPA_NO_LIBIIO
 else

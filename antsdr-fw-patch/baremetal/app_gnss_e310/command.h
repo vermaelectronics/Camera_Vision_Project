@@ -261,6 +261,8 @@ void set_gnss_smi(double* param, char param_no);
 void set_gnss_smi_freeze(double* param, char param_no);
 void get_gnss_aj(double* param, char param_no);
 void get_gnss_report(double* param, char param_no);
+void set_gnss_aj_ramp(double* param, char param_no);
+void get_gnss_aj_ramp(double* param, char param_no);
 void set_gnss_aj_log(double* param, char param_no);
 void set_gnss_aj_events(double* param, char param_no);
 void set_gnss_aj_csv(double* param, char param_no);

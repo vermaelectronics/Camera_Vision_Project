@@ -1,5 +1,5 @@
 // ============================================================================
-//  smi_pi.cpp  --  space-time SMI power inversion core (SMI-PI v4.4; antsdr-fw-patch crpa7: 10 + 10 taps)
+//  smi_pi.cpp  --  space-time SMI power inversion core (SMI-PI v4.4; antsdr-fw-patch crpa8: 10 + 10 taps, weight smoothing, fine gain)
 //  ANTSDR E310 V1 / GNSS CRPA project, Vitis HLS 2023.2
 //
 //  PIPELINE (one sample pair per clock)
@@ -29,7 +29,8 @@
 //       one conjugate tap per channel cancels it (+0.2 dB and +1.4 dB). The
 //       satellites have no image partner in the band, so the taps leave them
 //       alone.
-//    3. BYPASS                cfg[0] = 1: y[n] = x1[n-R], no weights at all.
+//    3. BYPASS                cfg[0] = 1: y[n] = x1[n-R] (crpa8: all weights 0, so with
+//       smoothing on the filter fades out instead of switching off).
 //       The firmware keeps the filter bypassed while there is no jammer and
 //       switches it in when one appears. Same SMI_REF-sample delay in both modes,
 //       so switching never shifts the satellites' code phase.
@@ -44,6 +45,15 @@
 //       to dominate. The firmware (aj_makeup_shift) sets the shift from the
 //       gain cut and the residual so that the output is never more than 3 dB
 //       above the clean level (a leaking jammer is never amplified).
+//
+//    5. SMOOTHING (crpa8)     cfg[19:16] = k > 0: the weights, the image taps and the
+//       fine output gain move from the old to the newly committed values with a
+//       time constant of 2^(k+7) samples instead of in one clock, so a new weight
+//       set does not make a phase or gain step in the satellites the GNSS receiver
+//       is tracking. k = 0 is the crpa7 behaviour, bit for bit.
+//    6. FINE GAIN (crpa8)     gain[15:0], Q2.14, after the 6 dB make-up shift
+//       (2 DSP48), so the firmware can hold the level into the receiver within
+//       a fraction of a dB. 1.0 gives the crpa7 output bit for bit.
 //
 //  WEIGHT SCALE (v4.4)
 //    The weight words hold w * 2^ws (ws = cfg[14:12], 0..5) and the sum of the
@@ -70,7 +80,7 @@
 //    x2n     : 18-bit signed, Q2 (g2 x2, |g2| < 4)
 //    weights : 16-bit signed Q3.12, complex multiply with 3 real multipliers
 //              (k1 = wr (xr + xi), k2 = xr (wi - wr), k3 = xi (wr + wi);
-//               re = k1 - k3, im = k1 + k2): crpa7 (10 + 10): 63 multipliers + 2 for the real g2 = 65 DSP48;
+//               re = k1 - k3, im = k1 + k2): crpa7 (10 + 10): 63 multipliers + 2 for the real g2 = 65 DSP48 (crpa8: + 2 for the fine gain = 67);
 //               (4.9, 32 taps: 195 + 4 for g2, SMI_NFAB = 12 RX1 taps (36 multipliers) built from LUTs)
 //    sum     : 48 bits, Q14; the weighted taps are summed first, divided by
 //              2^ws (weight scale, v4.4), then subtracted from the reference;
@@ -123,18 +133,44 @@ static void cmul3_fab(w16_t wr, w16_t wi, ap_int<12> xr, ap_int<12> xi,
     pi = ap_int<31>(k1) + ap_int<31>(k2);
 }
 
+// ---- crpa8: smoothing of weights and output gain ------------------------------------
+// One running value per weight (and for the output gain) with SMI_RAMP_RF extra
+// fractional bits. Every tick it moves 1/2^SMI_RAMP_RS of the way to the committed
+// target: cur += round((target - cur) / 256). A tick is every 2^(k-1) samples
+// (k = cfg[19:16], 1..15), so the time constant is 2^(k+7) samples; no barrel
+// shifter, no multiplier. k = 0: cur = target at once (crpa7 behaviour, bit for bit).
+// It settles within 2^(RS-1) / 2^RF = 0.25 LSB of the target, so the rounded value
+// used by the multipliers ends exactly on the target.
+typedef ap_int<16 + SMI_RAMP_RF + 1> rv_t;
+
+static rv_t ramp_step(rv_t cur, w16_t target, bool snap, bool tick) {
+#pragma HLS INLINE
+    const rv_t t = rv_t(target) << SMI_RAMP_RF;
+    if (snap) return t;
+    if (!tick) return cur;
+    const ap_int<16 + SMI_RAMP_RF + 2> d = ap_int<16 + SMI_RAMP_RF + 2>(t) - cur;
+    return cur + rv_t((d + (1 << (SMI_RAMP_RS - 1))) >> SMI_RAMP_RS);
+}
+
+static w16_t ramp_val(rv_t cur) {
+#pragma HLS INLINE
+    return (w16_t)((cur + (1 << (SMI_RAMP_RF - 1))) >> SMI_RAMP_RF);
+}
+
 void smi_pi(hls::stream<ap_uint<64> > &s_axis_x,
             hls::stream<ap_uint<32> > &m_axis_y,
             ap_uint<2048> wts,
             ap_uint<64>   wcj,
             ap_uint<32>   cfg,
-            ap_uint<32>   nrm) {
+            ap_uint<32>   nrm,
+            ap_uint<32>   gain) {
 #pragma HLS INTERFACE axis port=s_axis_x
 #pragma HLS INTERFACE axis port=m_axis_y
 #pragma HLS INTERFACE ap_none port=wts
 #pragma HLS INTERFACE ap_none port=wcj
 #pragma HLS INTERFACE ap_none port=cfg
 #pragma HLS INTERFACE ap_none port=nrm
+#pragma HLS INTERFACE ap_none port=gain
 #pragma HLS INTERFACE ap_ctrl_none port=return
 #pragma HLS PIPELINE II=1
 
@@ -149,6 +185,19 @@ void smi_pi(hls::stream<ap_uint<64> > &s_axis_x,
 #pragma HLS RESET variable=h1i
 #pragma HLS RESET variable=h2r
 #pragma HLS RESET variable=h2i
+    // crpa8: running weights (2*SMI_NT space-time + 2 image taps), output gain
+    static rv_t cwr[2 * SMI_NT + 2], cwi[2 * SMI_NT + 2];
+#pragma HLS ARRAY_PARTITION variable=cwr complete
+#pragma HLS ARRAY_PARTITION variable=cwi complete
+#pragma HLS RESET variable=cwr
+#pragma HLS RESET variable=cwi
+    static rv_t        cgain = rv_t(SMI_GAIN_ONE) << SMI_RAMP_RF;
+    static ap_uint<15> rcnt = 0;
+    static ap_uint<3>  ws_prev = 0, sh_prev = 0;
+#pragma HLS RESET variable=cgain
+#pragma HLS RESET variable=rcnt
+#pragma HLS RESET variable=ws_prev
+#pragma HLS RESET variable=sh_prev
 
     if (s_axis_x.empty()) return;
     ap_uint<64> in = s_axis_x.read();
@@ -177,6 +226,46 @@ void smi_pi(hls::stream<ap_uint<64> > &s_axis_x,
     h1r[0] = x1r;  h1i[0] = x1i;
     h2r[0] = x2nr; h2i[0] = x2ni;
 
+    // ---- crpa8: weight and gain smoothing -------------------------------------
+    // Bypass is "all weights 0": with smoothing on, switching the filter in or out
+    // fades as well; with k = 0 the weights are 0 at once and y = x1[n-R] exactly.
+    const bool byp = cfg[0];
+    ap_uint<3> ws = cfg(14, 12);
+    if (ws > SMI_MAXWS) ws = SMI_MAXWS;
+    ap_uint<3> s = cfg(10, 8);
+    if (s > SMI_MAXSH) s = SMI_MAXSH;
+    const ap_uint<4> rk = cfg(SMI_CFG_RAMP_LSB + 3, SMI_CFG_RAMP_LSB);
+    const ap_uint<15> rmask = (rk == 0) ? ap_uint<15>(0) : ap_uint<15>((ap_uint<16>(1) << (rk - 1)) - 1);
+    const bool tick = ((rcnt & rmask) == 0);
+    rcnt++;
+    const bool wsnap = (rk == 0) || (ws != ws_prev);    // weight words of another scale: no ramp across
+    const bool gsnap = (rk == 0) || (s != sh_prev);     // 6 dB make-up step: the fine gain jumps with it
+    ws_prev = ws; sh_prev = s;
+    w16_t wtr[2 * SMI_NT + 2], wti[2 * SMI_NT + 2];
+#pragma HLS ARRAY_PARTITION variable=wtr complete
+#pragma HLS ARRAY_PARTITION variable=wti complete
+    for (int j = 0; j < 2 * SMI_NT + 2; j++) {
+#pragma HLS UNROLL
+        w16_t tr, ti;
+        if (j < 2 * SMI_NT) { tr = (w16_t)wts(32 * j + 15, 32 * j); ti = (w16_t)wts(32 * j + 31, 32 * j + 16); }
+        else { const int c = j - 2 * SMI_NT; tr = (w16_t)wcj(32 * c + 15, 32 * c); ti = (w16_t)wcj(32 * c + 31, 32 * c + 16); }
+        if (byp || j == SMI_REF) { tr = 0; ti = 0; }       // word SMI_REF (RX1 reference) is never used
+        cwr[j] = ramp_step(cwr[j], tr, wsnap, tick);
+        cwi[j] = ramp_step(cwi[j], ti, wsnap, tick);
+        wtr[j] = ramp_val(cwr[j]);
+        wti[j] = ramp_val(cwi[j]);
+    }
+    {
+        // the gain is unsigned Q2.14 (0 .. 3.99994); keep it in a signed running value
+        const rv_t t = rv_t(ap_uint<16>(gain(15, 0))) << SMI_RAMP_RF;
+        if (gsnap) cgain = t;
+        else if (tick) {
+            const ap_int<16 + SMI_RAMP_RF + 2> d = ap_int<16 + SMI_RAMP_RF + 2>(t) - cgain;
+            cgain = cgain + rv_t((d + (1 << (SMI_RAMP_RS - 1))) >> SMI_RAMP_RS);
+        }
+    }
+    const ap_uint<16> g16 = (ap_uint<16>)((cgain + (1 << (SMI_RAMP_RF - 1))) >> SMI_RAMP_RF);
+
     // ---- 2. space-time filter, accumulated in Q14 ---------------------------
     // sr, si = sum of all weighted taps (weights are w * 2^ws); the reference
     // tap is added after the sum is scaled back by 2^ws.
@@ -188,19 +277,15 @@ void smi_pi(hls::stream<ap_uint<64> > &s_axis_x,
 #pragma HLS UNROLL
         if (k != SMI_REF) {
             ap_int<31> pr, pi;
-            w16_t wr = (w16_t)wts(32 * k + 15, 32 * k);
-            w16_t wi = (w16_t)wts(32 * k + 31, 32 * k + 16);
-            if (k >= SMI_NT - SMI_NFAB) cmul3_fab(wr, wi, h1r[k], h1i[k], pr, pi);   // Q12, LUT multipliers (saves DSP48)
-            else                        cmul3<12>(wr, wi, h1r[k], h1i[k], pr, pi);   // Q12
+            if (k >= SMI_NT - SMI_NFAB) cmul3_fab(wtr[k], wti[k], h1r[k], h1i[k], pr, pi);   // Q12, LUT multipliers (saves DSP48)
+            else                        cmul3<12>(wtr[k], wti[k], h1r[k], h1i[k], pr, pi);   // Q12
             sr += acc_t(pr) << SMI_XFRAC;
             si += acc_t(pi) << SMI_XFRAC;
         }
         {
             ap_int<37> pr, pi;
             const int j = SMI_NT + k;
-            w16_t wr = (w16_t)wts(32 * j + 15, 32 * j);
-            w16_t wi = (w16_t)wts(32 * j + 31, 32 * j + 16);
-            cmul3<18>(wr, wi, h2r[k], h2i[k], pr, pi);   // Q14
+            cmul3<18>(wtr[j], wti[j], h2r[k], h2i[k], pr, pi);   // Q14
             sr += acc_t(pr);
             si += acc_t(pi);
         }
@@ -208,26 +293,36 @@ void smi_pi(hls::stream<ap_uint<64> > &s_axis_x,
     {   // image taps: c1 conj(x1[n-R]) (Q12) and c2 conj(x2n[n-R]) (Q14)
         ap_int<32> pr1, pi1;
         ap_int<38> pr2, pi2;
-        w16_t c1r = (w16_t)wcj(15, 0),  c1i = (w16_t)wcj(31, 16);
-        w16_t c2r = (w16_t)wcj(47, 32), c2i = (w16_t)wcj(63, 48);
-        cmul3<13>(c1r, c1i, ap_int<13>(h1r[SMI_REF]), ap_int<13>(-ap_int<13>(h1i[SMI_REF])), pr1, pi1);
-        cmul3<19>(c2r, c2i, ap_int<19>(h2r[SMI_REF]), ap_int<19>(-ap_int<19>(h2i[SMI_REF])), pr2, pi2);
+        const int j1 = 2 * SMI_NT, j2 = 2 * SMI_NT + 1;
+        cmul3<13>(wtr[j1], wti[j1], ap_int<13>(h1r[SMI_REF]), ap_int<13>(-ap_int<13>(h1i[SMI_REF])), pr1, pi1);
+        cmul3<19>(wtr[j2], wti[j2], ap_int<19>(h2r[SMI_REF]), ap_int<19>(-ap_int<19>(h2i[SMI_REF])), pr2, pi2);
         sr += (acc_t(pr1) << SMI_XFRAC) + acc_t(pr2);
         si += (acc_t(pi1) << SMI_XFRAC) + acc_t(pi2);
     }
-    ap_uint<3> ws = cfg(14, 12);
-    if (ws > SMI_MAXWS) ws = SMI_MAXWS;
     const acc_t wrnd = (ws == 0) ? acc_t(0) : (acc_t(1) << (ws - 1));
     acc_t ar = ref_r - ((sr + wrnd) >> ws);
     acc_t ai = ref_i - ((si + wrnd) >> ws);
 
-    // ---- 3. bypass, 4. make-up shift and rounding -----------------------------
-    if (cfg[0]) { ar = ref_r; ai = ref_i; }
-    ap_uint<3> s = cfg(10, 8);
-    if (s > SMI_MAXSH) s = SMI_MAXSH;
+    // ---- 3. make-up shift, 4. fine gain (crpa8) and rounding --------------------
+    // (bypass: all weights 0 above, so ar = ref exactly once they have faded out)
     const acc_t half = acc_t(1) << (Q - 1);
-    ap_int<16> yr = sat16(((ar << s) + half) >> Q);
-    ap_int<16> yi = sat16(((ai << s) + half) >> Q);
+    ap_int<16> yr, yi;
+    if (g16 == SMI_GAIN_ONE) {                // gain 1.0: the crpa7 rounding, bit for bit
+        yr = sat16(((ar << s) + half) >> Q);
+        yi = sat16(((ai << s) + half) >> Q);
+    } else {                                  // 6 fractional bits kept, x gain (Q2.14), rounded
+        const int UF = 6;
+        const acc_t uh = acc_t(1) << (Q - UF - 1);
+        acc_t ur = ((ar << s) + uh) >> (Q - UF), ui = ((ai << s) + uh) >> (Q - UF);
+        const acc_t umax = (acc_t(1) << 23) - 1, umin = -(acc_t(1) << 23);
+        if (ur > umax) ur = umax; if (ur < umin) ur = umin;
+        if (ui > umax) ui = umax; if (ui < umin) ui = umin;
+        const ap_int<41> pr = ap_int<24>(ur) * ap_int<17>(g16);
+        const ap_int<41> pi = ap_int<24>(ui) * ap_int<17>(g16);
+        const acc_t gh = acc_t(1) << (UF + SMI_GAIN_FRAC - 1);
+        yr = sat16((acc_t(pr) + gh) >> (UF + SMI_GAIN_FRAC));
+        yi = sat16((acc_t(pi) + gh) >> (UF + SMI_GAIN_FRAC));
+    }
     ap_uint<32> out;
     out(15, 0)  = (ap_uint<16>)yr;
     out(31, 16) = (ap_uint<16>)yi;

@@ -18,6 +18,9 @@ adapted to the design-A FPGA of this repository:
 - crpa5/crpa7: `gnss_rx_agc=` and `gnss_aj_avg=` saved in `GNSSCRPA.CFG`.
 - crpa7: 10 + 10 taps (`AJ_NT` 10, `AJ_REF` 5, `AJ_INFO` 0x0A050C07); the crpa5
   CW notch is not in this build.
+- crpa8: weight smoothing (`gnss_aj_ramp=`, saved in `GNSSCRPA.CFG`), fine output
+  gain, ADC clip counters (`AJ_INFO` 0x0A050C0A). The solver runs on one core here
+  (the Linux firmware uses the second core).
 
 `Scripts/build_software.tcl` and `Scripts/build_fsbl.tcl` are the Vitis 2023.2
 `xsct` scripts of the same project, unchanged.

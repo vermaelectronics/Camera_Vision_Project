@@ -117,6 +117,7 @@ static ap_uint<2048> g_w = 0;
 static ap_uint<64>   g_wcj = 0;
 static ap_uint<32>   g_cfg = SMI_CFG_BYPASS;
 static ap_uint<32>   g_nrm = 1 << SMI_GFRAC;
+static ap_uint<32>   g_gain = SMI_GAIN_ONE;     // crpa8: fine output gain, Q2.14
 
 static void set_weights(const int16_t *wre, const int16_t *wim) {
     g_w = 0;
@@ -131,9 +132,9 @@ static void set_weights(const int16_t *wre, const int16_t *wim) {
     }
 }
 
-static void set_cfg(int bypass, int shift, int ws = 0) {
+static void set_cfg(int bypass, int shift, int ws = 0, int ramp = 0) {
     g_cfg = (bypass ? SMI_CFG_BYPASS : 0u) | ((unsigned)(shift & 7) << SMI_CFG_SH_LSB) |
-            ((unsigned)(ws & 7) << SMI_CFG_WS_LSB);
+            ((unsigned)(ws & 7) << SMI_CFG_WS_LSB) | ((unsigned)(ramp & 15) << SMI_CFG_RAMP_LSB);
 }
 
 static void set_g2(int g2r, int g2i) {
@@ -148,7 +149,7 @@ static void push(hls::stream<ap_uint<64> > &xs, hls::stream<ap_uint<32> > &ys,
     ap_uint<64> w = 0;
     for (int k = 0; k < 4; k++) w(16 * k + 15, 16 * k) = (ap_uint<16>)(ap_int<16>)v[k];
     xs.write(w);
-    smi_pi(xs, ys, g_w, g_wcj, g_cfg, g_nrm);
+    smi_pi(xs, ys, g_w, g_wcj, g_cfg, g_nrm, g_gain);
     if (ys.empty()) { std::printf("core produced no output\n"); std::exit(2); }
     ap_uint<32> o = ys.read();
     if (out) *out = cd((double)(ap_int<16>)o(15, 0), (double)(ap_int<16>)o(31, 16));
@@ -266,6 +267,213 @@ static int test_bitexact() {
     return bad == 0 && sat > 0 && sat18c == 0 && bypassed > 0 && shifted > 0;
 }
 
+// ---- scenario 23 (crpa8): bit-exact with weight / gain smoothing and the fine gain --------
+// The same random weights, image taps, g2, shift, weight scale and bypass as scenario 1,
+// plus a random smoothing k (0, 1, 2, 3, 5: short time constants so the values move a lot
+// inside each segment) and a random fine gain; compared against an integer model.
+static int test_bitexact_ramp() {
+    hls::stream<ap_uint<64> > xs;
+    hls::stream<ap_uint<32> > ys;
+    const int SEG = 1500, NSEG = 40, n = SEG * NSEG, NWV = 2 * SMI_NT + 2;
+    std::vector<int> a(n), b(n), c(n), d(n);
+    std::vector<long long> x2nr(n), x2ni(n);
+    int bad = 0, ramped = 0, gained = 0, bypassed = 0;
+    int16_t wr[AJ_NW], wi[AJ_NW];
+    int g2r = 1 << SMI_GFRAC, byp = 0, sh = 0, wsc = 0, rk = 0, gn = SMI_GAIN_ONE;
+    // the model's running values (same widths and rules as the core)
+    long long cr[2 * SMI_NT + 2] = {0}, ci[2 * SMI_NT + 2] = {0}, cg = (long long)SMI_GAIN_ONE << SMI_RAMP_RF;
+    int cnt = 0, ws_prev = 0, sh_prev = 0;
+    for (int i = 0; i < n; i++) {
+        bool ext = (i % 97) < 10;
+        a[i] = ext ? (urand() < 0.5 ? -2048 : 2047) : (int)(urand() * 4096) - 2048;
+        b[i] = ext ? (urand() < 0.5 ? -2048 : 2047) : (int)(urand() * 4096) - 2048;
+        c[i] = (int)(urand() * 4096) - 2048;
+        d[i] = (int)(urand() * 4096) - 2048;
+    }
+    static const int ks[] = {0, 1, 2, 3, 5, 1, 2};
+    for (int i = 0; i < n; i++) {
+        if (i % SEG == 0) {
+            int seg = i / SEG;
+            int span = (seg % 3 == 0) ? 65536 : (seg % 3 == 1) ? 8192 : 1024;
+            for (int k = 0; k < AJ_NW; k++) {
+                wr[k] = (int16_t)((int)(urand() * span) - span / 2);
+                wi[k] = (int16_t)((int)(urand() * span) - span / 2);
+            }
+            g2r = (seg % 5 == 0) ? (1 << SMI_GFRAC) : (int)(urand() * 65536) - 32768;
+            byp = (seg % 6 == 4);
+            sh = (seg % 4 == 1) ? (seg % 8) : sh;           // shift changes now and then (gain snaps)
+            wsc = (seg % 5 == 2) ? (seg % 8) : wsc;         // weight scale changes now and then (weights snap)
+            rk = ks[seg % 7];
+            gn = (seg % 3 == 0) ? SMI_GAIN_ONE : 8192 + (int)(urand() * 40000);
+            if (seg == 7) gn = 65535;
+            set_weights(wr, wi); set_cfg(byp, sh, wsc, rk); set_g2(g2r, 0);
+            g_gain = (unsigned)gn;
+        }
+        const int S = SMI_GFRAC - SMI_XFRAC;
+        long long nr = (long long)g2r * c[i], ni = (long long)g2r * d[i];
+        x2nr[i] = (nr + (1LL << (S - 1))) >> S; x2ni[i] = (ni + (1LL << (S - 1))) >> S;
+        cd y;
+        push(xs, ys, a[i], b[i], c[i], d[i], &y);
+
+        // ---- the model: smoothing
+        int wse = wsc > SMI_MAXWS ? SMI_MAXWS : wsc, se = sh > SMI_MAXSH ? SMI_MAXSH : sh;
+        int mask = rk ? (1 << (rk - 1)) - 1 : 0;
+        bool tick = (cnt & mask) == 0;
+        cnt = (cnt + 1) & 0x7FFF;
+        bool wsnap = rk == 0 || wse != ws_prev, gsnap = rk == 0 || se != sh_prev;
+        ws_prev = wse; sh_prev = se;
+        long long w_r[2 * SMI_NT + 2], w_i[2 * SMI_NT + 2];
+        for (int j = 0; j < NWV; j++) {
+            long long tr = (j < 2 * SMI_NT) ? wr[j] : wr[AJ_IMG1 + j - 2 * SMI_NT];
+            long long ti = (j < 2 * SMI_NT) ? wi[j] : wi[AJ_IMG1 + j - 2 * SMI_NT];
+            if (byp || j == SMI_REF) { tr = 0; ti = 0; }
+            tr <<= SMI_RAMP_RF; ti <<= SMI_RAMP_RF;
+            if (wsnap) { cr[j] = tr; ci[j] = ti; }
+            else if (tick) {
+                cr[j] += (tr - cr[j] + (1LL << (SMI_RAMP_RS - 1))) >> SMI_RAMP_RS;
+                ci[j] += (ti - ci[j] + (1LL << (SMI_RAMP_RS - 1))) >> SMI_RAMP_RS;
+            }
+            w_r[j] = (cr[j] + (1LL << (SMI_RAMP_RF - 1))) >> SMI_RAMP_RF;
+            w_i[j] = (ci[j] + (1LL << (SMI_RAMP_RF - 1))) >> SMI_RAMP_RF;
+            if (rk && !wsnap && (w_r[j] != (j < 2 * SMI_NT ? wr[j] : wr[AJ_IMG1 + j - 2 * SMI_NT]))) ramped++;
+        }
+        {
+            long long tg = (long long)gn << SMI_RAMP_RF;
+            if (gsnap) cg = tg;
+            else if (tick) cg += (tg - cg + (1LL << (SMI_RAMP_RS - 1))) >> SMI_RAMP_RS;
+        }
+        long long g16 = (cg + (1LL << (SMI_RAMP_RF - 1))) >> SMI_RAMP_RF;
+        if (g16 != SMI_GAIN_ONE) gained++;
+        if (byp) bypassed++;
+
+        // ---- the model: filter
+        auto at  = [&](const std::vector<int> &v, int j) { return j >= 0 ? (long long)v[j] : 0LL; };
+        auto atl = [&](const std::vector<long long> &v, int j) { return j >= 0 ? v[j] : 0LL; };
+        const int Q = SMI_WFRAC + SMI_XFRAC;
+        long long sr = at(a, i - SMI_REF) << Q, si = at(b, i - SMI_REF) << Q;
+        long long tr = 0, ti = 0;
+        for (int k = 0; k < SMI_NT; k++) {
+            if (k != SMI_REF) {
+                long long xr = at(a, i - k), xi = at(b, i - k);
+                tr += (w_r[k] * xr - w_i[k] * xi) << SMI_XFRAC;
+                ti += (w_r[k] * xi + w_i[k] * xr) << SMI_XFRAC;
+            }
+            long long xr = atl(x2nr, i - k), xi = atl(x2ni, i - k);
+            tr += w_r[SMI_NT + k] * xr - w_i[SMI_NT + k] * xi; ti += w_r[SMI_NT + k] * xi + w_i[SMI_NT + k] * xr;
+        }
+        {
+            const int j1 = 2 * SMI_NT, j2 = 2 * SMI_NT + 1;
+            long long xr = at(a, i - SMI_REF), xi = -at(b, i - SMI_REF);
+            tr += (w_r[j1] * xr - w_i[j1] * xi) << SMI_XFRAC;
+            ti += (w_r[j1] * xi + w_i[j1] * xr) << SMI_XFRAC;
+            xr = atl(x2nr, i - SMI_REF); xi = -atl(x2ni, i - SMI_REF);
+            tr += w_r[j2] * xr - w_i[j2] * xi;
+            ti += w_r[j2] * xi + w_i[j2] * xr;
+        }
+        long long rnd = wse ? (1LL << (wse - 1)) : 0;
+        sr -= (tr + rnd) >> wse; si -= (ti + rnd) >> wse;
+        long long er, ei;
+        if (g16 == SMI_GAIN_ONE) {
+            long long half = 1LL << (Q - 1);
+            er = ((sr << se) + half) >> Q; ei = ((si << se) + half) >> Q;
+        } else {
+            const int UF = 6;
+            long long ur = ((sr << se) + (1LL << (Q - UF - 1))) >> (Q - UF), ui = ((si << se) + (1LL << (Q - UF - 1))) >> (Q - UF);
+            ur = sat_ll(ur, -(1LL << 23), (1LL << 23) - 1); ui = sat_ll(ui, -(1LL << 23), (1LL << 23) - 1);
+            long long gh = 1LL << (UF + SMI_GAIN_FRAC - 1);
+            er = (ur * g16 + gh) >> (UF + SMI_GAIN_FRAC); ei = (ui * g16 + gh) >> (UF + SMI_GAIN_FRAC);
+        }
+        er = sat_ll(er, -32768, 32767); ei = sat_ll(ei, -32768, 32767);
+        if ((long long)y.real() != er || (long long)y.imag() != ei) {
+            if (bad < 5) std::printf("  mismatch at %d: core (%g,%g) model (%lld,%lld)\n", i, y.real(), y.imag(), er, ei);
+            bad++;
+        }
+    }
+    std::printf("bit-exact with smoothing and fine gain: %d samples, %d mismatches; %d weight values in a ramp,\n"
+                "           %d samples with a gain other than 1.0, %d bypassed\n", n, bad, ramped, gained, bypassed);
+    return bad == 0 && ramped > 1000 && gained > 1000 && bypassed > 0;
+}
+
+// ---- scenario 24 (crpa8): what the smoothing does to a jammer null ------------------------
+// RX2 = c x RX1 for a wideband jammer, the RX2 tap at the reference delay set to 1/c nulls it.
+// Checks: k = 0 nulls at once; k = 6 (time constant 2^13 samples) fades the null in, about
+// e^-2 (-8.7 dB) of the jammer left after one time constant, the same null as k = 0 after
+// six; a gain step 1.0 -> 2.0 moves smoothly to +6.02 dB; a weight-scale change does not
+// disturb the null; bypass with k = 6 fades the jammer back in.
+static int test_ramp_behaviour() {
+    const int TAU = 1 << (6 + 7);
+    const int N = 24000 + 30 * TAU + 4000;
+    cvec J(N), x1(N), x2(N);
+    for (int i = 0; i < N; i++) J[i] = cd(grand(), grand());
+    J = fir(J, lowpass(0.42, 41), 20);
+    double pj = pwr(J, 0), js = 500.0 / std::sqrt(pj / 2);
+    const cd cc = std::polar(0.8, 0.7);
+    for (int i = 0; i < N; i++) {
+        J[i] *= js;
+        x1[i] = J[i] + cd(grand(), grand()) * 4.0;
+        x2[i] = cc * J[i] + cd(grand(), grand()) * 4.0;
+    }
+    int16_t wr[AJ_NW] = {0}, wi[AJ_NW] = {0};
+    cd b = 1.0 / cc;
+    wr[SMI_NT + SMI_REF] = (int16_t)std::floor(b.real() * 4096 + 0.5);
+    wi[SMI_NT + SMI_REF] = (int16_t)std::floor(b.imag() * 4096 + 0.5);
+    set_g2(1 << SMI_GFRAC, 0);
+    std::vector<cd> xq(N);
+    for (int i = 0; i < N; i++) xq[i] = cd(q12(x1[i].real()), q12(x1[i].imag()));
+    auto run = [&](int from, int to, cvec &y) {
+        hls::stream<ap_uint<64> > xs; hls::stream<ap_uint<32> > ys;
+        for (int i = from; i < to; i++) push(xs, ys, q12(x1[i].real()), q12(x1[i].imag()), q12(x2[i].real()), q12(x2[i].imag()), &y[i]);
+    };
+    auto pw = [&](const cvec &y, int from, int len) { double p = 0; for (int i = from; i < from + len; i++) p += std::norm(y[i]); return p / len; };
+    // output gain against the delayed RX1 (bypass: y = g x1[n-R], weights 0)
+    auto gest = [&](const cvec &y, int from, int len) {
+        double num = 0, den = 0;
+        for (int i = from; i < from + len; i++) { num += (y[i] * std::conj(xq[i - SMI_REF])).real(); den += std::norm(xq[i - SMI_REF]); }
+        return num / den;
+    };
+    cvec y(N);
+    int ok = 1;
+    // k = 0: bypass 4000 samples, then the null at once
+    g_gain = SMI_GAIN_ONE;
+    set_weights(wr, wi); set_cfg(1, 0, 0, 0); run(0, 4000, y);
+    double p_in = pw(y, 2000, 2000);
+    set_cfg(0, 0, 0, 0); run(4000, 24000, y);
+    double p_now = pw(y, 4010, 1000), p_null = pw(y, 10000, 14000);
+    std::printf("  k = 0 : the null at once: %.1f dB below the jammer in the first 1000 samples, %.1f dB later\n",
+                10 * std::log10(p_in / p_now), 10 * std::log10(p_in / p_null));
+    if (10 * std::log10(p_in / p_now) < 30) ok = 0;
+    // k = 6: bypass again (the null fades out), then the filter fades in
+    set_cfg(1, 0, 0, 6); run(24000, 24000 + 8 * TAU, y);
+    int s0 = 24000 + 8 * TAU;
+    double p_back = pw(y, s0 - 4000, 4000);
+    set_cfg(0, 0, 0, 6); run(s0, s0 + 7 * TAU, y);
+    double p_0 = pw(y, s0, 256), p_1 = pw(y, s0 + TAU - 512, 1024), p_6 = pw(y, s0 + 6 * TAU, TAU);
+    double r1 = 10 * std::log10(p_1 / p_0), r6 = 10 * std::log10(p_6 / p_null);
+    std::printf("  k = 6 : bypass faded back to %+.2f dB of the jammer; filter in: %+.2f dB after one time constant\n"
+                "          (%d samples, e^-2 = -8.69 dB expected), %+.2f dB from the instant null after six\n",
+                10 * std::log10(p_back / p_in), r1, TAU, r6);
+    if (std::fabs(10 * std::log10(p_back / p_in)) > 0.5 || r1 > -7.5 || r1 < -10.0 || std::fabs(r6) > 0.5) ok = 0;
+    // a weight-scale change (ws 0 -> 2, weights x 4) with k = 6: no transient
+    int s1 = s0 + 7 * TAU;
+    int16_t wr4[AJ_NW], wi4[AJ_NW];
+    for (int k = 0; k < AJ_NW; k++) { wr4[k] = (int16_t)(wr[k] * 4); wi4[k] = (int16_t)(wi[k] * 4); }
+    set_weights(wr4, wi4); set_cfg(0, 0, 2, 6); run(s1, s1 + 4000, y);
+    double p_ws = pw(y, s1, 4000);
+    std::printf("  scale : ws 0 -> 2 with the weights x 4: %+.2f dB against the null (no transient expected)\n", 10 * std::log10(p_ws / p_null));
+    if (std::fabs(10 * std::log10(p_ws / p_null)) > 0.5) ok = 0;
+    // fine gain 1.0 -> 2.0 with k = 6, measured in bypass (y = g x1[n-R])
+    int s2 = s1 + 4000;
+    set_cfg(1, 0, 0, 6); run(s2, s2 + 8 * TAU, y);
+    int s3 = s2 + 8 * TAU;
+    g_gain = 2 * SMI_GAIN_ONE; run(s3, s3 + 7 * TAU, y);
+    double g0 = gest(y, s3, 64), g1 = gest(y, s3 + TAU - 32, 64), g6 = gest(y, s3 + 6 * TAU, TAU);
+    std::printf("  gain  : 1.0 -> 2.0 with k = 6: %.4f in the first 64 samples, %.4f after one time constant\n"
+                "          (2 - e^-1 = 1.6321 expected), %.4f after six (2 - e^-6 = 1.9975)\n", g0, g1, g6);
+    if (g0 > 1.01 || std::fabs(g1 - 1.6321) > 0.02 || std::fabs(g6 - 1.9975) > 0.005) ok = 0;
+    g_gain = SMI_GAIN_ONE;
+    return ok;
+}
+
 // ---- scenario 14: the output make-up rule ---------------------------------------
 static int test_makeup() {
     struct T { int cut; double out; int maxsh; int want; } t[] = {
@@ -281,6 +489,16 @@ static int test_makeup() {
         double e61 = aj_adc_excess_db(61.0), e66 = aj_adc_excess_db(66.0), e71 = aj_adc_excess_db(71.0), e50 = aj_adc_excess_db(50.0);
         std::printf("ADC excess model: J/N 50 %.2f, 61 %.2f, 66 %.2f, 71 %.2f dB\n", e50, e61, e66, e71);
         if (e50 > 0.3 || std::fabs(e61 - 1.8) > 0.5 || std::fabs(e66 - 4.1) > 0.8 || std::fabs(e71 - 7.8) > 1.0) bad++;
+    }
+    {   // crpa8: the fine make-up on top of the 6 dB steps (restore the cut, at most +3 dB over the clean level)
+        struct F { int cut; double out; int sh; double want; } f[] = {
+            {0, 0, 0, 0}, {10, 0, 1, 4}, {34, 0.3, 5, 4}, {26, 0.3, 4, 2}, {34, 40, 0, 0},
+            {34, 5, 5, 2}, {34, 4, 5, 3}, {50, 0, 7, 5.99}, {13, 0, 2, 1}};
+        for (auto &c : f) {
+            double g = aj_makeup_fine_db(c.cut, c.out, c.sh);
+            if (std::fabs(g - c.want) > 1e-9) { std::printf("  fine: cut %d, out %.1f, shift %d: got %.2f, want %.2f\n", c.cut, c.out, c.sh, g, c.want); bad++; }
+        }
+        std::printf("fine make-up (crpa8): %d cases checked\n", (int)(sizeof f / sizeof f[0]));
     }
     std::printf("make-up rule: %d cases, %d wrong\n", (int)(sizeof t / sizeof t[0]), bad);
     return bad == 0;
@@ -694,6 +912,8 @@ int main(int argc, char **argv) {
         sc.nblk = 12; sc.jc = -5.5 / fs; sc.jbw = 36.0 / fs; sc.echod = (argc > 4) ? std::atoi(argv[4]) : 3;
         ok = test_jammer(22, sc); break; }
     case 18: { Scen sc = {40, false, 0, 0, true, 0, 0, 0, 0}; sc.nblk = 30; sc.avg = -1; ok = test_jammer(18, sc); break; }
+    case 23: ok = test_bitexact_ramp(); break;      // crpa8: smoothing and fine gain, bit for bit
+    case 24: ok = test_ramp_behaviour(); break;     // crpa8: what smoothing does to a null
     default: std::printf("unknown scenario %d\n", scen); ok = 0;
     }
     std::printf("SMI_PI_CSIM: %s (scenario %d)\n", ok ? "PASS" : "FAIL", scen);
