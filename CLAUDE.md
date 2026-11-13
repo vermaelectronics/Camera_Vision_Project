@@ -57,7 +57,11 @@ Name each new design-A (pass-through + CRPA) package with the next number:
   with DEPENDENCE distance=24 instead of a shift register; NLMS step saturated before
   the weight update; smi_pi 3.1. C simulation bit-exact, unchanged. Not yet
   re-run in Vitis by the user. Commit ca0cd02.
-- Next package: `crpa12`.
+- `crpa12` (2026-11-13): crpa11 **without the second ARM core** (user: "I don't want to
+  use the 2nd ARM of the Zynq 7020"): worker thread / GNSS_AJ_THREAD / -lpthread removed,
+  gnss_crpa pinned to CPU 0. All crpa8/9/10/11 features kept (user asked to keep the
+  crpa9 features). Nothing ever moved between FPGA and ARM. Commit 46c1a18.
+- Next package: `crpa13`.
 
 Files per package: `crpaN-full-src.zip.part1`, `crpaN-full-src.zip.part2`,
 `crpaN-kit.zip`, `SHA256SUMS-crpaN.txt`.
