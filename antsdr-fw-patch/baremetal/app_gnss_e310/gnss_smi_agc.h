@@ -65,9 +65,4 @@ int      gnss_rxg_pulsy(void);       /* 1 while the gain keeps being cut again a
 uint32_t gnss_rxg_att_base(void);      /* operator's TX1 attenuation [mdB]  */
 int      gnss_rxg_comp_db(void);       /* TX level hold in effect [dB]      */
 
-/* crpa8: ADC clipping from the FPGA clip counters (AJ_CLIP1/2), parts per million of the samples
- * over the last gain-loop period; text for the reports */
-int         gnss_rxg_clip_ppm(void);
-const char *gnss_rxg_clip_txt(void);
-
 #endif

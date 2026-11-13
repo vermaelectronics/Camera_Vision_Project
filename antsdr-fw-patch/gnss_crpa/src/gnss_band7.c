@@ -52,9 +52,6 @@
 static int boot_band = GNSS_BAND_DEFAULT;
 static int saved_agc = -1;      /* crpa5: gnss_rx_agc=, -1 = never set   */
 static int saved_avg = -1;      /* crpa5: gnss_aj_avg= x 1000, 0 = auto  */
-static int saved_ramp = -1;     /* crpa8: gnss_aj_ramp=, -1 = never set  */
-static int saved_nlms = -1;     /* crpa10: gnss_aj_nlms=                 */
-static int saved_mu = -1;       /* crpa10: gnss_aj_nlms_mu= x 1e6         */
 static char conf_file[256];
 
 static const char *conf_path(void)
@@ -96,9 +93,6 @@ static int conf_save(void)
 		(unsigned long)att, (long)g, boot_band);
 	if (saved_agc >= 0) fprintf(f, "rx_agc=%d\n", saved_agc);
 	if (saved_avg >= 0) fprintf(f, "aj_avg_milli=%d\n", saved_avg);
-	if (saved_ramp >= 0) fprintf(f, "aj_ramp=%d\n", saved_ramp);
-	if (saved_nlms >= 0) fprintf(f, "aj_nlms=%d\n", saved_nlms);
-	if (saved_mu >= 0) fprintf(f, "aj_nlms_mu_e6=%d\n", saved_mu);
 	fflush(f);
 	fsync(fileno(f));
 	fclose(f);
@@ -129,9 +123,6 @@ void gnss_band7_load(void)
 			else if (!strcmp(line, "band_boot"))     boot_band = atoi(eq);
 			else if (!strcmp(line, "rx_agc"))        saved_agc = atoi(eq);
 			else if (!strcmp(line, "aj_avg_milli"))  saved_avg = atoi(eq);
-			else if (!strcmp(line, "aj_ramp"))       saved_ramp = atoi(eq);
-			else if (!strcmp(line, "aj_nlms"))       saved_nlms = atoi(eq);
-			else if (!strcmp(line, "aj_nlms_mu_e6")) saved_mu = atoi(eq);
 		}
 		fclose(f);
 	}
@@ -250,13 +241,10 @@ void set_gnss_band_boot(double *param, char param_no)
 }
 
 /* ---- crpa5: gnss_rx_agc= and gnss_aj_avg= kept with the band 7 values ---------------- */
-void gnss_settings_save(int rx_agc, int avg_milli, int ramp, int nlms, int mu_e6)
+void gnss_settings_save(int rx_agc, int avg_milli)
 {
 	if (rx_agc >= 0) saved_agc = rx_agc;
 	if (avg_milli >= 0) saved_avg = avg_milli;
-	if (ramp >= 0) saved_ramp = ramp;
-	if (nlms >= 0) saved_nlms = nlms;
-	if (mu_e6 >= 0) saved_mu = mu_e6;
 	if (conf_save() != 0)
 		console_print("  (setting active; not saved: %s)\n", (char *)conf_path());
 	else
@@ -274,15 +262,5 @@ void gnss_settings_apply(void)
 	} else if (saved_avg >= 50 && saved_avg <= 990) {
 		console_print("settings: gnss_aj_avg=%s (saved)\n", gnss_fmt((double)saved_avg / 1000.0, 2));
 		gnss_aj_set_avg((double)saved_avg / 1000.0, 0);
-	}
-	if (saved_ramp >= 0 && saved_ramp <= 15 && saved_ramp != gnss_aj_ramp()) {
-		console_print("settings: gnss_aj_ramp=%d (saved)\n", (long)saved_ramp);
-		gnss_aj_set_ramp(saved_ramp);
-	}
-	if ((saved_nlms == 0 || saved_nlms == 1) || (saved_mu >= 1000 && saved_mu <= 200000)) {
-		int on = (saved_nlms == 0 || saved_nlms == 1) ? saved_nlms : -1;
-		double mu = (saved_mu >= 1000 && saved_mu <= 200000) ? (double)saved_mu / 1e6 : 0.0;
-		console_print("settings: gnss_aj_nlms=%d (saved)\n", (long)(on >= 0 ? on : gnss_aj_nlms()));
-		gnss_aj_set_nlms(on, mu);
 	}
 }

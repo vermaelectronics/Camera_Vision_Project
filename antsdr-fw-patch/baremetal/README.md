@@ -1,7 +1,8 @@
 # Design A on bare metal
 
-`app_gnss_e310/` is the SMI-PI v4.9.14 (10 + 10 taps) firmware of
-LoopBack_Code_SMI_PI_STAP7x7_v4.9.14 (`Source/Firmware/app_gnss_e310`, set to 10 + 10 taps),
+`app_gnss_e310/` is the SMI-PI v4.9.14 firmware of
+LoopBack_Code_SMI_PI_STAP7x7_v4.9.14 (`Source/Firmware/app_gnss_e310`), since
+crpa6 with the SFAP-PI weight solver (128 frequency bins, `SFAP_BINS=64` for 64),
 adapted to the design-A FPGA of this repository:
 
 - `app_config.h`: `ANTSDR_DESIGN_A`, `gnss_passthrough` at `0x43C10000`,
@@ -15,15 +16,12 @@ adapted to the design-A FPGA of this repository:
   start-up band, saved on the SD card in `GNSSCRPA.CFG` (GNSS_LOG_SD build).
 - `main.c`: VCXO set before the AD9361 starts; start-up band from the SD card.
 - `gnss_info.c`: design-A address map.
-- crpa5/crpa7: `gnss_rx_agc=` and `gnss_aj_avg=` saved in `GNSSCRPA.CFG`.
-- crpa7: 10 + 10 taps (`AJ_NT` 10, `AJ_REF` 5, `AJ_INFO` 0x0A050C07); the crpa5
-  CW notch is not in this build.
-- crpa8: weight smoothing (`gnss_aj_ramp=`, saved in `GNSSCRPA.CFG`), fine output
-  gain, ADC clip counters (`AJ_INFO` 0x0A050C0A). The solver runs on one core here
-  (crpa12: the Linux firmware too).
-- crpa9: 3 + 3 image taps (`AJ_NIMG` 3), FPGA power meters (`AJ_INFO` 0x0A050C0B).
-- crpa10: 8 + 8 taps (`AJ_NT` 8, `AJ_REF` 4), hardware NLMS (`gnss_aj_nlms=`,
-  `gnss_aj_nlms_mu=`, saved in `GNSSCRPA.CFG`), `AJ_INFO` 0x08040C0C.
+- crpa5: `gnss_rx_agc=` and `gnss_aj_avg=` saved in `GNSSCRPA.CFG`; ADC clipping
+  warning with manual gain. (`gnss_notch*.c`, `smi_pi_nco.h`: the CW notch of the
+  crpa5 SMI-PI bitstream, not used with SFAP.)
+- crpa6: `gnss_aj_math.c/.h` = the SFAP-PI v5.0 solver, `gnss_sfap_cfg.h` = FFT
+  size, weight registers `AJ_WB/WC1/WC2` from 0x200 (the same files as
+  `gnss_crpa/src`).
 
 `Scripts/build_software.tcl` and `Scripts/build_fsbl.tcl` are the Vitis 2023.2
 `xsct` scripts of the same project, unchanged.

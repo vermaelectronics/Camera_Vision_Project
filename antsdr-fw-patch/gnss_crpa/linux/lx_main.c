@@ -20,7 +20,6 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
-#include <sched.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -495,7 +494,7 @@ static void firmware(void)
 	int cmd_type, invalid_cmd, b;
 	unsigned char cmd;
 
-	printf("\n=== ANTSDR E310 - GNSS CRPA, SMI-PI %s, Linux (gnss_crpa %s) ===\n",
+	printf("\n=== ANTSDR E310 - GNSS CRPA, %s, Linux (gnss_crpa %s) ===\n",
 	       "4.9.14", GNSS_CRPA_VERSION);
 	printf("    TX1 IS CONDUCTED, ATTENUATED COAX ONLY -- never an antenna.\n");
 
@@ -524,7 +523,7 @@ static void firmware(void)
 	gnss_aj_init();
 	gnss_aj_enable(1);
 	gnss_settings_apply();          /* crpa5: saved gnss_rx_agc= / gnss_aj_avg= */
-	console_print("\nANTI-JAM (SMI-PI " GNSS_AJ_VERSION_STR "): ON, bypassed until a jammer appears.\n"
+	console_print("\nANTI-JAM (" GNSS_AJ_VERSION_STR "): ON, bypassed until a jammer appears.\n"
 		      "  Jammer events are printed as [AJ] lines with a time stamp. gnss_aj? = state,\n"
 		      "  gnss_report? = everything (copy it into a report), gnss_aj_csv=500 = CSV log,\n"
 		      "  Only jammer events are printed (gnss_aj_log=30 adds a status line every 30 s).\n"
@@ -717,14 +716,6 @@ int main(int argc, char **argv)
 	signal(SIGTERM, on_signal);
 	signal(SIGINT, on_signal);
 	signal(SIGHUP, on_signal);
-
-	{   /* crpa12: the anti-jam runs on the first Cortex-A9 only (no second core) */
-		cpu_set_t one;
-		CPU_ZERO(&one);
-		CPU_SET(0, &one);
-		if (sched_setaffinity(0, sizeof(one), &one) != 0)
-			printf("gnss_crpa: note: could not pin to CPU 0 (%s)\n", strerror(errno));
-	}
 
 	if (lx_io_init() || lx_ad9361_open(&ad9361_phy)) {
 		printf("gnss_crpa: hardware not available -- is this the antsdr-fw-patch 0003 (SMI-PI) bitstream?\n");
