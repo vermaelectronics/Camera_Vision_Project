@@ -1,4 +1,4 @@
-/* gnss_crpa - the SMI-PI v4.9.14 GNSS anti-jam firmware for the ANTSDR E310,
+/* gnss_crpa - the GNSS anti-jam firmware for the ANTSDR E310 (crpa13: hardware NLMS, no SMI),
  * running under Linux (antsdr-fw-patch, design A).
  *
  *   gnss_crpa            run in this terminal, exactly like the bare-metal
@@ -20,6 +20,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <sched.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -494,7 +495,7 @@ static void firmware(void)
 	int cmd_type, invalid_cmd, b;
 	unsigned char cmd;
 
-	printf("\n=== ANTSDR E310 - GNSS CRPA, %s, Linux (gnss_crpa %s) ===\n",
+	printf("\n=== ANTSDR E310 - GNSS CRPA, NLMS-PI %s (crpa13), Linux (gnss_crpa %s) ===\n",
 	       "4.9.14", GNSS_CRPA_VERSION);
 	printf("    TX1 IS CONDUCTED, ATTENUATED COAX ONLY -- never an antenna.\n");
 
@@ -522,7 +523,7 @@ static void firmware(void)
 	gnss_info_menu();
 	gnss_aj_init();
 	gnss_aj_enable(1);
-	gnss_settings_apply();          /* crpa5: saved gnss_rx_agc= / gnss_aj_avg= */
+	gnss_settings_apply();          /* saved gnss_rx_agc= / gnss_aj_nlms_mu= */
 	console_print("\nANTI-JAM (" GNSS_AJ_VERSION_STR "): ON, bypassed until a jammer appears.\n"
 		      "  Jammer events are printed as [AJ] lines with a time stamp. gnss_aj? = state,\n"
 		      "  gnss_report? = everything (copy it into a report), gnss_aj_csv=500 = CSV log,\n"
@@ -645,7 +646,7 @@ static int client(int argc, char **argv)
 static void usage(void)
 {
 	fprintf(stderr,
-		"gnss_crpa %s - SMI-PI 4.9.14 GNSS anti-jam for the ANTSDR E310 (Linux)\n"
+		"gnss_crpa %s - GNSS anti-jam (hardware NLMS, crpa13) for the ANTSDR E310 (Linux)\n"
 		"  gnss_crpa        run in this terminal (no service running)\n"
 		"  gnss_crpa -d     run as the background service (S95gnss_crpa)\n"
 		"  gnss             attach to the service (Ctrl-D / exit detaches)\n"
@@ -717,8 +718,16 @@ int main(int argc, char **argv)
 	signal(SIGINT, on_signal);
 	signal(SIGHUP, on_signal);
 
+	{   /* crpa12: the anti-jam runs on the first Cortex-A9 only (no second core) */
+		cpu_set_t one;
+		CPU_ZERO(&one);
+		CPU_SET(0, &one);
+		if (sched_setaffinity(0, sizeof(one), &one) != 0)
+			printf("gnss_crpa: note: could not pin to CPU 0 (%s)\n", strerror(errno));
+	}
+
 	if (lx_io_init() || lx_ad9361_open(&ad9361_phy)) {
-		printf("gnss_crpa: hardware not available -- is this the antsdr-fw-patch 0003 (SMI-PI) bitstream?\n");
+		printf("gnss_crpa: hardware not available -- is this the antsdr-fw-patch 0003 (crpa13 NLMS) bitstream?\n");
 		lx_flush();
 		return 1;
 	}

@@ -1,4 +1,4 @@
-# gnss_crpa - SMI-PI 4.9.14 GNSS anti-jam firmware for the ANTSDR E310 on Linux.
+# gnss_crpa - GNSS anti-jam firmware (crpa13: hardware NLMS) for the ANTSDR E310 on Linux.
 # Built by buildroot (package/gnss-crpa). CC / CFLAGS / LDFLAGS may come from
 # the command line (buildroot's TARGET_CONFIGURE_OPTS); the project's own flags
 # are kept apart so they are never lost. Host test without libiio:

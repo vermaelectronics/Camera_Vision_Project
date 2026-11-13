@@ -4,24 +4,21 @@
 #
 # Default target is the ANTSDR E310 (TARGET=ant). E200 / E310v2 work the same
 # way with TARGET=e200 / TARGET=e310v2. For TARGET=ant the firmware also
-# includes the GNSS anti-jam (RX1+RX2 -> FPGA -> TX1, AD9361 LVDS 2R2T): the
-# SFAP-PI space-frequency filter (crpa13: 128 frequency bins, weights in block
-# RAM) driven by the 4.9.14 firmware as the gnss_crpa service with its "gnss"
-# console (BUILD_E310.md sections 7 and 8).
+# includes the GNSS anti-jam (RX1+RX2 -> FPGA -> TX1, AD9361 LVDS 2R2T; crpa13:
+# space-time filter whose weights a hardware NLMS loop adapts, no SMI) and the
+# gnss_crpa service with its "gnss" console (BUILD_E310.md sections 7 and 8).
+# crpa13 is Linux only (no bare-metal build).
 #
 #   ./build.sh deps       install Ubuntu build packages (uses sudo apt-get)
 #   ./build.sh check      check host tools and Vivado/Vitis 2023.2
 #   ./build.sh fetch      clone plutosdr-fw v0.39 + submodules at pinned commits
 #   ./build.sh patch      apply the ANTSDR patches (safe to re-run)
-#   ./build.sh hls        Vitis HLS: the sfap_pi anti-jam filter IP (ant only)
+#   ./build.sh hls        Vitis HLS: the nlms_pi anti-jam filter IP (ant only)
 #   ./build.sh hdl        Vivado only: build/system_top.xsa (+ bitstream)
 #   ./build.sh fsbl       Vitis/xsct: build/sdk/fsbl/Release/fsbl.elf
 #   ./build.sh firmware   full firmware: boot.bin, ant.frm/.dfu, boot.frm/.dfu ...
 #   ./build.sh sdimg      SD-card image: build_sdimg/BOOT.bin + uImage + ...
-#   ./build.sh baremetal  design A WITHOUT Linux (ant only): FPGA + the SMI-PI
-#                         firmware on bare metal -> build_baremetal/BOOT.bin
 #   ./build.sh all        check + fetch + patch + hls + firmware + sdimg
-#   ./build.sh all-baremetal  check + fetch + patch + hls + baremetal (no Linux)
 #   ./build.sh outputs    list the generated files
 #   ./build.sh reset      restore pristine v0.39 sources (drops patches and builds)
 #   ./build.sh make ARGS  run plutosdr-fw's make with the right environment
@@ -31,10 +28,8 @@
 #   XILINX_DIR       Xilinx install root (auto: /tools/Xilinx, /opt/Xilinx, ~/Xilinx)
 #   VIVADO_SETTINGS  settings script sourced for Xilinx tools (default: ./xilinx_env.sh)
 #   SKIP_LEGAL=1     skip buildroot legal-info (faster; no legal-info tarball)
-#   SFAP_SKIP_CSIM=1 hls: skip the 9 C-simulation scenarios (faster)
-#   FORCE_HLS=1      hls: rebuild the sfap_pi IP even if it is up to date
-#   BM_DEFINES=...   baremetal: firmware build defines (default GNSS_LOG_SD;
-#                    BM_DEFINES= (empty) builds without SD logging / saving)
+#   NLMS_PI_SKIP_CSIM=1  hls: skip the 16 C-simulation scenarios (faster)
+#   FORCE_HLS=1      hls: rebuild the nlms_pi IP even if it is up to date
 
 set -euo pipefail
 
@@ -52,13 +47,6 @@ for _v in ADI_HDL_DIR ADI_GHDL_DIR GNSS_CRPA_IP_REPO; do
 	fi
 done
 unset _v
-
-# SFAP-PI FFT size: crpa13 is built for 128 bins only (the 64-bin option of crpa6 is gone).
-if [ -n "${SFAP_BINS:-}" ] && [ "$SFAP_BINS" != 128 ]; then
-	echo "build.sh: this package (crpa13) has 128 frequency bins only (got SFAP_BINS=$SFAP_BINS)" >&2; exit 1
-fi
-SFAP_BINS=128
-SFAP_LOG2N=7
 
 # Everything below must reach make through the environment (see run_make).
 export TARGET="${TARGET:-ant}"
@@ -292,8 +280,8 @@ cmd_patch() {
 	info "Applying ANTSDR patches for TARGET=$TARGET"
 	# 0002-* (ant only): GPS L1 RX1 -> FPGA -> TX1 loopback (gnss_passthrough
 	# in the FPGA, /usr/sbin/gnss_loopback in Linux). See BUILD_E310.md.
-	# 0003-* (ant only): anti-jam. hdl: AD9361 LVDS 2R2T, gnss_passthrough
-	# v4.9.14 + the sfap_pi HLS core (0004: 64 bins instead of 128); linux: LVDS 2R2T device
+	# 0003-* (ant only): v4.9.14 anti-jam. hdl: AD9361 LVDS 2R2T,
+	# gnss_passthrough v4.9.14 + nlms_pi HLS core (crpa13); linux: LVDS 2R2T device
 	# tree; u-boot: mode=2r2t; buildroot: gnss-crpa package (gnss_crpa
 	# service + "gnss" console, gnss_loopback forwards to it).
 	local hdl_series=("$PATCH_DIR/0001-add-three-ant-hdl-support-bump-to-v0.39-v1.patch")
@@ -319,61 +307,12 @@ cmd_patch() {
 			sed -i '/BOARD_DIR}\/gnss_loopback /d' "$br/board/ant/post-build.sh"
 		fi
 	fi
-	# The 64-bin patch sits on top of 0003: take it off while the series is
-	# checked (0003 would not look "already applied" under it); sfap_bins_apply
-	# puts the wanted size back.
-	sfap_bins_lift
 	apply_series "$FW_DIR/hdl"         "${hdl_series[@]}"
 	apply_series "$FW_DIR/u-boot-xlnx" "${ub_series[@]}"
 	apply_series "$FW_DIR/linux"       "${lx_series[@]}"
 	apply_series "$FW_DIR/buildroot"   "${br_series[@]}"
 	apply_series "$FW_DIR"             "$PATCH_DIR/$TARGET/0001-add-support-makefile-scripts.patch"
-	sfap_bins_apply
 	sync_crpa
-}
-
-# --------------------------------------------------------------------------
-# SFAP-PI FFT size in the hdl tree (ant only): 0004-hdl-sfap-64bins.patch on
-# top of 0003 means 64 bins, without it 128.
-# --------------------------------------------------------------------------
-SFAP_PREV=""
-sfap_bins_lift() {
-	local p="$PATCH_DIR/$TARGET/0004-hdl-sfap-64bins.patch" hdl="$FW_DIR/hdl"
-	[ -f "$p" ] || return 0
-	if git -C "$hdl" apply --reverse --check "$p" 2>/dev/null; then
-		git -C "$hdl" apply --reverse --whitespace=nowarn "$p"
-		SFAP_PREV=64
-	fi
-}
-
-sfap_bins_apply() {
-	local p="$PATCH_DIR/$TARGET/0004-hdl-sfap-64bins.patch" hdl="$FW_DIR/hdl" have=128 prev
-	[ -f "$p" ] || return 0
-	git -C "$hdl" apply --reverse --check "$p" 2>/dev/null && have=64
-	prev="${SFAP_PREV:-$have}"
-	if [ "$have" != "$SFAP_BINS" ]; then
-		if [ "$SFAP_BINS" = 64 ]; then
-			git -C "$hdl" apply --whitespace=nowarn "$p" || die "cannot apply ${p#"$PATCH_DIR"/}; run './build.sh reset'"
-		else
-			git -C "$hdl" apply --reverse --whitespace=nowarn "$p" || die "cannot remove ${p#"$PATCH_DIR"/}; run './build.sh reset'"
-		fi
-	fi
-	if [ "$prev" != "$SFAP_BINS" ]; then
-		# the FPGA project does not notice a changed filter IP by itself
-		if [ -f "$FW_DIR/build/system_top.xsa" ] || [ -d "$hdl/projects/ant/ant.runs" ]; then
-			warn "SFAP-PI changed from $prev to $SFAP_BINS bins: the FPGA is built again"
-			rm -f "$FW_DIR/build/system_top.xsa" "$FW_DIR/build/system_top.bit"
-			make -C "$hdl/projects/ant" clean >/dev/null 2>&1 || true
-		fi
-	fi
-	echo "$SFAP_BINS" > "$ROOT/.sfap_bins"
-	ok "SFAP-PI: $SFAP_BINS frequency bins (gnss_passthrough, filter core and firmware)"
-}
-
-# Firmware sources with the FFT size of this build: <dir>/gnss_sfap_cfg.h
-sfap_cfg_header() {
-	sed -i "s/^#define AJ_LOG2N [0-9]*\$/#define AJ_LOG2N $SFAP_LOG2N/" "$1/gnss_sfap_cfg.h"
-	grep -q "^#define AJ_LOG2N $SFAP_LOG2N\$" "$1/gnss_sfap_cfg.h" || die "cannot set AJ_LOG2N in $1/gnss_sfap_cfg.h"
 }
 
 # --------------------------------------------------------------------------
@@ -383,65 +322,57 @@ sync_crpa() {
 	local dst="$FW_DIR/buildroot/package/gnss-crpa"
 	[ -d "$dst" ] || return 0
 	if [ -d "$dst/src" ] && diff -q "$ROOT/gnss_crpa/Makefile" "$dst/src/Makefile" >/dev/null 2>&1 &&
-	   diff -rq -x gnss_sfap_cfg.h "$ROOT/gnss_crpa/src" "$dst/src/src" >/dev/null 2>&1 &&
-	   diff -rq "$ROOT/gnss_crpa/linux" "$dst/src/linux" >/dev/null 2>&1 &&
-	   grep -q "^#define AJ_LOG2N $SFAP_LOG2N\$" "$dst/src/src/gnss_sfap_cfg.h" 2>/dev/null; then
-		ok "gnss_crpa sources up to date in buildroot/package/gnss-crpa/src ($SFAP_BINS bins)"
+	   diff -rq "$ROOT/gnss_crpa/src" "$dst/src/src" >/dev/null 2>&1 &&
+	   diff -rq "$ROOT/gnss_crpa/linux" "$dst/src/linux" >/dev/null 2>&1; then
+		ok "gnss_crpa sources up to date in buildroot/package/gnss-crpa/src"
 		return 0
 	fi
 	rm -rf "$dst/src"
 	mkdir -p "$dst/src"
 	cp -a "$ROOT/gnss_crpa/Makefile" "$ROOT/gnss_crpa/src" "$ROOT/gnss_crpa/linux" "$dst/src/"
-	sfap_cfg_header "$dst/src/src"
 	# buildroot copies a local package only once: make it build again
 	rm -rf "$FW_DIR"/buildroot/output/build/gnss-crpa-*
 	ok "gnss_crpa sources copied to buildroot/package/gnss-crpa/src"
 }
 
 # --------------------------------------------------------------------------
-# hls: the sfap_pi space-frequency anti-jam filter (Vitis HLS), ant only
+# hls: the nlms_pi space-time anti-jam filter (Vitis HLS), ant only
 # --------------------------------------------------------------------------
 cmd_hls() {
 	check_target
 	[ "$TARGET" = ant ] || { ok "hls: nothing to do for TARGET=$TARGET"; return 0; }
 	[ -d "$FW_DIR/hdl/library" ] || die "sources not fetched yet; run './build.sh fetch' and './build.sh patch'"
-	local src="$ROOT/hls/sfap_pi" out="$FW_DIR/hdl/library/antsdr_ip/sfap_pi"
+	local src="$ROOT/hls/nlms_pi" out="$FW_DIR/hdl/library/antsdr_ip/nlms_pi"
 	if [ -z "${FORCE_HLS:-}" ] && [ -f "$out/component.xml" ] &&
-	   [ "$(cat "$out/.sfap_bins" 2>/dev/null)" = "$SFAP_BINS" ] &&
 	   [ -z "$(find "$src" "$ROOT/gnss_crpa/src/gnss_aj_math.c" "$ROOT/gnss_crpa/src/gnss_aj_math.h" \
 		-newer "$out/component.xml" -type f -not -path '*/build/*' 2>/dev/null)" ]; then
-		ok "sfap_pi IP up to date ($SFAP_BINS bins): $out (FORCE_HLS=1 rebuilds it)"
+		ok "nlms_pi IP up to date: $out (FORCE_HLS=1 rebuilds it)"
 		return 0
 	fi
 	xilinx_run 'command -v vitis_hls' >/dev/null 2>&1 ||
 		die "vitis_hls not found via VIVADO_SETTINGS=$VIVADO_SETTINGS (install Vitis $REQUIRED_XILINX_VERSION)"
-	info "Vitis HLS: sfap_pi, $SFAP_BINS bins -> $out (about 15-30 min; SFAP_SKIP_CSIM=1 skips the C simulation)"
+	info "Vitis HLS: nlms_pi -> $out (about 10-20 min; NLMS_PI_SKIP_CSIM=1 skips the C simulation)"
 	local log="$src/build/build_hls.log"
 	mkdir -p "$src/build"
-	rm -f "$out/.sfap_bins"
-	if ! xilinx_run "cd '$src' && GNSS_CRPA_IP_REPO='$FW_DIR/hdl/library/antsdr_ip' SFAP_FW_DIR='$ROOT/gnss_crpa/src' SFAP_LOG2N='$SFAP_LOG2N' SFAP_SKIP_CSIM='${SFAP_SKIP_CSIM:-0}' vitis_hls -f build_hls.tcl" 2>&1 | tee "$log" ||
-	   ! grep -q "SFAP_PI_HLS: PASS" "$log"; then
-		die "sfap_pi HLS build failed (see $log)"
+	if ! xilinx_run "cd '$src' && GNSS_CRPA_IP_REPO='$FW_DIR/hdl/library/antsdr_ip' NLMS_PI_FW_DIR='$ROOT/gnss_crpa/src' NLMS_PI_SKIP_CSIM='${NLMS_PI_SKIP_CSIM:-0}' vitis_hls -f build_hls.tcl" 2>&1 | tee "$log" ||
+	   ! grep -q "NLMS_PI_HLS: PASS" "$log"; then
+		die "nlms_pi HLS build failed (see $log)"
 	fi
-	echo "$SFAP_BINS" > "$out/.sfap_bins"
-	# an older filter core of this folder (crpa1-5) must not stay in the IP catalog
-	rm -rf "$FW_DIR/hdl/library/antsdr_ip/smi_pi"
-	ok "sfap_pi IP ($SFAP_BINS bins): $out"
+	ok "nlms_pi IP: $out"
 }
 
 require_hls() {
 	[ "$TARGET" = ant ] || return 0
-	if [ -f "$PATCH_DIR/$TARGET/0003-hdl-stap-antijam.patch" ] && [ -d "$FW_DIR/hdl/library/gnss_passthrough" ]; then
-		sfap_bins_apply
-	fi
 	[ -d "$FW_DIR/buildroot/package/gnss-crpa" ] && sync_crpa
 	if [ -f "$PATCH_DIR/$TARGET/0003-hdl-stap-antijam.patch" ] &&
-	   { [ ! -f "$FW_DIR/hdl/library/antsdr_ip/sfap_pi/component.xml" ] ||
-	     [ "$(cat "$FW_DIR/hdl/library/antsdr_ip/sfap_pi/.sfap_bins" 2>/dev/null)" != "$SFAP_BINS" ]; }; then
+	   [ ! -f "$FW_DIR/hdl/library/antsdr_ip/nlms_pi/component.xml" ]; then
 		cmd_hls
 	fi
 }
 
+# --------------------------------------------------------------------------
+# make wrappers
+# --------------------------------------------------------------------------
 require_ready() {
 	check_target
 	[ -f "$FW_DIR/Makefile" ] || die "sources not fetched yet; run './build.sh fetch'"
@@ -505,48 +436,6 @@ cmd_sdimg() {
 	cmd_outputs
 }
 
-# --------------------------------------------------------------------------
-# baremetal: design-A FPGA + the anti-jam firmware without Linux (ant only)
-# --------------------------------------------------------------------------
-cmd_baremetal() {
-	require_ready
-	[ "$TARGET" = ant ] || die "baremetal is for TARGET=ant (E310) only"
-	require_hls
-	local xsa="$FW_DIR/build/system_top.xsa" out="$ROOT/build_baremetal"
-	local scripts="$ROOT/baremetal/Scripts" src="$ROOT/baremetal/app_gnss_e310"
-	[ -d "$src" ] || die "missing $src"
-	if [ ! -f "$xsa" ]; then
-		info "No FPGA build yet: building the hardware first (Vivado)"
-		run_make build/system_top.xsa
-	fi
-	mkdir -p "$out"
-	(cd "$out" && unzip -o -q "$xsa" system_top.bit) || die "no system_top.bit in $xsa"
-
-	# the firmware sources with this build's FFT size (gnss_sfap_cfg.h)
-	rm -rf "$out/fw_src"
-	cp -a "$src" "$out/fw_src"
-	sfap_cfg_header "$out/fw_src"
-	src="$out/fw_src"
-
-	info "Bare-metal firmware (Vitis xsct, classic BSP, SD logging + band 7 on SD, SFAP-PI $SFAP_BINS bins)"
-	xilinx_run "xsct '$scripts/build_software.tcl' '$xsa' '$out/vitis_ws' '$src' '$out/e310_gnss_app.elf' '${BM_DEFINES-GNSS_LOG_SD}'" \
-		2>&1 | tee "$out/build_software.log"
-	grep -q "SW_RESULT: PASS" "$out/build_software.log" || die "firmware build failed (see $out/build_software.log)"
-
-	info "FSBL (Vitis xsct)"
-	xilinx_run "xsct '$scripts/build_fsbl.tcl' '$xsa' '$out/fsbl_ws' '$out/fsbl.elf'" 2>&1 | tee "$out/build_fsbl.log"
-	grep -q "FSBL_RESULT: PASS" "$out/build_fsbl.log" || die "FSBL build failed (see $out/build_fsbl.log)"
-
-	info "BOOT.bin = FSBL + bitstream + firmware (bootgen)"
-	printf 'the_ROM_image:\n{\n\t[bootloader] %s\n\t%s\n\t%s\n}\n' \
-		"$out/fsbl.elf" "$out/system_top.bit" "$out/e310_gnss_app.elf" > "$out/boot.bif"
-	rm -f "$out/BOOT.bin"
-	xilinx_run "bootgen -arch zynq -image '$out/boot.bif' -o '$out/BOOT.bin' -w on" || die "bootgen failed"
-	[ -f "$out/BOOT.bin" ] || die "bootgen produced no BOOT.bin"
-	ok "Bare-metal boot image: $out/BOOT.bin ($(du -h "$out/BOOT.bin" | cut -f1))"
-	ok "Copy ONLY BOOT.bin to the SD card (no uImage, devicetree, ramdisk or uEnv.txt)."
-}
-
 cmd_outputs() {
 	local b="$FW_DIR/build" s="$FW_DIR/build_sdimg" f
 	info "QSPI-flash firmware ($b)"
@@ -608,8 +497,8 @@ case "$cmd" in
 	firmware) cmd_firmware ;;
 	sdimg)    cmd_sdimg ;;
 	all)      cmd_check; cmd_fetch; cmd_patch; cmd_hls; cmd_firmware; cmd_sdimg ;;
-	baremetal) cmd_baremetal ;;
-	all-baremetal) cmd_check; cmd_fetch; cmd_patch; cmd_hls; cmd_baremetal ;;
+	baremetal|all-baremetal)
+		die "crpa13 is Linux only: there is no bare-metal build in this package (use ./build.sh all; crpa12 has the last bare-metal build)" ;;
 	outputs)  cmd_outputs ;;
 	reset)    cmd_reset "$@" ;;
 	make)     require_ready; run_make "$@" ;;

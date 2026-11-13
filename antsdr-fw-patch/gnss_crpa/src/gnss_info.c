@@ -14,7 +14,7 @@
 #include "console.h"
 #include "gnss_l1.h"
 #include "gnss_passthrough.h"
-#include "gnss_aj_math.h"     /* crpa6: AJ_N, AJ_LAT, AJ_NSAMP */
+#include "gnss_aj_math.h"     /* 4.9.14: AJ_NT, AJ_REF, AJ_MAXDIM, AJ_NSAMP */
 #include "gnss_txdma.h"
 
 #ifdef XILINX_PLATFORM
@@ -185,6 +185,7 @@ static void info_hardware(struct ad9361_rf_phy *phy)
     console_print("     v4.0 is the SMI-PI space-time build: a 32+32-tap filter (4.9; 16+16 before)\n");
     console_print("     (smi_pi_0) on TX1, 31 weights computed by the ARM. v4.1\n");
     console_print("     adds bypass, RX2 normalisation, 2 image taps, make-up gain.\n");
+    console_print("     crpa13 (AJ_INFO layout 13): nlms_pi_0, weights adapted in the FPGA.\n");
     rule();
 
     console_print(" RF FRONT END                                            [cfg]\n");
@@ -267,9 +268,9 @@ static void info_config(struct ad9361_rf_phy *phy)
     console_print("     [4] tx2_on   : %d   %s\n", (long)((ctrl >> 4) & 1U),
                   (char *)(((ctrl >> 4) & 1U) ? "TX2 live" : "TX2 MUTED (default)"));
     console_print("     [5] smi_en   : %d   %s\n", (long)((ctrl >> 5) & 1U),
-                  (char *)(((ctrl >> 5) & 1U) ? "TX1 = SFAP-PI filter (RX1, RX2)"
+                  (char *)(((ctrl >> 5) & 1U) ? "TX1 = space-time NLMS filter (RX1, RX2)"
                                               : "TX1 = RX1 (anti-jam off)"));
-    console_print("   SMI-PI weights : %d commits so far (AJ_COMMIT, 0x180)\n",
+    console_print("   AJ commits     : %d so far (AJ_COMMIT, 0x180)\n",
                   (long)gnss_pt_read(GNSS_PT_REG_AJ_COMMIT));
     console_print("   DDR replay     : %s\n",
                   (char *)(gnss_txdma_is_running() ? "RUNNING" : "stopped"));
@@ -394,24 +395,27 @@ static void info_pl(void)
     console_print("   axi_ad9361 -> AD9361 -> [TX1 SMA]\n");
     rule();
 
-    console_print("\n SFAP-PI SPACE-FREQUENCY POWER INVERSION (crpa6)        [cfg]\n");
+    console_print("\n SPACE-TIME POWER INVERSION, HARDWARE NLMS (crpa13)      [cfg]\n");
     rule();
-    console_print("   sfap_pi_0 is a Vitis HLS filter on sys_cpu_clk (100 MHz), fed\n");
+    console_print("   nlms_pi_0 is a Vitis HLS filter on sys_cpu_clk (100 MHz), fed\n");
     console_print("   from gnss_passthrough through an async FIFO and returning\n");
     console_print("   through another. RX2 is first scaled to RX1's level (g2,\n");
-    console_print("   learned from the noise floors). RX1 and RX2 are split into\n");
-    console_print("   %d frequency bins (windowed FFT, 50 %% overlap); in every bin k:\n", (long)AJ_N);
-    console_print("     Y_k = X1_k - b_k X2n_k - c1_k conj(X1_-k) - c2_k conj(X2n_-k)\n");
-    console_print("   (b = the two-antenna null of that bin, c1 / c2 = image taps for\n");
-    console_print("   the AD9361 I/Q mirror of the jammer), then the inverse FFT and\n");
-    console_print("   overlap-add rebuild the signal. RX1's coefficient is fixed at 1,\n");
-    console_print("   so the output can never be turned down as a whole. With no\n");
-    console_print("   jammer the filter is BYPASSED (y = x1[n-%d] exactly, the filter's\n", (long)AJ_LAT);
-    console_print("   own latency) and the ARM only runs a cheap detector.\n");
-    console_print("   When a jammer appears the ARM computes the 3 x %d weights from\n", (long)AJ_N);
-    console_print("   %d-sample DMA captures of both channels (gnss_aj.c) and commits\n", (long)AJ_NSAMP);
-    console_print("   weights, bypass, make-up gain and g2 all at once (weights from\n");
-    console_print("   0x200, the rest 0x180-0x19C, AJ_COMMIT 0x180).\n");
+    console_print("   learned from the noise floors), then %d taps on RX1, %d on\n",
+                  (long)AJ_NT, (long)AJ_NT);
+    console_print("   RX2 and %d + %d image taps (the AD9361 I/Q mirror of the jammer):\n",
+                  (long)AJ_NIMG, (long)AJ_NIMG);
+    console_print("     y = x1[n-%d] - sum a_k x1[n-k] - sum b_k x2n[n-k]\n", (long)AJ_REF);
+    console_print("                 - sum c1_d conj(x1[n-%d-d]) - sum c2_d conj(x2n[n-%d-d])\n",
+                  (long)AJ_REF, (long)AJ_REF);
+    console_print("   RX1's tap at delay %d is fixed at 1, so the output can never be\n", (long)AJ_REF);
+    console_print("   turned down as a whole. With no jammer the filter is BYPASSED\n");
+    console_print("   (y = x1[n-%d] exactly, weights cleared) and the ARM only runs a\n", (long)AJ_REF);
+    console_print("   cheap detector on %d-sample DMA captures. When a jammer appears\n", (long)AJ_NSAMP);
+    console_print("   the filter goes in and the FPGA's NLMS loop adapts the %d weights\n", (long)AJ_MAXDIM);
+    console_print("   EVERY SAMPLE (no SMI solve on the ARM since crpa13). The ARM sets\n");
+    console_print("   the step (AJ_NLMS 0x1E0), weight scale, make-up gain and g2 and\n");
+    console_print("   commits them together (AJ_COMMIT 0x180); the running weights read\n");
+    console_print("   back at 0x400-0x43C, 0x190, 0x194, 0x1C0-0x1CC.\n");
     console_print("   CONTROL[5] puts it on TX1. TX2 carries a copy of the TX1 output\n");
     console_print("   (never raw RX2) and is MUTED unless gnss_tx2=1 (4.9.14).\n");
     rule();
@@ -431,7 +435,7 @@ static void info_pl(void)
     rule();
     console_print("   l_clk        4 x fs     AD9361 interface, gnss_passthrough,\n");
     console_print("                           wfifo din, rfifo dout (timed 4 ns)\n");
-    console_print("   sys_cpu_clk  100 MHz    sfap_pi_0 space-frequency filter (II=1)\n");
+    console_print("   sys_cpu_clk  100 MHz    nlms_pi_0 space-time filter (II=1)\n");
     console_print("   divclk       divided     cpack2, upack2, both DMA stream sides\n");
     console_print("   sys_cpu_clk  100 MHz     all AXI-Lite control\n");
     console_print("   The two FIFOs exist BECAUSE of that crossing. They are not\n");
@@ -477,8 +481,8 @@ static void info_about(void)
     rule();
     console_print("   This is the skeleton of a CRPA anti-jam front end. With\n");
     console_print("   gnss_smi=0 gnss_passthrough is transparent -- Iout = Iin.\n");
-    console_print("   With gnss_smi=1 (the default) the SFAP-PI space-frequency filter\n");
-    console_print("   (sfap_pi_0) replaces the identity on TX1 with adaptive power\n");
+    console_print("   With gnss_smi=1 (the default) the space-time NLMS filter\n");
+    console_print("   (nlms_pi_0) replaces the identity on TX1 with adaptive power\n");
     console_print("   inversion across the two antenna elements RX1 and RX2.\n");
     console_print("   Proving the loop end to end FIRST means that when the\n");
     console_print("   algorithm goes in, any change it causes is measurable\n");
@@ -524,8 +528,8 @@ static void info_about(void)
     console_print("     Galileo, QZSS, SBAS, BeiDou B1I/B1C and GLONASS G1. The\n");
     console_print("     receiver must have each system switched on.\n");
     console_print("   * Position ACCURACY was never checked against a reference.\n");
-    console_print("   * SMI-PI v4.1 (space-time) is verified in C simulation against\n");
-    console_print("     wideband (to 60 dB), CW and reflected jammers, I/Q imbalance\n");
+    console_print("   * The NLMS filter (crpa13) is verified in C simulation against\n");
+    console_print("     wideband (to 61 dB), CW and reflected jammers, I/Q imbalance\n");
     console_print("     and a weak RX2, NOT yet on this board.\n");
     console_print("     Treat it as under test until gnss_aj? confirms it.\n");
     rule();
@@ -577,16 +581,27 @@ static void info_registers(void)
     console_print("   0x34  TX_COUNT_CH1    RO\n");
     console_print("   0x38  RX_SNAPSHOT_CH1 RO\n");
     console_print("   0x40  CRPA_COEF0..15  RW  0x40-0x7C, stored but unused\n");
-    console_print("   0x200 AJ_WB/WC1/WC2   WO  SFAP-PI weights (shadow), Q3.12 {imag, real}:\n");
-    console_print("                             %d words b_k, then c1_k, then c2_k (k = FFT bin)\n", (long)AJ_N);
+    console_print("   0x400 AJ_W0..15       RO  running NLMS weights (crpa13), Q3.12 x 2^ws: 0..7 RX1, 8..15 RX2\n");
+    console_print("                             {imag, real}\n");
     console_print("   0x180 AJ_COMMIT       W/R write: all AJ_* -> filter; read: count\n");
-    console_print("   0x184 AJ_INFO         RO  0x%x (bins, hop, Q3.12, layout 9 = SFAP)\n", (unsigned long)GNSS_PT_AJ_INFO_EXPECTED);
+    console_print("   0x184 AJ_INFO         RO  0x08040C0D (8 taps, ref 4, Q3.12, layout 13 = NLMS only)\n");
     console_print("   0x188 AJ_CFG          RW  [0] bypass (reset 1), [10:8] make-up\n");
     console_print("   0x18C AJ_NORM         RW  RX2 normalisation g2, Q3.13 (0x2000=1)\n");
+    console_print("   0x190 AJ_WC0/WC1      RO  running image taps at R (0x190 RX1, 0x194 RX2)\n");
     console_print("   0x198 AJ_CFG_ACTIVE   RO  AJ_CFG as committed\n");
     console_print("   0x19C AJ_BLK_THR      RW  pulse blanker threshold (shadow; AJ_CFG[15] = enable), 0x1A0 active\n");
     console_print("   0x1A4 AJ_BLK_COUNT    RO  samples blanked,  0x1A8 AJ_BLK_BURSTS  RO  bursts blanked\n");
     console_print("   0x1AC AJ_RX_PEAK      RO  [15:0] RX peak of the last 8.5 ms window, [31:16] window counter\n");
+    console_print("   0x1B0 AJ_GAIN         RW  fine output gain (shadow), Q2.14, 1.0 = 0x4000 (crpa8)\n");
+    console_print("   0x1B4 AJ_GAIN_ACT     RO  committed fine gain\n");
+    console_print("   0x1B8 AJ_CLIP1        RO  RX1 samples at ADC full scale (wraps)\n");
+    console_print("   0x1BC AJ_CLIP2        RO  RX2 samples at ADC full scale (wraps)\n");
+    console_print("   0x1C0 AJ_WCX0..3      RO  running image taps c1(R-1), c1(R+1), c2(R-1), c2(R+1)\n");
+    console_print("   0x1D0 AJ_PWR_IN       RO  mean RX1 I^2+Q^2 over 2^16 samples (crpa9)\n");
+    console_print("   0x1D4 AJ_PWR_OUT      RO  mean filter output I^2+Q^2 over 2^16 samples\n");
+    console_print("   0x1D8 AJ_PWR_IDX      RO  [15:0] RX1 window counter, [31:16] output window counter\n");
+    console_print("   0x1E0 AJ_NLMS         RW  hardware NLMS step: [15:0] m, [20:16] shift, [31] adapt (0 = hold)\n");
+    console_print("   0x1E4 AJ_NLMS_ACT     RO  committed NLMS word\n");
     rule();
     console_print(" STATUS BITS [2] AND [3] ARE THE IMPORTANT ONES.\n");
     console_print("   They are axi_ad9361's read-back of (dac_data_sel == 4'h2),\n");
@@ -689,7 +704,7 @@ static void info_issues(void)
     console_print("   nothing and the board looks broken when it is not.\n");
     rule();
 
-    console_print("\n 5. SMI-PI NEEDS RX2 CONNECTED.\n");
+    console_print("\n 5. THE ANTI-JAM NEEDS RX2 CONNECTED.\n");
     rule();
     console_print("   Both RX channels are wired in the PL, so a TWO-ELEMENT CRPA\n");
     console_print("   is in place -- but with nothing on RX2 it sees only its own\n");
@@ -788,8 +803,8 @@ static void info_quickstart(void)
     console_print("   gnss_aj_log=N               status line every N s, 0 = off (default)\n");
     console_print("   gnss_aj_events=0 / =1       console silent / jammer events printed (default)\n");
     console_print("   gnss_aj_csv=N               CSV line every N ms (100..), 0 = off\n");
-    console_print("   gnss_aj_mode=0 / 1 / 2 / 3  63+2 taps (default) / RX2 / one / no image\n");
-    console_print("   gnss_aj_sweep=1 / 0         long memory for a moving (chirp) jammer, default on\n");
+    console_print("   gnss_aj_nlms_mu=0 / =X      NLMS step automatic (default) / by hand; gnss_aj_nlms? state\n");
+    console_print("   gnss_aj_nlms=1 / =0         NLMS adapting (default) / weights held\n");
     console_print("   gnss_aj_blank=1 / 0 / 2     pulse blanker (bitstream 4.6): auto (default) / off / on; gnss_aj_blank_db=7\n");
     console_print("   gnss_band=0..6   fixed RF preset: LO, rate, bandwidth, TX att, RX gain (0 = default)\n"
                   "   gnss_band=7,LO,rate,BW,att,gain   your own values (saved; gnss_band7? shows them)\n");

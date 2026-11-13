@@ -1,42 +1,44 @@
-From 38ae45a1f5c6740edda28c4e6c66b9be03cfe7fc Mon Sep 17 00:00:00 2001
+From dfb14b23a8b46e0c7c97bb6ba5ab0ccf21879954 Mon Sep 17 00:00:00 2001
 From: antsdr-fw-patch <antsdr-fw-patch@localhost>
 Date: Sat, 7 Nov 2026 11:57:58 +0000
-Subject: [PATCH] ant: SMI-PI STAP 8x8 v4.9.14 anti-jam with hardware NLMS,
- AD9361 LVDS 2R2T
+Subject: [PATCH] ant: STAP 8x8 v4.9.14 anti-jam, weights from hardware NLMS
+ only, AD9361 LVDS 2R2T
 
 Converts the E310 AD9361 interface to LVDS (pins and standards of the
 vendor E310 V1 design) so 2R2T runs at 61.44 MS/s, adds the fmcomms2-style
 divided-clock datapath, gnss_passthrough v4.9.14 at 0x43C10000 and the
-Vitis HLS smi_pi filter between two clock-crossing FIFOs.
+Vitis HLS anti-jam filter between two clock-crossing FIFOs.
 crpa8: AJ_GAIN (fine output gain, port gain), AJ_CLIP1/2 ADC clip counters.
-crpa9: 3 + 3 image taps (AJ_WCX0..3, 192-bit aj_wcj), power meters
-AJ_PWR_IN/OUT.
-crpa10: 8 + 8 taps (16 weight words), hardware NLMS register AJ_NLMS
-(port nlms, smi_pi 3.0), AJ_INFO 0x08040C0C (layout 12).
+crpa9: power meters AJ_PWR_IN/OUT.
+crpa13: the filter is nlms_pi 1.0 (8 + 8 taps, 3 + 3 image taps) with the
+weights adapted by its hardware NLMS loop only: no SMI weight registers
+(AJ_W, AJ_WC, AJ_WCX now read the running weights from the core's weight
+monitor, ports aj_wmon / aj_wmon_vld), AJ_NLMS is the step, AJ_INFO
+0x08040C0D (layout 13).
 ---
  library/gnss_passthrough/Makefile             |   3 +-
- library/gnss_passthrough/gnss_passthrough.v   | 542 ++++++++++++++++--
+ library/gnss_passthrough/gnss_passthrough.v   | 537 ++++++++++++++++--
  .../gnss_passthrough_constr.xdc               |  19 +-
  .../gnss_passthrough/gnss_passthrough_ip.tcl  |  68 ++-
- library/gnss_passthrough/gnss_pulse_blank.v   | 222 +++++++
+ library/gnss_passthrough/gnss_pulse_blank.v   | 222 ++++++++
  projects/ant/Makefile                         |   4 +
  projects/ant/gnss_passthrough_cdc.xdc         | 100 ++++
- projects/ant/system_bd.tcl                    | 383 +++++++------
+ projects/ant/system_bd.tcl                    | 386 +++++++------
  projects/ant/system_constr.xdc                | 131 ++---
  projects/ant/system_project.tcl               |   5 +
  projects/ant/system_top.v                     |  37 +-
- 11 files changed, 1212 insertions(+), 302 deletions(-)
+ 11 files changed, 1210 insertions(+), 302 deletions(-)
  create mode 100644 library/gnss_passthrough/gnss_pulse_blank.v
  create mode 100644 projects/ant/gnss_passthrough_cdc.xdc
 
 diff --git a/library/gnss_passthrough/Makefile b/library/gnss_passthrough/Makefile
-index ab4bcc0..58cad71 100644
+index ab4bcc0..83736d6 100644
 --- a/library/gnss_passthrough/Makefile
 +++ b/library/gnss_passthrough/Makefile
 @@ -1,10 +1,11 @@
  ####################################################################################
 -## gnss_passthrough - AD9361 RX -> TX loopback (antsdr-fw-patch, ANTSDR E310)
-+## gnss_passthrough v4.9.14 - AD9361 RX -> SMI-PI -> TX (antsdr-fw-patch, E310)
++## gnss_passthrough v4.9.14 - AD9361 RX -> NLMS anti-jam -> TX (antsdr-fw-patch, E310)
  ####################################################################################
  
  LIBRARY_NAME := gnss_passthrough
@@ -47,7 +49,7 @@ index ab4bcc0..58cad71 100644
  XILINX_DEPS += gnss_passthrough_constr.xdc
  XILINX_DEPS += gnss_passthrough_ip.tcl
 diff --git a/library/gnss_passthrough/gnss_passthrough.v b/library/gnss_passthrough/gnss_passthrough.v
-index feca02d..8fdfb8f 100644
+index feca02d..ef0c060 100644
 --- a/library/gnss_passthrough/gnss_passthrough.v
 +++ b/library/gnss_passthrough/gnss_passthrough.v
 @@ -1,6 +1,6 @@
@@ -108,14 +110,14 @@ index feca02d..8fdfb8f 100644
  //                                    [8]  overflow_sticky [9]  underflow_sticky
 +//                                    [10] smi_drop_sticky: an RX sample pair
 +//                                         arrived while the previous one was
-+//                                         still waiting for smi_pi_0 (never
++//                                         still waiting for the filter core (never
 +//                                         expected; cleared with cnt_clear)
  //                                    [16] pass_en (as seen in the clk domain)
 +//                                    [18] smi_en  (as seen in the clk domain)
  //
  //            READ [2]/[3] CAREFULLY. dac_enable_* is NOT an enable this block
  //            drives, and it is NOT derived from the valid strobes. It is a
-@@ -88,8 +116,91 @@
+@@ -88,8 +116,95 @@
  //    0x34    TX_COUNT_CH1    RO      dac_valid_i1 pulses served
  //    0x38    RX_SNAPSHOT_CH1 RO      {adc_data_q1, adc_data_i1} last accepted
  //    0x3C    RESERVED        RO      reads 0
@@ -124,46 +126,50 @@ index feca02d..8fdfb8f 100644
 +//    0x40..  CRPA_COEF[0..15] RW     reserved; stored and returned, no logic
 +//                                    consumes them. (0x48 was the v3 SMI-PI
 +//                                    loading L; v4 needs no loading register.)
-+//    0x400.. AJ_W[0..15]     RW      SMI-PI space-time weights, SHADOW copy (crpa10: 16 words for
-+//    0x43C                           8 + 8 taps; 0x440..0x4FC read 0, writes ignored).
-+//                                    Word k: {imag[31:16], real[15:0]}, signed
-+//                                    Q3.12 (1.0 = 0x1000).
++//    0x400.. AJ_W[0..15]     RO      crpa13 (layout 13): the weights the NLMS loop in nlms_pi_0 is
++//    0x43C                           running now (weight monitor, read only; writes are ignored;
++//                                    0x440..0x4FC read 0). Word k: {imag[31:16], real[15:0]},
++//                                    signed Q3.12 x 2^ws (1.0 = 0x1000 at ws = 0).
 +//                                      k = 0..7   RX1 tap at delay k
 +//                                                 (k = 4 is the reference,
-+//                                                 fixed at 1; its word is
-+//                                                 ignored by the core)
++//                                                 fixed at 1; reads 0)
 +//                                      k = 8..15  RX2 tap at delay k-8
 +//                                                 (applied to the NORMALISED
 +//                                                 RX2, see AJ_NORM)
-+//                                    Writing here does NOT change the filter.
++//                                    The core sends one weight per sample (round robin over the
++//                                    22 words), so each word is at most 22 samples old.
++//                                    (crpa1-12: the ARM's SMI weights, written here.)
 +//    0x180   AJ_COMMIT       W/RO    Any write copies ALL shadow registers
-+//                                    (AJ_W, AJ_CFG, AJ_NORM, AJ_WC) to the
++//                                    (AJ_CFG, AJ_NORM, AJ_BLK_THR, AJ_GAIN, AJ_NLMS) to the
 +//                                    values the core uses, in one s_axi_aclk
 +//                                    edge, so the core never runs a half-old,
 +//                                    half-new set. Reads a commit counter.
 +//    0x184   AJ_INFO         RO      {8'd taps per channel, 8'd reference delay,
 +//                                     8'd fraction bits, 8'd layout version}
-+//                                    = 0x08040C0C (crpa10: layout 12 = 8 + 8 taps, reference delay 4, hardware
-+//                                    NLMS (AJ_NLMS) + everything of layout 11; crpa9: 0x0A050C0B, layout 11 = layout 10 + 3 image taps per
-+//                                    channel (AJ_WCX0..3) + AJ_PWR_IN/OUT; crpa8: layout 10 = 10 + 10 taps,
-+//                                    reference delay 5, smoothing, AJ_GAIN, AJ_CLIP1/2; layout 7 = v4.9: 32 taps, weights at 0x400; layout 6 = v4.7: reference delay 4; 5 = v4.6: pulse blanker + RX peak hold; 4 = v4.5;
-+//                                      3 = v4.4; 2 = v4.1)
++//                                    = 0x08040C0D (crpa13: layout 13 = 8 + 8 taps, reference delay 4,
++//                                    weights from the hardware NLMS only (no SMI weight registers,
++//                                    no smoothing): AJ_W / AJ_WC / AJ_WCX read the running weights;
++//                                    crpa10-12: 0x08040C0C, layout 12 = SMI weights + NLMS
++//                                    refinement; crpa9: layout 11; crpa8: layout 10; layout 7 = v4.9;
++//                                    6 = v4.7; 5 = v4.6; 4 = v4.5; 3 = v4.4; 2 = v4.1)
 +//    0x188   AJ_CFG          RW      SHADOW. [0] bypass: 1 = TX1 carries RX1
 +//                                    delayed by 8 samples, no weights (reset
 +//                                    value 0x1: nothing is filtered until the
 +//                                    firmware has seen a jammer).
 +//                                    [10:8] output make-up shift s, 0..4: the
 +//                                    filter output x 2^s (6 dB per step; 0..7 from v4.5).
-+//                                    [14:12] weight scale ws, 0..5 (v4.4): the weight
-+//                                    words hold w * 2^ws and the core divides the sum
++//                                    [14:12] weight scale ws, 0..5 (v4.4): the weights
++//                                    are held as w * 2^ws and the core divides the sum
 +//                                    by 2^ws (finer steps for a CW 60-70 dB above noise).
++//                                    crpa13: a change of ws clears the NLMS weights;
++//                                    bypass ([0] = 1) clears them too.
 +//    0x18C   AJ_NORM         RW      SHADOW. RX2 input normalisation g2,
 +//                                    {imag[31:16], real[15:0]} signed Q3.13
 +//                                    (1.0 = 0x2000, the reset value). The core
 +//                                    filters g2 * RX2.
-+//    0x190   AJ_WC0          RW      SHADOW. Image tap c1 on conj(RX1[n-8]),
++//    0x190   AJ_WC0          RO      (crpa13: running weight, read only) image tap c1 on conj(RX1[n-R]),
 +//                                    weight-word format.
-+//    0x194   AJ_WC1          RW      SHADOW. Image tap c2 on conj(RX2n[n-8]).
++//    0x194   AJ_WC1          RO      image tap c2 on conj(RX2n[n-R]).
 +//    0x198   AJ_CFG_ACTIVE   RO      AJ_CFG as committed (what the core runs).
 +//    0x19C   AJ_BLK_THR      RW      SHADOW (v4.6, AJ_INFO layout 5). Pulse blanker threshold: the
 +//                                    blanker (gnss_pulse_blank.v) zeroes the filter output while the sum
@@ -182,47 +188,48 @@ index feca02d..8fdfb8f 100644
 +//                                    since CONTROL[8] (counter clear); wraps (the firmware takes
 +//                                    differences). The ADC clipped: a clipped jammer cannot be nulled.
 +//    0x1BC   AJ_CLIP2        RO      the same for RX2.
-+//    0x1C0   AJ_WCX0         RW      SHADOW (crpa9, layout 11). Image tap c1 on conj(RX1[n-R+1])
-+//    0x1C4   AJ_WCX1         RW      SHADOW. c1 on conj(RX1[n-R-1])  (AJ_WC0 0x190 = c1 at n-R)
-+//    0x1C8   AJ_WCX2         RW      SHADOW. c2 on conj(RX2n[n-R+1])
-+//    0x1CC   AJ_WCX3         RW      SHADOW. c2 on conj(RX2n[n-R-1]) (AJ_WC1 0x194 = c2 at n-R)
++//    0x1C0   AJ_WCX0         RO      (crpa9; crpa13: running weight, read only) image tap c1 on
++//                                    conj(RX1[n-R+1])
++//    0x1C4   AJ_WCX1         RO      c1 on conj(RX1[n-R-1])  (AJ_WC0 0x190 = c1 at n-R)
++//    0x1C8   AJ_WCX2         RO      c2 on conj(RX2n[n-R+1])
++//    0x1CC   AJ_WCX3         RO      c2 on conj(RX2n[n-R-1]) (AJ_WC1 0x194 = c2 at n-R)
 +//                                    (the AD9361 I/Q mirror changes across the band: three image
-+//                                    taps per channel follow it; weight-word format, committed
-+//                                    with AJ_COMMIT)
++//                                    taps per channel follow it)
 +//    0x1D0   AJ_PWR_IN       RO      (crpa9) mean I^2+Q^2 of RX1 over the last 2^16 samples [LSB^2]
 +//    0x1D4   AJ_PWR_OUT      RO      the same for the filter output to TX1 (before the blanker):
 +//                                    the residual on every sample, not only in the captures
 +//    0x1D8   AJ_PWR_IDX      RO      [15:0] RX1 window counter, [31:16] output window counter
-+//    0x1E0   AJ_NLMS         RW      SHADOW (crpa10, layout 12). Hardware NLMS in smi_pi 3.0: [15:0] step
-+//                                    mantissa m, [20:16] step shift sh, [31] enable (works with the
-+//                                    filter in and the smoothing on). Reset 0: off.
++//    0x1E0   AJ_NLMS         RW      SHADOW (crpa10; crpa13: the ONLY adaptation, nlms_pi 1.0):
++//                                    [15:0] step mantissa m, [20:16] step shift sh, [31] adapt.
++//                                    Every sample each weight moves by e[n-64] conj(u[n-64]) >> 8,
++//                                    e = output x m x 2^-sh. [31] = 0 with the filter in: weights
++//                                    held. Reset 0.
 +//    0x1E4   AJ_NLMS_ACT     RO      the committed value.
-+//    AJ_CFG[19:16] (crpa8)           smoothing k of the weights and the gain in smi_pi 2.7:
-+//                                    0 = off, 1..15 = time constant 2^(k+7) samples.
 +//
-+//  SMI-PI v4 CLOCKING
-+//    smi_pi_0 runs on sys_cpu_clk (= s_axi_aclk), not on clk: the block design
-+//    puts an asynchronous AXI-Stream FIFO on each side of it (m_axis_smi ->
-+//    FIFO -> core -> FIFO -> s_axis_smi). The committed values (aj_wts,
-+//    aj_wcj, aj_cfg, aj_nrm) are therefore driven from the same clock the core
-+//    runs on -- no crossing.
++//  CORE CLOCKING
++//    nlms_pi_0 (crpa13; smi_pi_0 before) runs on sys_cpu_clk (= s_axi_aclk), not on clk:
++//    the block design puts an asynchronous AXI-Stream FIFO on each side of it
++//    (m_axis_smi -> FIFO -> core -> FIFO -> s_axis_smi). The committed values (aj_cfg,
++//    aj_nrm, aj_gain, aj_nlms) and the weight monitor (aj_wmon) are therefore in the
++//    same clock the core runs on -- no crossing.
  //
  //  LICENCE
  //    Original work for this project.  Not derived from Analog Devices or
-@@ -141,6 +252,30 @@ module gnss_passthrough #(
+@@ -141,6 +256,31 @@ module gnss_passthrough #(
    output     [15:0]   dac_data_i1,
    output     [15:0]   dac_data_q1,
  
-+  // ---- SMI-PI v4 core: separate block-design IP (smi_pi_0) ----------------
-+  //  Source/BlockDesign/system_bd.tcl connects:
-+  //    m_axis_smi (clk) -> async FIFO -> smi_pi_0/s_axis_x {rx2_q, rx2_i, rx1_q, rx1_i}
-+  //    smi_pi_0/m_axis_y -> async FIFO -> s_axis_smi (clk)  {y_q, y_i}
++  // ---- anti-jam core: separate block-design IP (crpa13: nlms_pi_0) ----------
++  //  projects/ant/system_bd.tcl connects:
++  //    m_axis_smi (clk) -> async FIFO -> nlms_pi_0/s_axis_x {rx2_q, rx2_i, rx1_q, rx1_i}
++  //    nlms_pi_0/m_axis_y -> async FIFO -> s_axis_smi (clk)  {y_q, y_i}
 +  //    smi_rst_n (clk)  -> input FIFO reset (CONTROL[0] & CONTROL[5])
-+  //    aj_wts (s_axi_aclk) -> smi_pi_0/wts, the committed AJ_W weights
-+  //    aj_wcj (s_axi_aclk) -> smi_pi_0/wcj, the committed image taps AJ_WC
-+  //    aj_cfg (s_axi_aclk) -> smi_pi_0/cfg, the committed AJ_CFG
-+  //    aj_nrm (s_axi_aclk) -> smi_pi_0/nrm, the committed AJ_NORM
-+  //    aj_gain (s_axi_aclk) -> smi_pi_0/gain, the committed AJ_GAIN (crpa8)
++  //    aj_cfg (s_axi_aclk) -> nlms_pi_0/cfg, the committed AJ_CFG
++  //    aj_nrm (s_axi_aclk) -> nlms_pi_0/nrm, the committed AJ_NORM
++  //    aj_gain (s_axi_aclk) -> nlms_pi_0/gain, the committed AJ_GAIN
++  //    aj_nlms (s_axi_aclk) -> nlms_pi_0/nlms, the committed AJ_NLMS
++  //    nlms_pi_0/wmon, wmon_ap_vld -> aj_wmon, aj_wmon_vld (s_axi_aclk): one running
++  //                        weight per sample, [39:32] its index
 +  output     [63:0]   m_axis_smi_tdata,
 +  output              m_axis_smi_tvalid,
 +  input               m_axis_smi_tready,
@@ -230,17 +237,17 @@ index feca02d..8fdfb8f 100644
 +  input               s_axis_smi_tvalid,
 +  output              s_axis_smi_tready,
 +  output              smi_rst_n,
-+  output     [2047:0] aj_wts,
-+  output     [191:0]  aj_wcj,          // crpa9: 6 image taps {c2(R+1),c2(R),c2(R-1),c1(R+1),c1(R),c1(R-1)}
++  input      [39:0]   aj_wmon,         // crpa13: weight monitor from nlms_pi_0 ({index, imag, real})
++  input               aj_wmon_vld,
 +  output     [31:0]   aj_cfg,
 +  output     [31:0]   aj_nrm,
-+  output     [31:0]   aj_gain,         // crpa8: committed AJ_GAIN -> smi_pi_0/gain
-+  output     [31:0]   aj_nlms,         // crpa10: committed AJ_NLMS -> smi_pi_0/nlms
++  output     [31:0]   aj_gain,         // crpa8: committed AJ_GAIN -> nlms_pi_0/gain
++  output     [31:0]   aj_nlms,         // crpa10: committed AJ_NLMS -> nlms_pi_0/nlms
 +
    // ---- AXI4-Lite slave (sys_cpu_clk domain) -------------------------------
    input               s_axi_aclk,
    input               s_axi_aresetn,
-@@ -168,7 +303,40 @@ module gnss_passthrough #(
+@@ -168,7 +308,43 @@ module gnss_passthrough #(
    localparam [31:0] CORE_ID      = 32'h47435031;   // "GCP1"
    // v1.1 -- adds the RX->TX sample alignment stage. Bumped so a running board
    // reports which of the two behaviours its bitstream actually has.
@@ -274,15 +281,18 @@ index feca02d..8fdfb8f 100644
 +  //         CONTROL[4] tx2_on = 1. Both reset values give a silent TX2 whose
 +  //         source is the CRPA output. smi_pi_0 and AJ_INFO are unchanged.
 +  localparam [31:0] CORE_VERSION = 32'h0004090E;   // 4.9.14 (8 taps per channel (crpa10), low-DSP axi_ad9361, TX2 = CRPA copy, muted)
-+  localparam [31:0] AJ_INFO      = 32'h08040C0C;   // crpa10: 8 taps per channel, reference delay 4, layout 12 (hardware NLMS AJ_NLMS; 11: 3 + 3 image taps, power meters; 10: smoothing, AJ_GAIN, AJ_CLIP1/2)
-+  localparam        AJ_NWTS      = 16;             // crpa10: weight words in use (8 + 8 taps; the core port stays 64 words)
++  // crpa13 -- nlms_pi_0 1.0 replaces smi_pi_0: the weights come from the hardware NLMS loop only.
++  //         The SMI weight shadow / active registers (AJ_W, AJ_WC, AJ_WCX) are gone; those
++  //         addresses read the running weights from the core's weight monitor. AJ_INFO layout 13.
++  localparam [31:0] AJ_INFO      = 32'h08040C0D;   // crpa13: 8 taps per channel, reference delay 4, layout 13 (NLMS only; 12: SMI + NLMS; 11: 3 + 3 image taps, power meters; 10: smoothing, AJ_GAIN, AJ_CLIP1/2)
++  localparam        AJ_NMON      = 22;             // crpa13: monitored weight words (16 space-time + 6 image)
 +  localparam [31:0] AJ_GAIN_RESET = 32'h00004000;  // fine gain 1.0
 +  localparam [31:0] AJ_CFG_RESET = 32'h00000001;   // bypass
 +  localparam [31:0] AJ_NRM_RESET = 32'h00002000;   // g2 = 1.0
    localparam        AW           = FIFO_ADDR_WIDTH;
  
    // ==========================================================================
-@@ -236,6 +404,10 @@ module gnss_passthrough #(
+@@ -236,6 +412,10 @@ module gnss_passthrough #(
    // ---- software-writable state --------------------------------------------
    reg  [31:0] reg_scratch = 32'd0;
    reg  [31:0] reg_control = 32'd0;
@@ -293,7 +303,7 @@ index feca02d..8fdfb8f 100644
  
    always @(posedge s_axi_aclk) begin
      if (s_axi_aresetn == 1'b0) begin
-@@ -247,8 +419,85 @@ module gnss_passthrough #(
+@@ -247,8 +427,72 @@ module gnss_passthrough #(
          12'h003: reg_control <= s_axi_wdata;   // 0x0C
          default: ;
        endcase
@@ -302,54 +312,33 @@ index feca02d..8fdfb8f 100644
 +    end
 +  end
 +
-+  // ---- SMI-PI v4 weights: shadow (0x100..0x17C, 0x188..0x194), committed by
-+  // 0x180. All in s_axi_aclk, which is also the clock of smi_pi_0, so the
-+  // whole set changes in one edge. Reset: bypass (TX1 carries RX1 delayed by
-+  // 8 samples), weights zero, g2 = 1.
-+  reg  [31:0]   aj_shadow [0:AJ_NWTS-1];
-+  reg  [32*AJ_NWTS-1:0] aj_active = {(32*AJ_NWTS){1'b0}};
++  // ---- control registers of the core: shadow (0x188, 0x18C, 0x19C, 0x1B0, 0x1E0), committed
++  // by 0x180. All in s_axi_aclk, which is also the clock of nlms_pi_0, so the whole set
++  // changes in one edge. Reset: bypass (TX1 carries RX1 delayed by 4 samples), g2 = 1,
++  // NLMS off.
 +  reg  [31:0]   aj_gain_sh = AJ_GAIN_RESET, aj_gain_act = AJ_GAIN_RESET;
-+  reg  [31:0]   aj_nlms_sh = 32'd0, aj_nlms_act = 32'd0;   // crpa10: NLMS off after reset
++  reg  [31:0]   aj_nlms_sh = 32'd0, aj_nlms_act = 32'd0;
 +  reg  [31:0]   aj_cfg_sh  = AJ_CFG_RESET, aj_cfg_act = AJ_CFG_RESET;
 +  reg  [31:0]   aj_nrm_sh  = AJ_NRM_RESET, aj_nrm_act = AJ_NRM_RESET;
-+  reg  [31:0]   aj_wc0_sh  = 32'd0, aj_wc1_sh = 32'd0;
-+  reg  [31:0]   aj_wcx0_sh = 32'd0, aj_wcx1_sh = 32'd0, aj_wcx2_sh = 32'd0, aj_wcx3_sh = 32'd0;   // crpa9
-+  reg  [191:0]  aj_wcj_act = 192'd0;
 +  reg  [31:0]   aj_commits = 32'd0;
 +  reg  [31:0]   aj_thr_sh  = 32'hFFFFFFFF, aj_thr_act = 32'hFFFFFFFF;
 +  reg           aj_thr_tog = 1'b0;
 +  wire [31:0]   v_blk_cnt, v_blk_bursts, v_peak, v_clip0, v_clip1, v_pwr_in, v_pwr_out, v_pwr_idx;
-+  wire          aj_w_sel   = (reg_waddr >= 12'h100) && (reg_waddr < 12'h100 + AJ_NWTS);   // 0x400..0x44C (crpa8)
 +  wire          aj_commit  = reg_wr && (reg_waddr == 12'h060);
-+  integer ai;
-+  initial for (ai = 0; ai < AJ_NWTS; ai = ai + 1) aj_shadow[ai] = 32'd0;
 +
 +  always @(posedge s_axi_aclk) begin
 +    if (s_axi_aresetn == 1'b0) begin
-+      for (ai = 0; ai < AJ_NWTS; ai = ai + 1) aj_shadow[ai] <= 32'd0;
-+      aj_active  <= {(32*AJ_NWTS){1'b0}};
 +      aj_gain_sh <= AJ_GAIN_RESET; aj_gain_act <= AJ_GAIN_RESET;
 +      aj_nlms_sh <= 32'd0;         aj_nlms_act <= 32'd0;
 +      aj_cfg_sh  <= AJ_CFG_RESET;  aj_cfg_act <= AJ_CFG_RESET;
 +      aj_nrm_sh  <= AJ_NRM_RESET;  aj_nrm_act <= AJ_NRM_RESET;
-+      aj_wc0_sh  <= 32'd0;         aj_wc1_sh  <= 32'd0;
-+      aj_wcx0_sh <= 32'd0; aj_wcx1_sh <= 32'd0; aj_wcx2_sh <= 32'd0; aj_wcx3_sh <= 32'd0;
-+      aj_wcj_act <= 192'd0;
 +      aj_commits <= 32'd0;
 +      aj_thr_sh  <= 32'hFFFFFFFF;  aj_thr_act <= 32'hFFFFFFFF;  aj_thr_tog <= 1'b0;
 +    end else begin
-+      if (reg_wr && aj_w_sel)
-+        aj_shadow[reg_waddr[4:0]] <= s_axi_wdata;
 +      if (reg_wr) begin
 +        case (reg_waddr)
 +          12'h062: aj_cfg_sh <= s_axi_wdata;     // 0x188
 +          12'h063: aj_nrm_sh <= s_axi_wdata;     // 0x18C
-+          12'h064: aj_wc0_sh <= s_axi_wdata;     // 0x190
-+          12'h065: aj_wc1_sh <= s_axi_wdata;     // 0x194
-+          12'h070: aj_wcx0_sh <= s_axi_wdata;    // 0x1C0 (crpa9) c1 at R-1
-+          12'h071: aj_wcx1_sh <= s_axi_wdata;    // 0x1C4         c1 at R+1
-+          12'h072: aj_wcx2_sh <= s_axi_wdata;    // 0x1C8         c2 at R-1
-+          12'h073: aj_wcx3_sh <= s_axi_wdata;    // 0x1CC         c2 at R+1
 +          12'h067: aj_thr_sh <= s_axi_wdata;     // 0x19C
 +          12'h06C: aj_gain_sh <= s_axi_wdata;    // 0x1B0 (crpa8)
 +          12'h078: aj_nlms_sh <= s_axi_wdata;    // 0x1E0 (crpa10)
@@ -357,29 +346,37 @@ index feca02d..8fdfb8f 100644
 +        endcase
 +      end
 +      if (aj_commit) begin
-+        for (ai = 0; ai < AJ_NWTS; ai = ai + 1)
-+          aj_active[32*ai +: 32] <= aj_shadow[ai];
 +        aj_gain_act <= aj_gain_sh;
 +        aj_nlms_act <= aj_nlms_sh;
 +        aj_cfg_act <= aj_cfg_sh;
 +        aj_nrm_act <= aj_nrm_sh;
-+        aj_wcj_act <= {aj_wcx3_sh, aj_wc1_sh, aj_wcx2_sh, aj_wcx1_sh, aj_wc0_sh, aj_wcx0_sh};
 +        aj_thr_act <= aj_thr_sh;
 +        aj_thr_tog <= ~aj_thr_tog;
 +        aj_commits <= aj_commits + 1'b1;
 +      end
      end
    end
-+  assign aj_wts = {{(2048-32*AJ_NWTS){1'b0}}, aj_active};
 +  assign aj_gain = aj_gain_act;
 +  assign aj_nlms = aj_nlms_act;
-+  assign aj_wcj = aj_wcj_act;
 +  assign aj_cfg = aj_cfg_act;
 +  assign aj_nrm = aj_nrm_act;
++
++  // ---- crpa13: weight monitor. nlms_pi_0 sends one running weight per sample with its
++  // index; the last value of each is kept here (distributed RAM, no reset: the core
++  // refreshes all 22 within 22 samples) and read at the old weight addresses.
++  //   index 0..15  -> 0x400 + 4 index (RX1 taps 0..7, RX2 taps 0..7)
++  //   index 16..21 -> 0x1C0, 0x190, 0x1C4 (c1 at R-1, R, R+1), 0x1C8, 0x194, 0x1CC (c2)
++  reg  [31:0]   aj_wmon_r [0:31];
++  integer ai;
++  initial for (ai = 0; ai < 32; ai = ai + 1) aj_wmon_r[ai] = 32'd0;
++  always @(posedge s_axi_aclk) begin
++    if (aj_wmon_vld && aj_wmon[39:32] < AJ_NMON)
++      aj_wmon_r[aj_wmon[36:32]] <= aj_wmon[31:0];
++  end
  
    // Status view, refreshed from the clk domain (see CDC section).
    wire [31:0] v_status, v_rx_cnt0, v_tx_cnt0, v_ovf_cnt, v_unf_cnt;
-@@ -264,9 +513,15 @@ module gnss_passthrough #(
+@@ -264,9 +508,15 @@ module gnss_passthrough #(
    // 0x47435031 -- the ID -- because the ID read had immediately preceded it.
    // The first read after reset happened to be correct only because
    // axi_araddr_r resets to 0, which is the ID offset.
@@ -387,8 +384,8 @@ index feca02d..8fdfb8f 100644
    always @(posedge s_axi_aclk) begin
      if (s_axi_arvalid && axi_arready) begin
 -    case (s_axi_araddr[13:2])
-+    if (rd_idx >= 12'h100 && rd_idx < 12'h100 + AJ_NWTS)
-+      axi_rdata <= aj_shadow[rd_idx[4:0]];         // 0x400..0x44C
++    if (rd_idx >= 12'h100 && rd_idx < 12'h110)
++      axi_rdata <= aj_wmon_r[{1'b0, rd_idx[3:0]}]; // 0x400..0x43C: running weights (crpa13)
 +    else if (rd_idx >= 12'h100 && rd_idx <= 12'h13F)
 +      axi_rdata <= 32'd0;                          // 0x440..0x4FC: not used with 8 + 8 taps
 +    else
@@ -396,7 +393,7 @@ index feca02d..8fdfb8f 100644
        12'h000: axi_rdata <= CORE_ID;
        12'h001: axi_rdata <= CORE_VERSION;
        12'h002: axi_rdata <= reg_scratch;
-@@ -282,6 +537,36 @@ module gnss_passthrough #(
+@@ -282,6 +532,36 @@ module gnss_passthrough #(
        12'h00C: axi_rdata <= v_rx_cnt1;
        12'h00D: axi_rdata <= v_tx_cnt1;
        12'h00E: axi_rdata <= v_rx_snap1;
@@ -404,12 +401,12 @@ index feca02d..8fdfb8f 100644
 +      12'h061: axi_rdata <= AJ_INFO;               // 0x184
 +      12'h062: axi_rdata <= aj_cfg_sh;             // 0x188
 +      12'h063: axi_rdata <= aj_nrm_sh;             // 0x18C
-+      12'h064: axi_rdata <= aj_wc0_sh;             // 0x190
-+      12'h065: axi_rdata <= aj_wc1_sh;             // 0x194
-+      12'h070: axi_rdata <= aj_wcx0_sh;            // 0x1C0 (crpa9)
-+      12'h071: axi_rdata <= aj_wcx1_sh;            // 0x1C4
-+      12'h072: axi_rdata <= aj_wcx2_sh;            // 0x1C8
-+      12'h073: axi_rdata <= aj_wcx3_sh;            // 0x1CC
++      12'h064: axi_rdata <= aj_wmon_r[17];         // 0x190 c1 at R   (crpa13: running weights)
++      12'h065: axi_rdata <= aj_wmon_r[20];         // 0x194 c2 at R
++      12'h070: axi_rdata <= aj_wmon_r[16];         // 0x1C0 c1 at R-1
++      12'h071: axi_rdata <= aj_wmon_r[18];         // 0x1C4 c1 at R+1
++      12'h072: axi_rdata <= aj_wmon_r[19];         // 0x1C8 c2 at R-1
++      12'h073: axi_rdata <= aj_wmon_r[21];         // 0x1CC c2 at R+1
 +      12'h074: axi_rdata <= v_pwr_in;              // 0x1D0
 +      12'h075: axi_rdata <= v_pwr_out;             // 0x1D4
 +      12'h076: axi_rdata <= v_pwr_idx;             // 0x1D8
@@ -433,7 +430,7 @@ index feca02d..8fdfb8f 100644
        default: axi_rdata <= 32'd0;
      endcase
      end
-@@ -294,7 +579,7 @@ module gnss_passthrough #(
+@@ -294,7 +574,7 @@ module gnss_passthrough #(
    // ==========================================================================
    (* ASYNC_REG = "TRUE" *) reg [8:0] ctrl_meta = 9'd0;
    (* ASYNC_REG = "TRUE" *) reg [8:0] ctrl_sync = 9'd0;
@@ -442,7 +439,7 @@ index feca02d..8fdfb8f 100644
  
    always @(posedge clk) begin
      ctrl_meta <= ctrl_raw;
-@@ -304,9 +589,19 @@ module gnss_passthrough #(
+@@ -304,9 +584,19 @@ module gnss_passthrough #(
    wire pass_en   = ctrl_sync[0];
    wire mute      = ctrl_sync[1];
    wire swap_iq   = ctrl_sync[2];
@@ -463,7 +460,7 @@ index feca02d..8fdfb8f 100644
    // ==========================================================================
    //  Elastic buffer (one per channel)
    //  RX and TX sample strobes are both in the clk domain and run at the same
-@@ -316,17 +611,20 @@ module gnss_passthrough #(
+@@ -316,17 +606,20 @@ module gnss_passthrough #(
    //  filled to the midpoint.
    // ==========================================================================
    // Distributed (LUT) RAM: at depth 32 a block RAM would be wasteful, and
@@ -487,7 +484,7 @@ index feca02d..8fdfb8f 100644
    wire        empty1 = (level1 == 0);
  
    // Prime the buffer to half depth before the first read, so that a small
-@@ -336,24 +634,150 @@ module gnss_passthrough #(
+@@ -336,24 +629,150 @@ module gnss_passthrough #(
      if (rst || !pass_en) begin
        primed0 <= 1'b0;
        primed1 <= 1'b0;
@@ -644,7 +641,7 @@ index feca02d..8fdfb8f 100644
    wire [15:0] proc_i1 = adc_data_i1;
    wire [15:0] proc_q1 = adc_data_q1;
    // ======================= END PROCESSING CORE ==============================
-@@ -364,15 +788,19 @@ module gnss_passthrough #(
+@@ -364,15 +783,19 @@ module gnss_passthrough #(
    always @(posedge clk) begin
      if (rst) begin
        wptr0 <= 0; rptr0 <= 0;
@@ -672,7 +669,7 @@ index feca02d..8fdfb8f 100644
        end
        if (wr_en1 && !full1) begin
          fifo1[wptr1[AW-1:0]] <= {proc_q1, proc_i1};
-@@ -382,6 +810,11 @@ module gnss_passthrough #(
+@@ -382,6 +805,11 @@ module gnss_passthrough #(
          rd_data1 <= fifo1[rptr1[AW-1:0]];
          rptr1 <= rptr1 + 1'b1;
        end
@@ -684,7 +681,7 @@ index feca02d..8fdfb8f 100644
      end
    end
  
-@@ -392,7 +825,11 @@ module gnss_passthrough #(
+@@ -392,7 +820,11 @@ module gnss_passthrough #(
    // ==========================================================================
    wire [15:0] pt_i0 = swap_iq ? rd_data0[31:16] : rd_data0[15:0];
    wire [15:0] pt_q0 = swap_iq ? rd_data0[15:0]  : rd_data0[31:16];
@@ -697,7 +694,7 @@ index feca02d..8fdfb8f 100644
    wire [15:0] pt_i1 = swap_iq ? src1[31:16] : src1[15:0];
    wire [15:0] pt_q1 = swap_iq ? src1[15:0]  : src1[31:16];
  
-@@ -424,8 +861,9 @@ module gnss_passthrough #(
+@@ -424,8 +856,9 @@ module gnss_passthrough #(
    //  Only the low 12 bits are taken, so this is correct whatever the ADC
    //  data-format control does with [15:12] (sign-extend or zero-fill).
    //
@@ -709,7 +706,7 @@ index feca02d..8fdfb8f 100644
    //  Truncating to [11:0] here would wrap, turning a large sample into an
    //  opposite-signed small one. That is a silent, hard-to-see failure.
    // ==========================================================================
-@@ -436,8 +874,11 @@ module gnss_passthrough #(
+@@ -436,8 +869,11 @@ module gnss_passthrough #(
  
    assign dac_data_i0 = mute ? 16'd0 : (pass_en ? al_i0 : dma_dac_data_i0);
    assign dac_data_q0 = mute ? 16'd0 : (pass_en ? al_q0 : dma_dac_data_q0);
@@ -723,7 +720,7 @@ index feca02d..8fdfb8f 100644
  
    // ==========================================================================
    //  Counters and sticky flags  (requirement 59: prove data is flowing)
-@@ -447,6 +888,7 @@ module gnss_passthrough #(
+@@ -447,6 +883,7 @@ module gnss_passthrough #(
    reg [31:0] ovf_cnt = 32'd0, unf_cnt = 32'd0;
    reg [31:0] rx_snap0 = 32'd0, tx_snap0 = 32'd0, rx_snap1 = 32'd0;
    reg        ovf_sticky = 1'b0, unf_sticky = 1'b0;
@@ -731,7 +728,7 @@ index feca02d..8fdfb8f 100644
  
    always @(posedge clk) begin
      if (rst || cnt_clear) begin
-@@ -454,6 +896,7 @@ module gnss_passthrough #(
+@@ -454,6 +891,7 @@ module gnss_passthrough #(
        rx_cnt1 <= 32'd0; tx_cnt1 <= 32'd0;
        ovf_cnt <= 32'd0; unf_cnt <= 32'd0;
        ovf_sticky <= 1'b0; unf_sticky <= 1'b0;
@@ -739,7 +736,7 @@ index feca02d..8fdfb8f 100644
        rx_snap0 <= 32'd0; tx_snap0 <= 32'd0; rx_snap1 <= 32'd0;
      end else begin
        if (adc_valid_i0) begin
-@@ -479,12 +922,14 @@ module gnss_passthrough #(
+@@ -479,12 +917,14 @@ module gnss_passthrough #(
          unf_cnt    <= unf_cnt + 1'b1;
          unf_sticky <= 1'b1;
        end
@@ -756,7 +753,7 @@ index feca02d..8fdfb8f 100644
                        full1, empty1, full0, empty0,
                        dac_enable_q0, dac_enable_i0,
                        adc_enable_q0, adc_enable_i0 };
-@@ -506,6 +951,7 @@ module gnss_passthrough #(
+@@ -506,6 +946,7 @@ module gnss_passthrough #(
    reg         cap_toggle = 1'b0;
    reg  [31:0] cap_status, cap_rx0, cap_tx0, cap_ovf, cap_unf;
    reg  [31:0] cap_rxs0, cap_txs0, cap_lvl, cap_rx1, cap_tx1, cap_rxs1;
@@ -764,7 +761,7 @@ index feca02d..8fdfb8f 100644
  
    always @(posedge clk) begin
      cap_div <= cap_div + 1'b1;
-@@ -521,6 +967,14 @@ module gnss_passthrough #(
+@@ -521,6 +962,14 @@ module gnss_passthrough #(
        cap_rx1    <= rx_cnt1;
        cap_tx1    <= tx_cnt1;
        cap_rxs1   <= rx_snap1;
@@ -779,7 +776,7 @@ index feca02d..8fdfb8f 100644
        cap_toggle <= ~cap_toggle;
      end
    end
-@@ -532,6 +986,8 @@ module gnss_passthrough #(
+@@ -532,6 +981,8 @@ module gnss_passthrough #(
    reg [31:0] h_status = 32'd0, h_rx0 = 32'd0, h_tx0 = 32'd0;
    reg [31:0] h_ovf = 32'd0, h_unf = 32'd0, h_rxs0 = 32'd0, h_txs0 = 32'd0;
    reg [31:0] h_lvl = 32'd0, h_rx1 = 32'd0, h_tx1 = 32'd0, h_rxs1 = 32'd0;
@@ -788,7 +785,7 @@ index feca02d..8fdfb8f 100644
  
    always @(posedge s_axi_aclk) begin
      tog_meta <= cap_toggle;
-@@ -549,6 +1005,14 @@ module gnss_passthrough #(
+@@ -549,6 +1000,14 @@ module gnss_passthrough #(
        h_rx1    <= cap_rx1;
        h_tx1    <= cap_tx1;
        h_rxs1   <= cap_rxs1;
@@ -803,7 +800,7 @@ index feca02d..8fdfb8f 100644
      end
    end
  
-@@ -563,5 +1027,13 @@ module gnss_passthrough #(
+@@ -563,5 +1022,13 @@ module gnss_passthrough #(
    assign v_rx_cnt1  = h_rx1;
    assign v_tx_cnt1  = h_tx1;
    assign v_rx_snap1 = h_rxs1;
@@ -852,13 +849,13 @@ index a596ad5..0b593f0 100644
 +# clk_fpga_0 and {rx_clk clk_div_sel_*} (4.9.9, for TIMING-6/7) is kept, unscoped, in
 +# Source/XDC/gnss_passthrough_cdc.xdc. Everything above in this file is cell-based and stays.
 diff --git a/library/gnss_passthrough/gnss_passthrough_ip.tcl b/library/gnss_passthrough/gnss_passthrough_ip.tcl
-index 424bf66..4de1ff1 100644
+index 424bf66..89ee74b 100644
 --- a/library/gnss_passthrough/gnss_passthrough_ip.tcl
 +++ b/library/gnss_passthrough/gnss_passthrough_ip.tcl
 @@ -1,10 +1,13 @@
  ###############################################################################
 -## gnss_passthrough - AD9361 RX -> TX loopback for the ANTSDR E310 ("ant")
-+## gnss_passthrough v4.9.14 - AD9361 RX -> SMI-PI anti-jam -> TX
++## gnss_passthrough v4.9.14 - AD9361 RX -> space-time anti-jam (crpa13: nlms_pi) -> TX
 +## for the ANTSDR E310 ("ant", antsdr-fw-patch 0003)
  ##
  ## Packaged the same way as the ADI library cores, so projects/ant lists it in
@@ -866,7 +863,7 @@ index 424bf66..4de1ff1 100644
 -## gnss_passthrough.v and gnss_passthrough_constr.xdc are copied unchanged
 -## from LoopBack_Pipeline_noCRPA (Source/HDL, Source/IP/gnss_passthrough).
 +## gnss_passthrough.v, gnss_pulse_blank.v and gnss_passthrough_constr.xdc are
-+## copied from LoopBack_Code_SMI_PI_STAP7x7_v4.9.14, AJ_INFO for 8 + 8 (crpa10) (Source/HDL,
++## copied from LoopBack_Code_SMI_PI_STAP7x7_v4.9.14, AJ_INFO for 8 + 8 NLMS only (crpa13) (Source/HDL,
 +## Source/IP/gnss_passthrough). The AXI-Stream and reset interface definitions
 +## below are the ones of that project's gnss_passthrough_ip.tcl.
  ###############################################################################
@@ -925,7 +922,7 @@ index 424bf66..4de1ff1 100644
 +}
  
 -ipx::save_core [ipx::current_core]
-+# Sample-domain AXI-Stream links to and from the smi_pi filter FIFOs
++# Sample-domain AXI-Stream links to and from the anti-jam filter FIFOs
 +add_axis_if $core m_axis_smi master {TDATA TVALID TREADY}
 +add_axis_if $core s_axis_smi slave  {TDATA TVALID TREADY}
 +
@@ -940,8 +937,8 @@ index 424bf66..4de1ff1 100644
 +set prst_if [ensure_bus_if $core smi_rst_n xilinx.com:signal:reset_rtl:1.0]
 +set_bus_param $prst_if POLARITY ACTIVE_LOW
 +
-+set_property display_name "GNSS CRPA passthrough (SMI-PI v4.9.14)" $core
-+set_property description "AD9361 RX -> SMI-PI space-time anti-jam filter -> TX, with pulse blanker; registers, weights and CONTROL from the ARM" $core
++set_property display_name "GNSS CRPA passthrough (v4.9.14, NLMS anti-jam)" $core
++set_property description "AD9361 RX -> space-time anti-jam filter (hardware NLMS) -> TX, with pulse blanker; registers and CONTROL from the ARM, running weights read back" $core
 +
 +ipx::create_xgui_files $core
 +ipx::update_checksums  $core
@@ -1197,7 +1194,7 @@ index cfbd0ad..9540152 100644
  include ../scripts/project-xilinx.mk
 diff --git a/projects/ant/gnss_passthrough_cdc.xdc b/projects/ant/gnss_passthrough_cdc.xdc
 new file mode 100644
-index 0000000..71a5384
+index 0000000..d4b29e4
 --- /dev/null
 +++ b/projects/ant/gnss_passthrough_cdc.xdc
 @@ -0,0 +1,100 @@
@@ -1270,8 +1267,8 @@ index 0000000..71a5384
 +# --- 3. Control crossing into the sample domain -----------------------------
 +# Quasi-static software settings through two-flop synchronisers: the CONTROL
 +# bits (ctrl_meta) and the core parameters (mu_ctrl_meta in the PI-NLMS
-+# design, gamma_ctrl_meta in PL-NPI; the SMI-PI v4 weights need none: they
-+# are in sys_cpu_clk, the filter's own clock, and the sample streams cross
++# design, gamma_ctrl_meta in PL-NPI; the anti-jam core's registers and weight
++# monitor need none: they are in sys_cpu_clk, the filter's own clock, and the sample streams cross
 +# through the two axis_data_fifo IPs, which carry their own constraints).
 +#
 +# The pattern was "inst/ctrl_meta_reg*" until 2026-10-08, which matched only
@@ -1302,10 +1299,10 @@ index 0000000..71a5384
 +# The two clock names are Vivado's auto-derived ones (check with report_clocks if ADI renames the nets).
 +set_clock_groups -logically_exclusive -group [get_clocks -quiet clk_div_sel_0_s] -group [get_clocks -quiet clk_div_sel_1_s]
 diff --git a/projects/ant/system_bd.tcl b/projects/ant/system_bd.tcl
-index b091f87..3746d68 100644
+index b091f87..02650d6 100644
 --- a/projects/ant/system_bd.tcl
 +++ b/projects/ant/system_bd.tcl
-@@ -167,218 +167,253 @@ ad_connect  sys_concat_intc/In0 GND
+@@ -167,218 +167,256 @@ ad_connect  sys_concat_intc/In0 GND
  
  # ad9361
  
@@ -1324,8 +1321,9 @@ index b091f87..3746d68 100644
 +#       and the DMAs run. Linux (cf-ad9361-lpc, cf-ad9361-dds-core-lpc, IIO)
 +#       sees the same cores at the same addresses as before.
 +#     - gnss_passthrough v4.9.14 (registers at 0x43C1_0000) between the
-+#       axi_ad9361 ADC outputs and DAC inputs, feeding the SMI-PI space-time
-+#       filter smi_pi_0 (Vitis HLS, 8 + 8 taps, NLMS, sys_cpu_clk) through two
++#       axi_ad9361 ADC outputs and DAC inputs, feeding the space-time
++#       power-inversion filter nlms_pi_0 (Vitis HLS, 8 + 8 taps, weights from a
++#       hardware NLMS loop only; crpa13) on sys_cpu_clk through two
 +#       asynchronous AXI-Stream FIFOs.
 +#   The HDL x8 FIR interpolator/decimator of the Pluto design are removed.
 +#   The axi_ad9361 DDS is kept (the Linux DDS driver and the dds_* console
@@ -1679,10 +1677,12 @@ index b091f87..3746d68 100644
 -ad_connect  logic_or_1/Op1  axi_ad9361/rst
 -ad_connect  logic_or_1/Op2  axi_tdd_0/tdd_channel_2
 -ad_connect  logic_or_1/Res  tx_upack/reset
-+# SMI-PI space-time power-inversion filter (Vitis HLS IP smi_pi 3.0, 8 + 8
-+# taps, 3 + 3 image taps, weight smoothing, fine gain, hardware NLMS, II = 1) on sys_cpu_clk (100 MHz), so its timing does not depend on
-+# the sample rate. Weights, image taps, cfg and RX2 normalisation come from
-+# gnss_passthrough's AJ_* registers, written by gnss_crpa on the ARM.
++# Space-time power-inversion filter (Vitis HLS IP nlms_pi 1.0, crpa13: 8 + 8
++# taps, 3 + 3 image taps, weights adapted by a hardware delayed-NLMS loop only,
++# fine gain, II = 1) on sys_cpu_clk (100 MHz), so its timing does not depend on
++# the sample rate. cfg, RX2 normalisation, gain and the NLMS step come from
++# gnss_passthrough's AJ_* registers, written by gnss_crpa on the ARM; the
++# running weights come back through wmon (read at the AJ_W addresses).
 +
 +ad_ip_instance axis_data_fifo smi_fifo_in
 +ad_ip_parameter smi_fifo_in CONFIG.IS_ACLK_ASYNC 1
@@ -1693,16 +1693,16 @@ index b091f87..3746d68 100644
 +ad_connect gnss_passthrough/smi_rst_n smi_fifo_in/s_axis_aresetn
 +ad_connect gnss_passthrough/m_axis_smi smi_fifo_in/S_AXIS
 +
-+ad_ip_instance smi_pi smi_pi_0
-+ad_connect sys_cpu_clk                smi_pi_0/ap_clk
-+ad_connect sys_cpu_resetn             smi_pi_0/ap_rst_n
-+ad_connect smi_fifo_in/M_AXIS         smi_pi_0/s_axis_x
-+ad_connect gnss_passthrough/aj_wts    smi_pi_0/wts
-+ad_connect gnss_passthrough/aj_wcj    smi_pi_0/wcj
-+ad_connect gnss_passthrough/aj_cfg    smi_pi_0/cfg
-+ad_connect gnss_passthrough/aj_nrm    smi_pi_0/nrm
-+ad_connect gnss_passthrough/aj_gain   smi_pi_0/gain
-+ad_connect gnss_passthrough/aj_nlms   smi_pi_0/nlms
++ad_ip_instance nlms_pi nlms_pi_0
++ad_connect sys_cpu_clk                nlms_pi_0/ap_clk
++ad_connect sys_cpu_resetn             nlms_pi_0/ap_rst_n
++ad_connect smi_fifo_in/M_AXIS         nlms_pi_0/s_axis_x
++ad_connect gnss_passthrough/aj_cfg    nlms_pi_0/cfg
++ad_connect gnss_passthrough/aj_nrm    nlms_pi_0/nrm
++ad_connect gnss_passthrough/aj_gain   nlms_pi_0/gain
++ad_connect gnss_passthrough/aj_nlms   nlms_pi_0/nlms
++ad_connect nlms_pi_0/wmon             gnss_passthrough/aj_wmon
++ad_connect nlms_pi_0/wmon_ap_vld      gnss_passthrough/aj_wmon_vld
 +
 +ad_ip_instance axis_data_fifo smi_fifo_out
 +ad_ip_parameter smi_fifo_out CONFIG.IS_ACLK_ASYNC 1
@@ -1711,7 +1711,7 @@ index b091f87..3746d68 100644
 +ad_connect sys_cpu_clk                smi_fifo_out/s_axis_aclk
 +ad_connect axi_ad9361/l_clk           smi_fifo_out/m_axis_aclk
 +ad_connect sys_cpu_resetn             smi_fifo_out/s_axis_aresetn
-+ad_connect smi_pi_0/m_axis_y          smi_fifo_out/S_AXIS
++ad_connect nlms_pi_0/m_axis_y         smi_fifo_out/S_AXIS
 +ad_connect smi_fifo_out/M_AXIS        gnss_passthrough/s_axis_smi
 +
 +# No axi_tdd (as in the SMI-PI design B): Linux has no driver for it here,
@@ -1888,7 +1888,7 @@ index 0be0ba8..c712207 100644
 -set_false_path -from [get_pins {i_system_wrapper/system_i/axi_ad9361/inst/i_tx/i_up_dac_common/up_dac_gpio_out_int_reg[0]/C}];
  
 diff --git a/projects/ant/system_project.tcl b/projects/ant/system_project.tcl
-index 525496c..c020f13 100644
+index 525496c..e315fb8 100644
 --- a/projects/ant/system_project.tcl
 +++ b/projects/ant/system_project.tcl
 @@ -7,8 +7,13 @@ adi_project_create ant 0 {} "xc7z020clg400-2"
@@ -1898,7 +1898,7 @@ index 525496c..c020f13 100644
 +  "gnss_passthrough_cdc.xdc" \
    "$ad_hdl_dir/library/common/ad_iobuf.v"]
  
-+# antsdr-fw-patch 0003: clock crossings of gnss_passthrough / smi_pi and the
++# antsdr-fw-patch 0003: clock crossings of gnss_passthrough / nlms_pi and the
 +# rx_clk / clk_fpga_0 clock groups, applied after the IP-scoped constraints.
 +set_property PROCESSING_ORDER LATE [get_files *gnss_passthrough_cdc.xdc]
 +

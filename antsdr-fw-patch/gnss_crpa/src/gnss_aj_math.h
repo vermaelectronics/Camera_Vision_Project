@@ -1,49 +1,33 @@
 /******************************************************************************
  *  gnss_aj_math.h
- *  Space-frequency SMI power inversion: the weight computation (SFAP-PI v5.0).
- *
- *  antsdr-fw-patch crpa6: the SFAP-PI v5.0 solver (LoopBack SFAP_PassLVDS,
- *  Source/Firmware/app_sfap_lvds) behind the interface of the SMI-PI 4.9.14
- *  firmware (gnss_aj.c): averaging factor (r->avg, aj_set_av), pulse gate
- *  (r->gate), DC removal (aj_last_dc), sweep detector, output make-up rule.
- *  AJ_LOG2N selects the FFT size: 7 = 128 bins (default), 6 = 64 bins
- *  (v5.0). It must match SFAP_LOG2N of the FPGA core and AJ_LOG2N of
- *  gnss_passthrough.v; the firmware checks AJ_INFO at start-up.
+ *  crpa13: jammer detection, NLMS step and output make-up rules for the
+ *  space-time power-inversion filter whose weights the FPGA adapts itself
+ *  (nlms_pi, hardware NLMS). crpa1-crpa12 solved the weights here (SMI); that
+ *  solver is gone.
  *
  *  Pure C, no hardware access, no libm. The same file is compiled into the
- *  firmware (gnss_aj.c calls it once per captured block) and into the HLS
- *  C testbench (Source/HLS/sfap_pi/testbench.cpp), so the weights the core is
- *  tested with are exactly the weights the board computes.
+ *  firmware (gnss_aj.c) and into the HLS C testbench (hls/nlms_pi/
+ *  testbench.cpp), so the step word and the make-up the core is tested with
+ *  are exactly the board's.
  *
- *  FILTER (in the FPGA, sfap_pi_0):
- *      x2n = g2 x2   (RX2 normalised to RX1 before the FFT)
- *      frames of AJ_N = 64 samples, hop 32, window sin(pi n / 64) on analysis
- *      and synthesis (weighted overlap-add). Per frame and bin k:
- *        Y_k = X1_k - b_k X2n_k - c1_k conj(X1_{-k}) - c2_k conj(X2n_{-k})
- *      The RX1 coefficient is fixed at 1 (power inversion).
+ *  FILTER (in the FPGA, nlms_pi_0):
+ *      x2n = g2 x2   (RX2 normalised to RX1 at the core's input)
+ *      y[n] = x1[n-R] - sum_{k != R} a_k x1[n-k] - sum_k b_k x2n[n-k]
+ *                     - sum_d c1_d conj(x1[n-R-d]) - sum_d c2_d conj(x2n[n-R-d])
+ *      k = 0..AJ_NT-1, d = -1, 0, 1, R = AJ_REF. The RX1 tap at delay R is the
+ *      reference, fixed at 1 (power inversion). Every sample the core moves each
+ *      weight by alpha y conj(u) / (nw P_in) (delayed NLMS, 64 samples).
  *
- *  WEIGHTS (here), independently in every bin k:
- *      v = [X2n_k, conj(X1_{-k}), conj(X2n_{-k})],  d = X1_k
- *      minimise E|d - w^T v|^2  ->  (M_k + L_k D) w = g_k
- *      M_k = E[conj(v) v^T], g_k = E[conj(v) d] over the 127 frames of one
- *      4096-sample capture, analysed with the SAME window and hop as the
- *      FPGA, averaged with the previous block (AJ_AVG) while the jammer is
- *      tracked. D = the relative noise of each tap (RX2 taps: rx2_noise).
- *      L_k (diagonal loading) is bin k's noise, from the canceller's own
- *      output: L = Pout / (1 + |w|^2), iterated to a fixed point per bin. A
- *      bin with no jammer in it ends up with w ~ 0 (its satellites untouched).
+ *  WEIGHT WORDS (read back from gnss_passthrough, the core's weight monitor):
+ *      k = 0..AJ_NT-1       (0x400 + 4k)  RX1 tap at delay k (word AJ_REF reads 0)
+ *      k = AJ_NT..2AJ_NT-1  (0x400 + 4k)  RX2 tap at delay k-AJ_NT
+ *      k = AJ_IMG(p, d)     (0x190, 0x194, 0x1C0..0x1CC) image taps
+ *      [15:0] real, [31:16] imaginary, signed Q3.12 x 2^ws (1.0 = 4096 at ws 0).
  *
- *  DETECTION (aj_detect, no weights): RX1/RX2 powers and the RX1-RX2
- *      coherence from a few time-domain lag sums. Run on every capture while
- *      there is no jammer; the full solve only runs once one is detected.
- *
- *  WEIGHT WORDS (gnss_passthrough):
- *      i =   0..63   (0x200 + 4i)          b_k,  k = i        (RX2, linear)
- *      i =  64..127  (0x300 + 4(i-64))     c1_k, k = i - 64   (image, RX1)
- *      i = 128..191  (0x400 + 4(i-128))    c2_k, k = i - 128  (image, RX2)
- *      k is the bin in natural FFT order (k >= 32: negative frequencies).
- *      [15:0] real, [31:16] imaginary, signed Q3.12 (1.0 = 4096).
+ *  DETECTION (aj_detect): RX1/RX2 powers, the RX1-RX2 coherence and RX1's
+ *      lag-1 correlation (jammer bandwidth) from one capture.
  *****************************************************************************/
+
 #ifndef GNSS_AJ_MATH_H_
 #define GNSS_AJ_MATH_H_
 
@@ -53,146 +37,106 @@
 extern "C" {
 #endif
 
-#include "gnss_sfap_cfg.h"  /* AJ_LOG2N: 7 = 128 bins (default), 6 = 64 bins   */
-#define AJ_N        (1 << AJ_LOG2N)   /* bins = FFT size; must match SFAP_N   */
-#define AJ_HOP      (AJ_N / 2)  /* frame hop (50 % overlap); must match SFAP_HOP */
-#define AJ_NW       (3 * AJ_N)  /* weight words: N b + N c1 + N c2            */
-#define AJ_WB         0     /* first b_k word                                 */
-#define AJ_WC1      AJ_N    /* first c1_k word                                */
-#define AJ_WC2      (2 * AJ_N)  /* first c2_k word                            */
-#define AJ_MAXDIM     3     /* adaptive weights per bin                       */
+#ifndef AJ_NT
+#define AJ_NT        8    /* taps per antenna (8 + 8); must match NL_NT of nlms_pi */
+#endif
+#ifndef AJ_REF
+#define AJ_REF       4    /* RX1 reference delay; must match NL_REF */
+#endif
+#define AJ_NSPT      (2 * AJ_NT)       /* space-time weight words: RX1 AJ_NT, then RX2 AJ_NT */
+/* AJ_NIMG image (conjugate) taps per channel at delays REF-1, REF, REF+1: the AD9361's I/Q
+ * mirror changes across a wide band. */
+#ifndef AJ_NIMG
+#define AJ_NIMG       3     /* must match NL_NIMG of the core                  */
+#endif
+#define AJ_IMGH      ((AJ_NIMG - 1) / 2)
+#define AJ_IMG0      (2 * AJ_NT)       /* first image tap: c1 at REF-H .. REF+H, then c2 */
+#define AJ_IMG(p, d) (AJ_IMG0 + ((p) - 1) * AJ_NIMG + AJ_IMGH + (d))   /* channel p, delay REF+d */
+#define AJ_IMG1      AJ_IMG(1, 0)      /* image tap c1 at REF: conj(x1[n-REF])           */
+#define AJ_IMG2      AJ_IMG(2, 0)      /* image tap c2 at REF: conj(x2n[n-REF])          */
+#define AJ_NW        (2 * AJ_NT + 2 * AJ_NIMG)       /* weight words                     */
+#define AJ_MAXDIM    (2 * AJ_NT - 1 + 2 * AJ_NIMG)   /* adaptive weights                 */
 #define AJ_WFRAC     12     /* Q3.12                                          */
 #define AJ_GFRAC     13     /* RX2 normalisation g2, Q3.13                    */
+#define AJ_MAXWS      5     /* weight scale: the core holds w * 2^ws           */
+#define AJ_MAXSH      7     /* output make-up shift, 6 dB per step             */
+#define AJ_OUT_HEADROOM_DB  3.0   /* output may be this far above the clean level      */
 #ifndef AJ_NSAMP
-#define AJ_NSAMP   4096     /* samples per block (one DMA capture)            */
+#define AJ_NSAMP   8192     /* samples per capture (one DMA transfer)         */
 #endif
-#define AJ_LAT      (3 * AJ_N - 2)    /* FPGA input -> output latency [samples] */
-
-#define AJ_NLAG      16     /* lag sums used by detection                     */
-
-#define AJ_MODE_SFAP  0     /* per bin: b + 2 image taps (default)            */
-#define AJ_MODE_LIN   1     /* per bin: b only, no image taps                 */
-#define AJ_MODE_NB    2     /* one b for all bins: the narrowband v3 SMI-PI   */
-#define AJ_NMODES     3
-#define AJ_MODE_STAP  AJ_MODE_SFAP   /* the default mode, by its 4.9.14 name  */
-
-#define AJ_MAXSH      4     /* largest output make-up shift of the core (x16) */
-#define AJ_MAXWS      0     /* no weight scale in the SFAP core               */
-#define AJ_OUT_HEADROOM_DB  3.0   /* output may be this far above the clean level */
-
-/* Weight of the previous block's statistics in the solve (0 = none). */
-#ifndef AJ_AVG
-#define AJ_AVG       0.5
-#endif
-/* Adaptive averaging (as SMI-PI 4.9.9): AJ_AVG is adjusted from the solver's own
- * results unless a value is set by hand (aj_set_av) or by the caller (r->avg). */
-#ifndef AJ_AV_ADAPT
-#define AJ_AV_ADAPT  1
-#endif
-#define AJ_AV_MIN    0.30
-#define AJ_AV_MAX    0.90
-#define AJ_AV_STEP   0.05
-#define AJ_JIT_HI    0.15   /* relative change of the weights between two solves = jittering */
-#define AJ_RES_TRACK 6.0    /* residual [dB] above which, with stable weights, track faster  */
-void   aj_set_av(double v);
-void   aj_set_av_auto(void);
-int    aj_av_is_auto(void);
-double aj_av_value(void);
 
 /* Lowest noise estimate allowed [LSB^2]: 12-bit quantisation of I and Q. */
 #define AJ_QFLOOR    0.25
 
 typedef struct {
     /* ---- set by the caller -------------------------------------------- */
-    int     mode;           /* AJ_MODE_*                                      */
-    double  sig2_prev;      /* last noise estimate, <= 0 if none              */
     double  rho_noise_re;   /* lag-1 correlation of the noise alone (learned  */
     double  rho_noise_im;   /*   while no jammer is present), 0 if unknown    */
     double  noise_ref;      /* receiver noise floor at the present gain       */
                             /*   [LSB^2], learned while no jammer, <= 0: none */
-    double  g2;             /* RX2 normalisation the core applies (the Q3.13  */
-                            /*   value written to AJ_NORM), <= 0 means 1      */
-    double  rx2_noise;      /* normalised RX2 noise / RX1 noise: 1 when g2    */
-                            /*   equalises them, less when g2 hit its limit;  */
-                            /*   <= 0 means 1                                 */
-    double  avg;            /* weight of the earlier blocks in this solve;    */
-                            /*   <= 0: the adaptive / manual factor           */
-    int     gate;           /* 1 = skip a block with no jammer in it (pulsed  */
-                            /*   jammer): weights and statistics are kept     */
-    double  gate_coh_db;    /*   "no jammer": coherence J/N below this ...    */
-    double  gate_pwr;       /*   ... and RX1 power below noise_ref x this     */
-
-    /* ---- results ------------------------------------------------------ */
-    int16_t wre[AJ_NW], wim[AJ_NW];   /* weights to write, Q3.12             */
+    /* ---- aj_detect ------------------------------------------------------ */
     double  p1;             /* RX1 power [LSB^2]                              */
     double  p2;             /* RX2 power [LSB^2], raw (before g2)             */
     double  coh;            /* RX1-RX2 coherence, best lag (0..1)             */
     int     coh_lag;        /* that lag [samples]                             */
-    double  jn_coh_db;      /* J/N implied by the coherence [dB]              */
-    double  pout;           /* output power of the weights that were running */
-                            /* while this block was captured [LSB^2]         */
-    double  pout_wn2;       /* mean |w|^2 of those weights (noise-weighted)   */
-    double  sig2;           /* mean loading = canceller's noise estimate      */
-    double  wn2;            /* mean |w|^2 of the new weights (noise-weighted) */
-    double  noise;          /* noise used for the figures below [LSB^2]       */
+    double  jn_coh_db;      /* J/N implied by the coherence [dB]: a jammer    */
+                            /*   both antennas see; noise alone gives ~-15    */
+    double  noise;          /* noise used for jn_db [LSB^2]                   */
     double  jn_db;          /* jammer-to-noise at RX1 [dB]                    */
-    double  supp_db;        /* jammer suppression [dB] (capped at 60)         */
-    double  res_db;         /* output / output noise [dB], 0 = fully nulled  */
-    double  rho1_re, rho1_im;   /* RX1 lag-1 correlation of this block        */
+    double  rho1_re, rho1_im;   /* RX1 lag-1 correlation of this capture      */
     double  foff;           /* jammer centre, fraction of fs (-0.5..0.5)      */
     double  bw;             /* jammer bandwidth, fraction of fs (0..1)        */
-    int     iters;          /* loading iterations used (largest bin)          */
-    int     jam_bins;       /* bins whose J/N exceeds 3 dB                    */
-    int     wmax_bin;       /* bin with the largest |b_k|                     */
-    double  wmax;           /* that |b_k|                                     */
-    double  bin_jn_db[AJ_N];/* J/N per bin [dB], natural order                */
-    int     gated;          /* 1 = this block was skipped by the gate         */
-    int     ws;             /* weight scale: always 0 (no such stage in SFAP) */
-    int     ok;             /* 1 = weights valid                              */
+    int     ok;             /* 1 = valid                                      */
+    /* ---- filled by gnss_aj.c from the FPGA (weights read back, meters) --- */
+    int16_t wre[AJ_NW], wim[AJ_NW];   /* the running weights, w * 2^ws, Q3.12 */
+    int     ws;             /* weight scale in use                            */
+    double  wn2;            /* |w|^2 of the running weights, each tap weighted */
+                            /*   by its noise relative to RX1                  */
+    double  supp_db;        /* jammer suppression [dB] (capped at 60)         */
+    double  res_db;         /* output / output noise [dB], 0 = fully nulled  */
 } aj_result_t;
 
-/* ---- slow chirp / sweeping jammer (as SMI-PI 4.6) ------------------------------
- * A narrow jammer whose centre moves from solve to solve: a long memory makes it
- * fill its sweep range in the statistics. With SFAP every bin has its own weight,
- * so the long memory simply lets every bin of the sweep range keep its null. */
-#define AJ_SWEEP_AVG    0.98
-#define AJ_SWEEP_STEP   0.004
-#define AJ_SWEEP_BW     0.2
-#define AJ_SWEEP_ON     10
-#define AJ_SWEEP_MAX    30
-typedef struct { double last; int have; int score; int on; } aj_sweep_t;
-void   aj_sweep_reset(aj_sweep_t *s);
-double aj_sweep_update(aj_sweep_t *s, const aj_result_t *r);
-
-/* DC offset of RX1 / RX2 [LSB] in the last capture (removed before the statistics). */
+/* DC offset of RX1 / RX2 [LSB] in the last capture; removed before the
+ * statistics, the detection and the weights. */
 void aj_last_dc(double *dc1, double *dc2);
-/* Output make-up shift for an RX gain cut of cut_db and a filter output out_db above
- * the noise: 6 dB per step, never more than AJ_OUT_HEADROOM_DB above the clean level. */
-int  aj_makeup_shift(int cut_db, double out_db, int max_shift);
-/* Expected excess of the noise floor from the ADC's quantisation noise at J/N jn_db. */
-double aj_adc_excess_db(double jn_db);
-void aj_set_max_ws(int ws);   /* kept for the engine; SFAP has no weight scale */
 
 /* Detection only (no weights): fills p1, p2, coh, coh_lag, jn_coh_db,
  * rho1_re/im and, with r->noise_ref > 0, noise and jn_db; ok = 1.
  * Returns 0 on success. */
 int aj_detect(const uint32_t *buf, int nsamp, aj_result_t *r);
 
-/* Returns 0 on success, 1 when r->gate skipped a jammer-free block (r->gated = 1), < 0 on error. */
-/* buf: one DMA capture, 2 words per sample instant:
- *      word 2n   = {Q1[31:16], I1[15:0]}   RX1 (AD9361 channel 0)
- *      word 2n+1 = {Q2[31:16], I2[15:0]}   RX2 (AD9361 channel 1)
- *      12-bit samples, right-aligned (only [11:0] is used).
- * nsamp must be AJ_NSAMP. Returns 0 on success. */
-int aj_compute(const uint32_t *buf, int nsamp, aj_result_t *r);
-
-/* J/N, suppression and residual from r->p1, pout, pout_wn2 and sig2, with
- * noise_ref as the noise floor. aj_compute() calls it with r->noise_ref. */
-void aj_metrics(aj_result_t *r, double noise_ref);
-
-/* Forget the previous weights and the averaged statistics (after the
- * filter was bypassed, the mode, g2 or the RX gain changed). */
-void aj_reset(void);
+/* Output make-up shift for an RX gain cut of cut_db and a filter output out_db above the
+ * noise (at the present gain, 0 = nothing but noise): restores the clean output level,
+ * 6 dB per step, but never leaves the output more than AJ_OUT_HEADROOM_DB above it. */
+int  aj_makeup_shift(int cut_db, double out_db, int max_shift);
+/* crpa8: the rest of the make-up in dB (0 .. 5.99) on top of 6 x shift, by the same rule:
+ * restore the RX gain cut, never more than AJ_OUT_HEADROOM_DB above the clean level. */
+double aj_makeup_fine_db(int cut_db, double out_db, int shift);
+/* crpa10: hardware NLMS step. The core moves each weight word (x 2^ws) by
+ * (y m 2^-sh) conj(u) 2^-AJ_NLMS_CS in units of 2^-AJ_NLMS_RF word LSB, u in Q1; this
+ * returns the nlms register word ([15:0] m, [20:16] sh, [31] enable) for a normalised step
+ * alpha: dw = alpha y conj(u) / (nw p_in), p_in = mean |u|^2 [LSB^2] (the RX1 power),
+ * nw = the number of adaptive weights. 0 when off (alpha <= 0 or no power). */
+#define AJ_NLMS_RF   16     /* must match NL_RF of nlms_pi */
+#define AJ_NLMS_CS    8     /* must match NL_CS of nlms_pi */
+uint32_t aj_nlms_word(double alpha, double p_in, int ws, int nw);
+/* crpa13: the NLMS step alpha for a jammer whose RX1 lag-1 correlation magnitude is rho
+ * (aj_detect: |rho1|; about 1 for a CW or a narrow jammer, 0.2-0.5 for a wideband one).
+ * The delayed loop (D = 64 samples) is stable up to about alpha 1/48 for a CW (all its
+ * power in one eigenmode: C simulation, 1/32 diverged); a wideband jammer spreads its
+ * power over the taps, so it takes a 4 x larger step, and converges best near 1/16
+ * (C simulation, J/N 50: 1/128 38 dB, 1/32 46 dB, 1/16 48 dB, 1/8 48 dB, 1/4 diverged,
+ * after 10 ms). rho >= AJ_NLMS_RHO_NB: AJ_NLMS_ALPHA_NB; rho <= AJ_NLMS_RHO_WB:
+ * AJ_NLMS_ALPHA_WB; geometric in between. */
+#define AJ_NLMS_ALPHA_NB  (1.0 / 64.0)
+#define AJ_NLMS_ALPHA_WB  (1.0 / 16.0)
+#define AJ_NLMS_RHO_NB    0.95
+#define AJ_NLMS_RHO_WB    0.60
+double aj_nlms_alpha(double rho);
+/* Expected excess of the receiver's noise floor, in dB, from the 12-bit ADC's own
+ * quantisation noise when a jammer jn_db above the noise has to be kept off full scale
+ * (about 0 below J/N 54, +1.8 dB at 61, +4 dB at 66, +8 dB at 71). */
+double aj_adc_excess_db(double jn_db);
 
 /* Helpers (no libm on the board). */
 double aj_sqrt(double x);

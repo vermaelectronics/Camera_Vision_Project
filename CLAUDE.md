@@ -61,7 +61,20 @@ Name each new design-A (pass-through + CRPA) package with the next number:
   use the 2nd ARM of the Zynq 7020"): worker thread / GNSS_AJ_THREAD / -lpthread removed,
   gnss_crpa pinned to CPU 0. All crpa8/9/10/11 features kept (user asked to keep the
   crpa9 features). Nothing ever moved between FPGA and ARM. Commit 46c1a18.
-- Next package: `crpa13`.
+- `crpa13` (2026-11-13): **NLMS only, no SMI** (user: crpa12 hls failed, "remove SMI from this
+  design, only remain NLMS"; "STOP BARE Metal"). New HLS core `nlms_pi` 1.0 (hls/nlms_pi, replaces
+  smi_pi): crpa12 filter 8 + 8 taps, REF 4, 3 + 3 image taps, g2, shift, fine gain; weights adapted
+  by delayed NLMS only (D = 64, LUTRAM delay line + error history, starts from 0, cleared on bypass
+  or ws change), no weight inputs, no smoothing; weight monitor `wmon` (ap_vld, 1 word per sample)
+  read back at 0x400.., 0x190/0x194, 0x1C0..0x1CC. AJ_INFO 0x08040C0D (layout 13). Firmware (Linux
+  only): SMI solver removed from gnss_aj_math.c (aj_detect kept), step alpha from |rho1| (1/64 CW,
+  1/16 wideband, aj_nlms_alpha), ws rule, residual/suppression from FPGA meters, divergence guard
+  (clear + halve step), gnss_aj_nlms_mu= (0 = auto, saved as aj_nlms_step_e6), gnss_aj_nlms=0|1
+  (hold), removed gnss_aj_avg/ramp/sweep/mode. baremetal/ removed, `./build.sh baremetal` refuses.
+  csim 16 scenarios pass (10 ms): J/N 41 +1.3 dB, 51 +4.2, 61 +12 dB residual; 100 ms: 51 +0.8,
+  61 +7.6 (SMI optimum +0.7 / +4.0). Not yet run in Vitis by the user.
+  The paused SFAP-PI 128 BRAM work is commit 01f279c (WIP, not a package).
+- Next package: `crpa14`.
 
 Files per package: `crpaN-full-src.zip.part1`, `crpaN-full-src.zip.part2`,
 `crpaN-kit.zip`, `SHA256SUMS-crpaN.txt`.

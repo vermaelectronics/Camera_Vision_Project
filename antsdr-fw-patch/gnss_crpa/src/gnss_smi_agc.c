@@ -3,6 +3,7 @@
  *  Matched RX gain control and TX level hold for SMI-PI. See gnss_smi_agc.h.
  *****************************************************************************/
 
+#include <stdio.h>
 #include "gnss_smi_agc.h"
 #include "gnss_passthrough.h"
 #include "ad9361_api.h"
@@ -49,6 +50,44 @@ static double   pout_ref;        /* clean TX output power [LSB^2]           */
 static int      last_peak, last_comp_db;
 static double   last_pout;
 static int      dig_db;          /* make-up gain applied in the filter [dB] */
+
+/* crpa8: ADC clip counters (AJ_CLIP1/2, every sample, bitstream layout 10). clip_update()
+ * turns the counts since its last call into parts per million of the samples. */
+#define RXG_CLIP_PPM       100      /* more than this: the ADC clips, cut the gain / warn */
+static int      clip_hw = -1;
+static uint32_t clip_c0, clip_c1, clip_rx;
+static int      clip_ppm_last;
+static int clip_update(void)
+{
+	uint32_t c0, c1, rx, dc, dr;
+	if(clip_hw < 0) {
+		clip_hw = ((gnss_pt_read(GNSS_PT_REG_AJ_INFO) & 0xFFU) >= GNSS_PT_AJ_LAYOUT_RAMP);
+		clip_c0 = gnss_pt_read(GNSS_PT_REG_AJ_CLIP1); clip_c1 = gnss_pt_read(GNSS_PT_REG_AJ_CLIP2);
+		clip_rx = gnss_pt_read(GNSS_PT_REG_RX_COUNT_CH0);
+		return -1;
+	}
+	if(!clip_hw) return -1;
+	c0 = gnss_pt_read(GNSS_PT_REG_AJ_CLIP1); c1 = gnss_pt_read(GNSS_PT_REG_AJ_CLIP2);
+	rx = gnss_pt_read(GNSS_PT_REG_RX_COUNT_CH0);
+	dc = (c0 - clip_c0 > c1 - clip_c1) ? c0 - clip_c0 : c1 - clip_c1;
+	dr = rx - clip_rx;
+	clip_c0 = c0; clip_c1 = c1; clip_rx = rx;
+	if(dr == 0 || dc > dr) return -1;                  /* no samples, or a counter clear in between */
+	clip_ppm_last = (int)((uint64_t)dc * 1000000U / dr);
+	return clip_ppm_last;
+}
+
+int gnss_rxg_clip_ppm(void) { return clip_ppm_last; }
+
+const char *gnss_rxg_clip_txt(void)
+{
+	static char t[64];
+	if(clip_hw != 1) return "not measured (bitstream without AJ_CLIP1/2)";
+	if(clip_ppm_last == 0) return "none";
+	if(clip_ppm_last < RXG_CLIP_PPM) { snprintf(t, sizeof t, "%d ppm of the samples (light)", clip_ppm_last); return t; }
+	snprintf(t, sizeof t, "%d ppm of the samples: THE ADC CLIPS", clip_ppm_last);
+	return t;
+}
 
 static int32_t abs16(uint32_t half)
 {
@@ -273,7 +312,7 @@ static void manual_monitor(void)
 	static XTime t_next, t_warn;
 	static int   clip_run, init;
 	XTime now;
-	int   pk;
+	int   pk, ppm;
 	XTime_GetTime(&now);
 	if(now < t_next) return;
 	t_next = now + (XTime)((uint64_t)COUNTS_PER_SECOND * RXG_MON_US / 1000000U);
@@ -282,25 +321,29 @@ static void manual_monitor(void)
 		hw_peak_ok = ((gnss_pt_read(GNSS_PT_REG_AJ_INFO) & 0xFFU) >= GNSS_PT_AJ_LAYOUT_BLANK);
 		hw_idx_last = (uint16_t)(gnss_pt_read(GNSS_PT_REG_AJ_RX_PEAK) >> 16);
 		hw_idx_ignore = hw_idx_last;
+		(void)clip_update();
 		return;
 	}
+	ppm = clip_update();                     /* crpa8: exact count of clipped samples (every 100 ms) */
 	if(hw_peak_ok) {
 		pk = hw_peak_new();
-		if(pk < 0) return;                  /* no new window yet */
+		if(pk < 0 && ppm < 0) return;       /* no new window yet */
+		if(pk < 0) pk = last_peak;
 	} else {
 		int p0 = rx_peak(GNSS_PT_REG_RX_SNAPSHOT_CH0), p1 = rx_peak(GNSS_PT_REG_RX_SNAPSHOT_CH1);
 		pk = p0 > p1 ? p0 : p1;
 	}
 	last_peak = pk;
+	if(ppm >= RXG_CLIP_PPM && pk < RXG_CLIP_PEAK) pk = RXG_CLIP_PEAK;
 	clip_run = (pk >= RXG_CLIP_PEAK) ? clip_run + 1 : 0;
 	if(clip_run >= 3 && (t_warn == 0 || now - t_warn >= (XTime)((uint64_t)COUNTS_PER_SECOND * RXG_WARN_US / 1000000U))) {
 		int32_t g = 0;
 		t_warn = now;
 		ad9361_get_rx_rf_gain(ad9361_phy, 0, &g);
-		console_print("\n[RXG] ADC CLIPPING: RX peak %d of 2047 at %d dB MANUAL gain. A clipped jammer cannot be\n"
+		console_print("\n[RXG] ADC CLIPPING (%d ppm of the samples): RX peak %d of 2047 at %d dB MANUAL gain. A clipped jammer cannot be\n"
 			      "      nulled (it leaks 10-30 dB through the filter). Use gnss_rx_agc=2 (both gains cut\n"
 			      "      together, output level kept) or a lower RX gain (last value of gnss_band=7,...).\n",
-			      (long)pk, (long)g);
+			      (long)clip_ppm_last, (long)pk, (long)g);
 	}
 }
 
@@ -327,6 +370,12 @@ void gnss_rxg_poll(void)
 	{
 		int hw = hw_peak_new();            /* a pulse the snapshots did not catch */
 		if(hw > peak) peak = hw;
+	}
+	{
+		/* crpa8: the clip counters see every sample: clipping since the last poll (5 ms)
+		 * is a full-scale peak, so the attack takes the largest step at once */
+		int ppm = clip_update();
+		if(ppm >= RXG_CLIP_PPM) peak = 2047;
 	}
 	last_peak = peak;
 
