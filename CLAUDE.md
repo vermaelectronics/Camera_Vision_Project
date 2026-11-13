@@ -52,7 +52,12 @@ Name each new design-A (pass-through + CRPA) package with the next number:
   AJ_INFO 0x08040C0C (layout 12), `SMI_NLMS=0 ./build.sh hls` = core without NLMS.
   csim 26: drifting jammer residual 24.9 -> 1.7 dB; 27: fixed jammer +0.09 dB.
   crpa9 stays the 10 + 10 design without NLMS. Commit d7f3db0.
-- Next package: `crpa11`.
+- `crpa11` (2026-11-13): crpa10 with the **NLMS HLS timing fix** (user's crpa10 hls run:
+  estimated clock 63.552 ns, FAIL): error history = 32-slot circular buffer (LUTRAM)
+  with DEPENDENCE distance=24 instead of a shift register; NLMS step saturated before
+  the weight update; smi_pi 3.1. C simulation bit-exact, unchanged. Not yet
+  re-run in Vitis by the user. Commit ca0cd02.
+- Next package: `crpa12`.
 
 Files per package: `crpaN-full-src.zip.part1`, `crpaN-full-src.zip.part2`,
 `crpaN-kit.zip`, `SHA256SUMS-crpaN.txt`.
