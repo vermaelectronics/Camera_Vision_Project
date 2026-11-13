@@ -91,7 +91,7 @@ Name each new design-A (pass-through + CRPA) package with the next number:
   passes, weights carried capture to capture, ws = finest that fits), step aj_anlms_alpha(J/N):
   0.05 < 35 dB, 0.1 < 50, 0.2; gnss_aj_nlms_mu= / gnss_aj_nlms_pass= (saved as aj_arm_step_e6 /
   aj_arm_pass), gnss_aj_nlms=0|1; GNSS_PT_AJ_INFO_EXPECTED built from AJ_NT/AJ_REF. csim 16 pass
-  (20 captures): field J/N 41 / 51 / 61 residual +0.6 / +1.6 / +7.0 dB. ~101 DSP48 in all.
+  (20 captures): field J/N 41 / 51 / 61 residual +0.6 / +1.6 / +7.0 dB. ~101 DSP48 in all. Commit aa38a1b.
 - Next package: `crpa17` (then `crpa15`).
 
 Files per package: `crpaN-full-src.zip.part1`, `crpaN-full-src.zip.part2`,
