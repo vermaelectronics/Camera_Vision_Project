@@ -95,7 +95,16 @@ Name each new design-A (pass-through + CRPA) package with the next number:
 - `crpa17` (2026-11-13): crpa16 with **6 + 6 taps** (ST_NT / AJ_NT 6, ST_REF / AJ_REF 3, AJ_NWTS_DEF 12,
   AJ_INFO 0x06030C0E), 3 + 3 image taps, 17 weights, ~89 DSP48 in all. csim 16 pass: field J/N 41 /
   51 / 61 residual +0.7 / +1.7 / +7.3 dB (20 captures); reflection 3 samples later 22.9 dB (out of reach). Commit d69eb30.
-- Next package: `crpa15` (SFAP-PI 256 in Linux), then `crpa18`.
+- `crpa15` (2026-11-13): **SFAP-PI 256 in Linux design A** (user's SFAP_PI_256v3 = v6.2.1): HLS core
+  `sfap_pi` 4.0 (hls/sfap_pi, user's v6.0 core unchanged, replaces stap_pi), weights on the ARM by the
+  user's v6.2.1 aj_compute (gnss_aj_math.c + aj_adc_excess_db / aj_makeup_shift), 4096-sample
+  captures, per-bin detector, weight hold, g2 follow. gnss_passthrough: double-buffered weight RAM
+  3 x 2 x 256 (b 0x1000, c1 0x1400, c2 0x1800, written into the bank not in use, AJ_COMMIT flips only
+  when weights were written, 0x1B0 = bank), ap_memory ports aj_wb/wc1/wc2_address/ce/q 0/1 (names of
+  the user's design B); AJ_W/WC/WCX/GAIN removed; AJ_INFO 0x08070C0F (layout 15). Commands
+  gnss_aj_mode=0|1|2, gnss_aj_hold=, gnss_aj_sfap? (not saved); nlms commands removed. csim 18/18 pass
+  with the firmware's math (J/N 60 I/Q: +1.5 dB residual). ~170-190 DSP48. Linux only.
+- Next package: `crpa18`.
 
 Files per package: `crpaN-full-src.zip.part1`, `crpaN-full-src.zip.part2`,
 `crpaN-kit.zip`, `SHA256SUMS-crpaN.txt`.

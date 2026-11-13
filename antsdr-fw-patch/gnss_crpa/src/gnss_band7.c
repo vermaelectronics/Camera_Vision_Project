@@ -51,10 +51,8 @@
 
 static int boot_band = GNSS_BAND_DEFAULT;
 static int saved_agc = -1;      /* crpa5: gnss_rx_agc=, -1 = never set   */
-static int saved_mu = -1;       /* crpa16/17: gnss_aj_nlms_mu= (ARM NLMS step) x 1e6, 0 = automatic; -1 = never set.
-                                 * Saved as aj_arm_step_e6: the keys of other packages (aj_nlms_step_e6 of
-                                 * crpa13/14, aj_avg_milli, aj_ramp, aj_nlms ...) meant other things and are dropped. */
-static int saved_pass = -1;     /* crpa16/17: gnss_aj_nlms_pass= */
+/* crpa15: only gnss_rx_agc= is saved with the band; the anti-jam keys of other packages
+ * (aj_arm_step_e6, aj_nlms_step_e6, aj_avg_milli, ...) are dropped when the file is written. */
 static char conf_file[256];
 
 static const char *conf_path(void)
@@ -95,8 +93,6 @@ static int conf_save(void)
 		(unsigned long long)lo, (unsigned long)fs, (unsigned long)bw,
 		(unsigned long)att, (long)g, boot_band);
 	if (saved_agc >= 0) fprintf(f, "rx_agc=%d\n", saved_agc);
-	if (saved_mu >= 0) fprintf(f, "aj_arm_step_e6=%d\n", saved_mu);
-	if (saved_pass >= 0) fprintf(f, "aj_arm_pass=%d\n", saved_pass);
 	fflush(f);
 	fsync(fileno(f));
 	fclose(f);
@@ -126,8 +122,6 @@ void gnss_band7_load(void)
 			else if (!strcmp(line, "band7_rxg_db"))  g = (int32_t)strtol(eq, NULL, 10);
 			else if (!strcmp(line, "band_boot"))     boot_band = atoi(eq);
 			else if (!strcmp(line, "rx_agc"))        saved_agc = atoi(eq);
-			else if (!strcmp(line, "aj_arm_step_e6")) saved_mu = atoi(eq);
-			else if (!strcmp(line, "aj_arm_pass"))   saved_pass = atoi(eq);
 		}
 		fclose(f);
 	}
@@ -245,12 +239,10 @@ void set_gnss_band_boot(double *param, char param_no)
 	get_gnss_band_boot(param, param_no);
 }
 
-/* ---- crpa5: gnss_rx_agc= (and crpa16/17: gnss_aj_nlms_mu=, gnss_aj_nlms_pass=) kept with the band 7 values */
-void gnss_settings_save(int rx_agc, int mu_e6, int passes)
+/* ---- crpa5: gnss_rx_agc= kept with the band 7 values ------------------------------------ */
+void gnss_settings_save(int rx_agc)
 {
 	if (rx_agc >= 0) saved_agc = rx_agc;
-	if (mu_e6 >= 0) saved_mu = mu_e6;
-	if (passes >= 0) saved_pass = passes;
 	if (conf_save() != 0)
 		console_print("  (setting active; not saved: %s)\n", (char *)conf_path());
 	else
@@ -262,13 +254,5 @@ void gnss_settings_apply(void)
 	if (saved_agc >= 0 && saved_agc <= 2) {
 		console_print("settings: gnss_rx_agc=%d (saved)\n", (long)saved_agc);
 		gnss_rxg_set_mode(saved_agc);
-	}
-	if (saved_mu >= 1000 && saved_mu <= 1000000) {
-		console_print("settings: gnss_aj_nlms_mu=%s (saved)\n", gnss_fmt((double)saved_mu / 1e6, 4));
-		gnss_aj_set_nlms(-1, (double)saved_mu / 1e6, 0);
-	}
-	if (saved_pass >= 1 && saved_pass <= 8) {
-		console_print("settings: gnss_aj_nlms_pass=%d (saved)\n", (long)saved_pass);
-		gnss_aj_set_nlms(-1, -1.0, saved_pass);
 	}
 }

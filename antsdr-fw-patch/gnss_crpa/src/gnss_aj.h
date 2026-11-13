@@ -1,21 +1,20 @@
 /******************************************************************************
- *  gnss_aj.h  --  anti-jam engine (runs on the ARM; crpa16 / crpa17: the weights
- *                  are calculated by NLMS on the ARM and applied by stap_pi)
+ *  gnss_aj.h  --  anti-jam engine (runs on the ARM; crpa15: SFAP-PI 256 bins,
+ *                  the user's v6.2.1 solver per bin, filter sfap_pi in the FPGA)
  *
  *  WHAT IT DOES, CONTINUOUSLY, WITH NO OPERATOR SETTING
- *    1. Captures 8192 samples of RX1 and RX2 into DDR over the existing ADC
+ *    1. Captures 4096 samples (AJ_NSAMP) of RX1 and RX2 into DDR over the existing ADC
  *       DMA (a fan-out of the RX stream; the PL path is not interrupted).
  *    2. CLEAR (no jammer): the filter is BYPASSED -- TX1 carries RX1 exactly,
  *       4 samples later -- and each capture only goes through a cheap
  *       detector (aj_detect: powers + RX1/RX2 coherence). Meanwhile it learns
  *       the receiver noise floor and the RX2/RX1 level ratio (the input
  *       normalisation g2 the FPGA applies to RX2).
- *    3. JAMMED: the filter is switched in. Per capture the ARM measures the
- *       jammer (J/N, bandwidth), runs an NLMS over the capture (2 passes by
- *       default, continuing from the weights of the previous capture, step
- *       from J/N), commits the 21 / 17 weights with the weight scale that fits
- *       them, sets the output make-up gain and reads the FPGA power meters
- *       (suppression, residual).
+ *    3. JAMMED: the filter is switched in. Per capture (4096 samples) the
+ *       ARM solves the 3 weights of each of the 256 frequency bins (the
+ *       user's SFAP-PI v6.2.1 aj_compute: drift-aware averaging, weight hold,
+ *       g2 following a jammer weaker at RX2) and commits all 768 words to the
+ *       FPGA's double-buffered weight RAM, with the output make-up shift.
  *    4. Back to CLEAR (bypass, weights cleared) once the jammer has been gone
  *       for 0.5 s.
  *    Every change is printed on the console with a time stamp:
@@ -32,24 +31,14 @@
 
 #include <stdint.h>
 #include "gnss_aj_math.h"
-#if AJ_NT == 8
-#define AJ_TAPS_TXT "8 + 8"
-#define AJ_PKG_TXT  "crpa16"
-#elif AJ_NT == 6
-#define AJ_TAPS_TXT "6 + 6"
-#define AJ_PKG_TXT  "crpa17"
-#else
-#define AJ_TAPS_TXT "?"
-#define AJ_PKG_TXT  "crpa?"
-#endif
 
-/* DDR buffer for the captures: AJ_NSAMP (8192) samples x 2 channels x 4 bytes = 64 KiB.
+/* DDR buffer for the captures: AJ_NSAMP (4096 in crpa15) samples x 2 channels x 4 bytes = 32 KiB.
  * Away from the boot captures (0x10000000, 0x10800000; gnss_capture.h). */
 #ifndef GNSS_AJ_BUF_ADDR
 #define GNSS_AJ_BUF_ADDR   0x11000000U
 #endif
 
-#define GNSS_AJ_VERSION_STR  AJ_PKG_TXT " STAP-PI 4.9.14 (" AJ_TAPS_TXT " taps, 3 + 3 image taps, weights by NLMS on the ARM, no FPGA NLMS, fine gain, clip counters, power meters, low-DSP bitstream, level lock, TX2 = CRPA copy, muted, 89.75 dB)"
+#define GNSS_AJ_VERSION_STR  "crpa15 SFAP-PI 256 (v6.2.1 solver) 4.9.14 (256 bins, b + 2 image taps per bin, weights on the ARM, weight RAM in the FPGA, clip counters, power meters, low-DSP bitstream, level lock, TX2 = CRPA copy, muted, 89.75 dB)"
 
 /* RF profiles (gnss_band=). RX and TX are always set together, so the
  * retransmitted signal comes out on the frequency it came in on and the
@@ -70,14 +59,10 @@ int  gnss_aj_blank_available(void);         /* 1 = the bitstream has the blanker
 void gnss_aj_set_log(int seconds);  /* periodic status line, 0 = events only */
 void gnss_aj_set_events(int on);  /* 0 = no event lines (gnss_report? keeps them) */
 void gnss_aj_set_csv(int ms);
-/* crpa16/17: NLMS on the ARM (gnss_aj_nlms=, gnss_aj_nlms_mu=, gnss_aj_nlms_pass=, gnss_aj_nlms?).
- * on: -1 = leave, 1 = adapt (default), 0 = hold the weights; alpha: < 0 = leave,
- * 0 = automatic (from J/N), > 0 = manual step; passes: <= 0 = leave, 1..8 passes per capture */
-void gnss_aj_set_nlms(int on, double alpha, int passes);
-int  gnss_aj_nlms(void);            /* 1 = adapting */
-double gnss_aj_nlms_mu(void);       /* the manual step, 0 = automatic */
-int  gnss_aj_nlms_pass(void);
-void gnss_aj_nlms_line(void);
+/* crpa15: SFAP-PI (gnss_aj_mode=, gnss_aj_hold=, gnss_aj_sfap?) */
+void gnss_aj_set_mode(int mode);    /* AJ_MODE_SFAP / _LIN / _NB             */
+void gnss_aj_set_hold(int solves);  /* weight hold length, 0 = off           */
+void gnss_aj_sfap_line(void);
 int  gnss_aj_jammer_on(void);
 void gnss_aj_poll(void);
 void gnss_aj_print(void);           /* gnss_aj? / gnss_smi?                  */
@@ -95,9 +80,8 @@ int  gnss_band_set(int band);
  * checks and saves them (/mnt/jffs2/gnss_crpa.conf). */
 void gnss_band_custom_set(uint64_t lo, uint32_t fs, uint32_t bw, uint32_t att_mdb, int32_t rxg_db);
 void gnss_band_custom_get(uint64_t *lo, uint32_t *fs, uint32_t *bw, uint32_t *att_mdb, int32_t *rxg_db);
-/* crpa5: gnss_rx_agc= is saved with the band 7 values and restored at start-up; crpa16/17: and
- * gnss_aj_nlms_mu= (ARM NLMS step x 1e6, 0 = automatic), gnss_aj_nlms_pass=. -1 = leave. */
-void gnss_settings_save(int rx_agc, int mu_e6, int passes);
+/* crpa5: gnss_rx_agc= is saved with the band 7 values and restored at start-up (-1 = leave). */
+void gnss_settings_save(int rx_agc);
 void gnss_settings_apply(void);      /* after gnss_aj_enable(1) */
 int  gnss_band_get(void);
 void gnss_band_levels(void);

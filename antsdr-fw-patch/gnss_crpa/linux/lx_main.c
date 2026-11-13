@@ -1,4 +1,4 @@
-/* gnss_crpa - the GNSS anti-jam firmware for the ANTSDR E310 (crpa16/17: STAP, weights by NLMS on the ARM),
+/* gnss_crpa - the GNSS anti-jam firmware for the ANTSDR E310 (crpa15: SFAP-PI 256 bins, the user's v6.2.1 solver),
  * running under Linux (antsdr-fw-patch, design A).
  *
  *   gnss_crpa            run in this terminal, exactly like the bare-metal
@@ -495,7 +495,7 @@ static void firmware(void)
 	int cmd_type, invalid_cmd, b;
 	unsigned char cmd;
 
-	printf("\n=== ANTSDR E310 - GNSS CRPA, STAP-PI %s (crpa16/17, " AJ_TAPS_TXT " taps, NLMS on the ARM), Linux (gnss_crpa %s) ===\n",
+	printf("\n=== ANTSDR E310 - GNSS CRPA, SFAP-PI 256 %s (crpa15, the user's v6.2.1 solver), Linux (gnss_crpa %s) ===\n",
 	       "4.9.14", GNSS_CRPA_VERSION);
 	printf("    TX1 IS CONDUCTED, ATTENUATED COAX ONLY -- never an antenna.\n");
 
@@ -523,7 +523,7 @@ static void firmware(void)
 	gnss_info_menu();
 	gnss_aj_init();
 	gnss_aj_enable(1);
-	gnss_settings_apply();          /* saved gnss_rx_agc= / gnss_aj_nlms_mu= */
+	gnss_settings_apply();          /* saved gnss_rx_agc= */
 	console_print("\nANTI-JAM (" GNSS_AJ_VERSION_STR "): ON, bypassed until a jammer appears.\n"
 		      "  Jammer events are printed as [AJ] lines with a time stamp. gnss_aj? = state,\n"
 		      "  gnss_report? = everything (copy it into a report), gnss_aj_csv=500 = CSV log,\n"
@@ -646,7 +646,7 @@ static int client(int argc, char **argv)
 static void usage(void)
 {
 	fprintf(stderr,
-		"gnss_crpa %s - GNSS anti-jam (STAP, NLMS on the ARM, crpa16/17) for the ANTSDR E310 (Linux)\n"
+		"gnss_crpa %s - GNSS anti-jam (SFAP-PI 256 bins, crpa15) for the ANTSDR E310 (Linux)\n"
 		"  gnss_crpa        run in this terminal (no service running)\n"
 		"  gnss_crpa -d     run as the background service (S95gnss_crpa)\n"
 		"  gnss             attach to the service (Ctrl-D / exit detaches)\n"
@@ -727,7 +727,7 @@ int main(int argc, char **argv)
 	}
 
 	if (lx_io_init() || lx_ad9361_open(&ad9361_phy)) {
-		printf("gnss_crpa: hardware not available -- is this the antsdr-fw-patch 0003 (crpa16/17 stap_pi) bitstream?\n");
+		printf("gnss_crpa: hardware not available -- is this the antsdr-fw-patch 0003 (crpa15 sfap_pi 256) bitstream?\n");
 		lx_flush();
 		return 1;
 	}

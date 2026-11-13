@@ -1,35 +1,35 @@
-From c24f4d3773c362e3b6d158e07081eb64bd0ad7e1 Mon Sep 17 00:00:00 2001
+From 71607caecab172eecd06b10f3404d8d73b2d35fc Mon Sep 17 00:00:00 2001
 From: antsdr-fw-patch <antsdr-fw-patch@localhost>
 Date: Sat, 7 Nov 2026 11:57:58 +0000
-Subject: [PATCH] ant: STAP 6x6 v4.9.14 anti-jam, weights from the ARM
- (stap_pi), AD9361 LVDS 2R2T
+Subject: [PATCH] ant: SFAP-PI 256 v4.9.14 anti-jam (user's v6.0 core, weight
+ RAM), AD9361 LVDS 2R2T
 
 Converts the E310 AD9361 interface to LVDS (pins and standards of the
 vendor E310 V1 design) so 2R2T runs at 61.44 MS/s, adds the fmcomms2-style
 divided-clock datapath, gnss_passthrough v4.9.14 at 0x43C10000 and the
 Vitis HLS anti-jam filter between two clock-crossing FIFOs.
-crpa8: AJ_GAIN (fine output gain, port gain), AJ_CLIP1/2 ADC clip counters.
-crpa9: 3 + 3 image taps (AJ_WCX0..3, 192-bit aj_wcj), power meters
-AJ_PWR_IN/OUT.
-crpa16: the filter is stap_pi 1.0 (8 + 8 taps, 3 + 3 image taps), weights
-from the ARM (AJ_W 0x400.., AJ_WC, AJ_WCX, committed by AJ_COMMIT; the
-firmware calculates them by NLMS on the captures); no smoothing, no FPGA
-NLMS (AJ_NLMS gone); aj_wts is 32 x AJ_NWTS bits; AJ_INFO 0x08040C0E
-(layout 14).
-crpa17: 6 + 6 taps, reference delay 3: AJ_NWTS 12, AJ_INFO 0x06030C0E.
+crpa8: AJ_CLIP1/2 ADC clip counters. crpa9: power meters AJ_PWR_IN/OUT.
+crpa15: the filter is the user's SFAP-PI 256 core (sfap_pi 4.0: 256 bins,
+windowed FFT, 50 % overlap, one weight + two image taps per bin). Its 768
+weights come from the ARM through a double-buffered weight RAM in
+gnss_passthrough (0x1000 b, 0x1400 c1, 0x1800 c2; written into the bank
+not in use, AJ_COMMIT switches banks when weights were written; read by the
+core through its ap_memory ports, two per array, latency 1). AJ_W, AJ_WC,
+AJ_WCX and AJ_GAIN are gone; 0x1B0 reads the bank in use. AJ_INFO
+0x08070C0F (log2 N 8, log2 hop 7, layout 15).
 ---
  library/gnss_passthrough/Makefile             |   3 +-
- library/gnss_passthrough/gnss_passthrough.v   | 538 ++++++++++++++++--
+ library/gnss_passthrough/gnss_passthrough.v   | 515 ++++++++++++++++--
  .../gnss_passthrough_constr.xdc               |  19 +-
  .../gnss_passthrough/gnss_passthrough_ip.tcl  |  68 ++-
  library/gnss_passthrough/gnss_pulse_blank.v   | 222 ++++++++
  projects/ant/Makefile                         |   4 +
  projects/ant/gnss_passthrough_cdc.xdc         | 100 ++++
- projects/ant/system_bd.tcl                    | 383 +++++++------
+ projects/ant/system_bd.tcl                    | 388 +++++++------
  projects/ant/system_constr.xdc                | 131 ++---
  projects/ant/system_project.tcl               |   5 +
  projects/ant/system_top.v                     |  37 +-
- 11 files changed, 1207 insertions(+), 303 deletions(-)
+ 11 files changed, 1190 insertions(+), 302 deletions(-)
  create mode 100644 library/gnss_passthrough/gnss_pulse_blank.v
  create mode 100644 projects/ant/gnss_passthrough_cdc.xdc
 
@@ -51,7 +51,7 @@ index ab4bcc0..58cad71 100644
  XILINX_DEPS += gnss_passthrough_constr.xdc
  XILINX_DEPS += gnss_passthrough_ip.tcl
 diff --git a/library/gnss_passthrough/gnss_passthrough.v b/library/gnss_passthrough/gnss_passthrough.v
-index feca02d..01c6357 100644
+index feca02d..f29970f 100644
 --- a/library/gnss_passthrough/gnss_passthrough.v
 +++ b/library/gnss_passthrough/gnss_passthrough.v
 @@ -1,6 +1,6 @@
@@ -119,7 +119,7 @@ index feca02d..01c6357 100644
  //
  //            READ [2]/[3] CAREFULLY. dac_enable_* is NOT an enable this block
  //            drives, and it is NOT derived from the valid strobes. It is a
-@@ -88,8 +116,85 @@
+@@ -88,8 +116,67 @@
  //    0x34    TX_COUNT_CH1    RO      dac_valid_i1 pulses served
  //    0x38    RX_SNAPSHOT_CH1 RO      {adc_data_q1, adc_data_i1} last accepted
  //    0x3C    RESERVED        RO      reads 0
@@ -128,31 +128,25 @@ index feca02d..01c6357 100644
 +//    0x40..  CRPA_COEF[0..15] RW     reserved; stored and returned, no logic
 +//                                    consumes them. (0x48 was the v3 SMI-PI
 +//                                    loading L; v4 needs no loading register.)
-+//    0x400.. AJ_W[0..15]     RW      SMI-PI space-time weights, SHADOW copy (crpa10: 16 words for
-+//    0x43C                           8 + 8 taps; 0x440..0x4FC read 0, writes ignored).
-+//                                    Word k: {imag[31:16], real[15:0]}, signed
-+//                                    Q3.12 (1.0 = 0x1000).
-+//                                      k = 0..7   RX1 tap at delay k
-+//                                                 (k = 4 is the reference,
-+//                                                 fixed at 1; its word is
-+//                                                 ignored by the core)
-+//                                      k = 8..15  RX2 tap at delay k-8
-+//                                                 (applied to the NORMALISED
-+//                                                 RX2, see AJ_NORM)
-+//                                    Writing here does NOT change the filter.
++//    0x1000.. AJ_WB/WC1/WC2  WO      crpa15: SFAP-PI 256 per-bin weights, 768 words, written into
++//    0x1BFC                          the weight-RAM bank NOT in use:
++//                                      0x1000 + 4k   b_k   (on the normalised RX2)
++//                                      0x1400 + 4k   c1_k  (image tap on conj(X1 at bin -k))
++//                                      0x1800 + 4k   c2_k  (image tap on conj(X2n at bin -k))
++//                                    k = bin in natural FFT order, {imag[31:16], real[15:0]}, Q3.12.
++//                                    Read 0. sfap_pi_0 reads the bank in use through its ap_memory
++//                                    ports (two per array). Writing does NOT change the filter.
 +//    0x180   AJ_COMMIT       W/RO    Any write copies ALL shadow registers
-+//                                    (AJ_W, AJ_CFG, AJ_NORM, AJ_WC) to the
++//                                    (AJ_CFG, AJ_NORM, AJ_BLK_THR) and, if weights were written
++//                                    since the last commit, switches the weight bank, to the
 +//                                    values the core uses, in one s_axi_aclk
 +//                                    edge, so the core never runs a half-old,
 +//                                    half-new set. Reads a commit counter.
 +//    0x184   AJ_INFO         RO      {8'd taps per channel, 8'd reference delay,
 +//                                     8'd fraction bits, 8'd layout version}
-+//                                    = 0x08040C0E (crpa16: layout 14 = 8 + 8 taps, reference delay 4,
-+//                                    3 + 3 image taps, weights from the ARM (AJ_W, AJ_WC, AJ_WCX, NLMS on
-+//                                    the ARM), no smoothing, no FPGA NLMS; AJ_GAIN, clip counters, meters;
-+//                                    crpa17: 0x06030C0E, 6 + 6 taps, delay 3; crpa13/14: layout 13 = FPGA
-+//                                    NLMS only; crpa10-12: layout 12; crpa9: 11; crpa8: 10; layout 7 = v4.9;
-+//                                    6 = v4.7; 5 = v4.6; 4 = v4.5; 3 = v4.4; 2 = v4.1)
++//                                    = 0x08070C0F (crpa15: SFAP-PI 256, byte 3 = log2 N 8, byte 2 =
++//                                    log2 hop 7, layout 15 = weight RAM at 0x1000, blanker, clip
++//                                    counters, meters; crpa16/17: 0x08040C0E / 0x06030C0E STAP)
 +//    0x188   AJ_CFG          RW      SHADOW. [0] bypass: 1 = TX1 carries RX1
 +//                                    delayed by 8 samples, no weights (reset
 +//                                    value 0x1: nothing is filtered until the
@@ -166,9 +160,6 @@ index feca02d..01c6357 100644
 +//                                    {imag[31:16], real[15:0]} signed Q3.13
 +//                                    (1.0 = 0x2000, the reset value). The core
 +//                                    filters g2 * RX2.
-+//    0x190   AJ_WC0          RW      SHADOW. Image tap c1 on conj(RX1[n-8]),
-+//                                    weight-word format.
-+//    0x194   AJ_WC1          RW      SHADOW. Image tap c2 on conj(RX2n[n-8]).
 +//    0x198   AJ_CFG_ACTIVE   RO      AJ_CFG as committed (what the core runs).
 +//    0x19C   AJ_BLK_THR      RW      SHADOW (v4.6, AJ_INFO layout 5). Pulse blanker threshold: the
 +//                                    blanker (gnss_pulse_blank.v) zeroes the filter output while the sum
@@ -180,20 +171,11 @@ index feca02d..01c6357 100644
 +//    0x1AC   AJ_RX_PEAK      RO      [15:0] largest |I| or |Q| of RX1 and RX2 over the last window of
 +//                                    2^19 sample strobes (8.5 ms at 61.44 MS/s), updated at the
 +//                                    end of each window; [31:16] window counter (wraps).
-+//    0x1B0   AJ_GAIN         RW      SHADOW (crpa8, layout 10). Fine output gain after the make-up
-+//                                    shift, [15:0] unsigned Q2.14 (1.0 = 0x4000, the reset value).
-+//    0x1B4   AJ_GAIN_ACT     RO      the committed gain.
++//    0x1B0   AJ_BANK         RO      crpa15: [0] the weight-RAM bank in use (switches on AJ_COMMIT).
 +//    0x1B8   AJ_CLIP1        RO      (crpa8) RX1 samples with I or Q at full scale (2047 / -2048)
 +//                                    since CONTROL[8] (counter clear); wraps (the firmware takes
 +//                                    differences). The ADC clipped: a clipped jammer cannot be nulled.
 +//    0x1BC   AJ_CLIP2        RO      the same for RX2.
-+//    0x1C0   AJ_WCX0         RW      SHADOW (crpa9, layout 11). Image tap c1 on conj(RX1[n-R+1])
-+//    0x1C4   AJ_WCX1         RW      SHADOW. c1 on conj(RX1[n-R-1])  (AJ_WC0 0x190 = c1 at n-R)
-+//    0x1C8   AJ_WCX2         RW      SHADOW. c2 on conj(RX2n[n-R+1])
-+//    0x1CC   AJ_WCX3         RW      SHADOW. c2 on conj(RX2n[n-R-1]) (AJ_WC1 0x194 = c2 at n-R)
-+//                                    (the AD9361 I/Q mirror changes across the band: three image
-+//                                    taps per channel follow it; weight-word format, committed
-+//                                    with AJ_COMMIT)
 +//    0x1D0   AJ_PWR_IN       RO      (crpa9) mean I^2+Q^2 of RX1 over the last 2^16 samples [LSB^2]
 +//    0x1D4   AJ_PWR_OUT      RO      the same for the filter output to TX1 (before the blanker):
 +//                                    the residual on every sample, not only in the captures
@@ -201,28 +183,13 @@ index feca02d..01c6357 100644
 +//  SMI-PI v4 CLOCKING
 +//    smi_pi_0 runs on sys_cpu_clk (= s_axi_aclk), not on clk: the block design
 +//    puts an asynchronous AXI-Stream FIFO on each side of it (m_axis_smi ->
-+//    FIFO -> core -> FIFO -> s_axis_smi). The committed values (aj_wts,
-+//    aj_wcj, aj_cfg, aj_nrm) are therefore driven from the same clock the core
++//    FIFO -> core -> FIFO -> s_axis_smi). The committed values (aj_cfg,
++//    aj_nrm) and the weight RAM are therefore in the same clock the core
 +//    runs on -- no crossing.
  //
  //  LICENCE
  //    Original work for this project.  Not derived from Analog Devices or
-@@ -98,8 +203,13 @@
- 
- `timescale 1ns/100ps
- 
-+// crpa16 / crpa17: weight words of the space-time taps (2 x taps per antenna): 16 for 8 + 8,
-+// 12 for 6 + 6. Must match ST_NST of stap_pi and 2 * AJ_NT of the firmware.
-+`define AJ_NWTS_DEF 12   // crpa17: 6 + 6 (crpa16: 16)
-+
- module gnss_passthrough #(
--  parameter FIFO_ADDR_WIDTH = 5   // elastic buffer depth = 2**FIFO_ADDR_WIDTH
-+  parameter FIFO_ADDR_WIDTH = 5,  // elastic buffer depth = 2**FIFO_ADDR_WIDTH
-+  parameter AJ_NWTS_P = `AJ_NWTS_DEF
- ) (
-   // ---- sample-domain clock / reset (axi_ad9361 l_clk / rst) ----------------
-   input               clk,
-@@ -141,6 +251,30 @@ module gnss_passthrough #(
+@@ -141,6 +228,31 @@ module gnss_passthrough #(
    output     [15:0]   dac_data_i1,
    output     [15:0]   dac_data_q1,
  
@@ -231,12 +198,9 @@ index feca02d..01c6357 100644
 +  //    m_axis_smi (clk) -> async FIFO -> smi_pi_0/s_axis_x {rx2_q, rx2_i, rx1_q, rx1_i}
 +  //    smi_pi_0/m_axis_y -> async FIFO -> s_axis_smi (clk)  {y_q, y_i}
 +  //    smi_rst_n (clk)  -> input FIFO reset (CONTROL[0] & CONTROL[5])
-+  //    aj_wts (s_axi_aclk) -> smi_pi_0/wts, the committed AJ_W weights
-+  //    aj_wcj (s_axi_aclk) -> smi_pi_0/wcj, the committed image taps AJ_WC
++  //    crpa15: sfap_pi_0/wb, wc1, wc2 (ap_memory, 2 read ports each) -> aj_wb_*, aj_wc1_*, aj_wc2_*
 +  //    aj_cfg (s_axi_aclk) -> smi_pi_0/cfg, the committed AJ_CFG
 +  //    aj_nrm (s_axi_aclk) -> smi_pi_0/nrm, the committed AJ_NORM
-+  //    aj_gain (s_axi_aclk) -> smi_pi_0/gain, the committed AJ_GAIN (crpa8)
-+  //    crpa16/17: the core is stap_pi_0 (same ports without nlms), weights from the ARM
 +  output     [63:0]   m_axis_smi_tdata,
 +  output              m_axis_smi_tvalid,
 +  input               m_axis_smi_tready,
@@ -244,16 +208,20 @@ index feca02d..01c6357 100644
 +  input               s_axis_smi_tvalid,
 +  output              s_axis_smi_tready,
 +  output              smi_rst_n,
-+  output     [32*AJ_NWTS_P-1:0] aj_wts,   // crpa16/17: the AJ_NWTS committed weight words
-+  output     [191:0]  aj_wcj,          // crpa9: 6 image taps {c2(R+1),c2(R),c2(R-1),c1(R+1),c1(R),c1(R-1)}
++  // crpa15: weight RAM read ports for sfap_pi_0 (ap_memory rom_2p, read latency 1)
++  input      [7:0]    aj_wb_address0,  input aj_wb_ce0,  output [31:0] aj_wb_q0,
++  input      [7:0]    aj_wb_address1,  input aj_wb_ce1,  output [31:0] aj_wb_q1,
++  input      [7:0]    aj_wc1_address0, input aj_wc1_ce0, output [31:0] aj_wc1_q0,
++  input      [7:0]    aj_wc1_address1, input aj_wc1_ce1, output [31:0] aj_wc1_q1,
++  input      [7:0]    aj_wc2_address0, input aj_wc2_ce0, output [31:0] aj_wc2_q0,
++  input      [7:0]    aj_wc2_address1, input aj_wc2_ce1, output [31:0] aj_wc2_q1,
 +  output     [31:0]   aj_cfg,
 +  output     [31:0]   aj_nrm,
-+  output     [31:0]   aj_gain,         // crpa8: committed AJ_GAIN -> smi_pi_0/gain
 +
    // ---- AXI4-Lite slave (sys_cpu_clk domain) -------------------------------
    input               s_axi_aclk,
    input               s_axi_aresetn,
-@@ -168,7 +302,42 @@ module gnss_passthrough #(
+@@ -168,7 +280,40 @@ module gnss_passthrough #(
    localparam [31:0] CORE_ID      = 32'h47435031;   // "GCP1"
    // v1.1 -- adds the RX->TX sample alignment stage. Bumped so a running board
    // reports which of the two behaviours its bitstream actually has.
@@ -287,17 +255,15 @@ index feca02d..01c6357 100644
 +  //         CONTROL[4] tx2_on = 1. Both reset values give a silent TX2 whose
 +  //         source is the CRPA output. smi_pi_0 and AJ_INFO are unchanged.
 +  localparam [31:0] CORE_VERSION = 32'h0004090E;   // 4.9.14 (8 taps per channel (crpa10), low-DSP axi_ad9361, TX2 = CRPA copy, muted)
-+  // crpa16 -- stap_pi_0 1.0: the weights come from the ARM again (NLMS on the ARM), no smoothing
-+  //         (AJ_CFG[19:16] ignored), no FPGA NLMS (AJ_NLMS 0x1E0/0x1E4 gone). AJ_INFO layout 14.
-+  localparam [31:0] AJ_INFO      = 32'h06030C0E;   // crpa17: 6 taps per channel, reference delay 3, layout 14 (crpa16: 0x08040C0E; crpa10-12: 0x08040C0C, layout 12)
-+  localparam        AJ_NWTS      = AJ_NWTS_P;      // crpa16: 16 weight words (8 + 8); crpa17: 12 (6 + 6)
-+  localparam [31:0] AJ_GAIN_RESET = 32'h00004000;  // fine gain 1.0
++  // crpa15 -- sfap_pi_0 4.0 (the user's SFAP-PI 256, v6.0 core): weight RAM 3 x 2 x 256 words at
++  //         0x1000 (double-buffered, ap_memory read ports), no AJ_GAIN / AJ_W. AJ_INFO 0x08070C0F.
++  localparam [31:0] AJ_INFO      = 32'h08070C0F;   // crpa15: SFAP-PI 256 bins (log2 N 8, log2 hop 7, Q3.12, layout 15); crpa16: 0x08040C0E
 +  localparam [31:0] AJ_CFG_RESET = 32'h00000001;   // bypass
 +  localparam [31:0] AJ_NRM_RESET = 32'h00002000;   // g2 = 1.0
    localparam        AW           = FIFO_ADDR_WIDTH;
  
    // ==========================================================================
-@@ -236,6 +405,10 @@ module gnss_passthrough #(
+@@ -236,6 +381,10 @@ module gnss_passthrough #(
    // ---- software-writable state --------------------------------------------
    reg  [31:0] reg_scratch = 32'd0;
    reg  [31:0] reg_control = 32'd0;
@@ -308,7 +274,7 @@ index feca02d..01c6357 100644
  
    always @(posedge s_axi_aclk) begin
      if (s_axi_aresetn == 1'b0) begin
-@@ -247,8 +420,80 @@ module gnss_passthrough #(
+@@ -247,8 +396,90 @@ module gnss_passthrough #(
          12'h003: reg_control <= s_axi_wdata;   // 0x0C
          default: ;
        endcase
@@ -317,79 +283,89 @@ index feca02d..01c6357 100644
 +    end
 +  end
 +
-+  // ---- SMI-PI v4 weights: shadow (0x100..0x17C, 0x188..0x194), committed by
-+  // 0x180. All in s_axi_aclk, which is also the clock of smi_pi_0, so the
-+  // whole set changes in one edge. Reset: bypass (TX1 carries RX1 delayed by
-+  // 8 samples), weights zero, g2 = 1.
-+  reg  [31:0]   aj_shadow [0:AJ_NWTS-1];
-+  reg  [32*AJ_NWTS-1:0] aj_active = {(32*AJ_NWTS){1'b0}};
-+  reg  [31:0]   aj_gain_sh = AJ_GAIN_RESET, aj_gain_act = AJ_GAIN_RESET;
++  // ---- control registers (shadow 0x188, 0x18C, 0x19C), committed by 0x180 with the weight
++  // bank. All in s_axi_aclk, which is also the clock of sfap_pi_0. Reset: bypass, g2 = 1.
 +  reg  [31:0]   aj_cfg_sh  = AJ_CFG_RESET, aj_cfg_act = AJ_CFG_RESET;
 +  reg  [31:0]   aj_nrm_sh  = AJ_NRM_RESET, aj_nrm_act = AJ_NRM_RESET;
-+  reg  [31:0]   aj_wc0_sh  = 32'd0, aj_wc1_sh = 32'd0;
-+  reg  [31:0]   aj_wcx0_sh = 32'd0, aj_wcx1_sh = 32'd0, aj_wcx2_sh = 32'd0, aj_wcx3_sh = 32'd0;   // crpa9
-+  reg  [191:0]  aj_wcj_act = 192'd0;
 +  reg  [31:0]   aj_commits = 32'd0;
 +  reg  [31:0]   aj_thr_sh  = 32'hFFFFFFFF, aj_thr_act = 32'hFFFFFFFF;
 +  reg           aj_thr_tog = 1'b0;
 +  wire [31:0]   v_blk_cnt, v_blk_bursts, v_peak, v_clip0, v_clip1, v_pwr_in, v_pwr_out, v_pwr_idx;
-+  wire          aj_w_sel   = (reg_waddr >= 12'h100) && (reg_waddr < 12'h100 + AJ_NWTS);   // 0x400..0x44C (crpa8)
 +  wire          aj_commit  = reg_wr && (reg_waddr == 12'h060);
-+  integer ai;
-+  initial for (ai = 0; ai < AJ_NWTS; ai = ai + 1) aj_shadow[ai] = 32'd0;
++
++  // ---- crpa15: SFAP-PI 256 weight RAM ------------------------------------------------------
++  // 3 arrays (b, c1, c2) x 2 banks x 256 words. The ARM writes word i (0x1000 + 4i, i < 768:
++  // array i / 256, bin i % 256) into the bank NOT in use; AJ_COMMIT switches banks if any
++  // weight was written since the last commit (a commit of cfg alone, e.g. the bypass, keeps
++  // the bank). sfap_pi_0 reads the bank in use through two read ports per array (its
++  // ap_memory rom_2p ports, read latency 1): two copies of each array, written together,
++  // so each copy is a simple dual-port block RAM (512 x 32).
++  reg           aj_bank   = 1'b0;          // bank in use
++  reg           aj_wdirty = 1'b0;          // weights written since the last commit
++  wire          aj_w_sel  = reg_wr && (reg_waddr[11:10] == 2'b01) && (reg_waddr[9:8] != 2'b11);   // 0x1000..0x1BFC
++  wire [1:0]    aj_w_arr  = reg_waddr[9:8];
++  wire [8:0]    aj_w_ad   = {~aj_bank, reg_waddr[7:0]};
 +
 +  always @(posedge s_axi_aclk) begin
 +    if (s_axi_aresetn == 1'b0) begin
-+      for (ai = 0; ai < AJ_NWTS; ai = ai + 1) aj_shadow[ai] <= 32'd0;
-+      aj_active  <= {(32*AJ_NWTS){1'b0}};
-+      aj_gain_sh <= AJ_GAIN_RESET; aj_gain_act <= AJ_GAIN_RESET;
 +      aj_cfg_sh  <= AJ_CFG_RESET;  aj_cfg_act <= AJ_CFG_RESET;
 +      aj_nrm_sh  <= AJ_NRM_RESET;  aj_nrm_act <= AJ_NRM_RESET;
-+      aj_wc0_sh  <= 32'd0;         aj_wc1_sh  <= 32'd0;
-+      aj_wcx0_sh <= 32'd0; aj_wcx1_sh <= 32'd0; aj_wcx2_sh <= 32'd0; aj_wcx3_sh <= 32'd0;
-+      aj_wcj_act <= 192'd0;
 +      aj_commits <= 32'd0;
 +      aj_thr_sh  <= 32'hFFFFFFFF;  aj_thr_act <= 32'hFFFFFFFF;  aj_thr_tog <= 1'b0;
++      aj_bank    <= 1'b0;          aj_wdirty  <= 1'b0;
 +    end else begin
-+      if (reg_wr && aj_w_sel)
-+        aj_shadow[reg_waddr[4:0]] <= s_axi_wdata;
 +      if (reg_wr) begin
 +        case (reg_waddr)
 +          12'h062: aj_cfg_sh <= s_axi_wdata;     // 0x188
 +          12'h063: aj_nrm_sh <= s_axi_wdata;     // 0x18C
-+          12'h064: aj_wc0_sh <= s_axi_wdata;     // 0x190
-+          12'h065: aj_wc1_sh <= s_axi_wdata;     // 0x194
-+          12'h070: aj_wcx0_sh <= s_axi_wdata;    // 0x1C0 (crpa9) c1 at R-1
-+          12'h071: aj_wcx1_sh <= s_axi_wdata;    // 0x1C4         c1 at R+1
-+          12'h072: aj_wcx2_sh <= s_axi_wdata;    // 0x1C8         c2 at R-1
-+          12'h073: aj_wcx3_sh <= s_axi_wdata;    // 0x1CC         c2 at R+1
 +          12'h067: aj_thr_sh <= s_axi_wdata;     // 0x19C
-+          12'h06C: aj_gain_sh <= s_axi_wdata;    // 0x1B0 (crpa8)
 +          default: ;
 +        endcase
 +      end
++      if (aj_w_sel) aj_wdirty <= 1'b1;
 +      if (aj_commit) begin
-+        for (ai = 0; ai < AJ_NWTS; ai = ai + 1)
-+          aj_active[32*ai +: 32] <= aj_shadow[ai];
-+        aj_gain_act <= aj_gain_sh;
 +        aj_cfg_act <= aj_cfg_sh;
 +        aj_nrm_act <= aj_nrm_sh;
-+        aj_wcj_act <= {aj_wcx3_sh, aj_wc1_sh, aj_wcx2_sh, aj_wcx1_sh, aj_wc0_sh, aj_wcx0_sh};
 +        aj_thr_act <= aj_thr_sh;
 +        aj_thr_tog <= ~aj_thr_tog;
 +        aj_commits <= aj_commits + 1'b1;
++        if (aj_wdirty || aj_w_sel) begin
++          aj_bank   <= ~aj_bank;
++          aj_wdirty <= 1'b0;
++        end
 +      end
      end
    end
-+  assign aj_wts = aj_active;
-+  assign aj_gain = aj_gain_act;
-+  assign aj_wcj = aj_wcj_act;
 +  assign aj_cfg = aj_cfg_act;
 +  assign aj_nrm = aj_nrm_act;
++
++  // the six RAMs: no reset, one write port (AXI), one registered read port (the core)
++  reg  [31:0]   wb_m0 [0:511], wb_m1 [0:511], wc1_m0 [0:511], wc1_m1 [0:511], wc2_m0 [0:511], wc2_m1 [0:511];
++  reg  [31:0]   wb_q0_r = 32'd0, wb_q1_r = 32'd0, wc1_q0_r = 32'd0, wc1_q1_r = 32'd0, wc2_q0_r = 32'd0, wc2_q1_r = 32'd0;
++  integer ai;
++  initial for (ai = 0; ai < 512; ai = ai + 1) begin
++    wb_m0[ai] = 32'd0; wb_m1[ai] = 32'd0; wc1_m0[ai] = 32'd0; wc1_m1[ai] = 32'd0; wc2_m0[ai] = 32'd0; wc2_m1[ai] = 32'd0;
++  end
++  always @(posedge s_axi_aclk) begin
++    if (aj_w_sel && aj_w_arr == 2'd0) begin wb_m0[aj_w_ad]  <= s_axi_wdata; wb_m1[aj_w_ad]  <= s_axi_wdata; end
++    if (aj_w_sel && aj_w_arr == 2'd1) begin wc1_m0[aj_w_ad] <= s_axi_wdata; wc1_m1[aj_w_ad] <= s_axi_wdata; end
++    if (aj_w_sel && aj_w_arr == 2'd2) begin wc2_m0[aj_w_ad] <= s_axi_wdata; wc2_m1[aj_w_ad] <= s_axi_wdata; end
++  end
++  always @(posedge s_axi_aclk) begin
++    if (aj_wb_ce0)  wb_q0_r  <= wb_m0[{aj_bank, aj_wb_address0}];
++    if (aj_wb_ce1)  wb_q1_r  <= wb_m1[{aj_bank, aj_wb_address1}];
++    if (aj_wc1_ce0) wc1_q0_r <= wc1_m0[{aj_bank, aj_wc1_address0}];
++    if (aj_wc1_ce1) wc1_q1_r <= wc1_m1[{aj_bank, aj_wc1_address1}];
++    if (aj_wc2_ce0) wc2_q0_r <= wc2_m0[{aj_bank, aj_wc2_address0}];
++    if (aj_wc2_ce1) wc2_q1_r <= wc2_m1[{aj_bank, aj_wc2_address1}];
++  end
++  assign aj_wb_q0 = wb_q0_r;   assign aj_wb_q1 = wb_q1_r;
++  assign aj_wc1_q0 = wc1_q0_r; assign aj_wc1_q1 = wc1_q1_r;
++  assign aj_wc2_q0 = wc2_q0_r; assign aj_wc2_q1 = wc2_q1_r;
  
    // Status view, refreshed from the clk domain (see CDC section).
    wire [31:0] v_status, v_rx_cnt0, v_tx_cnt0, v_ovf_cnt, v_unf_cnt;
-@@ -264,9 +509,15 @@ module gnss_passthrough #(
+@@ -264,9 +495,15 @@ module gnss_passthrough #(
    // 0x47435031 -- the ID -- because the ID read had immediately preceded it.
    // The first read after reset happened to be correct only because
    // axi_araddr_r resets to 0, which is the ID offset.
@@ -397,16 +373,16 @@ index feca02d..01c6357 100644
    always @(posedge s_axi_aclk) begin
      if (s_axi_arvalid && axi_arready) begin
 -    case (s_axi_araddr[13:2])
-+    if (rd_idx >= 12'h100 && rd_idx < 12'h100 + AJ_NWTS)
-+      axi_rdata <= aj_shadow[rd_idx[4:0]];         // 0x400..0x44C
-+    else if (rd_idx >= 12'h100 && rd_idx <= 12'h13F)
-+      axi_rdata <= 32'd0;                          // 0x440..0x4FC: not used with 8 + 8 taps
++    if (rd_idx >= 12'h100 && rd_idx <= 12'h13F)
++      axi_rdata <= 32'd0;                          // 0x400..0x4FC: not used (crpa15)
++    else if (rd_idx >= 12'h400 && rd_idx < 12'h700)
++      axi_rdata <= 32'd0;                          // 0x1000..0x1BFC: the weight RAM is write only
 +    else
 +    case (rd_idx)
        12'h000: axi_rdata <= CORE_ID;
        12'h001: axi_rdata <= CORE_VERSION;
        12'h002: axi_rdata <= reg_scratch;
-@@ -282,6 +533,34 @@ module gnss_passthrough #(
+@@ -282,6 +519,27 @@ module gnss_passthrough #(
        12'h00C: axi_rdata <= v_rx_cnt1;
        12'h00D: axi_rdata <= v_tx_cnt1;
        12'h00E: axi_rdata <= v_rx_snap1;
@@ -414,12 +390,6 @@ index feca02d..01c6357 100644
 +      12'h061: axi_rdata <= AJ_INFO;               // 0x184
 +      12'h062: axi_rdata <= aj_cfg_sh;             // 0x188
 +      12'h063: axi_rdata <= aj_nrm_sh;             // 0x18C
-+      12'h064: axi_rdata <= aj_wc0_sh;             // 0x190
-+      12'h065: axi_rdata <= aj_wc1_sh;             // 0x194
-+      12'h070: axi_rdata <= aj_wcx0_sh;            // 0x1C0 (crpa9)
-+      12'h071: axi_rdata <= aj_wcx1_sh;            // 0x1C4
-+      12'h072: axi_rdata <= aj_wcx2_sh;            // 0x1C8
-+      12'h073: axi_rdata <= aj_wcx3_sh;            // 0x1CC
 +      12'h074: axi_rdata <= v_pwr_in;              // 0x1D0
 +      12'h075: axi_rdata <= v_pwr_out;             // 0x1D4
 +      12'h076: axi_rdata <= v_pwr_idx;             // 0x1D8
@@ -429,8 +399,7 @@ index feca02d..01c6357 100644
 +      12'h069: axi_rdata <= v_blk_cnt;             // 0x1A4
 +      12'h06A: axi_rdata <= v_blk_bursts;          // 0x1A8
 +      12'h06B: axi_rdata <= v_peak;                // 0x1AC
-+      12'h06C: axi_rdata <= aj_gain_sh;            // 0x1B0 (crpa8)
-+      12'h06D: axi_rdata <= aj_gain_act;           // 0x1B4
++      12'h06C: axi_rdata <= {31'd0, aj_bank};      // 0x1B0 crpa15: weight bank in use (read only)
 +      12'h06E: axi_rdata <= v_clip0;               // 0x1B8
 +      12'h06F: axi_rdata <= v_clip1;               // 0x1BC
 +      12'h010, 12'h011, 12'h012, 12'h013,
@@ -441,7 +410,7 @@ index feca02d..01c6357 100644
        default: axi_rdata <= 32'd0;
      endcase
      end
-@@ -294,7 +573,7 @@ module gnss_passthrough #(
+@@ -294,7 +552,7 @@ module gnss_passthrough #(
    // ==========================================================================
    (* ASYNC_REG = "TRUE" *) reg [8:0] ctrl_meta = 9'd0;
    (* ASYNC_REG = "TRUE" *) reg [8:0] ctrl_sync = 9'd0;
@@ -450,7 +419,7 @@ index feca02d..01c6357 100644
  
    always @(posedge clk) begin
      ctrl_meta <= ctrl_raw;
-@@ -304,9 +583,19 @@ module gnss_passthrough #(
+@@ -304,9 +562,19 @@ module gnss_passthrough #(
    wire pass_en   = ctrl_sync[0];
    wire mute      = ctrl_sync[1];
    wire swap_iq   = ctrl_sync[2];
@@ -471,7 +440,7 @@ index feca02d..01c6357 100644
    // ==========================================================================
    //  Elastic buffer (one per channel)
    //  RX and TX sample strobes are both in the clk domain and run at the same
-@@ -316,17 +605,20 @@ module gnss_passthrough #(
+@@ -316,17 +584,20 @@ module gnss_passthrough #(
    //  filled to the midpoint.
    // ==========================================================================
    // Distributed (LUT) RAM: at depth 32 a block RAM would be wasteful, and
@@ -495,7 +464,7 @@ index feca02d..01c6357 100644
    wire        empty1 = (level1 == 0);
  
    // Prime the buffer to half depth before the first read, so that a small
-@@ -336,24 +628,150 @@ module gnss_passthrough #(
+@@ -336,24 +607,150 @@ module gnss_passthrough #(
      if (rst || !pass_en) begin
        primed0 <= 1'b0;
        primed1 <= 1'b0;
@@ -652,7 +621,7 @@ index feca02d..01c6357 100644
    wire [15:0] proc_i1 = adc_data_i1;
    wire [15:0] proc_q1 = adc_data_q1;
    // ======================= END PROCESSING CORE ==============================
-@@ -364,15 +782,19 @@ module gnss_passthrough #(
+@@ -364,15 +761,19 @@ module gnss_passthrough #(
    always @(posedge clk) begin
      if (rst) begin
        wptr0 <= 0; rptr0 <= 0;
@@ -680,7 +649,7 @@ index feca02d..01c6357 100644
        end
        if (wr_en1 && !full1) begin
          fifo1[wptr1[AW-1:0]] <= {proc_q1, proc_i1};
-@@ -382,6 +804,11 @@ module gnss_passthrough #(
+@@ -382,6 +783,11 @@ module gnss_passthrough #(
          rd_data1 <= fifo1[rptr1[AW-1:0]];
          rptr1 <= rptr1 + 1'b1;
        end
@@ -692,7 +661,7 @@ index feca02d..01c6357 100644
      end
    end
  
-@@ -392,7 +819,11 @@ module gnss_passthrough #(
+@@ -392,7 +798,11 @@ module gnss_passthrough #(
    // ==========================================================================
    wire [15:0] pt_i0 = swap_iq ? rd_data0[31:16] : rd_data0[15:0];
    wire [15:0] pt_q0 = swap_iq ? rd_data0[15:0]  : rd_data0[31:16];
@@ -705,7 +674,7 @@ index feca02d..01c6357 100644
    wire [15:0] pt_i1 = swap_iq ? src1[31:16] : src1[15:0];
    wire [15:0] pt_q1 = swap_iq ? src1[15:0]  : src1[31:16];
  
-@@ -424,8 +855,9 @@ module gnss_passthrough #(
+@@ -424,8 +834,9 @@ module gnss_passthrough #(
    //  Only the low 12 bits are taken, so this is correct whatever the ADC
    //  data-format control does with [15:12] (sign-extend or zero-fill).
    //
@@ -717,7 +686,7 @@ index feca02d..01c6357 100644
    //  Truncating to [11:0] here would wrap, turning a large sample into an
    //  opposite-signed small one. That is a silent, hard-to-see failure.
    // ==========================================================================
-@@ -436,8 +868,11 @@ module gnss_passthrough #(
+@@ -436,8 +847,11 @@ module gnss_passthrough #(
  
    assign dac_data_i0 = mute ? 16'd0 : (pass_en ? al_i0 : dma_dac_data_i0);
    assign dac_data_q0 = mute ? 16'd0 : (pass_en ? al_q0 : dma_dac_data_q0);
@@ -731,7 +700,7 @@ index feca02d..01c6357 100644
  
    // ==========================================================================
    //  Counters and sticky flags  (requirement 59: prove data is flowing)
-@@ -447,6 +882,7 @@ module gnss_passthrough #(
+@@ -447,6 +861,7 @@ module gnss_passthrough #(
    reg [31:0] ovf_cnt = 32'd0, unf_cnt = 32'd0;
    reg [31:0] rx_snap0 = 32'd0, tx_snap0 = 32'd0, rx_snap1 = 32'd0;
    reg        ovf_sticky = 1'b0, unf_sticky = 1'b0;
@@ -739,7 +708,7 @@ index feca02d..01c6357 100644
  
    always @(posedge clk) begin
      if (rst || cnt_clear) begin
-@@ -454,6 +890,7 @@ module gnss_passthrough #(
+@@ -454,6 +869,7 @@ module gnss_passthrough #(
        rx_cnt1 <= 32'd0; tx_cnt1 <= 32'd0;
        ovf_cnt <= 32'd0; unf_cnt <= 32'd0;
        ovf_sticky <= 1'b0; unf_sticky <= 1'b0;
@@ -747,7 +716,7 @@ index feca02d..01c6357 100644
        rx_snap0 <= 32'd0; tx_snap0 <= 32'd0; rx_snap1 <= 32'd0;
      end else begin
        if (adc_valid_i0) begin
-@@ -479,12 +916,14 @@ module gnss_passthrough #(
+@@ -479,12 +895,14 @@ module gnss_passthrough #(
          unf_cnt    <= unf_cnt + 1'b1;
          unf_sticky <= 1'b1;
        end
@@ -764,7 +733,7 @@ index feca02d..01c6357 100644
                        full1, empty1, full0, empty0,
                        dac_enable_q0, dac_enable_i0,
                        adc_enable_q0, adc_enable_i0 };
-@@ -506,6 +945,7 @@ module gnss_passthrough #(
+@@ -506,6 +924,7 @@ module gnss_passthrough #(
    reg         cap_toggle = 1'b0;
    reg  [31:0] cap_status, cap_rx0, cap_tx0, cap_ovf, cap_unf;
    reg  [31:0] cap_rxs0, cap_txs0, cap_lvl, cap_rx1, cap_tx1, cap_rxs1;
@@ -772,7 +741,7 @@ index feca02d..01c6357 100644
  
    always @(posedge clk) begin
      cap_div <= cap_div + 1'b1;
-@@ -521,6 +961,14 @@ module gnss_passthrough #(
+@@ -521,6 +940,14 @@ module gnss_passthrough #(
        cap_rx1    <= rx_cnt1;
        cap_tx1    <= tx_cnt1;
        cap_rxs1   <= rx_snap1;
@@ -787,7 +756,7 @@ index feca02d..01c6357 100644
        cap_toggle <= ~cap_toggle;
      end
    end
-@@ -532,6 +980,8 @@ module gnss_passthrough #(
+@@ -532,6 +959,8 @@ module gnss_passthrough #(
    reg [31:0] h_status = 32'd0, h_rx0 = 32'd0, h_tx0 = 32'd0;
    reg [31:0] h_ovf = 32'd0, h_unf = 32'd0, h_rxs0 = 32'd0, h_txs0 = 32'd0;
    reg [31:0] h_lvl = 32'd0, h_rx1 = 32'd0, h_tx1 = 32'd0, h_rxs1 = 32'd0;
@@ -796,7 +765,7 @@ index feca02d..01c6357 100644
  
    always @(posedge s_axi_aclk) begin
      tog_meta <= cap_toggle;
-@@ -549,6 +999,14 @@ module gnss_passthrough #(
+@@ -549,6 +978,14 @@ module gnss_passthrough #(
        h_rx1    <= cap_rx1;
        h_tx1    <= cap_tx1;
        h_rxs1   <= cap_rxs1;
@@ -811,7 +780,7 @@ index feca02d..01c6357 100644
      end
    end
  
-@@ -563,5 +1021,13 @@ module gnss_passthrough #(
+@@ -563,5 +1000,13 @@ module gnss_passthrough #(
    assign v_rx_cnt1  = h_rx1;
    assign v_tx_cnt1  = h_tx1;
    assign v_rx_snap1 = h_rxs1;
@@ -860,7 +829,7 @@ index a596ad5..0b593f0 100644
 +# clk_fpga_0 and {rx_clk clk_div_sel_*} (4.9.9, for TIMING-6/7) is kept, unscoped, in
 +# Source/XDC/gnss_passthrough_cdc.xdc. Everything above in this file is cell-based and stays.
 diff --git a/library/gnss_passthrough/gnss_passthrough_ip.tcl b/library/gnss_passthrough/gnss_passthrough_ip.tcl
-index 424bf66..cf26e9d 100644
+index 424bf66..2b95d3a 100644
 --- a/library/gnss_passthrough/gnss_passthrough_ip.tcl
 +++ b/library/gnss_passthrough/gnss_passthrough_ip.tcl
 @@ -1,10 +1,13 @@
@@ -874,7 +843,7 @@ index 424bf66..cf26e9d 100644
 -## gnss_passthrough.v and gnss_passthrough_constr.xdc are copied unchanged
 -## from LoopBack_Pipeline_noCRPA (Source/HDL, Source/IP/gnss_passthrough).
 +## gnss_passthrough.v, gnss_pulse_blank.v and gnss_passthrough_constr.xdc are
-+## copied from LoopBack_Code_SMI_PI_STAP7x7_v4.9.14, AJ_INFO for 6 + 6 (crpa17, weights from the ARM) (Source/HDL,
++## copied from LoopBack_Code_SMI_PI_STAP7x7_v4.9.14, AJ_INFO for SFAP-PI 256 (crpa15, weight RAM for sfap_pi) (Source/HDL,
 +## Source/IP/gnss_passthrough). The AXI-Stream and reset interface definitions
 +## below are the ones of that project's gnss_passthrough_ip.tcl.
  ###############################################################################
@@ -1310,10 +1279,10 @@ index 0000000..71a5384
 +# The two clock names are Vivado's auto-derived ones (check with report_clocks if ADI renames the nets).
 +set_clock_groups -logically_exclusive -group [get_clocks -quiet clk_div_sel_0_s] -group [get_clocks -quiet clk_div_sel_1_s]
 diff --git a/projects/ant/system_bd.tcl b/projects/ant/system_bd.tcl
-index b091f87..5f4c216 100644
+index b091f87..808a9a3 100644
 --- a/projects/ant/system_bd.tcl
 +++ b/projects/ant/system_bd.tcl
-@@ -167,218 +167,253 @@ ad_connect  sys_concat_intc/In0 GND
+@@ -167,218 +167,258 @@ ad_connect  sys_concat_intc/In0 GND
  
  # ad9361
  
@@ -1333,24 +1302,24 @@ index b091f87..5f4c216 100644
 +#       sees the same cores at the same addresses as before.
 +#     - gnss_passthrough v4.9.14 (registers at 0x43C1_0000) between the
 +#       axi_ad9361 ADC outputs and DAC inputs, feeding the SMI-PI space-time
-+#       filter stap_pi_0 (Vitis HLS, crpa17: 6 + 6 taps, 3 + 3 image taps, weights from the
-+#       ARM, sys_cpu_clk) through two
++#       filter sfap_pi_0 (Vitis HLS, crpa15: the user's SFAP-PI 256 bins, weights from the
++#       ARM in a weight RAM in gnss_passthrough, sys_cpu_clk) through two
 +#       asynchronous AXI-Stream FIFOs.
 +#   The HDL x8 FIR interpolator/decimator of the Pluto design are removed.
 +#   The axi_ad9361 DDS is kept (the Linux DDS driver and the dds_* console
 +#   commands use it).
 +# ---------------------------------------------------------------------------
-+
+ 
+-create_bd_port -dir O tx_clk_out
+-create_bd_port -dir O tx_frame_out
+-create_bd_port -dir O -from 11 -to 0 tx_data_out
 +create_bd_port -dir I rx_clk_in_p
 +create_bd_port -dir I rx_clk_in_n
 +create_bd_port -dir I rx_frame_in_p
 +create_bd_port -dir I rx_frame_in_n
 +create_bd_port -dir I -from 5 -to 0 rx_data_in_p
 +create_bd_port -dir I -from 5 -to 0 rx_data_in_n
- 
--create_bd_port -dir O tx_clk_out
--create_bd_port -dir O tx_frame_out
--create_bd_port -dir O -from 11 -to 0 tx_data_out
++
 +create_bd_port -dir O tx_clk_out_p
 +create_bd_port -dir O tx_clk_out_n
 +create_bd_port -dir O tx_frame_out_p
@@ -1405,11 +1374,7 @@ index b091f87..5f4c216 100644
 +ad_connect  axi_ad9361/tdd_sync GND
 +ad_connect  sys_200m_clk axi_ad9361/delay_clk
 +ad_connect  axi_ad9361/l_clk axi_ad9361/clk
- 
--ad_add_interpolation_filter "tx_fir_interpolator" 8 2 1 {61.44} {7.68} \
--                             "$ad_hdl_dir/library/util_fir_int/coefile_int.coe"
--ad_ip_instance xlslice interp_slice
--ad_ip_instance util_upack2 tx_upack
++
 +# sample clock: l_clk / 4 in 2R2T, l_clk / 2 in 1R1T
 +
 +ad_ip_instance xlconcat util_ad9361_divclk_sel_concat
@@ -1448,7 +1413,11 @@ index b091f87..5f4c216 100644
 +  incr stap_i
 +}
 +ad_connect util_ad9361_adc_fifo/din_ovf axi_ad9361/adc_dovf
-+
+ 
+-ad_add_interpolation_filter "tx_fir_interpolator" 8 2 1 {61.44} {7.68} \
+-                             "$ad_hdl_dir/library/util_fir_int/coefile_int.coe"
+-ad_ip_instance xlslice interp_slice
+-ad_ip_instance util_upack2 tx_upack
 +ad_ip_instance util_cpack2 util_ad9361_adc_pack { \
 +  NUM_OF_CHANNELS 4 \
 +  SAMPLE_DATA_WIDTH 16 \
@@ -1688,10 +1657,11 @@ index b091f87..5f4c216 100644
 -ad_connect  logic_or_1/Op1  axi_ad9361/rst
 -ad_connect  logic_or_1/Op2  axi_tdd_0/tdd_channel_2
 -ad_connect  logic_or_1/Res  tx_upack/reset
-+# Space-time power-inversion filter (Vitis HLS IP stap_pi 1.0, crpa17: 6 + 6 taps, 3 + 3 image
-+# taps, fine gain, II = 1) on sys_cpu_clk (100 MHz), so its timing does not depend on the sample
-+# rate. Weights, image taps, cfg, RX2 normalisation and gain come from gnss_passthrough's AJ_*
-+# registers, written by gnss_crpa on the ARM (crpa16/17: the weights by NLMS on the ARM).
++# Space-frequency power-inversion filter (Vitis HLS IP sfap_pi 4.0, the user's SFAP-PI v6.0
++# core: 256 bins, windowed FFT, 50 % overlap, per-bin weight + 2 image taps, II = 1) on
++# sys_cpu_clk (100 MHz). cfg and RX2 normalisation come from gnss_passthrough's AJ_*
++# registers; the 768 weights from its double-buffered weight RAM, read through the core's
++# ap_memory ports (two per array), written by gnss_crpa on the ARM (crpa15).
 +
 +ad_ip_instance axis_data_fifo smi_fifo_in
 +ad_ip_parameter smi_fifo_in CONFIG.IS_ACLK_ASYNC 1
@@ -1702,15 +1672,19 @@ index b091f87..5f4c216 100644
 +ad_connect gnss_passthrough/smi_rst_n smi_fifo_in/s_axis_aresetn
 +ad_connect gnss_passthrough/m_axis_smi smi_fifo_in/S_AXIS
 +
-+ad_ip_instance stap_pi stap_pi_0
-+ad_connect sys_cpu_clk                stap_pi_0/ap_clk
-+ad_connect sys_cpu_resetn             stap_pi_0/ap_rst_n
-+ad_connect smi_fifo_in/M_AXIS         stap_pi_0/s_axis_x
-+ad_connect gnss_passthrough/aj_wts    stap_pi_0/wts
-+ad_connect gnss_passthrough/aj_wcj    stap_pi_0/wcj
-+ad_connect gnss_passthrough/aj_cfg    stap_pi_0/cfg
-+ad_connect gnss_passthrough/aj_nrm    stap_pi_0/nrm
-+ad_connect gnss_passthrough/aj_gain   stap_pi_0/gain
++ad_ip_instance sfap_pi sfap_pi_0
++ad_connect sys_cpu_clk                sfap_pi_0/ap_clk
++ad_connect sys_cpu_resetn             sfap_pi_0/ap_rst_n
++ad_connect smi_fifo_in/M_AXIS         sfap_pi_0/s_axis_x
++ad_connect gnss_passthrough/aj_cfg    sfap_pi_0/cfg
++ad_connect gnss_passthrough/aj_nrm    sfap_pi_0/nrm
++foreach w {wb wc1 wc2} {
++  foreach p {0 1} {
++    ad_connect sfap_pi_0/${w}_address$p     gnss_passthrough/aj_${w}_address$p
++    ad_connect sfap_pi_0/${w}_ce$p          gnss_passthrough/aj_${w}_ce$p
++    ad_connect gnss_passthrough/aj_${w}_q$p sfap_pi_0/${w}_q$p
++  }
++}
 +
 +ad_ip_instance axis_data_fifo smi_fifo_out
 +ad_ip_parameter smi_fifo_out CONFIG.IS_ACLK_ASYNC 1
@@ -1719,7 +1693,7 @@ index b091f87..5f4c216 100644
 +ad_connect sys_cpu_clk                smi_fifo_out/s_axis_aclk
 +ad_connect axi_ad9361/l_clk           smi_fifo_out/m_axis_aclk
 +ad_connect sys_cpu_resetn             smi_fifo_out/s_axis_aresetn
-+ad_connect stap_pi_0/m_axis_y         smi_fifo_out/S_AXIS
++ad_connect sfap_pi_0/m_axis_y         smi_fifo_out/S_AXIS
 +ad_connect smi_fifo_out/M_AXIS        gnss_passthrough/s_axis_smi
 +
 +# No axi_tdd (as in the SMI-PI design B): Linux has no driver for it here,
@@ -1896,7 +1870,7 @@ index 0be0ba8..c712207 100644
 -set_false_path -from [get_pins {i_system_wrapper/system_i/axi_ad9361/inst/i_tx/i_up_dac_common/up_dac_gpio_out_int_reg[0]/C}];
  
 diff --git a/projects/ant/system_project.tcl b/projects/ant/system_project.tcl
-index 525496c..5da37b9 100644
+index 525496c..f9661e4 100644
 --- a/projects/ant/system_project.tcl
 +++ b/projects/ant/system_project.tcl
 @@ -7,8 +7,13 @@ adi_project_create ant 0 {} "xc7z020clg400-2"
@@ -1906,7 +1880,7 @@ index 525496c..5da37b9 100644
 +  "gnss_passthrough_cdc.xdc" \
    "$ad_hdl_dir/library/common/ad_iobuf.v"]
  
-+# antsdr-fw-patch 0003: clock crossings of gnss_passthrough / stap_pi and the
++# antsdr-fw-patch 0003: clock crossings of gnss_passthrough / sfap_pi and the
 +# rx_clk / clk_fpga_0 clock groups, applied after the IP-scoped constraints.
 +set_property PROCESSING_ORDER LATE [get_files *gnss_passthrough_cdc.xdc]
 +
