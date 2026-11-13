@@ -25,7 +25,13 @@ Name each new design-A (pass-through + CRPA) package with the next number:
   0x80400C09 (64: 0x40200C09), weights from 0x200. hls/smi_pi removed. The user
   asked 128, then "hold for 64 FFT", then 128 again: built switchable.
   Commit 3b9e63e.
-- Next package: `crpa7`.
+- `crpa7` (2026-11-13): back to SMI-PI STAP, **10 + 10 taps** (reference delay 5,
+  AJ_INFO 0x0A050C07, 65 DSP48), **no CW notch** (user's choice), SFAP removed
+  from the tree. FPGA core = crpa4 smi_pi 2.5 with SMI_NT 10; firmware = crpa5
+  without gnss_notch (saved rx_agc / aj_avg, clipping warning kept). Linux and
+  bare metal. csim: delay 5 never below 8 + 8 (delay 4 lost 2.5 dB on the
+  reflection). Commit dc0836f.
+- Next package: `crpa8`.
 
 Files per package: `crpaN-full-src.zip.part1`, `crpaN-full-src.zip.part2`,
 `crpaN-kit.zip`, `SHA256SUMS-crpaN.txt`.
