@@ -61,7 +61,7 @@ static int clip_update(void)
 {
 	uint32_t c0, c1, rx, dc, dr;
 	if(clip_hw < 0) {
-		clip_hw = ((gnss_pt_read(GNSS_PT_REG_AJ_INFO) & 0xFFU) == GNSS_PT_AJ_LAYOUT_RAMP);
+		clip_hw = ((gnss_pt_read(GNSS_PT_REG_AJ_INFO) & 0xFFU) >= GNSS_PT_AJ_LAYOUT_RAMP);
 		clip_c0 = gnss_pt_read(GNSS_PT_REG_AJ_CLIP1); clip_c1 = gnss_pt_read(GNSS_PT_REG_AJ_CLIP2);
 		clip_rx = gnss_pt_read(GNSS_PT_REG_RX_COUNT_CH0);
 		return -1;

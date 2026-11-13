@@ -1,5 +1,5 @@
 // ============================================================================
-//  smi_pi.h  --  space-time SMI power inversion core (SMI-PI v4.4; antsdr-fw-patch crpa8: 10 + 10 taps, weight smoothing)
+//  smi_pi.h  --  space-time SMI power inversion core (SMI-PI v4.4; antsdr-fw-patch crpa9: 10 + 10 taps, 3 + 3 image taps, weight smoothing)
 //  ANTSDR E310 V1 / GNSS CRPA project, Vitis HLS 2023.2
 //
 //  See smi_pi.cpp for the filter, the fixed-point formats and why the
@@ -25,13 +25,19 @@
 #endif
 // DSP48 budget of this core (crpa7, 10 + 10): 9 RX1 taps + 10 RX2 taps + 2 image taps = 21 complex
 // multipliers x 3 (Gauss form) = 63, plus 2 for the real RX2 gain g2 = 65 DSP48, plus 2 for the crpa8 fine
-// output gain = 67 (8 + 8: 53, 7 + 7: 47, 6 + 6: 41,
+// output gain = 67, plus 4 image taps x 3 = 79 (crpa9) (8 + 8: 53, 7 + 7: 47, 6 + 6: 41,
 // 5 + 5: 35; 4.9.11 / 4.9.12 had 4 for a complex g2).
 // RX1 taps (the highest delays) whose multipliers are built from LUTs, not DSP48 (4.9.1: the 32-tap build needed 229 DSP48 of 220).
 // 12 taps = 36 multipliers = about 36 DSP48 saved, about 8000 LUT spent. 0 = all DSP48.
 #ifndef SMI_NFAB
 #define SMI_NFAB  0    /* 4.9.9: no LUT multipliers (they cost LUT and power) */
 #endif
+// crpa9: image (conjugate) taps per channel, at delays REF-1, REF, REF+1 (crpa8 and older: 1).
+// Must match AJ_NIMG of the firmware. 4 more complex multipliers than crpa8: 12 DSP48 (79 in all).
+#ifndef SMI_NIMG
+#define SMI_NIMG   3
+#endif
+#define SMI_IMGH   ((SMI_NIMG - 1) / 2)
 #define SMI_WFRAC 12          // weights are signed Q3.12 (1.0 = 4096)
 #define SMI_GFRAC 13          // RX2 normalisation gain, signed Q3.13 (1.0 = 8192)
 #define SMI_XFRAC  2          // fractional bits kept on the normalised RX2
@@ -56,15 +62,17 @@
 // m_axis_y : {y_q, y_i}, signed 16-bit:
 //            filter:  y[n] = 2^s (x1[n-R] - sum_{k!=R} a_k x1[n-k]   (R = SMI_REF)
 //                                        - sum_k b_k x2n[n-k]
-//                                        - c1 conj(x1[n-R]) - c2 conj(x2n[n-R]))
+//                                        - sum_d c1_d conj(x1[n-R-d]) - sum_d c2_d conj(x2n[n-R-d]))   (d = -1, 0, 1)
 //            bypass:  y[n] = 2^s x1[n-R]
 //            x2n = g2 * x2 (RX2 normalised to RX1, kept with 2 extra bits)
 // wts      : weight words, word k at bits [32k+31 : 32k] (port sized for 64; 4.9.13 uses 14):
 //              k = 0..SMI_NT-1          -> a_k (RX1, delay k); word SMI_REF is ignored
 //              k = SMI_NT..2*SMI_NT-1   -> b_{k-SMI_NT} (RX2 normalised, delay k-SMI_NT)
 //            each {imag[31:16], real[15:0]}, signed Q3.12.
-// wcj      : image taps, [31:0] c1 (RX1), [63:32] c2 (RX2 normalised), same
-//            word format as wts.
+// wcj      : image taps (crpa9: 2 x SMI_NIMG words), word c at [32c+31 : 32c]:
+//              c = 0..SMI_NIMG-1          -> c1 on conj(x1[n-(R-H+c)])   (H = SMI_IMGH)
+//              c = SMI_NIMG..2*SMI_NIMG-1 -> c2 on conj(x2n[n-(R-H+c-SMI_NIMG)])
+//            same word format as wts (crpa8 and older: 2 words, c1 and c2 at R).
 // cfg      : [0] bypass, [10:8] output make-up shift s (0..7),
 //            [14:12] weight scale ws (0..5; 6, 7 act as 5),
 //            [19:16] crpa8 smoothing k (0 = off; see SMI_CFG_RAMP_LSB). With k > 0 bypass
@@ -87,7 +95,7 @@
 void smi_pi(hls::stream<ap_uint<64> > &s_axis_x,
             hls::stream<ap_uint<32> > &m_axis_y,
             ap_uint<2048> wts,
-            ap_uint<64>   wcj,
+            ap_uint<32 * 2 * SMI_NIMG> wcj,
             ap_uint<32>   cfg,
             ap_uint<32>   nrm,
             ap_uint<32>   gain);

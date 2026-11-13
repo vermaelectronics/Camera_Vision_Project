@@ -1,5 +1,5 @@
 // ============================================================================
-//  smi_pi.cpp  --  space-time SMI power inversion core (SMI-PI v4.4; antsdr-fw-patch crpa8: 10 + 10 taps, weight smoothing, fine gain)
+//  smi_pi.cpp  --  space-time SMI power inversion core (SMI-PI v4.4; antsdr-fw-patch crpa9: 10 + 10 taps, 3 + 3 image taps, weight smoothing, fine gain)
 //  ANTSDR E310 V1 / GNSS CRPA project, Vitis HLS 2023.2
 //
 //  PIPELINE (one sample pair per clock)
@@ -14,7 +14,7 @@
 //    2. SPACE-TIME FILTER     SMI_NT taps on RX1 and SMI_NT on the normalised RX2
 //       (crpa7: 10 + 10, reference R = SMI_REF = 5; 32 + 32 in 4.9.7, 16 + 16 before):
 //         y[n] = x1[n-R] - sum_{k != R} a_k x1[n-k] - sum_k b_k x2n[n-k]
-//                        - c1 conj(x1[n-R]) - c2 conj(x2n[n-R])
+//                        - sum_d c1_d conj(x1[n-R-d]) - sum_d c2_d conj(x2n[n-R-d])   (crpa9: d = -1, 0, 1)
 //       The RX1 tap at delay R is the reference, fixed at 1 (power
 //       inversion), so the output can never be turned down as a whole. The
 //       RX2 taps follow the frequency-dependent RX1/RX2 ratio across the band
@@ -28,7 +28,10 @@
 //       at J/N 50 dB, +9 dB at 60 dB). The image is a copy of conj(jammer), so
 //       one conjugate tap per channel cancels it (+0.2 dB and +1.4 dB). The
 //       satellites have no image partner in the band, so the taps leave them
-//       alone.
+//       alone. crpa9: the mirror is not the same across a wide band (the I and
+//       Q analog filters differ), so each channel has SMI_NIMG = 3 image taps,
+//       at delays R-1, R, R+1 (C simulation, scenario 25, J/N 61 dB: residual
+//       +8.6 dB with one tap, +3.2 dB with three).
 //    3. BYPASS                cfg[0] = 1: y[n] = x1[n-R] (crpa8: all weights 0, so with
 //       smoothing on the filter fades out instead of switching off).
 //       The firmware keeps the filter bypassed while there is no jammer and
@@ -80,7 +83,8 @@
 //    x2n     : 18-bit signed, Q2 (g2 x2, |g2| < 4)
 //    weights : 16-bit signed Q3.12, complex multiply with 3 real multipliers
 //              (k1 = wr (xr + xi), k2 = xr (wi - wr), k3 = xi (wr + wi);
-//               re = k1 - k3, im = k1 + k2): crpa7 (10 + 10): 63 multipliers + 2 for the real g2 = 65 DSP48 (crpa8: + 2 for the fine gain = 67);
+//               re = k1 - k3, im = k1 + k2): crpa7 (10 + 10): 63 multipliers + 2 for the real g2 = 65 DSP48 (crpa8: + 2 for the fine gain = 67;
+//               crpa9: + 4 image taps x 3 = 79);
 //               (4.9, 32 taps: 195 + 4 for g2, SMI_NFAB = 12 RX1 taps (36 multipliers) built from LUTs)
 //    sum     : 48 bits, Q14; the weighted taps are summed first, divided by
 //              2^ws (weight scale, v4.4), then subtracted from the reference;
@@ -160,7 +164,7 @@ static w16_t ramp_val(rv_t cur) {
 void smi_pi(hls::stream<ap_uint<64> > &s_axis_x,
             hls::stream<ap_uint<32> > &m_axis_y,
             ap_uint<2048> wts,
-            ap_uint<64>   wcj,
+            ap_uint<32 * 2 * SMI_NIMG> wcj,
             ap_uint<32>   cfg,
             ap_uint<32>   nrm,
             ap_uint<32>   gain) {
@@ -185,8 +189,8 @@ void smi_pi(hls::stream<ap_uint<64> > &s_axis_x,
 #pragma HLS RESET variable=h1i
 #pragma HLS RESET variable=h2r
 #pragma HLS RESET variable=h2i
-    // crpa8: running weights (2*SMI_NT space-time + 2 image taps), output gain
-    static rv_t cwr[2 * SMI_NT + 2], cwi[2 * SMI_NT + 2];
+    // crpa8: running weights (2*SMI_NT space-time + 2*SMI_NIMG image taps, crpa9), output gain
+    static rv_t cwr[2 * SMI_NT + 2 * SMI_NIMG], cwi[2 * SMI_NT + 2 * SMI_NIMG];
 #pragma HLS ARRAY_PARTITION variable=cwr complete
 #pragma HLS ARRAY_PARTITION variable=cwi complete
 #pragma HLS RESET variable=cwr
@@ -241,10 +245,10 @@ void smi_pi(hls::stream<ap_uint<64> > &s_axis_x,
     const bool wsnap = (rk == 0) || (ws != ws_prev);    // weight words of another scale: no ramp across
     const bool gsnap = (rk == 0) || (s != sh_prev);     // 6 dB make-up step: the fine gain jumps with it
     ws_prev = ws; sh_prev = s;
-    w16_t wtr[2 * SMI_NT + 2], wti[2 * SMI_NT + 2];
+    w16_t wtr[2 * SMI_NT + 2 * SMI_NIMG], wti[2 * SMI_NT + 2 * SMI_NIMG];
 #pragma HLS ARRAY_PARTITION variable=wtr complete
 #pragma HLS ARRAY_PARTITION variable=wti complete
-    for (int j = 0; j < 2 * SMI_NT + 2; j++) {
+    for (int j = 0; j < 2 * SMI_NT + 2 * SMI_NIMG; j++) {
 #pragma HLS UNROLL
         w16_t tr, ti;
         if (j < 2 * SMI_NT) { tr = (w16_t)wts(32 * j + 15, 32 * j); ti = (w16_t)wts(32 * j + 31, 32 * j + 16); }
@@ -290,12 +294,16 @@ void smi_pi(hls::stream<ap_uint<64> > &s_axis_x,
             si += acc_t(pi);
         }
     }
-    {   // image taps: c1 conj(x1[n-R]) (Q12) and c2 conj(x2n[n-R]) (Q14)
+    for (int c = 0; c < SMI_NIMG; c++) {
+#pragma HLS UNROLL
+        // image taps (crpa9: SMI_NIMG per channel at delays R-H .. R+H):
+        // c1 conj(x1[n-a]) (Q12) and c2 conj(x2n[n-a]) (Q14)
+        const int a = SMI_REF - SMI_IMGH + c;
         ap_int<32> pr1, pi1;
         ap_int<38> pr2, pi2;
-        const int j1 = 2 * SMI_NT, j2 = 2 * SMI_NT + 1;
-        cmul3<13>(wtr[j1], wti[j1], ap_int<13>(h1r[SMI_REF]), ap_int<13>(-ap_int<13>(h1i[SMI_REF])), pr1, pi1);
-        cmul3<19>(wtr[j2], wti[j2], ap_int<19>(h2r[SMI_REF]), ap_int<19>(-ap_int<19>(h2i[SMI_REF])), pr2, pi2);
+        const int j1 = 2 * SMI_NT + c, j2 = 2 * SMI_NT + SMI_NIMG + c;
+        cmul3<13>(wtr[j1], wti[j1], ap_int<13>(h1r[a]), ap_int<13>(-ap_int<13>(h1i[a])), pr1, pi1);
+        cmul3<19>(wtr[j2], wti[j2], ap_int<19>(h2r[a]), ap_int<19>(-ap_int<19>(h2i[a])), pr2, pi2);
         sr += (acc_t(pr1) << SMI_XFRAC) + acc_t(pr2);
         si += (acc_t(pi1) << SMI_XFRAC) + acc_t(pi2);
     }

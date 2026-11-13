@@ -114,7 +114,7 @@ static int q12(double v) {
 
 // ---- the core, driven sample by sample ---------------------------------------
 static ap_uint<2048> g_w = 0;
-static ap_uint<64>   g_wcj = 0;
+static ap_uint<32 * 2 * SMI_NIMG> g_wcj = 0;   // crpa9: 2 x SMI_NIMG image taps
 static ap_uint<32>   g_cfg = SMI_CFG_BYPASS;
 static ap_uint<32>   g_nrm = 1 << SMI_GFRAC;
 static ap_uint<32>   g_gain = SMI_GAIN_ONE;     // crpa8: fine output gain, Q2.14
@@ -126,9 +126,9 @@ static void set_weights(const int16_t *wre, const int16_t *wim) {
         g_w(32 * k + 31, 32 * k + 16) = (ap_uint<16>)(ap_int<16>)wim[k];
     }
     g_wcj = 0;
-    for (int k = 0; k < 2; k++) {
-        g_wcj(32 * k + 15, 32 * k)      = (ap_uint<16>)(ap_int<16>)wre[AJ_IMG1 + k];
-        g_wcj(32 * k + 31, 32 * k + 16) = (ap_uint<16>)(ap_int<16>)wim[AJ_IMG1 + k];
+    for (int k = 0; k < 2 * SMI_NIMG; k++) {     // same order in the core and the firmware (AJ_IMG0 ..)
+        g_wcj(32 * k + 15, 32 * k)      = (ap_uint<16>)(ap_int<16>)wre[AJ_IMG0 + k];
+        g_wcj(32 * k + 31, 32 * k + 16) = (ap_uint<16>)(ap_int<16>)wim[AJ_IMG0 + k];
     }
 }
 
@@ -238,13 +238,14 @@ static int test_bitexact() {
                 long long xr = atl(x2nr, i - k), xi = atl(x2ni, i - k);
                 tr += wr[SMI_NT + k] * xr - wi[SMI_NT + k] * xi; ti += wr[SMI_NT + k] * xi + wi[SMI_NT + k] * xr;
             }
-            {   // image taps: c conj(x)
-                long long xr = at(a, i - SMI_REF), xi = -at(b, i - SMI_REF);
-                tr += (wr[AJ_IMG1] * xr - wi[AJ_IMG1] * xi) << SMI_XFRAC;
-                ti += (wr[AJ_IMG1] * xi + wi[AJ_IMG1] * xr) << SMI_XFRAC;
-                xr = atl(x2nr, i - SMI_REF); xi = -atl(x2ni, i - SMI_REF);
-                tr += wr[AJ_IMG2] * xr - wi[AJ_IMG2] * xi;
-                ti += wr[AJ_IMG2] * xi + wi[AJ_IMG2] * xr;
+            for (int c = 0; c < SMI_NIMG; c++) {   // image taps: c conj(x) at delays R-H .. R+H (crpa9)
+                const int dl = SMI_REF - SMI_IMGH + c, j1 = AJ_IMG0 + c, j2 = AJ_IMG0 + SMI_NIMG + c;
+                long long xr = at(a, i - dl), xi = -at(b, i - dl);
+                tr += (wr[j1] * xr - wi[j1] * xi) << SMI_XFRAC;
+                ti += (wr[j1] * xi + wi[j1] * xr) << SMI_XFRAC;
+                xr = atl(x2nr, i - dl); xi = -atl(x2ni, i - dl);
+                tr += wr[j2] * xr - wi[j2] * xi;
+                ti += wr[j2] * xi + wi[j2] * xr;
             }
             int w_eff = wsc > SMI_MAXWS ? SMI_MAXWS : wsc;
             long long rnd = w_eff ? (1LL << (w_eff - 1)) : 0;
@@ -274,14 +275,14 @@ static int test_bitexact() {
 static int test_bitexact_ramp() {
     hls::stream<ap_uint<64> > xs;
     hls::stream<ap_uint<32> > ys;
-    const int SEG = 1500, NSEG = 40, n = SEG * NSEG, NWV = 2 * SMI_NT + 2;
+    const int SEG = 1500, NSEG = 40, n = SEG * NSEG, NWV = 2 * SMI_NT + 2 * SMI_NIMG;
     std::vector<int> a(n), b(n), c(n), d(n);
     std::vector<long long> x2nr(n), x2ni(n);
     int bad = 0, ramped = 0, gained = 0, bypassed = 0;
     int16_t wr[AJ_NW], wi[AJ_NW];
     int g2r = 1 << SMI_GFRAC, byp = 0, sh = 0, wsc = 0, rk = 0, gn = SMI_GAIN_ONE;
     // the model's running values (same widths and rules as the core)
-    long long cr[2 * SMI_NT + 2] = {0}, ci[2 * SMI_NT + 2] = {0}, cg = (long long)SMI_GAIN_ONE << SMI_RAMP_RF;
+    long long cr[2 * SMI_NT + 2 * SMI_NIMG] = {0}, ci[2 * SMI_NT + 2 * SMI_NIMG] = {0}, cg = (long long)SMI_GAIN_ONE << SMI_RAMP_RF;
     int cnt = 0, ws_prev = 0, sh_prev = 0;
     for (int i = 0; i < n; i++) {
         bool ext = (i % 97) < 10;
@@ -322,10 +323,10 @@ static int test_bitexact_ramp() {
         cnt = (cnt + 1) & 0x7FFF;
         bool wsnap = rk == 0 || wse != ws_prev, gsnap = rk == 0 || se != sh_prev;
         ws_prev = wse; sh_prev = se;
-        long long w_r[2 * SMI_NT + 2], w_i[2 * SMI_NT + 2];
+        long long w_r[2 * SMI_NT + 2 * SMI_NIMG], w_i[2 * SMI_NT + 2 * SMI_NIMG];
         for (int j = 0; j < NWV; j++) {
-            long long tr = (j < 2 * SMI_NT) ? wr[j] : wr[AJ_IMG1 + j - 2 * SMI_NT];
-            long long ti = (j < 2 * SMI_NT) ? wi[j] : wi[AJ_IMG1 + j - 2 * SMI_NT];
+            long long tr = wr[j];                     // core order = firmware order (AJ_IMG0 = 2 * SMI_NT)
+            long long ti = wi[j];
             if (byp || j == SMI_REF) { tr = 0; ti = 0; }
             tr <<= SMI_RAMP_RF; ti <<= SMI_RAMP_RF;
             if (wsnap) { cr[j] = tr; ci[j] = ti; }
@@ -335,7 +336,7 @@ static int test_bitexact_ramp() {
             }
             w_r[j] = (cr[j] + (1LL << (SMI_RAMP_RF - 1))) >> SMI_RAMP_RF;
             w_i[j] = (ci[j] + (1LL << (SMI_RAMP_RF - 1))) >> SMI_RAMP_RF;
-            if (rk && !wsnap && (w_r[j] != (j < 2 * SMI_NT ? wr[j] : wr[AJ_IMG1 + j - 2 * SMI_NT]))) ramped++;
+            if (rk && !wsnap && w_r[j] != wr[j]) ramped++;
         }
         {
             long long tg = (long long)gn << SMI_RAMP_RF;
@@ -361,12 +362,12 @@ static int test_bitexact_ramp() {
             long long xr = atl(x2nr, i - k), xi = atl(x2ni, i - k);
             tr += w_r[SMI_NT + k] * xr - w_i[SMI_NT + k] * xi; ti += w_r[SMI_NT + k] * xi + w_i[SMI_NT + k] * xr;
         }
-        {
-            const int j1 = 2 * SMI_NT, j2 = 2 * SMI_NT + 1;
-            long long xr = at(a, i - SMI_REF), xi = -at(b, i - SMI_REF);
+        for (int c = 0; c < SMI_NIMG; c++) {
+            const int dl = SMI_REF - SMI_IMGH + c, j1 = 2 * SMI_NT + c, j2 = 2 * SMI_NT + SMI_NIMG + c;
+            long long xr = at(a, i - dl), xi = -at(b, i - dl);
             tr += (w_r[j1] * xr - w_i[j1] * xi) << SMI_XFRAC;
             ti += (w_r[j1] * xi + w_i[j1] * xr) << SMI_XFRAC;
-            xr = atl(x2nr, i - SMI_REF); xi = -atl(x2ni, i - SMI_REF);
+            xr = atl(x2nr, i - dl); xi = -atl(x2ni, i - dl);
             tr += w_r[j2] * xr - w_i[j2] * xi;
             ti += w_r[j2] * xi + w_i[j2] * xr;
         }
@@ -510,9 +511,17 @@ static int test_makeup() {
 // 4 CW that hops from k1 x fs to k1+k2 x fs after the three training captures (stale weights)
 struct Scen { double jnr_db; bool cw; double echo; double rx2_db; bool iq; double cwf; double satf; double chip; double delay;
               int kind = 0; double k1 = 0, k2 = 0; int nblk = 3; double avg = 0; int gate = 0;
-              double jc = 0, jbw = 0, cwjn = -99; int echod = 3; };   // jc, jbw: centre and width of a band-limited barrage (x fs); cwjn: an extra CW (at .cwf) at this J/N
+              double jc = 0, jbw = 0, cwjn = -99; int echod = 3; double iqfd = 0; };   // iqfd (crpa9): I/Q error that grows with frequency   // jc, jbw: centre and width of a band-limited barrage (x fs); cwjn: an extra CW (at .cwf) at this J/N
 
 // AD9361-like I/Q imbalance: gain error eps, phase error ph (degrees).
+// crpa9: fd != 0 adds an I/Q error that changes across the band: the Q branch sees a slightly
+// different filter, Q' = Q + fd (Q[n+1] - Q[n-1]) / 2 (a phase error growing with frequency)
+static void iq_freqdep(cvec &x, double fd) {
+    if (fd == 0) return;
+    std::vector<double> q(x.size());
+    for (size_t i = 0; i < x.size(); i++) q[i] = x[i].imag();
+    for (size_t i = 1; i + 1 < x.size(); i++) x[i] = cd(x[i].real(), q[i] + fd * (q[i + 1] - q[i - 1]) / 2);
+}
 static void iq_imbalance(cvec &x, double eps, double ph_deg) {
     double ph = ph_deg * M_PI / 180;
     cd mu = (1.0 + (1 + eps) * std::polar(1.0, -ph)) / 2.0;
@@ -627,7 +636,7 @@ static int test_jammer(int id, Scen sc) {
     {
         cvec q1(N), q2(N);
         for (int i = 0; i < N; i++) { q1[i] = n1[i]; q2[i] = n2[i]; }
-        if (sc.iq) { iq_imbalance(q1, IQ1_EPS, IQ1_PH); iq_imbalance(q2, IQ2_EPS, IQ2_PH); }
+        if (sc.iq) { iq_freqdep(q1, sc.iqfd); iq_freqdep(q2, -sc.iqfd); iq_imbalance(q1, IQ1_EPS, IQ1_PH); iq_imbalance(q2, IQ2_EPS, IQ2_PH); }
         for (int i = 0; i < N; i++) {
             q1[i] = cd(q12(q1[i].real()), q12(q1[i].imag()));
             q2[i] = cd(q12(q2[i].real()), q12(q2[i].imag()));
@@ -646,6 +655,9 @@ static int test_jammer(int id, Scen sc) {
         jx1[i] = J[i]; jx2[i] = J2[i]; nx1[i] = n1[i]; nx2[i] = n2[i];
     }
     if (sc.iq) {      // the imbalance is linear in I and Q, so per component
+        iq_freqdep(x1, sc.iqfd);  iq_freqdep(x2, -sc.iqfd);
+        iq_freqdep(jx1, sc.iqfd); iq_freqdep(jx2, -sc.iqfd);
+        iq_freqdep(nx1, sc.iqfd); iq_freqdep(nx2, -sc.iqfd);
         iq_imbalance(x1, IQ1_EPS, IQ1_PH);  iq_imbalance(x2, IQ2_EPS, IQ2_PH);
         iq_imbalance(jx1, IQ1_EPS, IQ1_PH); iq_imbalance(jx2, IQ2_EPS, IQ2_PH);
         iq_imbalance(nx1, IQ1_EPS, IQ1_PH); iq_imbalance(nx2, IQ2_EPS, IQ2_PH);
@@ -764,8 +776,8 @@ static int test_jammer(int id, Scen sc) {
     if (!solve(AJ_MODE_STAP, g2, r)) { std::printf("solver failed\n"); return 0; }
     int sh = (id >= 6) ? shift_for(r) : 0;
     Meas m = measure(r, g2, sh);
-    std::printf("  space-time %d+2 taps: suppression %.1f dB, residual %+.2f dB, satellite SNR loss %.2f dB, output %+.2f dB re RX1%s\n",
-                2 * SMI_NT - 1, m.supp, m.res, m.loss, m.out_db, sh ? "" : "");
+    std::printf("  space-time %d+%d taps: suppression %.1f dB, residual %+.2f dB, satellite SNR loss %.2f dB, output %+.2f dB re RX1%s\n",
+                2 * SMI_NT - 1, 2 * SMI_NIMG, m.supp, m.res, m.loss, m.out_db, sh ? "" : "");
     if (sh) std::printf("  output make-up    : %d (x%d, +%d dB)\n", sh, 1 << sh, 6 * sh);
     std::printf("  output level      : %+.1f dB against the clean level (RX gain cut %.0f dB, make-up +%d dB)\n", m.lvl, cut_db, 6 * sh);
     std::printf("  firmware figures  : J/N %.1f dB, suppression %.1f dB, residual %+.1f dB, |w|^2 %.2f, loading %.1f LSB^2 (%d passes), weight scale 2^%d\n",
@@ -842,6 +854,9 @@ static int test_jammer(int id, Scen sc) {
         else if (id == 12) ok = m.supp >= (SMI_NT <= 6 ? 45 : SMI_NT <= 8 ? 50 : 54) && m.loss <= 1.5 && m.res <= (SMI_NT <= 6 ? 3.5 : 1.0) && lvl_ok;   // 51 dB
         else ok = m.supp >= (SMI_NT <= 6 ? 40 : SMI_NT <= 8 ? 44 : 50) && m.loss <= 0.6 && m.res <= (SMI_NT <= 6 ? 2.0 : SMI_NT <= 8 ? 0.8 : 0.6) && lvl_ok;                   // 41 dB
         break; }
+    // crpa9: with 1 image tap per channel this case leaves +8.6 dB residual and 11 dB satellite loss;
+    // 3 image taps: +3.2 dB, 2.9 dB (the ADC's own limit at 61 dB, as scenario 11)
+    case 25: ok = m.supp >= 54 && m.res <= 4.5 && m.loss <= 4.5; break;
     case 9: case 10: {
         // the weight scale off (ws = 0) on the same data, for comparison
         aj_result_t r0 = r;
@@ -912,6 +927,12 @@ int main(int argc, char **argv) {
         sc.nblk = 12; sc.jc = -5.5 / fs; sc.jbw = 36.0 / fs; sc.echod = (argc > 4) ? std::atoi(argv[4]) : 3;
         ok = test_jammer(22, sc); break; }
     case 18: { Scen sc = {40, false, 0, 0, true, 0, 0, 0, 0}; sc.nblk = 30; sc.avg = -1; ok = test_jammer(18, sc); break; }
+    // crpa9: the field case at J/N 61 / 51 dB with an I/Q error that changes across the band
+    // (Q branch filter differs by fd = 0.03): what the extra image taps are for. argv[2] = J/N
+    case 25: {
+        Scen sc = {(argc > 2) ? std::atof(argv[2]) : 61.0, false, 0, 0, true, 0, -0.02 / 18.0, 1.023 / 18.0, 0.055};
+        sc.iqfd = (argc > 3) ? std::atof(argv[3]) : 0.03;
+        ok = test_jammer(25, sc); break; }
     case 23: ok = test_bitexact_ramp(); break;      // crpa8: smoothing and fine gain, bit for bit
     case 24: ok = test_ramp_behaviour(); break;     // crpa8: what smoothing does to a null
     default: std::printf("unknown scenario %d\n", scen); ok = 0;

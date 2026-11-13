@@ -21,6 +21,7 @@ adapted to the design-A FPGA of this repository:
 - crpa8: weight smoothing (`gnss_aj_ramp=`, saved in `GNSSCRPA.CFG`), fine output
   gain, ADC clip counters (`AJ_INFO` 0x0A050C0A). The solver runs on one core here
   (the Linux firmware uses the second core).
+- crpa9: 3 + 3 image taps (`AJ_NIMG` 3), FPGA power meters (`AJ_INFO` 0x0A050C0B).
 
 `Scripts/build_software.tcl` and `Scripts/build_fsbl.tcl` are the Vitis 2023.2
 `xsct` scripts of the same project, unchanged.

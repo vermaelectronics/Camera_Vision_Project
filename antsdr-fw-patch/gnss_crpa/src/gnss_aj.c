@@ -354,6 +354,26 @@ static void commit_weights(void)
 	ramp_from_bypass = 0;
 }
 
+/* crpa9: the FPGA power meters (AJ_PWR_IN/OUT, every sample, 2^16-sample windows).
+ * Residual = output power / what the output would carry with no jammer:
+ * noise floor x (1 + |w|^2) x the output gain^2 (make-up shift and fine gain).
+ * J/N from the RX1 meter against the learned noise floor. Returns 0 if not available. */
+static int hw_levels(double *res_db, double *jn_db)
+{
+	uint32_t pin, pout;
+	double nz, gain, nout;
+	if(!ramp_hw) return 0;
+	pin = gnss_pt_read(GNSS_PT_REG_AJ_PWR_IN);
+	pout = gnss_pt_read(GNSS_PT_REG_AJ_PWR_OUT);
+	nz = noise_now();
+	if(nz <= 0.0 || pin == 0U) return 0;
+	gain = (double)(1U << shift) * (double)gain_q14 / 16384.0;
+	nout = nz * (state == ST_JAMMED && res_solved ? 1.0 + res.wn2 : 1.0) * gain * gain;
+	*res_db = aj_db10((double)pout / nout);
+	*jn_db = aj_db10((double)pin / nz - 1.0);
+	return 1;
+}
+
 /* crpa8: Q2.14 gain word for a fine gain of db (0 .. 6 dB) */
 static uint32_t gain_word(double db)
 {
@@ -482,10 +502,13 @@ static void print_csv(XTime now)
 	if(!csv_hdr) {
 		csv_hdr = 1;
 		console_print("AJCSV,t_s,state,jn_db,coh_db,supp_db,res_db,rx_gain_db,cut_db,"
-			      "makeup_db,tx_att_db,g2_db,rate_per_s,bw_mhz,centre_mhz,clip_ppm,fine_db\n");
+			      "makeup_db,tx_att_db,g2_db,rate_per_s,bw_mhz,centre_mhz,clip_ppm,fine_db,res_fpga_db,jn_fpga_db\n");
 	}
 	radio(&fs, &lo);
-	console_print("AJCSV,%s,%s,%s,%s,%s,%s,%d,%d,%d,%s,%s,%d,%s,%s,%d,%s\n",
+	{
+	double hres = 0.0, hjn = 0.0;
+	int hok = hw_levels(&hres, &hjn);
+	console_print("AJCSV,%s,%s,%s,%s,%s,%s,%d,%d,%d,%s,%s,%d,%s,%s,%d,%s,%s,%s\n",
 		      f3u((double)ms_since(t_boot, now) / 1000.0),
 		      (char*)(state == ST_JAMMED ? "JAMMED" : "CLEAR"),
 		      fmt(res.jn_db < -99.0 ? -99.0 : res.jn_db, 1, 0),
@@ -496,7 +519,9 @@ static void print_csv(XTime now)
 		      f2u(tx_att_db()), fmt(aj_db10(g2 * g2), 1, 0),
 		      (long)(state == ST_JAMMED ? upd_rate : det_rate),
 		      fmt(res.bw * (double)fs / 1e6, 1, 0), fmt(res.foff * (double)fs / 1e6, 1, 0),
-		      (long)gnss_rxg_clip_ppm(), f2u(fine_db));
+		      (long)gnss_rxg_clip_ppm(), f2u(fine_db),
+		      hok ? fmt(hres < -9.9 ? -9.9 : hres, 1, 0) : "", hok ? fmt(hjn < -99.0 ? -99.0 : hjn, 1, 0) : "");
+	}
 }
 
 /* 4.9.6: the CSV header and one line, whatever gnss_aj_csv= says (for gnss_log.c); leaves the periodic CSV alone. */
@@ -936,7 +961,7 @@ static void jammed_state(XTime now)
 			      "     Two antennas null ONE direction (plus its reflections). Check that\n"
 			      "     RX2 has its antenna, that there is a single jammer, and the ADC peak\n"
 			      "     (gnss_rx_gain?).%s\n", f1(res.res_db),
-			      (char*)(aj_mode == AJ_MODE_STAP ? "" : " gnss_aj_mode=0 uses all 63+2 taps."));
+			      (char*)(aj_mode == AJ_MODE_STAP ? "" : " gnss_aj_mode=0 uses all space-time and image taps."));
 		}
 		add_event(now, EV_LEAK, res.res_db, res.jn_db, 0.0);
 	}
@@ -1254,7 +1279,7 @@ void gnss_aj_init(void)
 	aj_set_max_ws(ws_hw ? AJ_MAXWS : 0);
 	sh_max = ((gnss_pt_read(GNSS_PT_REG_AJ_INFO) & 0xFFU) >= 4U) ? AJ_MAXSH : 4;
 	blk_hw = ((gnss_pt_read(GNSS_PT_REG_AJ_INFO) & 0xFFU) >= GNSS_PT_AJ_LAYOUT_BLANK);
-	ramp_hw = ((gnss_pt_read(GNSS_PT_REG_AJ_INFO) & 0xFFU) == GNSS_PT_AJ_LAYOUT_RAMP);
+	ramp_hw = ((gnss_pt_read(GNSS_PT_REG_AJ_INFO) & 0xFFU) >= GNSS_PT_AJ_LAYOUT_RAMP);
 	blk_seeded = 0;
 	if(!blk_hw)
 		console_print("[AJ] NOTE: the bitstream has no pulse blanker (AJ_INFO layout %d, needs 5 = bitstream 4.6): pulsed\n"
@@ -1297,11 +1322,11 @@ void gnss_aj_enable(int on)
 					      (long)((info >> 24) & 0xFFU), (long)AJ_NT, (unsigned long)info);
 				return;
 			}
-			if((info & 0xFFU) != GNSS_PT_AJ_LAYOUT_RAMP) {
-				console_print("gnss_aj: the bitstream's AJ_INFO layout is %d, this firmware (crpa8) needs %d: weight\n"
-					      "         smoothing, AJ_GAIN and the clip counters (AJ_INFO 0x%x). Anti-jam NOT started:\n"
+			if((info & 0xFFU) != GNSS_PT_AJ_LAYOUT_NEEDED) {
+				console_print("gnss_aj: the bitstream's AJ_INFO layout is %d, this firmware (crpa9) needs %d: 3 + 3 image\n"
+					      "         taps, smoothing, AJ_GAIN, clip counters, power meters (AJ_INFO 0x%x). Anti-jam NOT started:\n"
 					      "         rebuild the WHOLE project (./build.sh reset, then the full build) so they match.\n",
-					      (long)(info & 0xFFU), (long)GNSS_PT_AJ_LAYOUT_RAMP, (unsigned long)info);
+					      (long)(info & 0xFFU), (long)GNSS_PT_AJ_LAYOUT_NEEDED, (unsigned long)info);
 				return;
 			}
 			if(((info >> 16) & 0xFFU) != (uint32_t)AJ_REF) {
@@ -1464,8 +1489,8 @@ static const char *mode_name(int m)
 {
 	static char txt[80];
 	switch(m) {
-	case AJ_MODE_STAP: snprintf(txt, sizeof txt, "space-time %d + 2 image taps (gnss_aj_mode=0)", 2 * AJ_NT - 1); break;
-	case AJ_MODE_RX2:  snprintf(txt, sizeof txt, "RX2 %d + 2 image taps (gnss_aj_mode=1)", AJ_NT); break;
+	case AJ_MODE_STAP: snprintf(txt, sizeof txt, "space-time %d + %d image taps (gnss_aj_mode=0)", 2 * AJ_NT - 1, 2 * AJ_NIMG); break;
+	case AJ_MODE_RX2:  snprintf(txt, sizeof txt, "RX2 %d + %d image taps (gnss_aj_mode=1)", AJ_NT, 2 * AJ_NIMG); break;
 	case AJ_MODE_NB:   return "one weight, the old v3 SMI-PI (gnss_aj_mode=2)";
 	default:           snprintf(txt, sizeof txt, "space-time %d taps, no image taps (gnss_aj_mode=3)", 2 * AJ_NT - 1); break;
 	}
@@ -1586,6 +1611,13 @@ void gnss_aj_report(void)
 			      (char*)(pulsed(now) ? "SEEN" : "not seen"),
 			      (long)(gnss_pt_read(GNSS_PT_REG_AJ_RX_PEAK) & 0xFFFFU));
 	gnss_aj_ramp_line();
+	{
+		double hres, hjn;
+		if(hw_levels(&hres, &hjn))
+			console_print("fpga meters   : residual %s dB, J/N %s dB (every sample, 2^16-sample windows; RX1 %d, out %d LSB^2)\n",
+				      f1(hres), f1(hjn < -99.0 ? -99.0 : hjn), (long)gnss_pt_read(GNSS_PT_REG_AJ_PWR_IN),
+				      (long)gnss_pt_read(GNSS_PT_REG_AJ_PWR_OUT));
+	}
 	console_print("adc clipping  : %s (RX1 %d, RX2 %d samples clipped since start; AJ_CLIP1/2)\n",
 		      (char*)gnss_rxg_clip_txt(), (long)gnss_pt_read(GNSS_PT_REG_AJ_CLIP1), (long)gnss_pt_read(GNSS_PT_REG_AJ_CLIP2));
 	{

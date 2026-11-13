@@ -5,7 +5,7 @@ This Repository is used to make Microphase software radio device firmware.
 > `./build.sh all` fetches the pinned plutosdr-fw v0.39 sources, applies these
 > patches and builds everything up to `boot.bin` / SD-card `BOOT.bin`. For the
 > E310 this includes the SMI-PI GNSS anti-jam (RX1+RX2 -> FPGA -> TX1, 10 + 10 space-time taps,
-> weight smoothing, fine output gain, ADC clip counters)
+> 3 + 3 image taps, weight smoothing, fine output gain, ADC clip counters, power meters)
 > and the `gnss` console with custom band 7 (BUILD_E310.md section 7). The
 > original vendor instructions follow below.
 

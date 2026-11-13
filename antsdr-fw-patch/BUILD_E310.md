@@ -206,7 +206,7 @@ It then does a shallow fetch of each submodule at the commit v0.39 pins:
 ./build.sh hls
 ```
 
-Builds `hls/smi_pi` (C simulation of scenarios 1-14, 23 and 24, synthesis at
+Builds `hls/smi_pi` (C simulation of scenarios 1-14 and 23-25, synthesis at
 100 MHz, II=1) into `plutosdr-fw/hdl/library/antsdr_ip/smi_pi`. It takes
 10–20 minutes. It prints `SMI_PI_HLS: PASS` at the end, and its log is
 `hls/smi_pi/build/build_hls.log`. `SMI_PI_SKIP_CSIM=1 ./build.sh hls` skips
@@ -391,18 +391,18 @@ at delay 5 (5 taps before it, 4 after). It is the space-time core of
 `LoopBack_Code_SMI_PI_STAP7x7_v4.9.14` with three more taps per antenna. The
 FPGA core and the firmware must agree:
 
-| Where | 10 + 10 (crpa7, crpa8) | 8 + 8 (crpa4, crpa5) | 7 + 7 (crpa3) | 6 + 6 (crpa1, crpa2) |
+| Where | 10 + 10 (crpa7 to crpa9) | 8 + 8 (crpa4, crpa5) | 7 + 7 (crpa3) | 6 + 6 (crpa1, crpa2) |
 |---|---|---|---|---|
 | `hls/smi_pi/smi_pi.h` `SMI_NT` / `SMI_REF` | 10 / 5 | 8 / 4 | 7 / 4 | 6 / 3 |
-| `gnss_passthrough.v` `AJ_INFO` (hdl 0003) | `0x0A050C0A` (crpa8; crpa7 `0x0A050C07`) | `0x08040C07` | `0x07040C07` | `0x06030C07` |
+| `gnss_passthrough.v` `AJ_INFO` (hdl 0003) | `0x0A050C0B` (crpa9; crpa8 `0x0A050C0A`, crpa7 `0x0A050C07`) | `0x08040C07` | `0x07040C07` | `0x06030C07` |
 | `gnss_aj_math.h` `AJ_NT` / `AJ_REF` (Linux and bare metal) | 10 / 5 | 8 / 4 | 7 / 4 | 6 / 3 |
-| adaptive weights | 19 + 2 image | 15 + 2 image | 13 + 2 image | 11 + 2 image |
+| adaptive weights | 19 + 6 image (crpa9; 19 + 2 before) | 15 + 2 image | 13 + 2 image | 11 + 2 image |
 | weight words at 0x400 | 0..9 RX1, 10..19 RX2 | 0..7, 8..15 | 0..6, 7..13 | 0..5, 6..11 |
-| DSP48 in `smi_pi` | 67 (crpa8: + 2 fine gain; crpa7 65) | 53 | 47 | 41 |
+| DSP48 in `smi_pi` | 79 (crpa9: + 12 image taps; crpa8 67, crpa7 65) | 53 | 47 | 41 |
 
 The image taps and the other registers are unchanged; since crpa8 the weight
 file holds the 20 words in use (0x400-0x44C; 0x450-0x4FC read 0). 67 of the
-220 DSP48 of the XC7Z020 go to the filter (about 97 with the rest of design A).
+220 DSP48 of the XC7Z020 go to the filter in crpa9 (about 110 with the rest of design A).
 
 C simulation of the core with the firmware maths (`hls/smi_pi/testbench.cpp`,
 suppression in dB; all 14 scenarios pass):
@@ -428,7 +428,7 @@ the bitstream has a different tap count or reference delay; the console then
 says so ("Anti-jam NOT started").
 
 To build 10 + 10 in a folder that was already patched for another size or an
-older package (crpa1 to crpa7), start from clean sources; `./build.sh patch`
+older package (crpa1 to crpa8), start from clean sources; `./build.sh patch`
 stops with "does not apply" otherwise:
 
 ```bash
@@ -480,6 +480,40 @@ instead of power inversion. In the C simulation it was better in 5 scenarios
 (e.g. the reflection case 48.2 instead of 37.4 dB) but worse with a 60 dB
 jammer and I/Q imbalance (scenario 8: 1.7 dB less suppression, 1.6 dB more
 satellite loss) and sensitive to its threshold, so power inversion stays.
+
+### 3 + 3 image taps, power meters (crpa9)
+
+crpa9 adds two of the remaining items of the RTL review on top of crpa8; two
+others were simulated first and left out:
+
+| Item | Result | In crpa9 |
+|---|---|---|
+| **3 image taps per channel** (delays R-1, R, R+1 instead of R only) | The AD9361's I/Q mirror is not the same across a wide band (the I and Q analog filters differ). With such an error (scenario 25, J/N 61 dB) one image tap leaves +8.6 dB residual and 11.2 dB satellite loss, three taps +3.2 dB and 2.9 dB; at J/N 51 dB +3.4 -> +0.4 dB. With a flat I/Q error nothing changes. | **Yes** (+12 DSP48, 79 in all) |
+| **FPGA power meters** on RX1 and on the filter output | Mean I^2+Q^2 over every 2^16 samples: the residual and J/N on every sample, not only in the 8192-sample captures | **Yes** |
+| 18-bit weights | The same residual as 16-bit and even as unrounded weights in every case: the weight scale already makes rounding harmless | No |
+| Hardware NLMS | Not built (high risk, about 63 DSP48; little gain for a fixed wideband jammer) | No |
+
+C simulation of crpa9 against crpa8 (suppression / residual / satellite loss, dB):
+
+| Scenario | crpa8 (1 + 1 image taps) | crpa9 (3 + 3) |
+|---|---|---|
+| 25: J/N 61 dB, I/Q error across the band | 48.4 / +8.58 / 11.18 | **57.0 / +3.19 / 2.87** |
+| 25: J/N 51 dB, the same | 46.4 / +3.35 / 2.97 | **56.0 / +0.38 / 0.16** |
+| 8: J/N 60 dB, flat I/Q error | 55.2 / +3.17 / 1.82 | 55.6 / +2.91 / 1.39 |
+| 11: field case J/N 61 dB | 57.2 / +3.10 / 3.91 | 57.4 / +2.90 / 4.47 |
+| 2, 4, 5, 6, 12, 13 | | within 0.8 dB of crpa8 |
+
+New registers (AJ_INFO `0x0A050C0B`, layout 11; the crpa9 firmware needs it):
+
+| Register | Address | |
+|---|---|---|
+| `AJ_WCX0..3` | 0x1C0-0x1CC | image taps c1 at R-1, c1 at R+1, c2 at R-1, c2 at R+1 (c1 / c2 at R stay at 0x190 / 0x194); committed with `AJ_COMMIT` |
+| `AJ_PWR_IN` | 0x1D0 | mean RX1 I^2+Q^2 over the last 2^16 samples [LSB^2] |
+| `AJ_PWR_OUT` | 0x1D4 | the same for the filter output to TX1 |
+| `AJ_PWR_IDX` | 0x1D8 | window counters |
+
+`gnss_report?` shows a `fpga meters` line (residual and J/N from the meters)
+and the CSV log has two more columns, `res_fpga_db` and `jn_fpga_db`.
 
 ### No CW notch, no SFAP-PI in this build
 
@@ -610,7 +644,7 @@ The service:
 ## 7b. Design A on bare metal (no Linux)
 
 `./build.sh baremetal` builds the same design-A FPGA (LVDS 2R2T,
-`gnss_passthrough` v4.9.14, `smi_pi` 10 + 10 taps with smoothing, `axi_vcxo_ctrl`) but runs the
+`gnss_passthrough` v4.9.14, `smi_pi` 10 + 10 taps, 3 + 3 image taps, smoothing, `axi_vcxo_ctrl`) but runs the
 SMI-PI v4.9.14 firmware directly on the ARM, like design B. There is no
 U-Boot, Linux or root file system: the SD card holds only `BOOT.bin`.
 

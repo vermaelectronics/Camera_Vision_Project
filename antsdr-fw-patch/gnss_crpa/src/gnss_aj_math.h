@@ -58,10 +58,19 @@ extern "C" {
 #define AJ_REF        5     /* crpa7: 5; must match SMI_REF (crpa3-5: 4, 4.9.12: 2). RX1 reference delay (4.8: was 8; echoes up to 11 samples can be cancelled) */
 #endif
 #define AJ_NSPT      (2 * AJ_NT)       /* space-time weight words: RX1 AJ_NT, then RX2 AJ_NT */
-#define AJ_IMG1      (2 * AJ_NT)       /* image tap c1: conj(x1[n-REF])                  */
-#define AJ_IMG2      (2 * AJ_NT + 1)   /* image tap c2: conj(x2n[n-REF])                 */
-#define AJ_NW        (2 * AJ_NT + 2)   /* weight words                                   */
-#define AJ_MAXDIM    (2 * AJ_NT + 1)   /* adaptive weights                               */
+/* crpa9: AJ_NIMG image (conjugate) taps per channel at delays REF-1, REF, REF+1 (crpa8 and
+ * older: 1, at REF). A single image tap cancels the AD9361's I/Q mirror at one frequency
+ * only; the mirror changes across a wide band (the I and Q analog filters differ). */
+#ifndef AJ_NIMG
+#define AJ_NIMG       3     /* must match SMI_NIMG of the core                */
+#endif
+#define AJ_IMGH      ((AJ_NIMG - 1) / 2)
+#define AJ_IMG0      (2 * AJ_NT)       /* first image tap: c1 at REF-H .. REF+H, then c2 */
+#define AJ_IMG(p, d) (AJ_IMG0 + ((p) - 1) * AJ_NIMG + AJ_IMGH + (d))   /* channel p, delay REF+d */
+#define AJ_IMG1      AJ_IMG(1, 0)      /* image tap c1 at REF: conj(x1[n-REF])           */
+#define AJ_IMG2      AJ_IMG(2, 0)      /* image tap c2 at REF: conj(x2n[n-REF])          */
+#define AJ_NW        (2 * AJ_NT + 2 * AJ_NIMG)       /* weight words                     */
+#define AJ_MAXDIM    (2 * AJ_NT - 1 + 2 * AJ_NIMG)   /* adaptive weights                 */
 #define AJ_WFRAC     12     /* Q3.12                                          */
 #define AJ_GFRAC     13     /* RX2 normalisation g2, Q3.13                    */
 #define AJ_MAXWS      5     /* weight scale: words hold w * 2^ws (SMI-PI 4.4)  */
@@ -71,8 +80,8 @@ extern "C" {
 #define AJ_NSAMP   8192     /* samples per block (one DMA capture). 4.9.4: 8192 (was 4096); 16384 broke the chirp detector and 2 tests */
 #endif
 
-#define AJ_MODE_STAP  0     /* RX1 NT-1 + RX2 NT + 2 image taps (default)     */
-#define AJ_MODE_RX2   1     /* RX2 NT + 2 image taps                          */
+#define AJ_MODE_STAP  0     /* RX1 NT-1 + RX2 NT + 2 x AJ_NIMG image taps (default) */
+#define AJ_MODE_RX2   1     /* RX2 NT + 2 x AJ_NIMG image taps                */
 #define AJ_MODE_NB    2     /* one weight, RX2 at delay 8: the old SMI-PI     */
 #define AJ_MODE_LIN   3     /* RX1 NT-1 + RX2 NT, no image taps (v4.0)        */
 #define AJ_NMODES     4

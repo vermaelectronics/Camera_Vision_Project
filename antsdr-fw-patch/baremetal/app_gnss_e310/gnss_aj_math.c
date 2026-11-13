@@ -107,9 +107,9 @@ static int64_t S11r[AJ_NT], S11i[AJ_NT];
 static int64_t S22r[AJ_NT], S22i[AJ_NT];
 static int64_t S12r[2 * AJ_NT - 1], S12i[2 * AJ_NT - 1];
 
-/* Full 34x34 statistics F_ij = E[conj(v_i) v_j] of this block:
- *   v_i = x_{p(i)}[n - d(i)]       i = 0..31 (the space-time taps)
- *   v_32 = conj(x1[n-8]), v_33 = conj(x2[n-8])   (the image taps)
+/* Full statistics F_ij = E[conj(v_i) v_j] of this block (AJ_NW x AJ_NW):
+ *   v_i = x_{p(i)}[n - d(i)]       i = 0..AJ_NSPT-1 (the space-time taps)
+ *   v_i = conj(x_p[n - a])         i = AJ_IMG0..AJ_NW-1 (the image taps, a = REF-1..REF+1)
  * RX2 entries are scaled by g2 (the core's input normalisation). */
 static double FR[AJ_NW][AJ_NW], FI[AJ_NW][AJ_NW];
 /* The same, averaged over blocks (what the solve uses). */
@@ -180,7 +180,7 @@ static void chan(int p, const int16_t **r, const int16_t **i)
 	else       { *r = X2R; *i = X2I; }
 }
 
-static int is_rx2(int i) { return (i >= AJ_NT && i < AJ_NSPT) || i == AJ_IMG2; }
+static int is_rx2(int i) { return (i >= AJ_NT && i < AJ_NSPT) || i >= AJ_IMG0 + AJ_NIMG; }
 
 static double dc_1, dc_2;
 
@@ -257,11 +257,12 @@ static int build_stats(const uint32_t *buf, int nsamp, double g2)
 			FI[j][i] = -FI[i][j];
 		}
 	}
-	/* Image taps (v_32 = conj(x1[n-8]), v_33 = conj(x2[n-8])):
-	 *   F[img_p][j]     = E[x_p[n-8] v_j]               (j a space-time tap)
-	 *   F[img_p][img_q] = conj(F[(p,8)][(q,8)])                            */
-	for(i = AJ_IMG1; i <= AJ_IMG2; i++) {
-		int p = (i == AJ_IMG1) ? 1 : 2, ri = (p == 1) ? AJ_REF : AJ_NT + AJ_REF;
+	/* Image taps (crpa9: AJ_NIMG per channel; v_i = conj(x_p[n-a]), a = REF-H .. REF+H):
+	 *   F[img][j]       = E[x_p[n-a] v_j]               (j a space-time tap)
+	 *   F[img_i][img_j] = conj(F[(p,a)][(q,b)])                            */
+	for(i = AJ_IMG0; i < AJ_NW; i++) {
+		int p = (i < AJ_IMG0 + AJ_NIMG) ? 1 : 2, a = AJ_REF - AJ_IMGH + (i - AJ_IMG0) % AJ_NIMG;
+		int ri = (p == 1) ? a : AJ_NT + a;
 		const int16_t *pr, *pi;
 		chan(p, &pr, &pi);
 		for(j = 0; j < AJ_NSPT; j++) {
@@ -269,14 +270,15 @@ static int build_stats(const uint32_t *buf, int nsamp, double g2)
 			const int16_t *qr, *qi;
 			int64_t sr, si;
 			chan(q, &qr, &qi);
-			comp_sum(pr, pi, AJ_REF, qr, qi, b, st, en, &sr, &si);
+			comp_sum(pr, pi, a, qr, qi, b, st, en, &sr, &si);
 			FR[i][j] = (double)sr * inv;
 			FI[i][j] = (double)si * inv;
 			FR[j][i] = FR[i][j];
 			FI[j][i] = -FI[i][j];
 		}
-		for(j = AJ_IMG1; j <= AJ_IMG2; j++) {
-			int rj = (j == AJ_IMG1) ? AJ_REF : AJ_NT + AJ_REF;
+		for(j = AJ_IMG0; j < AJ_NW; j++) {
+			int q = (j < AJ_IMG0 + AJ_NIMG) ? 1 : 2, b = AJ_REF - AJ_IMGH + (j - AJ_IMG0) % AJ_NIMG;
+			int rj = (q == 1) ? b : AJ_NT + b;
 			FR[i][j] = FR[ri][rj];
 			FI[i][j] = -FI[ri][rj];
 		}
@@ -602,7 +604,8 @@ int aj_compute(const uint32_t *buf, int nsamp, aj_result_t *r)
 	} else {
 		for(k = (r->mode == AJ_MODE_RX2) ? AJ_NT : 0; k < AJ_NSPT; k++)
 			if(k != AJ_REF) idx[n++] = k;
-		if(r->mode != AJ_MODE_LIN) { idx[n++] = AJ_IMG1; idx[n++] = AJ_IMG2; }
+		if(r->mode != AJ_MODE_LIN)
+			for(k = AJ_IMG0; k < AJ_NW; k++) idx[n++] = k;      /* crpa9: all image taps */
 	}
 	for(i = 0; i < n; i++) {
 		for(j = 0; j < n; j++) {

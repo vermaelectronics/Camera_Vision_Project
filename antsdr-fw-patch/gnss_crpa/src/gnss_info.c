@@ -413,7 +413,7 @@ static void info_pl(void)
     console_print("   When a jammer appears the ARM computes the %d weights from\n", (long)AJ_MAXDIM);
     console_print("   %d-sample DMA captures of both channels (gnss_aj.c), a few\n", (long)AJ_NSAMP);
     console_print("   hundred times a second, and commits weights, bypass, make-up\n");
-    console_print("   gain and g2 all at once (weights 0x400-0x44C, the rest 0x180-0x1B0, AJ_COMMIT 0x180).\n");
+    console_print("   gain and g2 all at once (weights 0x400-0x44C, the rest 0x180-0x1CC, AJ_COMMIT 0x180).\n");
     console_print("   CONTROL[5] puts it on TX1. TX2 carries a copy of the TX1 output\n");
     console_print("   (never raw RX2) and is MUTED unless gnss_tx2=1 (4.9.14).\n");
     rule();
@@ -595,6 +595,10 @@ static void info_registers(void)
     console_print("   0x1B8 AJ_CLIP1        RO  RX1 samples at ADC full scale (wraps)\n");
     console_print("   0x1BC AJ_CLIP2        RO  RX2 samples at ADC full scale (wraps)\n");
     console_print("   AJ_CFG[19:16]             weight / gain smoothing k: 0 off, 1..15 = 2^(k+7) samples\n");
+    console_print("   0x1C0 AJ_WCX0..3      RW  image taps c1(R-1), c1(R+1), c2(R-1), c2(R+1) (crpa9; c1/c2 at R: 0x190/0x194)\n");
+    console_print("   0x1D0 AJ_PWR_IN       RO  mean RX1 I^2+Q^2 over 2^16 samples (crpa9)\n");
+    console_print("   0x1D4 AJ_PWR_OUT      RO  mean filter output I^2+Q^2 over 2^16 samples\n");
+    console_print("   0x1D8 AJ_PWR_IDX      RO  [15:0] RX1 window counter, [31:16] output window counter\n");
     rule();
     console_print(" STATUS BITS [2] AND [3] ARE THE IMPORTANT ONES.\n");
     console_print("   They are axi_ad9361's read-back of (dac_data_sel == 4'h2),\n");

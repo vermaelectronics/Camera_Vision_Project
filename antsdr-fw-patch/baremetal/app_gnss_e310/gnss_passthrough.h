@@ -81,7 +81,11 @@
 #define GNSS_PT_REG_AJ_INFO         0x184U  /* RO 0x10040C06                  */
 #define GNSS_PT_REG_AJ_CFG          0x188U  /* RW [0] bypass, [10:8] shift, [14:12] weight scale */
 #define GNSS_PT_REG_AJ_NORM         0x18CU  /* RW g2, Q3.13 {im, re}          */
-#define GNSS_PT_REG_AJ_WC(k)        (0x190U + ((k) * 4U)) /* RW image taps 0,1 */
+#define GNSS_PT_REG_AJ_WC(k)        (0x190U + ((k) * 4U)) /* RW image taps c1, c2 at the reference delay */
+#define GNSS_PT_REG_AJ_WCX(k)       (0x1C0U + ((k) * 4U)) /* RW (crpa9) image taps c1(R-1), c1(R+1), c2(R-1), c2(R+1) */
+#define GNSS_PT_REG_AJ_PWR_IN       0x1D0U  /* RO (crpa9) mean RX1 I^2+Q^2 over 2^16 samples */
+#define GNSS_PT_REG_AJ_PWR_OUT      0x1D4U  /* RO mean filter output I^2+Q^2 (to TX1)       */
+#define GNSS_PT_REG_AJ_PWR_IDX      0x1D8U  /* RO [15:0] RX1 window count, [31:16] output   */
 #define GNSS_PT_REG_AJ_CFG_ACTIVE   0x198U  /* RO AJ_CFG as committed         */
 /* bitstream 4.6 (AJ_INFO layout 5): pulse blanker on the filter output, RX peak hold */
 #define GNSS_PT_REG_AJ_BLK_THR      0x19CU  /* RW shadow: blanker threshold (sum of 8 samples of I^2+Q^2), committed by AJ_COMMIT */
@@ -89,7 +93,8 @@
 #define GNSS_PT_REG_AJ_BLK_COUNT    0x1A4U  /* RO samples blanked since the counter clear */
 #define GNSS_PT_REG_AJ_BLK_BURSTS   0x1A8U  /* RO bursts blanked since the counter clear  */
 #define GNSS_PT_REG_AJ_RX_PEAK      0x1ACU  /* RO [15:0] largest |I|,|Q| of RX1/RX2 in the last window, [31:16] window counter */
-#define GNSS_PT_AJ_INFO_EXPECTED    0x0A050C0AU   /* crpa8: 10 taps per channel, reference delay 5, layout 10 (smoothing, AJ_GAIN, AJ_CLIP1/2) */
+#define GNSS_PT_AJ_INFO_EXPECTED    0x0A050C0BU   /* crpa9: 10 taps per channel, reference delay 5, layout 11 (3 + 3 image taps, AJ_PWR_IN/OUT) */
+#define GNSS_PT_AJ_LAYOUT_NEEDED    11U           /* crpa9 firmware: 3 + 3 image taps, power meters */
 #define GNSS_PT_AJ_LAYOUT_RAMP      10U           /* crpa8: AJ_CFG[19:16] smoothing, AJ_GAIN, AJ_CLIP1/2 */
 #define GNSS_PT_REG_AJ_GAIN         0x1B0U  /* RW shadow (crpa8): fine output gain [15:0] Q2.14, 1.0 = 0x4000 */
 #define GNSS_PT_REG_AJ_GAIN_ACT     0x1B4U  /* RO committed gain                  */

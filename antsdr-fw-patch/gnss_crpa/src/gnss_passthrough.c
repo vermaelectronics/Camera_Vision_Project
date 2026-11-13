@@ -148,9 +148,16 @@ void gnss_pt_write_aj(const int16_t *re, const int16_t *im,
             gnss_pt_write(GNSS_PT_REG_AJ_W(k),
                           ((uint32_t)(uint16_t)im[k] << 16) | (uint32_t)(uint16_t)re[k]);
         }
-        for (k = 0; k < 2U; k++) {
-            gnss_pt_write(GNSS_PT_REG_AJ_WC(k),
-                          ((uint32_t)(uint16_t)im[AJ_IMG1 + k] << 16) | (uint32_t)(uint16_t)re[AJ_IMG1 + k]);
+        {
+            /* crpa9: image taps c1 / c2 at R (AJ_WC0/1) and at R-1, R+1 (AJ_WCX0..3) */
+            static const int wc[2] = {AJ_IMG(1, 0), AJ_IMG(2, 0)};
+            static const int wcx[4] = {AJ_IMG(1, -1), AJ_IMG(1, 1), AJ_IMG(2, -1), AJ_IMG(2, 1)};
+            for (k = 0; k < 2U; k++)
+                gnss_pt_write(GNSS_PT_REG_AJ_WC(k),
+                              ((uint32_t)(uint16_t)im[wc[k]] << 16) | (uint32_t)(uint16_t)re[wc[k]]);
+            for (k = 0; k < 4U; k++)
+                gnss_pt_write(GNSS_PT_REG_AJ_WCX(k),
+                              ((uint32_t)(uint16_t)im[wcx[k]] << 16) | (uint32_t)(uint16_t)re[wcx[k]]);
         }
     }
     gnss_pt_write(GNSS_PT_REG_AJ_CFG, cfg);
