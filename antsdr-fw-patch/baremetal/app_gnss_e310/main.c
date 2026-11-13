@@ -1217,7 +1217,7 @@ int main(void)
 	gnss_aj_init();
 	gnss_aj_enable(1);
 	gnss_settings_apply();          /* crpa5: saved gnss_rx_agc= / gnss_aj_avg= */
-	console_print("\nANTI-JAM (" GNSS_AJ_VERSION_STR "): ON, bypassed until a jammer appears.\n"
+	console_print("\nANTI-JAM (SMI-PI " GNSS_AJ_VERSION_STR "): ON, bypassed until a jammer appears.\n"
 		      "  Jammer events are printed as [AJ] lines with a time stamp. gnss_aj? = state,\n"
 		      "  gnss_report? = everything (copy it into a report), gnss_aj_csv=500 = CSV log,\n"
 		      "  Only jammer events are printed (gnss_aj_log=30 adds a status line every 30 s).\n"

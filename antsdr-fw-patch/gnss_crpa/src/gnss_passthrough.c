@@ -144,11 +144,13 @@ void gnss_pt_write_aj(const int16_t *re, const int16_t *im,
 {
     uint32_t k;
     if (re && im) {
-        /* crpa6: 0x200 + 4i for word i = 0 .. 3N-1: b_k, then c1_k, then c2_k,
-         * one contiguous block (the order of aj_result_t.wre / wim). */
-        for (k = 0; k < (uint32_t)AJ_NW; k++) {
-            gnss_pt_write(GNSS_PT_REG_AJ_WB(k),
+        for (k = 0; k < 2U * AJ_NT; k++) {
+            gnss_pt_write(GNSS_PT_REG_AJ_W(k),
                           ((uint32_t)(uint16_t)im[k] << 16) | (uint32_t)(uint16_t)re[k]);
+        }
+        for (k = 0; k < 2U; k++) {
+            gnss_pt_write(GNSS_PT_REG_AJ_WC(k),
+                          ((uint32_t)(uint16_t)im[AJ_IMG1 + k] << 16) | (uint32_t)(uint16_t)re[AJ_IMG1 + k]);
         }
     }
     gnss_pt_write(GNSS_PT_REG_AJ_CFG, cfg);
