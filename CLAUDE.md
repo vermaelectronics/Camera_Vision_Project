@@ -45,7 +45,14 @@ Name each new design-A (pass-through + CRPA) package with the next number:
   0x0A050C0B (layout 11). Studied and left out: 18-bit weights (no gain), NLMS
   (not built). csim 25 (I/Q error across the band, J/N 61): residual 8.6 -> 3.2 dB.
   Commit 342c6d7.
-- Next package: `crpa10`.
+- `crpa10` (2026-11-13): **new design** on crpa9 with **8 + 8 taps** (REF 4) and the
+  **hardware NLMS** (item 7): smi_pi 3.0, delayed LMS D = 24, anchored to the SMI
+  weights by the smoothing, AJ_NLMS 0x1E0 (m, sh, enable), gnss_aj_nlms=0|1 (default
+  off), gnss_aj_nlms_mu= (default 0.031), 132 DSP48 in the core (~166 of 220 in all),
+  AJ_INFO 0x08040C0C (layout 12), `SMI_NLMS=0 ./build.sh hls` = core without NLMS.
+  csim 26: drifting jammer residual 24.9 -> 1.7 dB; 27: fixed jammer +0.09 dB.
+  crpa9 stays the 10 + 10 design without NLMS. Commit d7f3db0.
+- Next package: `crpa11`.
 
 Files per package: `crpaN-full-src.zip.part1`, `crpaN-full-src.zip.part2`,
 `crpaN-kit.zip`, `SHA256SUMS-crpaN.txt`.
