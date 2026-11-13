@@ -522,8 +522,15 @@ Larger steps follow faster but cost a little on a fixed jammer (0.06: +0.2 dB,
 (scenario 23, 60000 samples, NLMS on in half of them: 0 mismatches). All 19
 scenarios pass (1-14, 23-27).
 
-**If the build does not meet timing** (the NLMS update is the longest path at
-100 MHz): build the core without NLMS, the rest of crpa10 stays:
+**crpa11** fixes the crpa10 HLS timing (crpa10: `estimated clock period 63.552 ns`,
+`FAIL`): the NLMS error history was a shift register written at the end of the
+pipeline and read at the start of the next sample, which forced the whole filter
+into one clock. crpa11 keeps it in a 32-slot circular buffer (LUTRAM) and tells
+HLS the 24-sample distance (`DEPENDENCE ... distance=24`), and saturates the NLMS
+step before the weight update. The C simulation is bit for bit the same.
+
+**If the build still does not meet timing**: build the core without NLMS, the
+rest of crpa11 stays:
 
 ```bash
 SMI_NLMS=0 ./build.sh hls

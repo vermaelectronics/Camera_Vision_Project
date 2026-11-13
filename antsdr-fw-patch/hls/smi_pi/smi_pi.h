@@ -68,6 +68,11 @@
 #define SMI_NLMS         1     // 0: core without the NLMS hardware (SMI_NLMS=0 ./build.sh hls)
 #endif
 #define SMI_NLMS_D      24     // delay of the error / inputs used for the update [samples]
+#define SMI_NLMS_HB     32     // error history: circular buffer of 32 slots (> SMI_NLMS_D)
+#define SMI_NLMS_HBB     5     // its pointer width
+#if SMI_NLMS_D != 24
+#error "the DEPENDENCE distance in smi_pi.cpp is written as 24: change it with SMI_NLMS_D"
+#endif
 #define SMI_NLMS_CS      8     // fixed shift of e conj(u)
 #define SMI_NLMS_EW     24     // bits of e (saturated)
 

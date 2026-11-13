@@ -160,17 +160,28 @@ typedef ap_int<SMI_NLMS_EW> e_t;              // NLMS error e = y m 2^-sh
 typedef ap_int<17>          z_t;              // NLMS input conj(u) (Q1)
 typedef ap_int<16 + SMI_RAMP_RF + 22> dl_t;   // one NLMS step in running-value units
 
-static rv_t w_update(rv_t cur, w16_t target, bool snap, bool tick, bool nl, dl_t dlt) {
+// crpa11: the NLMS step arrives already saturated to dn_t (outside the one-clock loop of the
+// running value): the loop is only target - cur, one 3-input add and the clamp. A step beyond
+// +-2^34 saturates the running value (+-2^31) anyway, so the result is the same as unsaturated.
+typedef ap_int<16 + SMI_RAMP_RF + 3> dn_t;    // 35 bits
+static dn_t dl_sat(dl_t d) {
+#pragma HLS INLINE
+    const dl_t hi = (dl_t(1) << (16 + SMI_RAMP_RF + 2)) - 1, lo = -(dl_t(1) << (16 + SMI_RAMP_RF + 2));
+    return (dn_t)(d > hi ? hi : d < lo ? lo : d);
+}
+
+static rv_t w_update(rv_t cur, w16_t target, bool snap, bool tick, bool nl, dn_t dlt) {
 #pragma HLS INLINE
     if (snap) return rv_t(target) << SMI_RAMP_RF;
-    ap_int<16 + SMI_RAMP_RF + 24> v = cur;
+    typedef ap_int<16 + SMI_RAMP_RF + 4> v_t;   // 36 bits: cur + ramp step + NLMS step
+    v_t v = cur;
     if (tick) {
         const ap_int<16 + SMI_RAMP_RF + 2> d = ap_int<16 + SMI_RAMP_RF + 2>(rv_t(target) << SMI_RAMP_RF) - cur;
         v += (d + (1 << (SMI_RAMP_RS - 1))) >> SMI_RAMP_RS;
     }
     if (nl) v += dlt;
-    const ap_int<16 + SMI_RAMP_RF + 24> hi = ap_int<16 + SMI_RAMP_RF + 24>(32767) << SMI_RAMP_RF;
-    const ap_int<16 + SMI_RAMP_RF + 24> lo = -(ap_int<16 + SMI_RAMP_RF + 24>(32768) << SMI_RAMP_RF);
+    const v_t hi = v_t(32767) << SMI_RAMP_RF;
+    const v_t lo = -(v_t(32768) << SMI_RAMP_RF);
     if (v > hi) v = hi;
     if (v < lo) v = lo;
     return (rv_t)v;
@@ -241,12 +252,18 @@ void smi_pi(hls::stream<ap_uint<64> > &s_axis_x,
 #pragma HLS RESET variable=rcnt
 #pragma HLS RESET variable=ws_prev
 #pragma HLS RESET variable=sh_prev
-    // crpa10: the NLMS error of the last SMI_NLMS_D samples (index k = k+1 samples ago)
-    static e_t ehr[SMI_NLMS_D], ehi[SMI_NLMS_D];
-#pragma HLS ARRAY_PARTITION variable=ehr complete
-#pragma HLS ARRAY_PARTITION variable=ehi complete
-#pragma HLS RESET variable=ehr
-#pragma HLS RESET variable=ehi
+    // crpa10/11: the NLMS error of the last samples, a circular buffer (crpa10 had a shift
+    // register: its write at the end of the pipeline and its read at the start of the next
+    // sample forced the whole filter into one clock, 63.6 ns). Slot ewp gets e[n]; e[n-D] is
+    // read from slot ewp - D. The DEPENDENCE pragma tells HLS that distance, so the path
+    // weights -> filter -> e may take up to D clocks.
+    static e_t ehr[SMI_NLMS_HB], ehi[SMI_NLMS_HB];
+    static ap_uint<SMI_NLMS_HBB> ewp = 0;
+#pragma HLS BIND_STORAGE variable=ehr type=ram_s2p impl=lutram
+#pragma HLS BIND_STORAGE variable=ehi type=ram_s2p impl=lutram
+#pragma HLS DEPENDENCE variable=ehr type=inter direction=RAW distance=24 dependent=true
+#pragma HLS DEPENDENCE variable=ehi type=inter direction=RAW distance=24 dependent=true
+#pragma HLS RESET variable=ewp
 
     if (s_axis_x.empty()) return;
     ap_uint<64> in = s_axis_x.read();
@@ -294,7 +311,8 @@ void smi_pi(hls::stream<ap_uint<64> > &s_axis_x,
     const bool nl = SMI_NLMS && nlms[31] && !byp && rk != 0;
     const ap_uint<16> nm = nlms(15, 0);
     const ap_uint<5>  nsh = nlms(20, 16);
-    const e_t eor = ehr[SMI_NLMS_D - 1], eoi = ehi[SMI_NLMS_D - 1];   // e of the sample D ago
+    const ap_uint<SMI_NLMS_HBB> erp = ewp - SMI_NLMS_D;                 // slot of the sample D ago
+    const e_t eor = ehr[erp], eoi = ehi[erp];
     w16_t wtr[2 * SMI_NT + 2 * SMI_NIMG], wti[2 * SMI_NT + 2 * SMI_NIMG];
 #pragma HLS ARRAY_PARTITION variable=wtr complete
 #pragma HLS ARRAY_PARTITION variable=wti complete
@@ -319,8 +337,8 @@ void smi_pi(hls::stream<ap_uint<64> > &s_axis_x,
         dl_t dr, di;
         nlms_step(eor, eoi, zr, zi, dr, di);
         const bool nlj = nl && j != SMI_REF;
-        cwr[j] = w_update(cwr[j], tr, wsnap, tick, nlj, dr);
-        cwi[j] = w_update(cwi[j], ti, wsnap, tick, nlj, di);
+        cwr[j] = w_update(cwr[j], tr, wsnap, tick, nlj, dl_sat(dr));
+        cwi[j] = w_update(cwi[j], ti, wsnap, tick, nlj, dl_sat(di));
         wtr[j] = ramp_val(cwr[j]);
         wti[j] = ramp_val(cwi[j]);
     }
@@ -389,11 +407,8 @@ void smi_pi(hls::stream<ap_uint<64> > &s_axis_x,
         const ap_int<36> emax = (ap_int<36>(1) << (SMI_NLMS_EW - 1)) - 1, emin = -(ap_int<36>(1) << (SMI_NLMS_EW - 1));
         if (er > emax) er = emax; if (er < emin) er = emin;
         if (ei > emax) ei = emax; if (ei < emin) ei = emin;
-        for (int k = SMI_NLMS_D - 1; k > 0; k--) {
-#pragma HLS UNROLL
-            ehr[k] = ehr[k - 1]; ehi[k] = ehi[k - 1];
-        }
-        ehr[0] = (e_t)er; ehi[0] = (e_t)ei;
+        ehr[ewp] = (e_t)er; ehi[ewp] = (e_t)ei;
+        ewp++;
     }
 
     // ---- 3. make-up shift, 4. fine gain (crpa8) and rounding --------------------

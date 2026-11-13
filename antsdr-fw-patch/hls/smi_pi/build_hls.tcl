@@ -44,7 +44,7 @@
 #    SMI_PI_FW_DIR=<dir>  directory holding gnss_aj_math.c/.h
 #
 #  OUTPUT
-#    $GNSS_CRPA_IP_REPO/smi_pi/component.xml, VLNV antsdr:gnss:smi_pi:3.0 (crpa10: 8 + 8 taps, 3 + 3 image taps, smoothing, fine gain, hardware NLMS; 2.8 = crpa9; 2.7 = crpa8; 2.5 = 4.9.13/4.9.14 and crpa1-4, crpa7; 2.6 = crpa5)
+#    $GNSS_CRPA_IP_REPO/smi_pi/component.xml, VLNV antsdr:gnss:smi_pi:3.1 (crpa11: crpa10 with the NLMS timing fix; crpa10: 8 + 8 taps, 3 + 3 image taps, smoothing, fine gain, hardware NLMS; 2.8 = crpa9; 2.7 = crpa8; 2.5 = 4.9.13/4.9.14 and crpa1-4, crpa7; 2.6 = crpa5)
 #    $GNSS_CRPA_IP_REPO/smi_pi/smi_pi_csynth.rpt
 #
 #  SUCCESS MARKER
@@ -154,7 +154,7 @@ if {$ii eq "" || $ii > $pipeline_ii} {
 
 # ---- 4 package as a Vivado IP ------------------------------------------------------
 export_design -format ip_catalog -rtl verilog \
-  -vendor antsdr -library gnss -version 3.0 -ipname smi_pi \
+  -vendor antsdr -library gnss -version 3.1 -ipname smi_pi \
   -display_name "SMI power inversion, space-time" \
   -description "Two-element space-time SMI power-inversion anti-jam filter (Vitis HLS): RX2 normalised to RX1 at the input, 8 taps on RX1 (reference tap at delay 4 fixed at 1), 8 on RX2 and 3 + 3 image (conjugate) taps, hardware NLMS refinement; real RX2 gain g2, bypass, output make-up gain and fine gain, weights and gain smoothed (cfg[19:16]); weights from the ARM via gnss_passthrough. s_axis_x = RX1 and RX2 IQ, m_axis_y = filtered RX1."
 
@@ -181,6 +181,6 @@ file delete -force $out_ip
 file copy -force $ip_src $out_ip
 if {[file exists $rpt_txt]} { file copy -force $rpt_txt $out_ip }
 
-puts "SMI_PI_HLS: IP antsdr:gnss:smi_pi:3.0 -> $out_ip"
+puts "SMI_PI_HLS: IP antsdr:gnss:smi_pi:3.1 -> $out_ip"
 puts "SMI_PI_HLS: PASS"
 exit 0
