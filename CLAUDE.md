@@ -79,7 +79,7 @@ Name each new design-A (pass-through + CRPA) package with the next number:
   AJ_INFO 0x06030C0D, weights 0x400..0x42C + 6 image regs (AJ_NST 12 in gnss_passthrough), 17
   adaptive weights, ~108 DSP48 in the core (~142 in all). csim 16 pass (scenario 5 limit for 6 + 6:
   reflection out of reach, 22.5 dB vs optimum 23.8): field J/N 41 / 51 / 61 residual +1.6 / +5.5 /
-  +14.0 dB at 10 ms. NLMS only, no SMI, Linux only. Not yet run in Vitis by the user.
+  +14.0 dB at 10 ms. NLMS only, no SMI, Linux only. Not yet run in Vitis by the user. Commit 9d13533.
 - Next package: `crpa15`.
 
 Files per package: `crpaN-full-src.zip.part1`, `crpaN-full-src.zip.part2`,
