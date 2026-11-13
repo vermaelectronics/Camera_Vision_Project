@@ -74,7 +74,13 @@ Name each new design-A (pass-through + CRPA) package with the next number:
   csim 16 scenarios pass (10 ms): J/N 41 +1.3 dB, 51 +4.2, 61 +12 dB residual; 100 ms: 51 +0.8,
   61 +7.6 (SMI optimum +0.7 / +4.0). Not yet run in Vitis by the user. Commit 6d9aadd.
   The paused SFAP-PI 128 BRAM work is commit 01f279c (WIP, not a package).
-- Next package: `crpa14`.
+- `crpa14` (2026-11-13): crpa13 with **6 + 6 taps** (user: "only use 6x6 taps", then chose
+  "Only 6 x 6" and keep the 3 + 3 image taps): NL_NT / AJ_NT 6, NL_REF / AJ_REF 3, nlms_pi 1.1,
+  AJ_INFO 0x06030C0D, weights 0x400..0x42C + 6 image regs (AJ_NST 12 in gnss_passthrough), 17
+  adaptive weights, ~108 DSP48 in the core (~142 in all). csim 16 pass (scenario 5 limit for 6 + 6:
+  reflection out of reach, 22.5 dB vs optimum 23.8): field J/N 41 / 51 / 61 residual +1.6 / +5.5 /
+  +14.0 dB at 10 ms. NLMS only, no SMI, Linux only. Not yet run in Vitis by the user.
+- Next package: `crpa15`.
 
 Files per package: `crpaN-full-src.zip.part1`, `crpaN-full-src.zip.part2`,
 `crpaN-kit.zip`, `SHA256SUMS-crpaN.txt`.

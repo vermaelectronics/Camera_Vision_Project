@@ -75,7 +75,7 @@
  * AJ_COMMIT hands all of them to the filter in one clock. AJ_COMMIT reads back a
  * commit counter. crpa13: the weights are adapted in the FPGA (nlms_pi, hardware
  * NLMS); AJ_W, AJ_WC and AJ_WCX are READ ONLY: the weights the core runs now. */
-#define GNSS_PT_REG_AJ_W(k)         (0x400U + ((k) * 4U)) /* RO (crpa13), k = 0..2*AJ_NT-1: running space-time weights */
+#define GNSS_PT_REG_AJ_W(k)         (0x400U + ((k) * 4U)) /* RO (crpa13), k = 0..2*AJ_NT-1 (crpa14: 0..11): running space-time weights */
 #define GNSS_PT_REG_AJ_COMMIT       0x180U  /* W: commit, R: count            */
 #define GNSS_PT_REG_AJ_INFO         0x184U  /* RO 0x10040C06                  */
 #define GNSS_PT_REG_AJ_CFG          0x188U  /* RW [0] bypass, [10:8] shift, [14:12] weight scale */
@@ -92,7 +92,7 @@
 #define GNSS_PT_REG_AJ_BLK_COUNT    0x1A4U  /* RO samples blanked since the counter clear */
 #define GNSS_PT_REG_AJ_BLK_BURSTS   0x1A8U  /* RO bursts blanked since the counter clear  */
 #define GNSS_PT_REG_AJ_RX_PEAK      0x1ACU  /* RO [15:0] largest |I|,|Q| of RX1/RX2 in the last window, [31:16] window counter */
-#define GNSS_PT_AJ_INFO_EXPECTED    0x08040C0DU   /* crpa13: 8 taps per channel, reference delay 4, layout 13 (weights from the hardware NLMS only) */
+#define GNSS_PT_AJ_INFO_EXPECTED    0x06030C0DU   /* crpa14: 6 taps per channel, reference delay 3, layout 13 (weights from the hardware NLMS only); crpa13: 0x08040C0D */
 #define GNSS_PT_AJ_LAYOUT_NEEDED    13U           /* crpa13 firmware: nlms_pi (no SMI weight registers) + AJ_GAIN, clip counters, meters */
 #define GNSS_PT_REG_AJ_NLMS         0x1E0U  /* RW shadow (crpa10): [15:0] step m, [20:16] shift, [31] adapt (crpa13: 0 = weights held) */
 #define GNSS_PT_REG_AJ_NLMS_ACT     0x1E4U  /* RO committed NLMS word */

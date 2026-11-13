@@ -1277,7 +1277,7 @@ void gnss_aj_enable(int on)
 				return;
 			}
 			if((info & 0xFFU) != GNSS_PT_AJ_LAYOUT_NEEDED) {
-				console_print("gnss_aj: the bitstream's AJ_INFO layout is %d, this firmware (crpa13) needs %d: weights from the\n"
+				console_print("gnss_aj: the bitstream's AJ_INFO layout is %d, this firmware (crpa14) needs %d: weights from the\n"
 					      "         hardware NLMS only (nlms_pi), AJ_GAIN, clip counters, power meters (AJ_INFO 0x%x). Anti-jam NOT started:\n"
 					      "         rebuild the WHOLE project (./build.sh reset, then the full build) so they match.\n",
 					      (long)(info & 0xFFU), (long)GNSS_PT_AJ_LAYOUT_NEEDED, (unsigned long)info);

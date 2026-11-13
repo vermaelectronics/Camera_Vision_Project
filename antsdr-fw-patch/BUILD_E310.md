@@ -356,7 +356,7 @@ sudo dfu-util -a uboot-env.dfu -D ./uboot-env.dfu
 
 ---
 
-## 7. GNSS anti-jam (crpa13: hardware NLMS): RX1 + RX2 -> FPGA -> TX1
+## 7. GNSS anti-jam (crpa14: hardware NLMS, 6 + 6 taps): RX1 + RX2 -> FPGA -> TX1
 
 The `0003` patches put the GNSS anti-jam into this Linux firmware ("design A"):
 AD9361 LVDS 2R2T, `gnss_passthrough` v4.9.14, a space-time filter core between
@@ -364,7 +364,7 @@ RX1/RX2 and TX1, and the `gnss_crpa` service with its console. One feature of
 the Linux port is new: **band 7, your own RF values, set at any time from PuTTY**.
 
 ```text
-antenna 1 -> RX1 \                    nlms_pi space-time anti-jam (8 + 8 taps,
+antenna 1 -> RX1 \                    nlms_pi space-time anti-jam (6 + 6 taps,
                   AD9361 -> FPGA  gnss_passthrough  3 + 3 image taps, NLMS) -> AD9361 -> TX1
 antenna 2 -> RX2 /  LVDS 2R2T         + pulse blanker                     -> coax + attenuator + DC block
                     61.44 MS/s                                               -> GNSS receiver -> GNSS Viewer
@@ -378,6 +378,42 @@ antenna 2 -> RX2 /  LVDS 2R2T         + pulse blanker                     -> coa
   LVDS. U-Boot defaults to `mode=2r2t`.
 * **Firmware (buildroot 0003):** `gnss_crpa`, started at boot: self-test,
   band, anti-jam on, TX1 on.
+
+### crpa14: 6 + 6 taps
+
+crpa14 is crpa13 (below) with **6 taps per antenna (6 + 6), reference delay 3**
+(as crpa1/crpa2), the 3 + 3 image taps kept: 17 adaptive weights instead of 21.
+Core `nlms_pi` 1.1, **`AJ_INFO` = `0x06030C0D`**, running weights at
+0x400-0x42C (12 words; 0x430-0x4FC read 0) and the six image-tap registers.
+Everything else is crpa13: NLMS only, no SMI, Linux only.
+
+| Where | crpa14 (6 + 6) | crpa13 (8 + 8) |
+|---|---|---|
+| `hls/nlms_pi/nlms_pi.h` `NL_NT` / `NL_REF` | 6 / 3 | 8 / 4 |
+| `gnss_aj_math.h` `AJ_NT` / `AJ_REF` | 6 / 3 | 8 / 4 |
+| `AJ_INFO` (hdl 0003) | `0x06030C0D` | `0x08040C0D` |
+| adaptive weights | 5 RX1 + 6 RX2 + 6 image = 17 | 7 + 8 + 6 = 21 |
+| DSP48 in `nlms_pi` (estimate) | about 108 (51 filter, 51 NLMS, 6) | about 132 |
+| DSP48 in design A (estimate) | about 142 of 220 (65 %) | about 166 (75 %) |
+
+C simulation, 6 + 6, NLMS from zero weights, 300000 samples (about 10 ms at
+30.72 MS/s), suppression / residual (optimum residual of the same 17 taps):
+
+| Scenario | 6 + 6 (crpa14) | 8 + 8 (crpa13) |
+|---|---|---|
+| 2: wideband, J/N 30 dB | 36.2 dB / +0.55 dB (+0.12) | 37.3 / +0.45 |
+| 4: CW, J/N 40 dB | 64.3 dB / +0.04 dB | 60.6 / +0.06 |
+| 5: wideband + reflection 3 samples later | 22.5 dB / +3.3 dB (+2.5) | 36.9 / +0.45 |
+| 6: wideband 50 dB, I/Q imbalance | 47.1 dB / +2.8 dB (+0.9) | 48.2 / +2.3 |
+| 8: wideband 60 dB, I/Q imbalance | 47.4 dB / +9.2 dB (+3.7) | 48.7 / +8.2 |
+| 9: CW 62 dB on the satellite | 69.8 dB / +0.17 dB | 70.1 / +0.15 |
+| 11 / 12 / 13: field J/N 61 / 51 / 41 dB | 43.9 / 43.8 / 41.9 dB; +14.0 / +5.5 / +1.6 dB | 46.1 / 45.7 / 43.1; +12.0 / +4.2 / +1.3 |
+| 26: drifting jammer, adapting residual at the end | +2.6 dB | +2.2 dB |
+
+6 + 6 is about 1-2 dB below 8 + 8 on wideband jammers and cannot cancel a
+reflection that arrives more than 2 samples after the direct jammer (its RX1
+taps end at delay 5), but uses about 24 DSP48 less. All 16 scenarios pass
+(scenario 5 with the 6 + 6 limit).
 
 ### crpa13: weights from the hardware NLMS only (no SMI)
 
@@ -401,8 +437,8 @@ normalisation g2, make-up shift, fine gain) and adapts its 21 weights with a
 * No weight registers from the ARM any more: `AJ_W` (0x400-0x43C), `AJ_WC`
   (0x190/0x194) and `AJ_WCX` (0x1C0-0x1CC) now **read back the running
   weights** (the core sends one per sample to `gnss_passthrough`).
-* `AJ_INFO` = **`0x08040C0D`** (8 taps, delay 4, layout 13). The firmware
-  refuses to start the anti-jam on another layout.
+* `AJ_INFO` = `0x08040C0D` in crpa13 (8 taps, delay 4, layout 13); crpa14:
+  `0x06030C0D`. The firmware refuses to start the anti-jam on another bitstream.
 * Kept: fine gain `AJ_GAIN`, ADC clip counters `AJ_CLIP1/2`, FPGA power
   meters `AJ_PWR_IN/OUT`, pulse blanker, one ARM core (no worker thread).
 * Gone: SMI solver, weight smoothing (`gnss_aj_ramp=`), solver averaging
@@ -455,7 +491,7 @@ crpa12 weight registers in `gnss_passthrough` (about 1700 flip-flops) and the
 2048-bit weight bus are gone.
 
 To build in a folder that was already patched for another package (crpa1 to
-crpa12), start from clean sources; `./build.sh patch` stops with "does not
+crpa13), start from clean sources; `./build.sh patch` stops with "does not
 apply" otherwise:
 
 ```bash
@@ -560,7 +596,7 @@ The service:
 |---|---|
 | `gnss: the gnss_crpa service is not running` | `/etc/init.d/S95gnss_crpa start`, then `tail /var/log/gnss_crpa.log` |
 | `hardware not available` | The board runs an older bitstream. Copy the new `BOOT.bin` to the SD card. |
-| `AJ_INFO layout is 12, this firmware (crpa13) needs 13` | Old (crpa10-12) `BOOT.bin` with the new firmware: copy the whole new SD image. |
+| `AJ_INFO layout is 12, this firmware (crpa14) needs 13` / `bitstream has 8 taps per channel, this firmware needs 6` | Old (crpa10-13) `BOOT.bin` with the new firmware: copy the whole new SD image. |
 | `NLMS loop diverging ... step x0.5` | The step was too large for this jammer; the firmware cleared the weights and halved it. With `gnss_aj_nlms_mu=` set by hand, lower it or set 0 (automatic). |
 | `gnss_pt: … version` mismatch in the self-test | Same: old `BOOT.bin`. |
 | `no RX capture` | Another program (IIO Oscilloscope, `iio_readdev`) holds the RX buffer. Close it and restart the service. |

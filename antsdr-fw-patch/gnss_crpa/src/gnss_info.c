@@ -581,10 +581,10 @@ static void info_registers(void)
     console_print("   0x34  TX_COUNT_CH1    RO\n");
     console_print("   0x38  RX_SNAPSHOT_CH1 RO\n");
     console_print("   0x40  CRPA_COEF0..15  RW  0x40-0x7C, stored but unused\n");
-    console_print("   0x400 AJ_W0..15       RO  running NLMS weights (crpa13), Q3.12 x 2^ws: 0..7 RX1, 8..15 RX2\n");
+    console_print("   0x400 AJ_W0..11       RO  running NLMS weights (crpa14), Q3.12 x 2^ws: 0..5 RX1, 6..11 RX2\n");
     console_print("                             {imag, real}\n");
     console_print("   0x180 AJ_COMMIT       W/R write: all AJ_* -> filter; read: count\n");
-    console_print("   0x184 AJ_INFO         RO  0x08040C0D (8 taps, ref 4, Q3.12, layout 13 = NLMS only)\n");
+    console_print("   0x184 AJ_INFO         RO  0x06030C0D (6 taps, ref 3, Q3.12, layout 13 = NLMS only)\n");
     console_print("   0x188 AJ_CFG          RW  [0] bypass (reset 1), [10:8] make-up\n");
     console_print("   0x18C AJ_NORM         RW  RX2 normalisation g2, Q3.13 (0x2000=1)\n");
     console_print("   0x190 AJ_WC0/WC1      RO  running image taps at R (0x190 RX1, 0x194 RX2)\n");

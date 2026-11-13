@@ -1,6 +1,7 @@
 // ============================================================================
 //  nlms_pi.h  --  space-time power-inversion core with the weights adapted by
-//                 a hardware NLMS loop only (antsdr-fw-patch crpa13, nlms_pi 1.0)
+//                 a hardware NLMS loop only (antsdr-fw-patch crpa13, nlms_pi 1.0;
+//                 crpa14: 6 + 6 taps, nlms_pi 1.1)
 //  ANTSDR E310 V1 / GNSS CRPA project, Vitis HLS 2023.2
 //
 //  crpa13: the SMI solver is gone. crpa1-crpa12 computed the weights on the
@@ -18,11 +19,11 @@
 #include "ap_int.h"
 #include "hls_stream.h"
 
-#define NL_NT      8     // taps per antenna (8 + 8, as crpa10-12)
-#define NL_REF     4     // RX1 reference tap delay (fixed at 1)
+#define NL_NT      6     // taps per antenna (crpa14: 6 + 6; crpa13 and crpa10-12: 8 + 8)
+#define NL_REF     3     // RX1 reference tap delay (fixed at 1); crpa14: 3 (as crpa1/2 6 + 6), crpa13: 4
 #define NL_NIMG    3     // image (conjugate) taps per antenna at delays REF-1, REF, REF+1
 #define NL_IMGH    ((NL_NIMG - 1) / 2)
-#define NL_NW      (2 * NL_NT + 2 * NL_NIMG)   // 22 weight words (word NL_REF is never used)
+#define NL_NW      (2 * NL_NT + 2 * NL_NIMG)   // 18 weight words (word NL_REF is never used); crpa13: 22
 
 #define NL_WFRAC  12     // weights as used by the filter: signed Q3.12 (1.0 = 4096)
 #define NL_GFRAC  13     // RX2 normalisation g2, signed Q3.13 (1.0 = 8192)

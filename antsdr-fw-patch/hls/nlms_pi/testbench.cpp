@@ -21,7 +21,7 @@
 //  held (nlms[31] = 0) and the jammer, the noise and the sum are passed
 //  through separately: suppression, residual (output / output of the same
 //  weights on the noise alone, 0 dB = fully nulled), satellite SNR loss. The
-//  same figures for the OPTIMUM weights of the same 21 taps (Wiener solution
+//  same figures for the OPTIMUM weights of the same taps (Wiener solution
 //  in double precision from the training data) show how close NLMS gets.
 //
 //  Scenario (argv[1]); each needs a freshly reset core, so the csim script
@@ -30,7 +30,7 @@
 //       large enough to saturate the weights), bypass and weight-scale changes,
 //       against an integer reference model of the core; also the weight monitor
 //    2  wideband jammer 30 dB
-//    3  no jammer: bypass is exactly x1[n-4]; with the filter in and NLMS on,
+//    3  no jammer: bypass is exactly x1[n-R]; with the filter in and NLMS on,
 //       output within 0.5 dB of RX1, satellite loss <= 0.5 dB
 //    4  CW jammer 40 dB
 //    5  wideband jammer 30 dB plus a reflection (-6 dB, 3 samples later)
@@ -308,7 +308,7 @@ static int test_bitexact() {
             if (ref.cwr[j] != 0) nonzero++;
         }
     }
-    // bypass: exactly x1[n-4]
+    // bypass: exactly x1[n-R]
     g_cfg = NL_CFG_BYPASS; g_gain = NL_GAIN_ONE; g_nlms = 0x80000000u | 0xFFFF;
     int byp_bad = 0;
     std::vector<int> ha(20000), hb(20000);
@@ -389,7 +389,7 @@ static double irr_db(double eps, double ph_deg) {
     return 10 * std::log10(std::norm(mu) / std::norm(nu));
 }
 
-// the 21 adaptive taps of sample n (as the core multiplies them), d = x1[n-R]
+// the adaptive taps of sample n (as the core multiplies them), d = x1[n-R]
 static void taps_of(const cvec &x1, const cvec &x2n, int n, cd *u) {
     int q = 0;
     for (int k = 0; k < NL_NT; k++) if (k != NL_REF) u[q++] = x1[n - k];
@@ -646,7 +646,9 @@ static int test_jammer(int id, Scen sc) {
     case 2:  ok = m.supp >= 35 && m.loss <= 3 && m.res <= 1.0; break;
     case 3:  ok = std::fabs(m.out_db) <= 0.5 && std::fabs(m.loss) <= 1.0 && m.res <= 0.3 && wn2 <= 0.05; break;
     case 4:  ok = m.supp >= 55 && m.loss <= 3 && m.res <= 0.3; break;
-    case 5:  ok = m.supp >= 33 && m.res <= 1.0; break;
+    // 6 + 6 taps (reference delay 3) cannot reach a reflection 3 samples later on RX1 (it would need
+    // delay 6): the optimum of these taps is itself only ~24 dB there (crpa1 SMI 6 + 6: 20.4 dB)
+    case 5:  ok = (NL_NT >= 8) ? (m.supp >= 33 && m.res <= 1.0) : (m.supp >= 20 && m.res <= o_res + 1.5); break;
     case 6:  ok = m.supp >= 45 && m.loss <= 2.5 && m.res <= 3.5; break;
     case 7: {
         // the same without the normalisation (g2 = 1)

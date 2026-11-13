@@ -1,9 +1,11 @@
 // ============================================================================
 //  nlms_pi.cpp  --  space-time power inversion, weights from a hardware NLMS
-//                   loop only (antsdr-fw-patch crpa13, nlms_pi 1.0)
+//                   loop only (antsdr-fw-patch crpa13, nlms_pi 1.0; crpa14: 6 + 6 taps,
+//                   reference delay 3, nlms_pi 1.1)
 //  ANTSDR E310 V1 / GNSS CRPA project, Vitis HLS 2023.2
 //
 //  This is the crpa12 space-time filter (smi_pi 3.1: 8 + 8 taps, 3 + 3 image
+//  taps; crpa14: 6 + 6 taps, reference delay 3, the image taps kept;
 //  taps, RX2 normalisation, make-up shift, fine gain) with the SMI weight path
 //  removed: no weight words from the ARM, no weight smoothing. The weights are
 //  adapted by the delayed NLMS loop of crpa10 only, starting from zero.
@@ -15,7 +17,7 @@
 //       NL_NIMG image taps on each (widely linear, AD9361 I/Q mirror):
 //         y[n] = x1[n-R] - 2^-ws ( sum_{k != R} a_k x1[n-k] + sum_k b_k x2n[n-k]
 //                        + sum_d c1_d conj(x1[n-R-d]) + sum_d c2_d conj(x2n[n-R-d]) )
-//       R = NL_REF = 4, d = -1, 0, 1. The RX1 tap at delay R is the reference,
+//       R = NL_REF = 3 (crpa13: 4), d = -1, 0, 1. The RX1 tap at delay R is the reference,
 //       fixed at 1 (power inversion: the output can never be turned down as a
 //       whole, only the parts the two antennas see coherently).
 //    3. BYPASS                cfg[0] = 1: all weights cleared to 0, y = x1[n-R]
@@ -28,7 +30,7 @@
 //
 //  ADAPTATION (the only one in crpa13)
 //    Every sample, with nlms[31] = 1 and the filter in, each adaptive weight w_j
-//    (21 of them: 7 RX1, 8 RX2, 6 image) moves by
+//    (crpa14: 17 of them: 5 RX1, 6 RX2, 6 image; crpa13: 21) moves by
 //        w_j += (e[n-D] conj(u_j[n-D])) >> NL_CS,     e = y m 2^-sh
 //    u_j = the sample tap j multiplies (for an image tap conj(x), so its conj(u)
 //    is x), y = the filter output before the make-up gain (rounded to LSB,
@@ -60,14 +62,14 @@
 //    The filter uses the state rounded to Q3.12.
 //
 //  WEIGHT MONITOR: wmon (ap_vld) carries one rounded weight per sample, round
-//    robin over the 22 words, with its index in [39:32]; gnss_passthrough keeps
+//    robin over the 18 words (crpa13: 22), with its index in [39:32]; gnss_passthrough keeps
 //    the last value of each and the ARM reads them at the old weight addresses
 //    (0x400.., 0x190, 0x194, 0x1C0..0x1CC).
 //
 //  NUMBERS: x1 12 bits; x2n Q2 in 18 bits; weights Q3.12 (16 bits); products
 //    accumulated in Q14, 48 bits. 3-multiplier complex products (cmul3).
-//    DSP48: filter 21 x 3 = 63, NLMS steps 21 x 3 = 63, g2 2, error 2, fine
-//    gain 2: about 132.
+//    DSP48 (crpa14, 6 + 6): filter 17 x 3 = 51, NLMS steps 17 x 3 = 51, g2 2,
+//    error 2, fine gain 2: about 108 (crpa13, 8 + 8: about 132).
 // ============================================================================
 #include "nlms_pi.h"
 

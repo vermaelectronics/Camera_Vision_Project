@@ -38,10 +38,10 @@ extern "C" {
 #endif
 
 #ifndef AJ_NT
-#define AJ_NT        8    /* taps per antenna (8 + 8); must match NL_NT of nlms_pi */
+#define AJ_NT        6    /* taps per antenna (crpa14: 6 + 6; crpa13: 8 + 8); must match NL_NT of nlms_pi */
 #endif
 #ifndef AJ_REF
-#define AJ_REF       4    /* RX1 reference delay; must match NL_REF */
+#define AJ_REF       3    /* RX1 reference delay (crpa14: 3; crpa13: 4); must match NL_REF */
 #endif
 #define AJ_NSPT      (2 * AJ_NT)       /* space-time weight words: RX1 AJ_NT, then RX2 AJ_NT */
 /* AJ_NIMG image (conjugate) taps per channel at delays REF-1, REF, REF+1: the AD9361's I/Q

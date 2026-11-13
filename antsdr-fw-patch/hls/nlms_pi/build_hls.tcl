@@ -2,7 +2,8 @@
 #  build_hls.tcl  --  Vitis HLS 2023.2: nlms_pi.cpp -> block-design IP nlms_pi
 #
 #  Builds the space-time power-inversion filter with the weights adapted by a
-#  hardware NLMS loop only (antsdr-fw-patch crpa13, nlms_pi 1.0: 8 + 8 taps,
+#  hardware NLMS loop only (antsdr-fw-patch crpa14, nlms_pi 1.1: 6 + 6 taps, ref 3;
+#  crpa13 = nlms_pi 1.0, 8 + 8 taps;
 #  3 + 3 image taps, RX2 normalisation, bypass, make-up shift, fine gain; no
 #  SMI weights from the ARM, no smoothing) and packages it as a Vivado IP that
 #  the E310 block design (plutosdr-fw/hdl/projects/ant/system_bd.tcl, patch
@@ -36,7 +37,7 @@
 #    NLMS_PI_FW_DIR=<dir>  directory holding gnss_aj_math.c/.h
 #
 #  OUTPUT
-#    $GNSS_CRPA_IP_REPO/nlms_pi/component.xml, VLNV antsdr:gnss:nlms_pi:1.0
+#    $GNSS_CRPA_IP_REPO/nlms_pi/component.xml, VLNV antsdr:gnss:nlms_pi:1.1
 #    $GNSS_CRPA_IP_REPO/nlms_pi/nlms_pi_csynth.rpt
 #
 #  SUCCESS MARKER
@@ -139,9 +140,9 @@ if {$ii eq "" || $ii > $pipeline_ii} {
 
 # ---- 4 package as a Vivado IP ------------------------------------------------------
 export_design -format ip_catalog -rtl verilog \
-  -vendor antsdr -library gnss -version 1.0 -ipname nlms_pi \
+  -vendor antsdr -library gnss -version 1.1 -ipname nlms_pi \
   -display_name "NLMS power inversion, space-time" \
-  -description "Two-element space-time power-inversion anti-jam filter (Vitis HLS), weights adapted by a hardware delayed-NLMS loop only (no SMI): RX2 normalised to RX1 at the input, 8 taps on RX1 (reference tap at delay 4 fixed at 1), 8 on RX2 and 3 + 3 image (conjugate) taps, D = 64; real RX2 gain g2, bypass, output make-up and fine gain; step word from the ARM via gnss_passthrough, weights read back through wmon. s_axis_x = RX1 and RX2 IQ, m_axis_y = filtered RX1."
+  -description "Two-element space-time power-inversion anti-jam filter (Vitis HLS), weights adapted by a hardware delayed-NLMS loop only (no SMI): RX2 normalised to RX1 at the input, 6 taps on RX1 (reference tap at delay 3 fixed at 1), 6 on RX2 and 3 + 3 image (conjugate) taps, D = 64; real RX2 gain g2, bypass, output make-up and fine gain; step word from the ARM via gnss_passthrough, weights read back through wmon. s_axis_x = RX1 and RX2 IQ, m_axis_y = filtered RX1."
 
 set impl_dir [file join $work nlms_pi_hls sol impl]
 set ip_src   [file join $impl_dir ip]
@@ -166,6 +167,6 @@ file delete -force $out_ip
 file copy -force $ip_src $out_ip
 if {[file exists $rpt_txt]} { file copy -force $rpt_txt $out_ip }
 
-puts "NLMS_PI_HLS: IP antsdr:gnss:nlms_pi:1.0 -> $out_ip"
+puts "NLMS_PI_HLS: IP antsdr:gnss:nlms_pi:1.1 -> $out_ip"
 puts "NLMS_PI_HLS: PASS"
 exit 0
