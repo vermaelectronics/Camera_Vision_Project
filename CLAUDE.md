@@ -39,7 +39,13 @@ Name each new design-A (pass-through + CRPA) package with the next number:
   words, AJ_INFO 0x0A050C0A (layout 10), Linux solver in a worker thread
   (GNSS_AJ_THREAD). Eigen solver studied, not included (worse in csim 8).
   Commit 5990f02.
-- Next package: `crpa9`.
+- `crpa9` (2026-11-13): crpa8 + **3 + 3 image taps** (delays R-1, R, R+1; SMI_NIMG /
+  AJ_NIMG 3, smi_pi 2.8, AJ_WCX0..3 0x1C0-0x1CC, 79 DSP48) + **FPGA power meters**
+  AJ_PWR_IN/OUT/IDX 0x1D0-0x1D8 (res_fpga_db / jn_fpga_db in CSV), AJ_INFO
+  0x0A050C0B (layout 11). Studied and left out: 18-bit weights (no gain), NLMS
+  (not built). csim 25 (I/Q error across the band, J/N 61): residual 8.6 -> 3.2 dB.
+  Commit 342c6d7.
+- Next package: `crpa10`.
 
 Files per package: `crpaN-full-src.zip.part1`, `crpaN-full-src.zip.part2`,
 `crpaN-kit.zip`, `SHA256SUMS-crpaN.txt`.
