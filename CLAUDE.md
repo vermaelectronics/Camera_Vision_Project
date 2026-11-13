@@ -72,7 +72,7 @@ Name each new design-A (pass-through + CRPA) package with the next number:
   (clear + halve step), gnss_aj_nlms_mu= (0 = auto, saved as aj_nlms_step_e6), gnss_aj_nlms=0|1
   (hold), removed gnss_aj_avg/ramp/sweep/mode. baremetal/ removed, `./build.sh baremetal` refuses.
   csim 16 scenarios pass (10 ms): J/N 41 +1.3 dB, 51 +4.2, 61 +12 dB residual; 100 ms: 51 +0.8,
-  61 +7.6 (SMI optimum +0.7 / +4.0). Not yet run in Vitis by the user.
+  61 +7.6 (SMI optimum +0.7 / +4.0). Not yet run in Vitis by the user. Commit 6d9aadd.
   The paused SFAP-PI 128 BRAM work is commit 01f279c (WIP, not a package).
 - Next package: `crpa14`.
 
