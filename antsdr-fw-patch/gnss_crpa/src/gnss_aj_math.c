@@ -279,30 +279,11 @@ double aj_makeup_fine_db(int cut_db, double out_db, int shift)
 	return f;
 }
 
-uint32_t aj_nlms_word(double alpha, double p_in, int ws, int nw)
+double aj_anlms_alpha(double jn_db)
 {
-	/* m 2^-sh = alpha 2^(12 + ws + RF - 1 + CS) / (nw p_in)   (the -1: u is in Q1) */
-	double t;
-	int sh = 0, e = 12 + ws + AJ_NLMS_RF - 1 + AJ_NLMS_CS;
-	if(alpha <= 0.0 || p_in <= 0.0 || nw <= 0) return 0U;
-	t = alpha / ((double)nw * p_in);
-	while(e > 0) { t *= 2.0; e--; }
-	while(t < 32768.0 && sh < 31) { t *= 2.0; sh++; }
-	if(t > 65535.0) t = 65535.0;
-	return 0x80000000U | ((uint32_t)sh << 16) | (uint32_t)(t + 0.5);
-}
-
-double aj_nlms_alpha(double rho)
-{
-	double t, a;
-	if(rho < 0.0) rho = -rho;
-	if(rho >= AJ_NLMS_RHO_NB) return AJ_NLMS_ALPHA_NB;
-	if(rho <= AJ_NLMS_RHO_WB) return AJ_NLMS_ALPHA_WB;
-	/* AJ_NLMS_ALPHA_NB x (WB / NB)^t, t = 0..1 (WB / NB = 4 = 2^2: 2^(2t) by halving steps) */
-	t = (AJ_NLMS_RHO_NB - rho) / (AJ_NLMS_RHO_NB - AJ_NLMS_RHO_WB);
-	a = AJ_NLMS_ALPHA_NB;
-	while(t >= 0.5) { a *= 2.0; t -= 0.5; }
-	return a * (1.0 + 2.0 * t);          /* linear inside the last half step (no libm) */
+	if(jn_db < 35.0) return 0.05;
+	if(jn_db < 50.0) return AJ_ANLMS_ALPHA_DEF;
+	return 0.2;
 }
 
 int aj_makeup_shift(int cut_db, double out_db, int max_shift)
@@ -320,4 +301,90 @@ int aj_makeup_shift(int cut_db, double out_db, int max_shift)
 	if(s > max_shift) s = max_shift;
 	if(s < 0) s = 0;
 	return s;
+}
+
+/* ---- crpa16 / crpa17: NLMS on the ARM (see gnss_aj_math.h) ---------------------------------- */
+static double nl_wr[AJ_NW], nl_wi[AJ_NW];
+
+void aj_nlms_reset(void)
+{
+	int j;
+	for(j = 0; j < AJ_NW; j++) { nl_wr[j] = 0.0; nl_wi[j] = 0.0; }
+}
+
+static int16_t nl_q312(double v)
+{
+	double s = v * 4096.0;
+	s = (s >= 0.0) ? s + 0.5 : s - 0.5;
+	if(s > 32767.0)  return 32767;
+	if(s < -32768.0) return -32768;
+	return (int16_t)s;
+}
+
+int aj_nlms_solve(const uint32_t *buf, int nsamp, double g2, double rx2n,
+                  double alpha, int passes, aj_result_t *r)
+{
+	double ur[AJ_NW], ui[AJ_NW];
+	double pin = 0.0, pout = 0.0, wmax = 0.0, wn2 = 0.0, sc;
+	int n, j, p, cnt = 0, ws;
+
+	if(!buf || !r || nsamp != AJ_NSAMP || alpha <= 0.0 || passes < 1) return -1;
+	if(passes > AJ_ANLMS_PASSES_MAX) passes = AJ_ANLMS_PASSES_MAX;
+	if(g2 <= 0.0) g2 = 1.0;
+	if(rx2n <= 0.0) rx2n = 1.0;
+	unpack(buf, nsamp);                      /* 12-bit samples, DC removed (as aj_detect) */
+	ur[AJ_REF] = 0.0; ui[AJ_REF] = 0.0;      /* the reference tap: fixed at 1, no weight  */
+	for(p = 0; p < passes; p++) {
+		const int last = (p == passes - 1);
+		for(n = AJ_NT - 1; n < nsamp; n++) {
+			double dr = X1R[n - AJ_REF], di = X1I[n - AJ_REF];
+			double yr = dr, yi = di, nrm = 1.0, mu, er, ei;
+			int c;
+			for(j = 0; j < AJ_NT; j++) {
+				if(j != AJ_REF) { ur[j] = X1R[n - j]; ui[j] = X1I[n - j]; }
+				ur[AJ_NT + j] = g2 * X2R[n - j]; ui[AJ_NT + j] = g2 * X2I[n - j];
+			}
+			for(c = 0; c < AJ_NIMG; c++) {      /* image taps: conj(x) at REF-1, REF, REF+1 */
+				const int a = AJ_REF - AJ_IMGH + c;
+				ur[AJ_IMG0 + c] = X1R[n - a];                  ui[AJ_IMG0 + c] = -X1I[n - a];
+				ur[AJ_IMG0 + AJ_NIMG + c] = g2 * X2R[n - a];   ui[AJ_IMG0 + AJ_NIMG + c] = -g2 * X2I[n - a];
+			}
+			for(j = 0; j < AJ_NW; j++) {
+				yr -= nl_wr[j] * ur[j] - nl_wi[j] * ui[j];
+				yi -= nl_wr[j] * ui[j] + nl_wi[j] * ur[j];
+				nrm += ur[j] * ur[j] + ui[j] * ui[j];
+			}
+			mu = alpha / nrm;
+			er = mu * yr; ei = mu * yi;
+			for(j = 0; j < AJ_NW; j++) {     /* w += mu y conj(u) */
+				nl_wr[j] += er * ur[j] + ei * ui[j];
+				nl_wi[j] += ei * ur[j] - er * ui[j];
+			}
+			if(last) { pin += dr * dr + di * di; pout += yr * yr + yi * yi; cnt++; }
+		}
+	}
+	nl_wr[AJ_REF] = 0.0; nl_wi[AJ_REF] = 0.0;
+	for(j = 0; j < AJ_NW; j++) {
+		double m = nl_wr[j] * nl_wr[j] + nl_wi[j] * nl_wi[j];
+		if(!(m == m) || m > 64.0) {           /* not finite, or |w| > 8: start again */
+			aj_nlms_reset();
+			return 1;
+		}
+		if(m > wmax) wmax = m;
+		wn2 += (j >= AJ_NT && j < AJ_NSPT) || j >= AJ_IMG0 + AJ_NIMG ? m * rx2n : m;
+	}
+	/* the finest weight scale the words fit: |w| 2^ws <= 7.5 (Q3.12 stops at 8) */
+	wmax = aj_sqrt(wmax);
+	ws = 0;
+	while(ws < AJ_MAXWS && wmax * (double)(2 << ws) <= 7.5) ws++;
+	sc = (double)(1 << ws);
+	for(j = 0; j < AJ_NW; j++) {
+		r->wre[j] = nl_q312(nl_wr[j] * sc);
+		r->wim[j] = nl_q312(nl_wi[j] * sc);
+	}
+	r->ws = ws;
+	r->wn2 = wn2;
+	r->arm_pin = cnt ? pin / cnt : 0.0;
+	r->arm_pout = cnt ? pout / cnt : 0.0;
+	return 0;
 }

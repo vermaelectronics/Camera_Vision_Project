@@ -1,6 +1,7 @@
 /******************************************************************************
  *  gnss_aj.c  --  anti-jam engine (crpa13: the weights are adapted by the
- *  hardware NLMS loop in the FPGA, nlms_pi; no SMI solve on the ARM). See gnss_aj.h.
+ *  ARM by NLMS on the captures and applied by the FPGA filter stap_pi; crpa16 /
+ *  crpa17. crpa13/14 had the NLMS in the FPGA). See gnss_aj.h.
  *****************************************************************************/
 
 #include <stdio.h>
@@ -96,24 +97,17 @@ static void print_band_cover(void);       /* RF profiles section, below */
 static double   fine_db;                 /* fine output gain on top of the 6 dB make-up shift [dB] */
 static uint32_t gain_q14 = GNSS_PT_AJ_GAIN_ONE;
 
-/* ---- crpa13: the hardware NLMS loop is the only adaptation ------------------------------------
- * The FPGA core (nlms_pi) moves every weight each sample; the ARM sets the step from the RX1
- * power (FPGA meter) and the jammer's bandwidth, picks the weight scale, watches for a diverging
- * loop and reads the weights back for the reports. */
-#define AJ_DIV_RATIO      2.0      /* output (gains removed) above 2 x the RX1 power ...          */
-#define AJ_DIV_COUNT      3        /* ... in this many captures in a row: the loop diverges      */
-#define AJ_BACK_MIN       (1.0 / 16.0)   /* the step is never cut below 1/16 of the rule's        */
-#define AJ_WS_HOLD_US     1000000U /* a new weight scale must be wanted this long (it clears the weights) */
-static int      nlms_hw;                 /* bitstream has nlms_pi (AJ_INFO layout 13) */
-static double   nlms_mu_user;            /* gnss_aj_nlms_mu=: 0 = automatic (aj_nlms_alpha) */
-static double   nlms_mu = AJ_NLMS_ALPHA_WB;   /* the step in use */
-static double   nlms_back = 1.0;         /* divergence back-off: 1, 1/2, 1/4 ... */
-static uint32_t nlms_word;               /* the last word committed */
-static int      nlms_ws, ws_want, div_cnt;
-static uint32_t n_div;                   /* divergence resets */
-static uint32_t det_us_last, det_us_max; /* time of the detection maths per capture */
-static int      ws_target(void);
-static XTime    ws_t0;
+/* ---- crpa16 / crpa17: the weights by NLMS ON THE ARM ------------------------------------------
+ * Every capture while jammed, aj_nlms_solve() (gnss_aj_math.c) runs a normalised LMS over the
+ * capture (gnss_aj_nlms_pass= passes), continuing from the weights of the previous capture; the
+ * weights are committed to the FPGA filter (stap_pi) with the weight scale that fits them. */
+static int      st_hw;                   /* bitstream has stap_pi (AJ_INFO layout 14) */
+static double   nlms_mu_user;            /* gnss_aj_nlms_mu=: 0 = automatic (aj_anlms_alpha from J/N) */
+static double   nlms_mu = AJ_ANLMS_ALPHA_DEF;   /* the step in use */
+static int      nlms_pass = AJ_ANLMS_PASSES_DEF;
+static uint32_t n_div;                   /* weight resets (not finite / out of range) */
+static uint32_t solve_us_last, solve_us_max;   /* aj_nlms_solve per capture */
+static uint32_t det_us_last, det_us_max;       /* aj_detect per capture     */
 
 struct aj_event { uint32_t ms; int type; double v1, v2, v3; };
 static struct aj_event ev[AJ_NEV];
@@ -297,56 +291,32 @@ static int add_event(XTime now, int type, double v1, double v2, double v3)
 /* ---- FPGA filter ------------------------------------------------------------ */
 static void commit_bypass(void)
 {
-	/* bypass: TX1 = RX1 delayed by AJ_REF samples; the core clears its weights (crpa13) */
+	/* bypass: TX1 = RX1 delayed by AJ_REF samples (the core ignores the weights) */
 	shift = 0;
 	fine_db = 0.0; gain_q14 = GNSS_PT_AJ_GAIN_ONE;
 	gnss_rxg_set_digital_db(0);
 	blk_thr_set = blk_threshold(0);
-	nlms_word = 0;
-	gnss_pt_write_aj(GNSS_PT_AJ_CFG_BYPASS | blk_cfg_bit(blk_thr_set), g2_q13(), blk_thr_set, gain_q14, 0U);
-}
-
-static double rx1_power(void)
-{
-	double p = (double)gnss_pt_read(GNSS_PT_REG_AJ_PWR_IN);   /* FPGA meter, every sample */
-	return (p > 0.0) ? p : res.p1;                            /* else the capture's */
-}
-
-/* crpa13: the NLMS step word: alpha from the jammer's bandwidth (or gnss_aj_nlms_mu=), times the
- * divergence back-off, normalised by the RX1 power */
-static uint32_t nlms_step_word(void)
-{
-	double rho = aj_sqrt(res.rho1_re * res.rho1_re + res.rho1_im * res.rho1_im);
-	nlms_mu = (nlms_mu_user > 0.0 ? nlms_mu_user : aj_nlms_alpha(rho)) * nlms_back;
-	return aj_nlms_word(nlms_mu, rx1_power(), nlms_ws, AJ_MAXDIM);
+	gnss_pt_write_aj(NULL, NULL, GNSS_PT_AJ_CFG_BYPASS | blk_cfg_bit(blk_thr_set), g2_q13(), blk_thr_set, gain_q14);
 }
 
 static void commit_filter(void)
 {
 	gnss_rxg_set_digital_db(6 * shift + (int)(fine_db + 0.5));
 	blk_thr_set = blk_threshold(1);
-	nlms_word = aj_frozen ? 0U : nlms_step_word();       /* frozen: the weights are held */
-	gnss_pt_write_aj(GNSS_PT_AJ_CFG_SHIFT(shift) | GNSS_PT_AJ_CFG_WS(nlms_ws) | blk_cfg_bit(blk_thr_set),
-	                 g2_q13(), blk_thr_set, gain_q14, nlms_word);
-}
-
-/* a short bypass: the core clears its weights (they re-adapt from 0) */
-static void clear_weights(void)
-{
-	gnss_pt_write_aj(GNSS_PT_AJ_CFG_BYPASS | blk_cfg_bit(blk_thr_set), g2_q13(), blk_thr_set, gain_q14, 0U);
-	commit_filter();
+	gnss_pt_write_aj(res.wre, res.wim, GNSS_PT_AJ_CFG_SHIFT(shift) | GNSS_PT_AJ_CFG_WS(res.ws) | blk_cfg_bit(blk_thr_set),
+	                 g2_q13(), blk_thr_set, gain_q14);
 }
 
 /* crpa9: the FPGA power meters (AJ_PWR_IN/OUT, every sample, 2^16-sample windows).
  * Residual = output power / what the output would carry with no jammer:
  * noise floor x (1 + |w|^2) x the output gain^2 (make-up shift and fine gain).
  * J/N from the RX1 meter against the learned noise floor. Returns 0 if not available.
- * crpa13: this is THE residual (no SMI statistics); |w|^2 from the weights read back. */
+ * crpa13-17: this is THE residual; |w|^2 from the weights the ARM committed. */
 static int hw_levels(double *res_db, double *jn_db)
 {
 	uint32_t pin, pout;
 	double nz, gain, nout;
-	if(!nlms_hw) return 0;
+	if(!st_hw) return 0;
 	pin = gnss_pt_read(GNSS_PT_REG_AJ_PWR_IN);
 	pout = gnss_pt_read(GNSS_PT_REG_AJ_PWR_OUT);
 	nz = noise_now();
@@ -468,7 +438,7 @@ static void print_line(XTime now)
 		print_type();
 		console_print(" | RX %d/%d dB  make-up +%s dB  TX att %s dB | NLMS alpha %s, %d checks/s%s\n",
 			      (long)cur_gain(), (long)gnss_rxg_ref(), f1u(6.0 * shift + fine_db),
-			      f2u(tx_att_db()), fmt(nlms_mu, 4, 0), (long)upd_rate, (char*)(aj_frozen ? " HELD" : ""));
+			      f2u(tx_att_db()), fmt(nlms_mu, 3, 0), (long)upd_rate, (char*)(aj_frozen ? " HELD" : ""));
 	} else {
 		console_print("clear   noise %s LSB^2  coherence %s dB  power J/N %s | RX %d/%d dB"
 			      "  TX att %s dB%s | g2 %s dB | bypass, %d checks/s%s\n",
@@ -735,11 +705,8 @@ static void enter_jammed(XTime now)
 		g2_src = 2;
 	}
 	gain_seen = gnss_rxg_changes();
-	/* crpa13: the NLMS loop starts from zero weights (the bypass cleared them) with the full step */
-	nlms_back = 1.0;
-	div_cnt = 0;
-	nlms_ws = ws_want = ws_target();
-	ws_t0 = now;
+	/* crpa16: the ARM NLMS starts from zero weights for every new jammer */
+	aj_nlms_reset();
 }
 
 static void leave_jammed(XTime now)
@@ -941,7 +908,7 @@ static void jammed_state(XTime now)
 			      "     Two antennas null ONE direction (plus its reflections). Check that\n"
 			      "     RX2 has its antenna, that there is a single jammer, and the ADC peak\n"
 			      "     (gnss_rx_gain?). The NLMS loop keeps converging for a while on a strong\n"
-			      "     wideband jammer (gnss_aj_nlms? shows the step).\n", f1(res.res_db));
+			      "     wideband jammer (gnss_aj_nlms? shows the step and the passes).\n", f1(res.res_db));
 		}
 		add_event(now, EV_LEAK, res.res_db, res.jn_db, 0.0);
 	}
@@ -956,35 +923,6 @@ static int detect_capture(XTime now)
 /* ---- JAMMED: the NLMS loop in the FPGA adapts the weights; per capture the ARM measures,
  * sets the step, the weight scale and the output gain, and watches the loop ---------------- */
 
-/* the weight scale for this jammer: finer weight steps for a very strong jammer (the null has
- * to be deeper than a Q3.12 step allows), never for an RX2 so weak that g2 hit its limit (its
- * weights are large) */
-static int ws_target(void)
-{
-	double rho = aj_sqrt(res.rho1_re * res.rho1_re + res.rho1_im * res.rho1_im);
-	if(g2 >= 0.99 * AJ_G2_MAX) return 0;
-	if(rho >= AJ_NLMS_RHO_NB) return (res.jn_db >= 50.0) ? 2 : 0;     /* CW / narrow: |w| ~0.1 */
-	return (res.jn_db >= 55.0) ? 1 : 0;                               /* wideband: |w| ~1      */
-}
-
-static int is_rx2_tap(int k) { return (k >= AJ_NT && k < AJ_NSPT) || k >= AJ_IMG0 + AJ_NIMG; }
-
-/* the running weights from the core's weight monitor; |w|^2 weighted by each tap's noise */
-static void read_weights(void)
-{
-	int k;
-	double s = 0.0, sc = 4096.0 * (double)(1 << nlms_ws), m;
-	for(k = 0; k < AJ_NW; k++) {
-		uint32_t w = gnss_pt_read_weight(k);
-		res.wre[k] = (int16_t)(w & 0xFFFFU);
-		res.wim[k] = (int16_t)(w >> 16);
-		m = ((double)res.wre[k] * res.wre[k] + (double)res.wim[k] * res.wim[k]) / (sc * sc);
-		s += is_rx2_tap(k) ? m * rx2n : m;
-	}
-	res.ws = nlms_ws;
-	res.wn2 = s;
-}
-
 /* largest |w| as used (/ 2^ws) */
 static double w_max(void)
 {
@@ -994,7 +932,7 @@ static double w_max(void)
 		v = (double)res.wre[k] * res.wre[k] + (double)res.wim[k] * res.wim[k];
 		if(v > m) m = v;
 	}
-	return aj_sqrt(m) / (4096.0 * (double)(1 << nlms_ws));
+	return aj_sqrt(m) / (4096.0 * (double)(1 << res.ws));
 }
 
 /* suppression and residual from the FPGA meters (every sample, 2^16-sample windows) */
@@ -1002,12 +940,15 @@ static void nlms_levels(void)
 {
 	double pin = (double)gnss_pt_read(GNSS_PT_REG_AJ_PWR_IN), pout = (double)gnss_pt_read(GNSS_PT_REG_AJ_PWR_OUT);
 	double nz = noise_now(), g = (double)(1U << shift) * (double)gain_q14 / 16384.0, po, nout, pj, pr;
-	if(pin <= 0.0 || pout <= 0.0) { res.res_db = 99.0; res.supp_db = 0.0; return; }   /* no meter reading: not nulled */
-	po = pout / (g * g);                       /* output power before the make-up gain */
+	if(pin <= 0.0 || pout <= 0.0) {               /* no meter reading: the ARM's own figures */
+		pin = res.arm_pin; po = res.arm_pout;
+		if(pin <= 0.0 || po <= 0.0) { res.res_db = 99.0; res.supp_db = 0.0; return; }
+	} else {
+		po = pout / (g * g);                       /* output power before the make-up gain */
+	}
 	if(nz <= 0.0 && res.jn_coh_db > -90.0)
 		nz = pin / (1.0 + db2lin(res.jn_coh_db));   /* no learned floor: the noise from the RX1/RX2 coherence */
 	if(nz <= 0.0) {
-		/* no clean floor learned yet (jammer since power-up): only the power ratio is known */
 		res.supp_db = aj_db10(pin / po);
 		res.res_db = 0.0;
 	} else {
@@ -1020,54 +961,39 @@ static void nlms_levels(void)
 	if(res.supp_db < -30.0) res.supp_db = -30.0;
 }
 
-/* a diverging loop (step too large for this jammer: output above the input): clear the weights
- * and halve the step; the rule's step comes back with the next jammer */
-static void nlms_guard(XTime now)
-{
-	double pin = (double)gnss_pt_read(GNSS_PT_REG_AJ_PWR_IN), pout = (double)gnss_pt_read(GNSS_PT_REG_AJ_PWR_OUT);
-	double g = (double)(1U << shift) * (double)gain_q14 / 16384.0;
-	if(aj_frozen || pin <= 0.0) { div_cnt = 0; return; }
-	if(pout / (g * g) > AJ_DIV_RATIO * pin) div_cnt++;
-	else div_cnt = 0;
-	if(div_cnt < AJ_DIV_COUNT) return;
-	div_cnt = 0;
-	n_div++;
-	if(nlms_back > AJ_BACK_MIN) nlms_back *= 0.5;
-	clear_weights();
-	if(ev_print(now)) {
-		stamp(now);
-		console_print("NLMS loop diverging (output %s dB above RX1): weights cleared, step x%s\n",
-			      f1(aj_db10(pout / (g * g) / pin)), f3u(nlms_back));
-	}
-}
-
-/* weights near the edge of the range for this scale: one step coarser */
-static void nlms_ws_update(XTime now)
-{
-	int t = ws_target();
-	if(nlms_ws > 0 && w_max() > 0.9 * 8.0 / (double)(1 << nlms_ws)) t = nlms_ws - 1;
-	if(t != ws_want) { ws_want = t; ws_t0 = now; }
-	if(ws_want != nlms_ws && (now - ws_t0 >= us(AJ_WS_HOLD_US) || ws_want < nlms_ws)) {
-		nlms_ws = ws_want;                     /* the core clears the weights on a new scale */
-		div_cnt = 0;
-	}
-}
-
+/* JAMMED: measure (detection), run the ARM NLMS on this capture, commit the weights */
 static void nlms_capture(XTime now)
 {
-	int want;
+	int want, rc;
+	XTime t0, t1;
+	uint32_t u;
 	prep_detect();
 	if(run_detect(GNSS_AJ_BUF_PTR, &res) != 0 || !res.ok) {
 		n_fail++;
 		return;
 	}
-	res_valid = res_solved = 1;
+	res_valid = 1;
+	if(aj_frozen) {                              /* held: no new weights, levels only */
+		nlms_levels();
+		jammed_state(now);
+		return;
+	}
+	nlms_mu = (nlms_mu_user > 0.0) ? nlms_mu_user : aj_anlms_alpha(res.jn_db > -90.0 ? res.jn_db : res.jn_coh_db);
+	XTime_GetTime(&t0);
+	rc = aj_nlms_solve(GNSS_AJ_BUF_PTR, AJ_NSAMP, g2, rx2n, nlms_mu, nlms_pass, &res);
+	XTime_GetTime(&t1);
+	u = (uint32_t)((uint64_t)(t1 - t0) * 1000000U / COUNTS_PER_SECOND);
+	solve_us_last = u;
+	if(u > solve_us_max) solve_us_max = u;
+	if(rc < 0) { n_fail++; return; }
+	if(rc == 1) {
+		n_div++;
+		if(ev_print(now)) { stamp(now); console_print("NLMS weights out of range: started again from 0\n"); }
+	}
+	res_solved = 1;
 	n_upd++;
 	cnt_upd++;
-	read_weights();
 	nlms_levels();
-	nlms_guard(now);
-	nlms_ws_update(now);
 
 	/* Output make-up gain: 6 dB per step of RX gain cut (up to 42 dB), so the
 	 * output into the receiver stays at the clean level; never more than 3 dB
@@ -1077,8 +1003,7 @@ static void nlms_capture(XTime now)
 	else if(want > shift) shift++;
 	fine_db = aj_makeup_fine_db(cut_db(), res.res_db + aj_db10(1.0 + res.wn2), shift);
 	gain_q14 = gain_word(fine_db);
-	if(!aj_frozen)
-		commit_filter();
+	commit_filter();
 	jammed_state(now);
 }
 
@@ -1233,7 +1158,7 @@ void gnss_aj_init(void)
 	t_key = now - us(AJ_KEY_QUIET_US);
 	sh_max = ((gnss_pt_read(GNSS_PT_REG_AJ_INFO) & 0xFFU) >= 4U) ? AJ_MAXSH : 4;
 	blk_hw = ((gnss_pt_read(GNSS_PT_REG_AJ_INFO) & 0xFFU) >= GNSS_PT_AJ_LAYOUT_BLANK);
-	nlms_hw = ((gnss_pt_read(GNSS_PT_REG_AJ_INFO) & 0xFFU) == GNSS_PT_AJ_LAYOUT_NEEDED);
+	st_hw = ((gnss_pt_read(GNSS_PT_REG_AJ_INFO) & 0xFFU) == GNSS_PT_AJ_LAYOUT_NEEDED);
 	blk_seeded = 0;
 	if(!blk_hw)
 		console_print("[AJ] NOTE: the bitstream has no pulse blanker (AJ_INFO layout %d, needs 5 = bitstream 4.6): pulsed\n"
@@ -1277,8 +1202,8 @@ void gnss_aj_enable(int on)
 				return;
 			}
 			if((info & 0xFFU) != GNSS_PT_AJ_LAYOUT_NEEDED) {
-				console_print("gnss_aj: the bitstream's AJ_INFO layout is %d, this firmware (crpa14) needs %d: weights from the\n"
-					      "         hardware NLMS only (nlms_pi), AJ_GAIN, clip counters, power meters (AJ_INFO 0x%x). Anti-jam NOT started:\n"
+				console_print("gnss_aj: the bitstream's AJ_INFO layout is %d, this firmware (crpa16/17) needs %d: stap_pi with the\n"
+					      "         weights from the ARM, AJ_GAIN, clip counters, power meters (AJ_INFO 0x%x). Anti-jam NOT started:\n"
 					      "         rebuild the WHOLE project (./build.sh reset, then the full build) so they match.\n",
 					      (long)(info & 0xFFU), (long)GNSS_PT_AJ_LAYOUT_NEEDED, (unsigned long)info);
 				return;
@@ -1335,14 +1260,9 @@ int  gnss_aj_jammer_on(void) { return state == ST_JAMMED; }
 
 void gnss_aj_freeze(int on)
 {
-	/* crpa13: frozen = the NLMS loop stops (the weights are held as they are); the bypass
-	 * and the output gain stay as they are too */
+	/* frozen = the ARM stops calculating new weights; the committed ones (and the bypass)
+	 * stay as they are */
 	aj_frozen = on ? 1 : 0;
-	if(state == ST_JAMMED && res_solved) {
-		nlms_word = aj_frozen ? 0U : nlms_step_word();
-		gnss_pt_write(GNSS_PT_REG_AJ_NLMS, nlms_word);
-		gnss_pt_write(GNSS_PT_REG_AJ_COMMIT, 1U);
-	}
 }
 
 void gnss_aj_set_events(int on)
@@ -1358,34 +1278,32 @@ void gnss_aj_set_log(int seconds)
 	aj_log_s = seconds;
 }
 
-/* ---- crpa13: hardware NLMS (gnss_aj_nlms=, gnss_aj_nlms_mu=, gnss_aj_nlms?) ------------------ */
+/* ---- crpa16/17: NLMS on the ARM (gnss_aj_nlms=, gnss_aj_nlms_mu=, gnss_aj_nlms_pass=, gnss_aj_nlms?) */
 void gnss_aj_nlms_line(void)
 {
-	double rho = aj_sqrt(res.rho1_re * res.rho1_re + res.rho1_im * res.rho1_im);
-	if(!nlms_hw) { console_print("nlms          : this bitstream has no nlms_pi core (AJ_INFO layout 13)\n"); return; }
-	console_print("nlms          : %s; step alpha %s (%s), weight scale 2^%d, FPGA word 0x%x\n",
-		      (char*)(aj_frozen ? "HELD (gnss_aj_nlms=0 / gnss_smi_freeze=1): weights not adapting" :
-		              state == ST_JAMMED ? "ADAPTING every sample (hardware NLMS, 64-sample delayed update)" :
-		              "waiting (filter bypassed, weights cleared until a jammer)"),
-		      fmt(nlms_mu, 4, 0),
-		      (char*)(nlms_mu_user > 0.0 ? "manual, gnss_aj_nlms_mu=" : "automatic from the jammer bandwidth"),
-		      (long)nlms_ws, (unsigned long)gnss_pt_read(GNSS_PT_REG_AJ_NLMS_ACT));
-	console_print("                RX1 lag-1 correlation |rho1| %s (1 = CW: alpha %s, <= %s wideband: alpha %s), back-off x%s,\n"
-		      "                %lu divergence resets since start\n",
-		      f3u(rho), fmt(AJ_NLMS_ALPHA_NB, 4, 0), f2u(AJ_NLMS_RHO_WB), fmt(AJ_NLMS_ALPHA_WB, 4, 0),
-		      f3u(nlms_back), (unsigned long)n_div);
+	if(!st_hw) { console_print("nlms          : this bitstream has no stap_pi core (AJ_INFO layout 14)\n"); return; }
+	console_print("nlms          : %s; step alpha %s (%s), %d passes per capture, weight scale 2^%d\n",
+		      (char*)(aj_frozen ? "HELD (gnss_aj_nlms=0 / gnss_smi_freeze=1): no new weights" :
+		              state == ST_JAMMED ? "ON THE ARM, every capture (weights committed to the FPGA filter)" :
+		              "waiting (filter bypassed until a jammer)"),
+		      fmt(nlms_mu, 3, 0),
+		      (char*)(nlms_mu_user > 0.0 ? "manual, gnss_aj_nlms_mu=" : "automatic from J/N: 0.05 < 35 dB, 0.1 < 50 dB, 0.2"),
+		      (long)nlms_pass, (long)res.ws);
+	console_print("                ARM time %s ms last, %s ms max per capture; largest |w| %s; %lu weight restarts\n",
+		      f2u((double)solve_us_last / 1000.0), f2u((double)solve_us_max / 1000.0), f3u(w_max()), (unsigned long)n_div);
 }
 
 int    gnss_aj_nlms(void)    { return !aj_frozen; }
 double gnss_aj_nlms_mu(void) { return nlms_mu_user; }
+int    gnss_aj_nlms_pass(void) { return nlms_pass; }
 
-/* on: -1 = leave, 1 = adapt, 0 = hold the weights; alpha: < 0 = leave, 0 = automatic, > 0 = manual */
-void gnss_aj_set_nlms(int on, double alpha)
+/* on: -1 = leave, 1 = adapt, 0 = hold the weights; alpha: < 0 = leave, 0 = automatic, > 0 = manual;
+ * passes: <= 0 = leave */
+void gnss_aj_set_nlms(int on, double alpha, int passes)
 {
 	if(alpha >= 0.0) nlms_mu_user = alpha;
+	if(passes > 0) nlms_pass = (passes > AJ_ANLMS_PASSES_MAX) ? AJ_ANLMS_PASSES_MAX : passes;
 	if(on >= 0) gnss_aj_freeze(!on);
-	else blk_refresh();            /* the new step now (state unchanged) */
-	if(state == ST_JAMMED && res_solved && !aj_frozen) commit_filter();
 	gnss_aj_nlms_line();
 }
 
@@ -1412,7 +1330,7 @@ void gnss_aj_note_tx(int on)
 static const char *filter_txt(void)
 {
 	static char txt[120];
-	snprintf(txt, sizeof txt, "space-time %d + %d + %d image taps, weights from the hardware NLMS loop (nlms_pi)",
+	snprintf(txt, sizeof txt, "space-time %d + %d + %d image taps (stap_pi), weights by NLMS on the ARM",
 		 AJ_NT - 1, AJ_NT, 2 * AJ_NIMG);
 	return txt;
 }
@@ -1575,7 +1493,7 @@ void gnss_aj_report(void)
 			double m = ((double)res.wre[k] * res.wre[k] + (double)res.wim[k] * res.wim[k]) / (double)(1 << (2 * res.ws));
 			if(m > wmax) { wmax = m; kmax = k; }
 		}
-		console_print("weights       : |w|^2 %s, largest %s tap at delay %d (|w| %s), image |c1| %s |c2| %s (running, read back)\n",
+		console_print("weights       : |w|^2 %s, largest %s tap at delay %d (|w| %s), image |c1| %s |c2| %s (committed by the ARM)\n",
 			      f2u(res.wn2), (char*)(kmax < AJ_NT ? "RX1" : "RX2"), (long)(kmax % AJ_NT),
 			      f2u(aj_sqrt(wmax) / 4096.0),
 			      f3u(aj_sqrt((double)res.wre[AJ_IMG1] * res.wre[AJ_IMG1] + (double)res.wim[AJ_IMG1] * res.wim[AJ_IMG1]) / (4096.0 * (1 << res.ws))),

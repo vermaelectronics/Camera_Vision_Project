@@ -146,9 +146,10 @@ command cmd_list[] = {
 	{"gnss_report?", "EVERYTHING in one block (radio, gains, g2, jammer, events) to copy into a report.", "", get_gnss_report},
 	{"gnss_aj_log=", "Status line every N s on the console (default 0 = off: only JAMMER ON/OFF events; held back while you type).", "gnss_aj_log=30", set_gnss_aj_log},
 	{"gnss_aj_events=", "1 = print JAMMER ON/NULLED/OFF events (default), 0 = console silent (gnss_report? still lists them).", "gnss_aj_events=0", set_gnss_aj_events},
-	{"gnss_aj_nlms=", "crpa13: the hardware NLMS loop (the only adaptation): 1 = adapt (default), 0 = hold the weights as they are (not saved; same as gnss_smi_freeze=1).", "gnss_aj_nlms=1", set_gnss_aj_nlms},
-	{"gnss_aj_nlms_mu=", "crpa13: NLMS step alpha 0.001 .. 0.25 by hand, 0 = automatic (default: 1/64 for a CW, 1/16 for a wideband jammer; saved). Too big for a CW makes the loop diverge (it is then cleared and the step halved).", "gnss_aj_nlms_mu=0", set_gnss_aj_nlms_mu},
-	{"gnss_aj_nlms?", "crpa13: NLMS state, step, weight scale, divergence resets, the FPGA word.", "", get_gnss_aj_nlms},
+	{"gnss_aj_nlms=", "crpa16/17: the NLMS on the ARM: 1 = new weights every capture (default), 0 = hold the weights as they are (not saved; same as gnss_smi_freeze=1).", "gnss_aj_nlms=1", set_gnss_aj_nlms},
+	{"gnss_aj_nlms_mu=", "crpa16/17: ARM NLMS step alpha 0.001 .. 1 by hand, 0 = automatic (default: 0.05 below J/N 35 dB, 0.1 below 50 dB, 0.2 above; saved).", "gnss_aj_nlms_mu=0", set_gnss_aj_nlms_mu},
+	{"gnss_aj_nlms_pass=", "crpa16/17: passes of the ARM NLMS over each capture, 1..8 (default 2; more = deeper null on a strong jammer, more ARM time; saved).", "gnss_aj_nlms_pass=2", set_gnss_aj_nlms_pass},
+	{"gnss_aj_nlms?", "crpa16/17: NLMS state, step, passes, weight scale, ARM time per capture.", "", get_gnss_aj_nlms},
 	{"gnss_aj_csv=", "CSV line (AJCSV,...) every N ms, 100 to 60000; 0 = off (default).", "gnss_aj_csv=0", set_gnss_aj_csv},
 	{"gnss_aj_blank=", "Pulse blanker (bitstream 4.6): 0 = off (default since 4.9.3), 1 = automatic, 2 = always on.", "gnss_aj_blank=0", set_gnss_aj_blank},
 	{"gnss_aj_blank_db=", "Pulse blanker threshold above the output noise [dB], 3..30, default 7.", "gnss_aj_blank_db=7", set_gnss_aj_blank_db},
@@ -424,24 +425,34 @@ void get_gnss_report(double* param, char param_no)
 	gnss_aj_report();
 }
 
-/* crpa13: the hardware NLMS loop (the only adaptation) */
+/* crpa16/17: the NLMS on the ARM */
 void set_gnss_aj_nlms(double* param, char param_no)
 {
 	if(param_no < 1 || (param[0] != 0.0 && param[0] != 1.0)) {
 		console_print("gnss_aj_nlms= needs 1 (adapt) or 0 (hold the weights). Example: gnss_aj_nlms=1\n");
 		return;
 	}
-	gnss_aj_set_nlms((int)param[0], -1.0);
+	gnss_aj_set_nlms((int)param[0], -1.0, 0);
 }
 
 void set_gnss_aj_nlms_mu(double* param, char param_no)
 {
-	if(param_no < 1 || param[0] < 0.0 || param[0] > 0.25 || (param[0] > 0.0 && param[0] < 0.001)) {
-		console_print("gnss_aj_nlms_mu= needs 0 (automatic) or a step 0.001 .. 0.25. Example: gnss_aj_nlms_mu=0\n");
+	if(param_no < 1 || param[0] < 0.0 || param[0] > 1.0 || (param[0] > 0.0 && param[0] < 0.001)) {
+		console_print("gnss_aj_nlms_mu= needs 0 (automatic) or a step 0.001 .. 1. Example: gnss_aj_nlms_mu=0\n");
 		return;
 	}
-	gnss_aj_set_nlms(-1, param[0]);
-	gnss_settings_save(-1, (int)(param[0] * 1e6 + 0.5));
+	gnss_aj_set_nlms(-1, param[0], 0);
+	gnss_settings_save(-1, (int)(param[0] * 1e6 + 0.5), -1);
+}
+
+void set_gnss_aj_nlms_pass(double* param, char param_no)
+{
+	if(param_no < 1 || param[0] < 1.0 || param[0] > 8.0) {
+		console_print("gnss_aj_nlms_pass= needs 1 .. 8 passes per capture. Example: gnss_aj_nlms_pass=2\n");
+		return;
+	}
+	gnss_aj_set_nlms(-1, -1.0, (int)param[0]);
+	gnss_settings_save(-1, -1, (int)param[0]);
 }
 
 void get_gnss_aj_nlms(double* param, char param_no)
@@ -610,7 +621,7 @@ void set_gnss_rx_agc(double* param, char param_no)
 	}
 	gnss_rxg_set_mode((int)param[0]);
 	gnss_rxg_print();
-	gnss_settings_save((int)param[0], -1);   /* crpa5 */
+	gnss_settings_save((int)param[0], -1, -1);   /* crpa5 */
 }
 
 /**************************************************************************//***

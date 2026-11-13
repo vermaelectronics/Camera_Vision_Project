@@ -38,10 +38,10 @@ extern "C" {
 #endif
 
 #ifndef AJ_NT
-#define AJ_NT        6    /* taps per antenna (crpa14: 6 + 6; crpa13: 8 + 8); must match NL_NT of nlms_pi */
+#define AJ_NT        8    /* taps per antenna (crpa16: 8 + 8; crpa17 / crpa14: 6 + 6); must match ST_NT of stap_pi */
 #endif
 #ifndef AJ_REF
-#define AJ_REF       3    /* RX1 reference delay (crpa14: 3; crpa13: 4); must match NL_REF */
+#define AJ_REF       4    /* RX1 reference delay (crpa16: 4; crpa17 / crpa14: 3); must match ST_REF */
 #endif
 #define AJ_NSPT      (2 * AJ_NT)       /* space-time weight words: RX1 AJ_NT, then RX2 AJ_NT */
 /* AJ_NIMG image (conjugate) taps per channel at delays REF-1, REF, REF+1: the AD9361's I/Q
@@ -94,6 +94,9 @@ typedef struct {
                             /*   by its noise relative to RX1                  */
     double  supp_db;        /* jammer suppression [dB] (capped at 60)         */
     double  res_db;         /* output / output noise [dB], 0 = fully nulled  */
+    /* ---- aj_nlms_solve (crpa16/17) ------------------------------------- */
+    double  arm_pin;        /* mean |x1|^2 of the capture (DC removed)         */
+    double  arm_pout;       /* mean |y|^2 of the NLMS output on its last pass  */
 } aj_result_t;
 
 /* DC offset of RX1 / RX2 [LSB] in the last capture; removed before the
@@ -112,31 +115,32 @@ int  aj_makeup_shift(int cut_db, double out_db, int max_shift);
 /* crpa8: the rest of the make-up in dB (0 .. 5.99) on top of 6 x shift, by the same rule:
  * restore the RX gain cut, never more than AJ_OUT_HEADROOM_DB above the clean level. */
 double aj_makeup_fine_db(int cut_db, double out_db, int shift);
-/* crpa10: hardware NLMS step. The core moves each weight word (x 2^ws) by
- * (y m 2^-sh) conj(u) 2^-AJ_NLMS_CS in units of 2^-AJ_NLMS_RF word LSB, u in Q1; this
- * returns the nlms register word ([15:0] m, [20:16] sh, [31] enable) for a normalised step
- * alpha: dw = alpha y conj(u) / (nw p_in), p_in = mean |u|^2 [LSB^2] (the RX1 power),
- * nw = the number of adaptive weights. 0 when off (alpha <= 0 or no power). */
-#define AJ_NLMS_RF   16     /* must match NL_RF of nlms_pi */
-#define AJ_NLMS_CS    8     /* must match NL_CS of nlms_pi */
-uint32_t aj_nlms_word(double alpha, double p_in, int ws, int nw);
-/* crpa13: the NLMS step alpha for a jammer whose RX1 lag-1 correlation magnitude is rho
- * (aj_detect: |rho1|; about 1 for a CW or a narrow jammer, 0.2-0.5 for a wideband one).
- * The delayed loop (D = 64 samples) is stable up to about alpha 1/48 for a CW (all its
- * power in one eigenmode: C simulation, 1/32 diverged); a wideband jammer spreads its
- * power over the taps, so it takes a 4 x larger step, and converges best near 1/16
- * (C simulation, J/N 50: 1/128 38 dB, 1/32 46 dB, 1/16 48 dB, 1/8 48 dB, 1/4 diverged,
- * after 10 ms). rho >= AJ_NLMS_RHO_NB: AJ_NLMS_ALPHA_NB; rho <= AJ_NLMS_RHO_WB:
- * AJ_NLMS_ALPHA_WB; geometric in between. */
-#define AJ_NLMS_ALPHA_NB  (1.0 / 64.0)
-#define AJ_NLMS_ALPHA_WB  (1.0 / 16.0)
-#define AJ_NLMS_RHO_NB    0.95
-#define AJ_NLMS_RHO_WB    0.60
-double aj_nlms_alpha(double rho);
 /* Expected excess of the receiver's noise floor, in dB, from the 12-bit ADC's own
  * quantisation noise when a jammer jn_db above the noise has to be kept off full scale
  * (about 0 below J/N 54, +1.8 dB at 61, +4 dB at 66, +8 dB at 71). */
 double aj_adc_excess_db(double jn_db);
+
+/* ---- crpa16 / crpa17: the weights by NLMS ON THE ARM ------------------------------------
+ * The FPGA core (stap_pi) only applies the weights. aj_nlms_solve() runs a normalised LMS
+ * over one capture (the same taps, signs and g2 as the core), `passes` times, starting from
+ * the weights it ended with on the previous capture (it keeps them between calls):
+ *     y[n] = x1[n-R] - w . u[n]          (u = the AJ_MAXDIM tap samples, as the core sees them)
+ *     w   += alpha y[n] conj(u[n]) / (|u[n]|^2 + 1)
+ * There is no update delay on the ARM, so the loop is stable for any jammer for alpha < 2;
+ * the misadjustment (extra output noise) is about alpha / 2.
+ * It writes r->wre / wim (Q3.12 x 2^ws), r->ws (the finest scale the weights fit), r->wn2
+ * (|w|^2, the RX2 taps weighted by rx2n), r->arm_pin, r->arm_pout. Returns 0, -1 on a bad
+ * argument, 1 when the weights were not finite or out of range (they are then reset to 0). */
+#define AJ_ANLMS_ALPHA_DEF   0.10   /* step for J/N 35..50 dB (aj_anlms_alpha)           */
+#define AJ_ANLMS_PASSES_DEF  2      /* passes over each capture                         */
+#define AJ_ANLMS_PASSES_MAX  8
+void aj_nlms_reset(void);                      /* weights to 0 (new jammer, bypass, band change) */
+/* The step for a jammer jn_db above the noise (C simulation, 20 captures, 2 passes): a small
+ * step leaves less extra noise on a weak jammer, a larger one reaches the weak spectral parts
+ * of a strong wideband jammer sooner. 0.05 below 35 dB, 0.1 up to 50 dB, 0.2 above. */
+double aj_anlms_alpha(double jn_db);
+int  aj_nlms_solve(const uint32_t *buf, int nsamp, double g2, double rx2n,
+                   double alpha, int passes, aj_result_t *r);
 
 /* Helpers (no libm on the board). */
 double aj_sqrt(double x);

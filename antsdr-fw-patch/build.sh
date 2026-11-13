@@ -4,16 +4,16 @@
 #
 # Default target is the ANTSDR E310 (TARGET=ant). E200 / E310v2 work the same
 # way with TARGET=e200 / TARGET=e310v2. For TARGET=ant the firmware also
-# includes the GNSS anti-jam (RX1+RX2 -> FPGA -> TX1, AD9361 LVDS 2R2T; crpa13:
-# space-time filter whose weights a hardware NLMS loop adapts, no SMI) and the
-# gnss_crpa service with its "gnss" console (BUILD_E310.md sections 7 and 8).
-# crpa13 is Linux only (no bare-metal build).
+# includes the GNSS anti-jam (RX1+RX2 -> FPGA -> TX1, AD9361 LVDS 2R2T; crpa16 /
+# crpa17: space-time filter stap_pi, weights calculated by NLMS on the ARM) and
+# the gnss_crpa service with its "gnss" console (BUILD_E310.md sections 7 and 8).
+# Linux only (no bare-metal build).
 #
 #   ./build.sh deps       install Ubuntu build packages (uses sudo apt-get)
 #   ./build.sh check      check host tools and Vivado/Vitis 2023.2
 #   ./build.sh fetch      clone plutosdr-fw v0.39 + submodules at pinned commits
 #   ./build.sh patch      apply the ANTSDR patches (safe to re-run)
-#   ./build.sh hls        Vitis HLS: the nlms_pi anti-jam filter IP (ant only)
+#   ./build.sh hls        Vitis HLS: the stap_pi anti-jam filter IP (ant only)
 #   ./build.sh hdl        Vivado only: build/system_top.xsa (+ bitstream)
 #   ./build.sh fsbl       Vitis/xsct: build/sdk/fsbl/Release/fsbl.elf
 #   ./build.sh firmware   full firmware: boot.bin, ant.frm/.dfu, boot.frm/.dfu ...
@@ -28,8 +28,8 @@
 #   XILINX_DIR       Xilinx install root (auto: /tools/Xilinx, /opt/Xilinx, ~/Xilinx)
 #   VIVADO_SETTINGS  settings script sourced for Xilinx tools (default: ./xilinx_env.sh)
 #   SKIP_LEGAL=1     skip buildroot legal-info (faster; no legal-info tarball)
-#   NLMS_PI_SKIP_CSIM=1  hls: skip the 16 C-simulation scenarios (faster)
-#   FORCE_HLS=1      hls: rebuild the nlms_pi IP even if it is up to date
+#   STAP_PI_SKIP_CSIM=1  hls: skip the 16 C-simulation scenarios (faster)
+#   FORCE_HLS=1      hls: rebuild the stap_pi IP even if it is up to date
 
 set -euo pipefail
 
@@ -281,7 +281,7 @@ cmd_patch() {
 	# 0002-* (ant only): GPS L1 RX1 -> FPGA -> TX1 loopback (gnss_passthrough
 	# in the FPGA, /usr/sbin/gnss_loopback in Linux). See BUILD_E310.md.
 	# 0003-* (ant only): v4.9.14 anti-jam. hdl: AD9361 LVDS 2R2T,
-	# gnss_passthrough v4.9.14 + nlms_pi HLS core (crpa13); linux: LVDS 2R2T device
+	# gnss_passthrough v4.9.14 + stap_pi HLS core (crpa16/17); linux: LVDS 2R2T device
 	# tree; u-boot: mode=2r2t; buildroot: gnss-crpa package (gnss_crpa
 	# service + "gnss" console, gnss_loopback forwards to it).
 	local hdl_series=("$PATCH_DIR/0001-add-three-ant-hdl-support-bump-to-v0.39-v1.patch")
@@ -336,36 +336,36 @@ sync_crpa() {
 }
 
 # --------------------------------------------------------------------------
-# hls: the nlms_pi space-time anti-jam filter (Vitis HLS), ant only
+# hls: the stap_pi space-time anti-jam filter (Vitis HLS), ant only
 # --------------------------------------------------------------------------
 cmd_hls() {
 	check_target
 	[ "$TARGET" = ant ] || { ok "hls: nothing to do for TARGET=$TARGET"; return 0; }
 	[ -d "$FW_DIR/hdl/library" ] || die "sources not fetched yet; run './build.sh fetch' and './build.sh patch'"
-	local src="$ROOT/hls/nlms_pi" out="$FW_DIR/hdl/library/antsdr_ip/nlms_pi"
+	local src="$ROOT/hls/stap_pi" out="$FW_DIR/hdl/library/antsdr_ip/stap_pi"
 	if [ -z "${FORCE_HLS:-}" ] && [ -f "$out/component.xml" ] &&
 	   [ -z "$(find "$src" "$ROOT/gnss_crpa/src/gnss_aj_math.c" "$ROOT/gnss_crpa/src/gnss_aj_math.h" \
 		-newer "$out/component.xml" -type f -not -path '*/build/*' 2>/dev/null)" ]; then
-		ok "nlms_pi IP up to date: $out (FORCE_HLS=1 rebuilds it)"
+		ok "stap_pi IP up to date: $out (FORCE_HLS=1 rebuilds it)"
 		return 0
 	fi
 	xilinx_run 'command -v vitis_hls' >/dev/null 2>&1 ||
 		die "vitis_hls not found via VIVADO_SETTINGS=$VIVADO_SETTINGS (install Vitis $REQUIRED_XILINX_VERSION)"
-	info "Vitis HLS: nlms_pi -> $out (about 10-20 min; NLMS_PI_SKIP_CSIM=1 skips the C simulation)"
+	info "Vitis HLS: stap_pi -> $out (about 10-20 min; STAP_PI_SKIP_CSIM=1 skips the C simulation)"
 	local log="$src/build/build_hls.log"
 	mkdir -p "$src/build"
-	if ! xilinx_run "cd '$src' && GNSS_CRPA_IP_REPO='$FW_DIR/hdl/library/antsdr_ip' NLMS_PI_FW_DIR='$ROOT/gnss_crpa/src' NLMS_PI_SKIP_CSIM='${NLMS_PI_SKIP_CSIM:-0}' vitis_hls -f build_hls.tcl" 2>&1 | tee "$log" ||
-	   ! grep -q "NLMS_PI_HLS: PASS" "$log"; then
-		die "nlms_pi HLS build failed (see $log)"
+	if ! xilinx_run "cd '$src' && GNSS_CRPA_IP_REPO='$FW_DIR/hdl/library/antsdr_ip' STAP_PI_FW_DIR='$ROOT/gnss_crpa/src' STAP_PI_SKIP_CSIM='${STAP_PI_SKIP_CSIM:-0}' vitis_hls -f build_hls.tcl" 2>&1 | tee "$log" ||
+	   ! grep -q "STAP_PI_HLS: PASS" "$log"; then
+		die "stap_pi HLS build failed (see $log)"
 	fi
-	ok "nlms_pi IP: $out"
+	ok "stap_pi IP: $out"
 }
 
 require_hls() {
 	[ "$TARGET" = ant ] || return 0
 	[ -d "$FW_DIR/buildroot/package/gnss-crpa" ] && sync_crpa
 	if [ -f "$PATCH_DIR/$TARGET/0003-hdl-stap-antijam.patch" ] &&
-	   [ ! -f "$FW_DIR/hdl/library/antsdr_ip/nlms_pi/component.xml" ]; then
+	   [ ! -f "$FW_DIR/hdl/library/antsdr_ip/stap_pi/component.xml" ]; then
 		cmd_hls
 	fi
 }
@@ -498,7 +498,7 @@ case "$cmd" in
 	sdimg)    cmd_sdimg ;;
 	all)      cmd_check; cmd_fetch; cmd_patch; cmd_hls; cmd_firmware; cmd_sdimg ;;
 	baremetal|all-baremetal)
-		die "crpa13 is Linux only: there is no bare-metal build in this package (use ./build.sh all; crpa12 has the last bare-metal build)" ;;
+		die "this package is Linux only: there is no bare-metal build (use ./build.sh all; crpa12 has the last bare-metal build)" ;;
 	outputs)  cmd_outputs ;;
 	reset)    cmd_reset "$@" ;;
 	make)     require_ready; run_make "$@" ;;

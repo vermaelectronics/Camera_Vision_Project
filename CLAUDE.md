@@ -80,7 +80,19 @@ Name each new design-A (pass-through + CRPA) package with the next number:
   adaptive weights, ~108 DSP48 in the core (~142 in all). csim 16 pass (scenario 5 limit for 6 + 6:
   reflection out of reach, 22.5 dB vs optimum 23.8): field J/N 41 / 51 / 61 residual +1.6 / +5.5 /
   +14.0 dB at 10 ms. NLMS only, no SMI, Linux only. Not yet run in Vitis by the user. Commit 9d13533.
-- Next package: `crpa15`.
+- 2026-11-13: user asked for three Linux designs with the weights on the ARM: `crpa15` = SFAP-PI
+  256 (user's SFAP_PI_256v3 = v6.2.1, bare-metal design B, sfap_pi 4.0, weights on the ARM per bin,
+  BRAM weight RAM), `crpa16` = STAP 8 + 8 (3 + 3 image), `crpa17` = STAP 6 + 6 (3 + 3 image); STAP
+  weights by "NLMS on ARM" (user's choice), three separate packages. Built in the order 16, 17, 15.
+- `crpa16` (2026-11-13): HLS core `stap_pi` 1.0 (hls/stap_pi, replaces nlms_pi): filter only, weights
+  on ap_none ports (wts 32 x ST_NST, wcj 192) from passthrough shadow/active registers (crpa12 RTL
+  without AJ_NLMS and smoothing, aj_wts 32 x AJ_NWTS, parameter AJ_NWTS_P), AJ_INFO 0x08040C0E
+  (layout 14). Firmware: aj_nlms_solve() in gnss_aj_math.c (normalised LMS over each capture, 2
+  passes, weights carried capture to capture, ws = finest that fits), step aj_anlms_alpha(J/N):
+  0.05 < 35 dB, 0.1 < 50, 0.2; gnss_aj_nlms_mu= / gnss_aj_nlms_pass= (saved as aj_arm_step_e6 /
+  aj_arm_pass), gnss_aj_nlms=0|1; GNSS_PT_AJ_INFO_EXPECTED built from AJ_NT/AJ_REF. csim 16 pass
+  (20 captures): field J/N 41 / 51 / 61 residual +0.6 / +1.6 / +7.0 dB. ~101 DSP48 in all.
+- Next package: `crpa17` (then `crpa15`).
 
 Files per package: `crpaN-full-src.zip.part1`, `crpaN-full-src.zip.part2`,
 `crpaN-kit.zip`, `SHA256SUMS-crpaN.txt`.

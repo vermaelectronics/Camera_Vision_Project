@@ -261,6 +261,7 @@ void get_gnss_aj(double* param, char param_no);
 void get_gnss_report(double* param, char param_no);
 void set_gnss_aj_nlms(double* param, char param_no);
 void set_gnss_aj_nlms_mu(double* param, char param_no);
+void set_gnss_aj_nlms_pass(double* param, char param_no);
 void get_gnss_aj_nlms(double* param, char param_no);
 void set_gnss_aj_log(double* param, char param_no);
 void set_gnss_aj_events(double* param, char param_no);

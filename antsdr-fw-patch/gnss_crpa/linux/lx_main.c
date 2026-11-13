@@ -1,4 +1,4 @@
-/* gnss_crpa - the GNSS anti-jam firmware for the ANTSDR E310 (crpa13: hardware NLMS, no SMI),
+/* gnss_crpa - the GNSS anti-jam firmware for the ANTSDR E310 (crpa16/17: STAP, weights by NLMS on the ARM),
  * running under Linux (antsdr-fw-patch, design A).
  *
  *   gnss_crpa            run in this terminal, exactly like the bare-metal
@@ -495,7 +495,7 @@ static void firmware(void)
 	int cmd_type, invalid_cmd, b;
 	unsigned char cmd;
 
-	printf("\n=== ANTSDR E310 - GNSS CRPA, NLMS-PI %s (crpa14, 6 + 6 taps), Linux (gnss_crpa %s) ===\n",
+	printf("\n=== ANTSDR E310 - GNSS CRPA, STAP-PI %s (crpa16/17, " AJ_TAPS_TXT " taps, NLMS on the ARM), Linux (gnss_crpa %s) ===\n",
 	       "4.9.14", GNSS_CRPA_VERSION);
 	printf("    TX1 IS CONDUCTED, ATTENUATED COAX ONLY -- never an antenna.\n");
 
@@ -646,7 +646,7 @@ static int client(int argc, char **argv)
 static void usage(void)
 {
 	fprintf(stderr,
-		"gnss_crpa %s - GNSS anti-jam (hardware NLMS, 6 + 6 taps, crpa14) for the ANTSDR E310 (Linux)\n"
+		"gnss_crpa %s - GNSS anti-jam (STAP, NLMS on the ARM, crpa16/17) for the ANTSDR E310 (Linux)\n"
 		"  gnss_crpa        run in this terminal (no service running)\n"
 		"  gnss_crpa -d     run as the background service (S95gnss_crpa)\n"
 		"  gnss             attach to the service (Ctrl-D / exit detaches)\n"
@@ -727,7 +727,7 @@ int main(int argc, char **argv)
 	}
 
 	if (lx_io_init() || lx_ad9361_open(&ad9361_phy)) {
-		printf("gnss_crpa: hardware not available -- is this the antsdr-fw-patch 0003 (crpa14 NLMS 6 + 6) bitstream?\n");
+		printf("gnss_crpa: hardware not available -- is this the antsdr-fw-patch 0003 (crpa16/17 stap_pi) bitstream?\n");
 		lx_flush();
 		return 1;
 	}

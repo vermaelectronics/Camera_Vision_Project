@@ -139,24 +139,32 @@ int gnss_pt_tx2_on(void)
     return ((c & GNSS_PT_CTRL_TX2_ON) && !(c & GNSS_PT_CTRL_MUTE)) ? 1 : 0;
 }
 
-void gnss_pt_write_aj(uint32_t cfg, int32_t g2_q13, uint32_t blk_thr, uint32_t gain, uint32_t nlms)
+void gnss_pt_write_aj(const int16_t *re, const int16_t *im,
+                      uint32_t cfg, int32_t g2_q13, uint32_t blk_thr, uint32_t gain)
 {
+    uint32_t k;
+    if (re && im) {
+        for (k = 0; k < 2U * AJ_NT; k++) {
+            gnss_pt_write(GNSS_PT_REG_AJ_W(k),
+                          ((uint32_t)(uint16_t)im[k] << 16) | (uint32_t)(uint16_t)re[k]);
+        }
+        {
+            /* image taps c1 / c2 at R (AJ_WC0/1) and at R-1, R+1 (AJ_WCX0..3) */
+            static const int wc[2] = {AJ_IMG(1, 0), AJ_IMG(2, 0)};
+            static const int wcx[4] = {AJ_IMG(1, -1), AJ_IMG(1, 1), AJ_IMG(2, -1), AJ_IMG(2, 1)};
+            for (k = 0; k < 2U; k++)
+                gnss_pt_write(GNSS_PT_REG_AJ_WC(k),
+                              ((uint32_t)(uint16_t)im[wc[k]] << 16) | (uint32_t)(uint16_t)re[wc[k]]);
+            for (k = 0; k < 4U; k++)
+                gnss_pt_write(GNSS_PT_REG_AJ_WCX(k),
+                              ((uint32_t)(uint16_t)im[wcx[k]] << 16) | (uint32_t)(uint16_t)re[wcx[k]]);
+        }
+    }
     gnss_pt_write(GNSS_PT_REG_AJ_CFG, cfg);
     gnss_pt_write(GNSS_PT_REG_AJ_NORM, (uint32_t)(uint16_t)(int16_t)g2_q13);
     gnss_pt_write(GNSS_PT_REG_AJ_BLK_THR, blk_thr);
     gnss_pt_write(GNSS_PT_REG_AJ_GAIN, gain);          /* crpa8: fine output gain, committed with the rest */
-    gnss_pt_write(GNSS_PT_REG_AJ_NLMS, nlms);          /* crpa13: the NLMS step (the only adaptation) */
     gnss_pt_write(GNSS_PT_REG_AJ_COMMIT, 1U);
-}
-
-uint32_t gnss_pt_read_weight(int k)
-{
-    /* image taps: c1 at R-1, R, R+1 = WCX0, WC0, WCX1; c2 = WCX2, WC1, WCX3 */
-    static const uint32_t img[6] = {GNSS_PT_REG_AJ_WCX(0), GNSS_PT_REG_AJ_WC(0), GNSS_PT_REG_AJ_WCX(1),
-                                    GNSS_PT_REG_AJ_WCX(2), GNSS_PT_REG_AJ_WC(1), GNSS_PT_REG_AJ_WCX(3)};
-    if (k < 0 || k >= AJ_NW) { return 0U; }
-    if (k < 2 * AJ_NT) { return gnss_pt_read(GNSS_PT_REG_AJ_W((uint32_t)k)); }
-    return gnss_pt_read(img[k - 2 * AJ_NT]);
 }
 
 void gnss_pt_get_state(gnss_pt_state_t *st)
