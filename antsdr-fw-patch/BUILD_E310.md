@@ -356,7 +356,7 @@ sudo dfu-util -a uboot-env.dfu -D ./uboot-env.dfu
 
 ---
 
-## 7. GNSS anti-jam (crpa16: STAP 8 + 8, weights by NLMS on the ARM): RX1 + RX2 -> FPGA -> TX1
+## 7. GNSS anti-jam (crpa17: STAP 6 + 6, weights by NLMS on the ARM): RX1 + RX2 -> FPGA -> TX1
 
 The `0003` patches put the GNSS anti-jam into this Linux firmware ("design A"):
 AD9361 LVDS 2R2T, `gnss_passthrough` v4.9.14, a space-time filter core between
@@ -364,7 +364,7 @@ RX1/RX2 and TX1, and the `gnss_crpa` service with its console. One feature of
 the Linux port is new: **band 7, your own RF values, set at any time from PuTTY**.
 
 ```text
-antenna 1 -> RX1 \                    stap_pi space-time anti-jam (8 + 8 taps,
+antenna 1 -> RX1 \                    stap_pi space-time anti-jam (6 + 6 taps,
                   AD9361 -> FPGA  gnss_passthrough  3 + 3 image taps)      -> AD9361 -> TX1
 antenna 2 -> RX2 /  LVDS 2R2T         + pulse blanker                     -> coax + attenuator + DC block
                     61.44 MS/s                                               -> GNSS receiver -> GNSS Viewer
@@ -384,7 +384,10 @@ antenna 2 -> RX2 /  LVDS 2R2T         + pulse blanker                     -> coa
 Three Linux packages were asked for, all with the weights calculated on the ARM:
 **crpa15** = SFAP-PI 256 (the user's v6.2.1), **crpa16** = STAP 8 + 8 with
 3 + 3 image taps, **crpa17** = STAP 6 + 6 with 3 + 3 image taps. This package is
-**crpa16** (crpa17 is the same source with 6 + 6 taps).
+**crpa17**: crpa16 (described below, 8 + 8) with **6 + 6 taps, reference delay 3,
+`AJ_INFO` = `0x06030C0E`**, weights at 0x400..0x42C (12 words) plus the six
+image-tap registers; 17 adaptive weights. The C-simulation table below is for
+8 + 8; the 6 + 6 figures follow it.
 
 * **FPGA:** `stap_pi` 1.0, the space-time filter only (8 taps per antenna,
   reference delay 4, 3 + 3 image taps, RX2 normalisation g2, make-up shift, fine
@@ -406,6 +409,9 @@ Three Linux packages were asked for, all with the weights calculated on the ARM:
   `gnss_aj_nlms_mu=X` sets it by hand (0 = automatic), `gnss_aj_nlms_pass=N`
   the passes (1-8), `gnss_aj_nlms=0` holds the weights, `gnss_aj_nlms?` shows
   it all with the ARM time per capture. Step and passes are saved.
+* 6 + 6 (`ST_NT` / `AJ_NT` 6, `ST_REF` / `AJ_REF` 3 in `hls/stap_pi/stap_pi.h`
+  and `gnss_crpa/src/gnss_aj_math.h`, `AJ_NWTS_DEF` 12 in `gnss_passthrough.v`)
+  is crpa17.
 * Kept: fine gain, ADC clip counters, FPGA power meters (suppression and
   residual), pulse blanker, one ARM core. Linux only.
 
@@ -425,6 +431,12 @@ best possible weights of the same 21 taps):
 | 9: CW 62 dB on the satellite | 65.1 dB | +1.2 dB | +0.5 dB | 1 |
 | 11 / 12 / 13: field J/N 61 / 51 / 41 dB | 51.6 / 50.8 / 46.5 dB | +7.0 / +1.6 / +0.6 dB | +3.0 / +0.5 / +0.1 dB | – / 13 / 1 |
 | 26: jammer direction drifting | tracked, ARM residual about +1.9 dB | | | 5 |
+
+crpa17 (6 + 6, 17 weights), same simulation: J/N 30 39.0 -> 37.8 dB suppression
+(+0.38 dB residual), CW 40 dB 56.1 dB, J/N 50 48.2 dB (+2.2 dB), J/N 60 49.2 dB
+(+7.5 dB), field J/N 61 / 51 / 41: 50.9 / 50.3 / 45.7 dB (+7.3 / +1.7 / +0.7 dB),
+CW 62 dB 65.7 dB. The reflection 3 samples later is out of reach of RX1 taps
+0..5: 22.9 dB (optimum of these taps 23.8 dB, +2.5 dB residual).
 
 After 100 captures (about 0.5-1 s on the board) the field cases reach J/N 61
 +5.6 dB, 51 +0.9 dB, 50 +1.1 dB residual. Compared with crpa13 (NLMS in the

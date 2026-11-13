@@ -92,7 +92,10 @@ Name each new design-A (pass-through + CRPA) package with the next number:
   0.05 < 35 dB, 0.1 < 50, 0.2; gnss_aj_nlms_mu= / gnss_aj_nlms_pass= (saved as aj_arm_step_e6 /
   aj_arm_pass), gnss_aj_nlms=0|1; GNSS_PT_AJ_INFO_EXPECTED built from AJ_NT/AJ_REF. csim 16 pass
   (20 captures): field J/N 41 / 51 / 61 residual +0.6 / +1.6 / +7.0 dB. ~101 DSP48 in all. Commit aa38a1b.
-- Next package: `crpa17` (then `crpa15`).
+- `crpa17` (2026-11-13): crpa16 with **6 + 6 taps** (ST_NT / AJ_NT 6, ST_REF / AJ_REF 3, AJ_NWTS_DEF 12,
+  AJ_INFO 0x06030C0E), 3 + 3 image taps, 17 weights, ~89 DSP48 in all. csim 16 pass: field J/N 41 /
+  51 / 61 residual +0.7 / +1.7 / +7.3 dB (20 captures); reflection 3 samples later 22.9 dB (out of reach).
+- Next package: `crpa15` (SFAP-PI 256 in Linux), then `crpa18`.
 
 Files per package: `crpaN-full-src.zip.part1`, `crpaN-full-src.zip.part2`,
 `crpaN-kit.zip`, `SHA256SUMS-crpaN.txt`.
