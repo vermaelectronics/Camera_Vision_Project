@@ -103,7 +103,7 @@ Name each new design-A (pass-through + CRPA) package with the next number:
   when weights were written, 0x1B0 = bank), ap_memory ports aj_wb/wc1/wc2_address/ce/q 0/1 (names of
   the user's design B); AJ_W/WC/WCX/GAIN removed; AJ_INFO 0x08070C0F (layout 15). Commands
   gnss_aj_mode=0|1|2, gnss_aj_hold=, gnss_aj_sfap? (not saved); nlms commands removed. csim 18/18 pass
-  with the firmware's math (J/N 60 I/Q: +1.5 dB residual). ~170-190 DSP48. Linux only.
+  with the firmware's math (J/N 60 I/Q: +1.5 dB residual). ~170-190 DSP48. Linux only. Commit e9bba03.
 - Next package: `crpa18`.
 
 Files per package: `crpaN-full-src.zip.part1`, `crpaN-full-src.zip.part2`,
