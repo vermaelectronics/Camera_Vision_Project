@@ -31,7 +31,15 @@ Name each new design-A (pass-through + CRPA) package with the next number:
   without gnss_notch (saved rx_agc / aj_avg, clipping warning kept). Linux and
   bare metal. csim: delay 5 never below 8 + 8 (delay 4 lost 2.5 dB on the
   reflection). Commit dc0836f.
-- Next package: `crpa8`.
+- `crpa8` (2026-11-13): crpa7 (10 + 10, REF 5) + **weight smoothing** in the FPGA
+  (smi_pi 2.7, AJ_CFG[19:16] k, time constant 2^(k+7) samples, gnss_aj_ramp=,
+  default 10, first set after bypass k = 1), **fine output gain** AJ_GAIN 0x1B0
+  (Q2.14, 2 DSP48, 67 total), **ADC clip counters** AJ_CLIP1/2 0x1B8/0x1BC (used by
+  gnss_rx_agc=2 and the manual-gain warning, clip_ppm in CSV), weight file 20
+  words, AJ_INFO 0x0A050C0A (layout 10), Linux solver in a worker thread
+  (GNSS_AJ_THREAD). Eigen solver studied, not included (worse in csim 8).
+  Commit 5990f02.
+- Next package: `crpa9`.
 
 Files per package: `crpaN-full-src.zip.part1`, `crpaN-full-src.zip.part2`,
 `crpaN-kit.zip`, `SHA256SUMS-crpaN.txt`.
