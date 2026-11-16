@@ -112,7 +112,7 @@ Name each new design-A (pass-through + CRPA) package with the next number:
   (default 1, saved as aj_arm_direct), shown in gnss_aj_nlms?. hls/sfap_pi removed again (crpa15 is its
   own package). csim 16/16 pass: J/N 60 residual +3.9 dB / satellite loss 2.8 dB (crpa16 +6.1 / 6.7),
   field 61 +3.6 / 4.6 (crpa16 +7.0 / 7.1), 51 +0.9 / 1.1, 41 +0.4 / 0.1; converged after 1 capture at
-  J/N 50 (crpa16: 6). Host fake run: direct solve 5.6 ms on a PC, nulled. Commit <pending>.
+  J/N 50 (crpa16: 6). Host fake run: direct solve 5.6 ms on a PC, nulled. Commit e4fdb94.
 - Next package: `crpa19`.
 
 Files per package: `crpaN-full-src.zip.part1`, `crpaN-full-src.zip.part2`,
