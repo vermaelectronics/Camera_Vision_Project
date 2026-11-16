@@ -146,7 +146,7 @@ Name each new design-A (pass-through + CRPA) package with the next number:
   Firmware only, crpa18 bitstream fits. Script ren/direct.py. Commit 664b58b.
 - `crpa23` (2026-11-17): crpa21 (SFAP_PI) + the same slow-lock fix as crpa24 (TX1 direct while no jammer,
   gnss_aj_passthru=, old names removed). SFAP core latency 766 samples: each switch is a 12.5/25 us step in
-  TX1 timing (receiver may re-acquire briefly at jammer ON/OFF). crpa15 bitstream fits. Commit <pending23>.
+  TX1 timing (receiver may re-acquire briefly at jammer ON/OFF). crpa15 bitstream fits. Commit 6963d7e.
 - Next package: `crpa25`.
 
 Files per package: `crpaN-full-src.zip.part1`, `crpaN-full-src.zip.part2`,
