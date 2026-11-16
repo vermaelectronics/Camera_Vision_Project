@@ -113,7 +113,17 @@ Name each new design-A (pass-through + CRPA) package with the next number:
   own package). csim 16/16 pass: J/N 60 residual +3.9 dB / satellite loss 2.8 dB (crpa16 +6.1 / 6.7),
   field 61 +3.6 / 4.6 (crpa16 +7.0 / 7.1), 51 +0.9 / 1.1, 41 +0.4 / 0.1; converged after 1 capture at
   J/N 50 (crpa16: 6). Host fake run: direct solve 5.6 ms on a PC, nulled. Commit e4fdb94.
-- Next package: `crpa19`.
+- `crpa19` (2026-11-17): **crpa15 renamed SFAP PI** (user: "update firmware it is SFAP PI and STAP NLMS PI";
+  user found the SMI names everywhere). Firmware only (FPGA, HLS, AJ_INFO 0x08070C0F unchanged, crpa15
+  bitstream fits): every console text GNSS_SMI / gnss_smi / SMI-PI -> "SFAP PI" / gnss_sfap= / gnss_sfap? /
+  gnss_sfap_freeze=; old gnss_smi?, gnss_smi=, gnss_smi_freeze= kept as hidden aliases (empty description,
+  skipped by help?); register labels smi_en -> aj_en. Script: rename.py + fixup.py (string literals only).
+  Also asked: crpa15/18 lock satellites slowly even WITHOUT a jammer (crpa4/5 did not). Code check: crpa18
+  detector (aj_detect, coherence, spectrum) identical to crpa5, radio/gain/TX code unchanged, bypass exact,
+  axi_ad9361 + passthrough datapath + block design unchanged apart from the core. Suspects: Vivado timing
+  (bigger designs), false JAMMER ON (crpa15 per-bin detector), setup/saved conf. A/B test asked:
+  gnss_sfap=0 (core out of the TX1 path) vs =1, gnss_report?, conf file, WNS. Commit <pending19>.
+- Next package: `crpa20` (crpa18 renamed STAP NLMS PI).
 
 Files per package: `crpaN-full-src.zip.part1`, `crpaN-full-src.zip.part2`,
 `crpaN-kit.zip`, `SHA256SUMS-crpaN.txt`.

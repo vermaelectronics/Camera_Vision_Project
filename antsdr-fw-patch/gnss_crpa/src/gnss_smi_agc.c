@@ -492,7 +492,7 @@ void gnss_rxg_print(void)
 	int32_t g1 = 0, g2 = 0;
 	uint32_t att = 0;
 	static const char *names[3] = {"MANUAL (locked)", "AD9361 AGC (per channel)",
-	                               "MATCHED AUTO (SMI-PI)"};
+	                               "MATCHED AUTO (RX1 = RX2)"};
 
 	if(!ad9361_phy) return;
 	ad9361_get_rx_gain_control_mode(ad9361_phy, 0, &m1);
@@ -505,7 +505,7 @@ void gnss_rxg_print(void)
 		      (char*)(m1 == RF_GAIN_MGC ? "manual" : "AGC"), (long)g1,
 		      (char*)(m2 == RF_GAIN_MGC ? "manual" : "AGC"), (long)g2,
 		      (char*)((m1 == RF_GAIN_MGC && m2 == RF_GAIN_MGC && g1 == g2)
-		          ? " (matched, OK for SMI-PI)" : " (NOT matched)"));
+		          ? " (matched, OK for SFAP PI)" : " (NOT matched)"));
 	if(rxg_mode == GNSS_RXG_MATCHED)
 		console_print("  reference %d dB, ADC peak %d of 2047, TX1 %d mdB "
 			      "(operator %d mdB, level hold +%d dB)\n",
