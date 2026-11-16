@@ -4,7 +4,7 @@
 #
 # Default target is the ANTSDR E310 (TARGET=ant). E200 / E310v2 work the same
 # way with TARGET=e200 / TARGET=e310v2. For TARGET=ant the firmware also
-# includes the GNSS anti-jam (RX1+RX2 -> FPGA -> TX1, AD9361 LVDS 2R2T; crpa22:
+# includes the GNSS anti-jam (RX1+RX2 -> FPGA -> TX1, AD9361 LVDS 2R2T; crpa24:
 # STAP_NLMS_PI, space-time filter stap_pi 10 + 10 taps, weights calculated on the ARM: a direct
 # solve on the first capture of a jammer, then NLMS) and
 # the gnss_crpa service with its "gnss" console (BUILD_E310.md sections 7 and 8).

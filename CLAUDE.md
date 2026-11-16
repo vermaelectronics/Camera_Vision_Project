@@ -137,8 +137,14 @@ Name each new design-A (pass-through + CRPA) package with the next number:
 - `crpa22` (2026-11-17): crpa20 with the user's exact name **STAP_NLMS_PI**: commands gnss_stap_nlms_pi=0|1 /
   gnss_stap_nlms_pi? / gnss_stap_nlms_pi_freeze= (old gnss_smi* hidden aliases). Supersedes crpa20. Firmware
   only, crpa18 bitstream fits (AJ_INFO 0x0A050C0E). Commit 7758051.
-- Open: slow satellite lock with no jammer (crpa15/18): waiting for the user's gnss_*=0 / =1 cold-start A/B test.
-- Next package: `crpa23`.
+- `crpa24` (2026-11-17): crpa22 + **slow-lock fix** (user: "correct the slow lock"; crpa1 locked fast with no
+  jammer, crpa15/18 slowly): with no jammer TX1 = RX1 straight through gnss_passthrough (CONTROL[5] = 0, core
+  and its FIFOs out of the TX1 path), core switched in by commit_filter() when jammed, out by commit_bypass();
+  core_path() waits for STATUS SMI_EN_SYNCED; gnss_aj_passthru=1|0 (default 1, not saved); TX level hold
+  learns whenever the anti-jam runs (tx_and_smi_on also true with gnss_aj_enabled()); status "TX1 = RX1
+  direct (filter core out of the path)"; old gnss_smi aliases REMOVED (user: "i dont want old name").
+  Firmware only, crpa18 bitstream fits. Script ren/direct.py. Commit <pending24>.
+- Next package: `crpa23` = the same for SFAP_PI (crpa21), then `crpa25`.
 
 Files per package: `crpaN-full-src.zip.part1`, `crpaN-full-src.zip.part2`,
 `crpaN-kit.zip`, `SHA256SUMS-crpaN.txt`.

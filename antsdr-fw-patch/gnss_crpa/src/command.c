@@ -144,12 +144,13 @@ command cmd_list[] = {
 	{"gnss_stap_nlms_pi_freeze=", "1 = hold the filter exactly as it is (NLMS weights held, bypass), 0 = automatic (default).", "gnss_stap_nlms_pi_freeze=0", set_gnss_smi_freeze},
 	{"gnss_aj?", "Anti-jam status: bypass/filter, jammer type and frequency, J/N, suppression.", "", get_gnss_aj},
 	{"gnss_report?", "EVERYTHING in one block (radio, gains, g2, jammer, events) to copy into a report.", "", get_gnss_report},
+	{"gnss_aj_passthru=", "1 = with no jammer TX1 = RX1 straight through, the filter core switched in only while a jammer is on (default: fastest satellite lock); 0 = the core always in the TX1 path, bypassed while no jammer (as up to crpa24). Not saved.", "gnss_aj_passthru=1", set_gnss_aj_passthru},
 	{"gnss_aj_log=", "Status line every N s on the console (default 0 = off: only JAMMER ON/OFF events; held back while you type).", "gnss_aj_log=30", set_gnss_aj_log},
 	{"gnss_aj_events=", "1 = print JAMMER ON/NULLED/OFF events (default), 0 = console silent (gnss_report? still lists them).", "gnss_aj_events=0", set_gnss_aj_events},
 	{"gnss_aj_nlms=", "crpa16/17: the NLMS on the ARM: 1 = new weights every capture (default), 0 = hold the weights as they are (not saved; same as gnss_stap_nlms_pi_freeze=1).", "gnss_aj_nlms=1", set_gnss_aj_nlms},
 	{"gnss_aj_nlms_mu=", "crpa16/17: ARM NLMS step alpha 0.001 .. 1 by hand, 0 = automatic (default: 0.05 below J/N 35 dB, 0.1 below 50 dB, 0.2 above; saved).", "gnss_aj_nlms_mu=0", set_gnss_aj_nlms_mu},
 	{"gnss_aj_nlms_pass=", "crpa16/17: passes of the ARM NLMS over each capture, 1..8 (default 2; more = deeper null on a strong jammer, more ARM time; saved).", "gnss_aj_nlms_pass=2", set_gnss_aj_nlms_pass},
-	{"gnss_aj_direct=", "crpa22: captures solved directly (Wiener, ARM) at the start of a jammer before the NLMS takes over, 0..8 (default 1; 0 = NLMS from 0 as crpa16; saved).", "gnss_aj_direct=1", set_gnss_aj_direct},
+	{"gnss_aj_direct=", "crpa24: captures solved directly (Wiener, ARM) at the start of a jammer before the NLMS takes over, 0..8 (default 1; 0 = NLMS from 0 as crpa16; saved).", "gnss_aj_direct=1", set_gnss_aj_direct},
 	{"gnss_aj_nlms?", "crpa16/17: NLMS state, step, passes, weight scale, ARM time per capture.", "", get_gnss_aj_nlms},
 	{"gnss_aj_csv=", "CSV line (AJCSV,...) every N ms, 100 to 60000; 0 = off (default).", "gnss_aj_csv=0", set_gnss_aj_csv},
 	{"gnss_aj_blank=", "Pulse blanker (bitstream 4.6): 0 = off (default since 4.9.3), 1 = automatic, 2 = always on.", "gnss_aj_blank=0", set_gnss_aj_blank},
@@ -172,10 +173,6 @@ command cmd_list[] = {
 	 * real sample. See gnss_txdma.h. */
 	{"gnss_ddr_tx?", "Gets the DDR round-trip replay state.", "", get_gnss_ddr_tx},
 	{"gnss_ddr_tx=", "1 = capture RX to DDR and replay it cyclically on TX1, 0 = stop.", "gnss_ddr_tx=0", set_gnss_ddr_tx},
-	/* old names (the SMI-PI firmware), kept so scripts keep working; not listed by help? */
-	{"gnss_smi?", "", "", get_gnss_smi},
-	{"gnss_smi=", "", "gnss_smi=1", set_gnss_smi},
-	{"gnss_smi_freeze=", "", "gnss_smi_freeze=0", set_gnss_smi_freeze},
 };
 const char cmd_no = (sizeof(cmd_list) / sizeof(command));
 
@@ -1764,4 +1761,14 @@ void set_dds_tx2_tone2_scale(double* param, char param_no)	// dds_tx2_tone2_scal
 	}
 	else
 		show_invalid_param_message(1);
+}
+
+/* crpa23/24: TX1 straight through while no jammer */
+void set_gnss_aj_passthru(double* param, char param_no)
+{
+	if(param_no < 1 || (param[0] != 0.0 && param[0] != 1.0)) {
+		console_print("gnss_aj_passthru= needs 1 (no jammer: TX1 = RX1 direct, default) or 0 (core always in the path)\n");
+		return;
+	}
+	gnss_aj_set_passthru((int)param[0]);
 }

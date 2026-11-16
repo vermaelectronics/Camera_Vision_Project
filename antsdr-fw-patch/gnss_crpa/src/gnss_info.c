@@ -184,7 +184,7 @@ static void info_hardware(struct ad9361_rf_phy *phy)
     console_print("     v2.x-v4.1 were the earlier anti-jam builds. 4.9.14 (this build):\n");
     console_print("     the STAP_NLMS_PI space-time filter: 10 + 10 taps, 3 + 3 image taps,\n");
     console_print("     weights calculated on the ARM.\n");
-    console_print("     crpa16/17/18 (AJ_INFO layout 14): stap_pi_0, weights by NLMS on the ARM (crpa22: direct start).\n");
+    console_print("     crpa16/17/18 (AJ_INFO layout 14): stap_pi_0, weights by NLMS on the ARM (crpa24: direct start).\n");
     rule();
 
     console_print(" RF FRONT END                                            [cfg]\n");

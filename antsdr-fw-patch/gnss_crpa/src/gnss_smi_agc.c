@@ -169,11 +169,15 @@ static double db10(double x)
 	return r;
 }
 
+int gnss_aj_enabled(void);   /* gnss_aj.c */
+
 static int tx_and_smi_on(void)
 {
 	uint32_t st = gnss_pt_read(GNSS_PT_REG_STATUS);
+	/* crpa23/24: with no jammer the core is out of the path (TX1 = RX1 direct) while the anti-jam
+	 * runs: the clean reference level is learned then too */
 	return (st & GNSS_PT_ST_DAC_EN_I0) && (st & GNSS_PT_ST_DAC_EN_Q0) &&
-	       (st & GNSS_PT_ST_PASS_EN_SYNCED) && (st & GNSS_PT_ST_SMI_EN_SYNCED);
+	       (st & GNSS_PT_ST_PASS_EN_SYNCED) && ((st & GNSS_PT_ST_SMI_EN_SYNCED) || gnss_aj_enabled());
 }
 
 void gnss_rxg_stop_tx_hold(void)

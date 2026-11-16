@@ -213,7 +213,7 @@ void gnss_pt_print_state(void)
     {
         uint32_t cfg = gnss_pt_read(GNSS_PT_REG_AJ_CFG_ACTIVE);
         printf("  STAP_NLMS_PI   : %s, %lu weight commits, layout 0x%08lx\n",
-               (s.status & GNSS_PT_ST_SMI_EN_SYNCED) ? "ON (TX1 = space-time filter)" : "off",
+               (s.status & GNSS_PT_ST_SMI_EN_SYNCED) ? "ON (TX1 = filter core)" : "off (TX1 = RX1 direct)",
                (unsigned long)gnss_pt_read(GNSS_PT_REG_AJ_COMMIT),
                (unsigned long)gnss_pt_read(GNSS_PT_REG_AJ_INFO));
         printf("  cfg            : 0x%08lx (%s, make-up shift %lu), g2 0x%08lx\n",

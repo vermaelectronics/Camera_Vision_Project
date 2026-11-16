@@ -296,6 +296,26 @@ static int add_event(XTime now, int type, double v1, double v2, double v3)
 }
 
 /* ---- FPGA filter ------------------------------------------------------------ */
+/* crpa23/24: with no jammer TX1 = RX1 straight through gnss_passthrough (CONTROL[5] = 0: the
+ * filter core and its two clock-crossing FIFOs are out of the TX1 path, a plain pass-through as in
+ * crpa1 with the anti-jam off), so the receiver locks exactly as on a plain pass-through. The core
+ * is switched in when a jammer is confirmed (commit_filter) and out again when it has gone
+ * (commit_bypass). gnss_passthrough flushes and re-primes its TX buffer on every switch.
+ * gnss_aj_passthru=0: the core stays in the path, bypassed (crpa15-22 behaviour). */
+static int pt_direct = 1;          /* gnss_aj_passthru= (not saved, 1 at every start) */
+static int core_in = -1;           /* CONTROL[5] as last written, -1 = not known */
+static void core_path(int in)
+{
+	int n;
+	if(!pt_direct) in = 1;
+	if(in == core_in) return;
+	gnss_pt_set_smi(in);
+	core_in = in;
+	for(n = 0; n < 10000; n++)     /* the switch crosses into the sample domain (<= ~1 ms) */
+		if(((gnss_pt_read(GNSS_PT_REG_STATUS) & GNSS_PT_ST_SMI_EN_SYNCED) != 0U) == (in != 0))
+			break;
+}
+
 static void commit_bypass(void)
 {
 	/* bypass: TX1 = RX1 delayed by AJ_REF samples (the core ignores the weights) */
@@ -304,6 +324,7 @@ static void commit_bypass(void)
 	gnss_rxg_set_digital_db(0);
 	blk_thr_set = blk_threshold(0);
 	gnss_pt_write_aj(NULL, NULL, GNSS_PT_AJ_CFG_BYPASS | blk_cfg_bit(blk_thr_set), g2_q13(), blk_thr_set, gain_q14);
+	if(aj_on) core_path(0);           /* crpa23/24: no jammer: TX1 = RX1 direct */
 }
 
 static void commit_filter(void)
@@ -312,6 +333,7 @@ static void commit_filter(void)
 	blk_thr_set = blk_threshold(1);
 	gnss_pt_write_aj(res.wre, res.wim, GNSS_PT_AJ_CFG_SHIFT(shift) | GNSS_PT_AJ_CFG_WS(res.ws) | blk_cfg_bit(blk_thr_set),
 	                 g2_q13(), blk_thr_set, gain_q14);
+	core_path(1);                       /* crpa23/24: jammer: the filter core into TX1 */
 }
 
 /* crpa9: the FPGA power meters (AJ_PWR_IN/OUT, every sample, 2^16-sample windows).
@@ -1259,13 +1281,15 @@ void gnss_aj_enable(int on)
 			add_event(now, EV_START, 0.0, 0.0, 0.0);
 		}
 		aj_on = 1;
-		gnss_pt_set_smi(1);
+		core_in = -1;
+		core_path(state == ST_JAMMED);    /* crpa23/24: core only while jammed */
 	} else {
 		gnss_aj_dma_release();
 		aj_on = 0;
 		gnss_rxg_stop_tx_hold();
 		gnss_rxg_set_digital_db(0);
 		gnss_pt_set_smi(0);
+		core_in = 0;
 		if(state == ST_JAMMED)
 			console_print("[AJ] anti-jam switched off (jammer state no longer monitored)\n");
 		state = ST_CLEAR;
@@ -1274,7 +1298,7 @@ void gnss_aj_enable(int on)
 	/* The enable crosses into the sample domain and back; wait (<= ~1 ms)
 	 * until STATUS confirms it, so a status print straight after is right. */
 	{
-		uint32_t want = on ? GNSS_PT_ST_SMI_EN_SYNCED : 0U;
+		uint32_t want = (on && core_in == 1) ? GNSS_PT_ST_SMI_EN_SYNCED : 0U;
 		int n;
 		for(n = 0; n < 10000; n++)
 			if((gnss_pt_read(GNSS_PT_REG_STATUS) & GNSS_PT_ST_SMI_EN_SYNCED) == want)
@@ -1388,7 +1412,7 @@ void gnss_aj_print_short(void)
 {
 	console_print("STAP_NLMS_PI: anti-jam %s, %s%s, jammer %s",
 		      (char*)(aj_on ? "ON" : "off"),
-		      (char*)(state == ST_JAMMED ? "FILTER IN" : "bypass"),
+		      (char*)(state == ST_JAMMED ? "FILTER IN" : core_in == 0 ? "TX1 = RX1 direct (filter core out of the path)" : "bypass"),
 		      (char*)(aj_frozen ? ", FROZEN" : ""),
 		      (char*)(!aj_on ? "not monitored" : state == ST_JAMMED ? "ON" : "none"));
 	if(aj_on && res_valid && res_solved)
@@ -2103,3 +2127,14 @@ void gnss_idle(void)
 	levels_guard();
 	gnss_log_poll();
 }
+
+/* crpa23/24: gnss_aj_passthru= */
+void gnss_aj_set_passthru(int on)
+{
+	pt_direct = on ? 1 : 0;
+	if(aj_on) core_path(state == ST_JAMMED);
+	console_print("passthru      : %s\n", (char*)(pt_direct
+		? "1 = no jammer: TX1 = RX1 straight through, the filter core switched in only while a jammer is on"
+		: "0 = the filter core always in the TX1 path (bypassed while no jammer)"));
+}
+int gnss_aj_passthru(void) { return pt_direct; }

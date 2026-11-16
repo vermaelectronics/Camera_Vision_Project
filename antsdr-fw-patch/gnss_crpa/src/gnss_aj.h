@@ -35,7 +35,7 @@
 #include "gnss_aj_math.h"
 #if AJ_NT == 10
 #define AJ_TAPS_TXT "10 + 10"
-#define AJ_PKG_TXT  "crpa22"
+#define AJ_PKG_TXT  "crpa24"
 #elif AJ_NT == 8
 #define AJ_TAPS_TXT "8 + 8"
 #define AJ_PKG_TXT  "crpa16"
@@ -76,6 +76,9 @@ void gnss_aj_freeze(int on);        /* hold the present weights (NLMS stops) */
 void gnss_aj_set_blank(int mode);           /* pulse blanker: 0 off, 1 auto (default), 2 on (bitstream 4.6) */
 void gnss_aj_set_blank_db(double db);       /* blanker threshold above the output noise [dB], 3..30      */
 int  gnss_aj_blank_available(void);         /* 1 = the bitstream has the blanker                          */
+/* crpa23/24: 1 = no jammer: TX1 = RX1 straight through (core out of the path, default), 0 = core always in */
+void gnss_aj_set_passthru(int on);
+int  gnss_aj_passthru(void);
 void gnss_aj_set_log(int seconds);  /* periodic status line, 0 = events only */
 void gnss_aj_set_events(int on);  /* 0 = no event lines (gnss_report? keeps them) */
 void gnss_aj_set_csv(int ms);

@@ -6,7 +6,7 @@ of ADI `plutosdr-fw` v0.39:
 
 | Stage | Tool | Output |
 |---|---|---|
-| Anti-jam filter core `stap_pi` (E310 only; crpa22: STAP_NLMS_PI 10 + 10 taps, weights from the ARM) | Vitis HLS 2023.2 | `hdl/library/antsdr_ip/stap_pi` IP |
+| Anti-jam filter core `stap_pi` (E310 only; crpa24: STAP_NLMS_PI 10 + 10 taps, weights from the ARM) | Vitis HLS 2023.2 | `hdl/library/antsdr_ip/stap_pi` IP |
 | FPGA hardware design (AD9361 LVDS 2R2T + ANTSDR VCXO/PPS logic + GNSS anti-jam, xc7z020clg400-2) | Vivado 2023.2 | `system_top.xsa`, `system_top.bit` |
 | First-stage boot loader | Vitis 2023.2 (`xsct`) | `fsbl.elf` |
 | U-Boot, Linux 6.1, device tree, buildroot rootfs | Linaro GCC 7.3 (downloaded by buildroot) | `u-boot.elf`, `zImage`/`uImage`, `zynq-ant.dtb`, `rootfs.cpio.gz` |
@@ -356,7 +356,7 @@ sudo dfu-util -a uboot-env.dfu -D ./uboot-env.dfu
 
 ---
 
-## 7. GNSS anti-jam (crpa22: STAP_NLMS_PI 10 + 10, direct start + NLMS on the ARM): RX1 + RX2 -> FPGA -> TX1
+## 7. GNSS anti-jam (crpa24: STAP_NLMS_PI 10 + 10, direct start + NLMS on the ARM): RX1 + RX2 -> FPGA -> TX1
 
 The `0003` patches put the GNSS anti-jam into this Linux firmware ("design A"):
 AD9361 LVDS 2R2T, `gnss_passthrough` v4.9.14, a space-time filter core between
@@ -379,11 +379,21 @@ antenna 2 -> RX2 /  LVDS 2R2T         + pulse blanker                     -> coa
 * **Firmware (buildroot 0003):** `gnss_crpa`, started at boot: self-test,
   band, anti-jam on, TX1 on.
 
-### crpa22 (= crpa18): STAP_NLMS_PI, 10 + 10 taps, direct start, then NLMS on the ARM
+### crpa24 (= crpa18): STAP_NLMS_PI, 10 + 10 taps, direct start, then NLMS on the ARM
 
-crpa22 is crpa18 with the console names changed from the old SMI-PI ones to **STAP_NLMS_PI**
+**crpa24: fast satellite lock with no jammer.** With no jammer, TX1 now carries RX1 straight
+through `gnss_passthrough` (CONTROL[5] = 0): the filter core and its two clock-crossing FIFOs are
+out of the TX1 path, a plain pass-through. The core is switched in only when a jammer is
+confirmed (with its first weights) and out again 0.5 s after the jammer has gone;
+`gnss_passthrough` flushes and re-primes its TX buffer on every switch. Before (crpa15-crpa22)
+the core stayed in the path, bypassed, also with no jammer. Switching changes the TX1 delay by a
+fraction of a microsecond (the core and its FIFOs), which the receiver rides through.
+`gnss_aj_passthru=0` keeps the core in the path as before (not saved). The old command
+names are removed.
+
+crpa24 is crpa18 with the console names changed from the old SMI-PI ones to **STAP_NLMS_PI**
 (`gnss_stap_nlms_pi=0|1`, `gnss_stap_nlms_pi?`, `gnss_stap_nlms_pi_freeze=`; the status line reads `STAP_NLMS_PI:
-anti-jam ON ...`). The old `gnss_smi...` commands still work but are no longer listed. FPGA
+anti-jam ON ...`). FPGA
 and HLS core are unchanged (`AJ_INFO` `0x0A050C0E`, the crpa18 bitstream fits).
 
 crpa18 is crpa16 (STAP, weights calculated on the ARM) with two changes:
@@ -520,7 +530,8 @@ directly from the shell, e.g. `gnss gnss_band?`.
 | `gnss_band7?` | Band 7 values, whether it is in use, where they are saved |
 | `gnss_band_boot=7` / `gnss_band_boot?` | Band used at power-on (saved; 0 = default) |
 | `gnss_aj?` / `gnss_report?` | Anti-jam state / everything in one block |
-| `gnss_stap_nlms_pi=0` / `gnss_stap_nlms_pi=1` | Anti-jam off (TX1 = RX1, the filter core out of the path) / on (old name `gnss_smi=` still works) |
+| `gnss_stap_nlms_pi=0` / `gnss_stap_nlms_pi=1` | Anti-jam off (TX1 = RX1, the filter core out of the path) / on |
+| `gnss_aj_passthru=1` / `=0` | No jammer: TX1 = RX1 straight through, core in only while jammed (default) / core always in the path (as up to crpa22); not saved |
 | `gnss_tx=0` / `gnss_tx=1` | Silence TX1 / switch it back on |
 | `tx1_attenuation=40000` | TX1 attenuation in mdB (bigger = quieter) |
 | `gnss_rx_gain=45` | RX1 and RX2 gain |
@@ -561,7 +572,7 @@ The service:
 |---|---|
 | `gnss: the gnss_crpa service is not running` | `/etc/init.d/S95gnss_crpa start`, then `tail /var/log/gnss_crpa.log` |
 | `hardware not available` | The board runs an older bitstream. Copy the new `BOOT.bin` to the SD card. |
-| `AJ_INFO layout is 13, this firmware (crpa22) needs 14` / `the bitstream has 8 taps per channel, this firmware needs 10` | `BOOT.bin` of another package with this firmware: copy the whole new SD image. |
+| `AJ_INFO layout is 13, this firmware (crpa24) needs 14` / `the bitstream has 8 taps per channel, this firmware needs 10` | `BOOT.bin` of another package with this firmware: copy the whole new SD image. |
 | `NLMS weights out of range: started again from 0` | The ARM NLMS weights went out of the Q3.12 range (should not happen); with `gnss_aj_nlms_mu=` set by hand, lower it or set 0 (automatic). |
 | `gnss_pt: … version` mismatch in the self-test | Same: old `BOOT.bin`. |
 | `no RX capture` | Another program (IIO Oscilloscope, `iio_readdev`) holds the RX buffer. Close it and restart the service. |
@@ -616,7 +627,7 @@ The vendor patches are **unchanged**. This folder adds:
 * `patch/ant/0002-*.patch`: the GPS L1 RX1 -> FPGA -> TX1 loopback.
 * `patch/ant/0003-*.patch`, `hls/stap_pi/`, `gnss_crpa/`: the v4.9.14
   anti-jam (section 7): LVDS 2R2T, `gnss_passthrough` v4.9.14 + `stap_pi`
-  (crpa22: STAP_NLMS_PI 10 + 10 taps, direct start + NLMS on the ARM), and the firmware as the
+  (crpa24: STAP_NLMS_PI 10 + 10 taps, direct start + NLMS on the ARM), and the firmware as the
   `gnss_crpa` Linux service with custom band 7.
 
 * `build.sh`: fetches sources at the pinned commits (the vendor zip has no
