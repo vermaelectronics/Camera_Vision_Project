@@ -122,7 +122,7 @@ Name each new design-A (pass-through + CRPA) package with the next number:
   detector (aj_detect, coherence, spectrum) identical to crpa5, radio/gain/TX code unchanged, bypass exact,
   axi_ad9361 + passthrough datapath + block design unchanged apart from the core. Suspects: Vivado timing
   (bigger designs), false JAMMER ON (crpa15 per-bin detector), setup/saved conf. A/B test asked:
-  gnss_sfap=0 (core out of the TX1 path) vs =1, gnss_report?, conf file, WNS. Commit <pending19>.
+  gnss_sfap=0 (core out of the TX1 path) vs =1, gnss_report?, conf file, WNS. Commit e9d429d.
 - Next package: `crpa20` (crpa18 renamed STAP NLMS PI).
 
 Files per package: `crpaN-full-src.zip.part1`, `crpaN-full-src.zip.part2`,
