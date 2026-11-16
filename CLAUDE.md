@@ -143,7 +143,7 @@ Name each new design-A (pass-through + CRPA) package with the next number:
   core_path() waits for STATUS SMI_EN_SYNCED; gnss_aj_passthru=1|0 (default 1, not saved); TX level hold
   learns whenever the anti-jam runs (tx_and_smi_on also true with gnss_aj_enabled()); status "TX1 = RX1
   direct (filter core out of the path)"; old gnss_smi aliases REMOVED (user: "i dont want old name").
-  Firmware only, crpa18 bitstream fits. Script ren/direct.py. Commit <pending24>.
+  Firmware only, crpa18 bitstream fits. Script ren/direct.py. Commit 664b58b.
 - Next package: `crpa23` = the same for SFAP_PI (crpa21), then `crpa25`.
 
 Files per package: `crpaN-full-src.zip.part1`, `crpaN-full-src.zip.part2`,
