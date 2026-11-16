@@ -129,7 +129,7 @@ Name each new design-A (pass-through + CRPA) package with the next number:
   crpa18 Linux/U-Boot/buildroot patches identical, Linux-side code only printing fixes + clip counter. Asked
   the user for the gnss_smi=0 / =1 cold-start test on the current cards; if =0 is faster, next step = TX1
   straight through gnss_passthrough (CONTROL[5] = 0) while no jammer, core switched in only when jammed.
-  Commit <pending20>.
+  Commit f5c806c.
 - Next package: `crpa21`.
 
 Files per package: `crpaN-full-src.zip.part1`, `crpaN-full-src.zip.part2`,
