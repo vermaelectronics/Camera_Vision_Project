@@ -144,7 +144,10 @@ Name each new design-A (pass-through + CRPA) package with the next number:
   learns whenever the anti-jam runs (tx_and_smi_on also true with gnss_aj_enabled()); status "TX1 = RX1
   direct (filter core out of the path)"; old gnss_smi aliases REMOVED (user: "i dont want old name").
   Firmware only, crpa18 bitstream fits. Script ren/direct.py. Commit 664b58b.
-- Next package: `crpa23` = the same for SFAP_PI (crpa21), then `crpa25`.
+- `crpa23` (2026-11-17): crpa21 (SFAP_PI) + the same slow-lock fix as crpa24 (TX1 direct while no jammer,
+  gnss_aj_passthru=, old names removed). SFAP core latency 766 samples: each switch is a 12.5/25 us step in
+  TX1 timing (receiver may re-acquire briefly at jammer ON/OFF). crpa15 bitstream fits. Commit <pending23>.
+- Next package: `crpa25`.
 
 Files per package: `crpaN-full-src.zip.part1`, `crpaN-full-src.zip.part2`,
 `crpaN-kit.zip`, `SHA256SUMS-crpaN.txt`.

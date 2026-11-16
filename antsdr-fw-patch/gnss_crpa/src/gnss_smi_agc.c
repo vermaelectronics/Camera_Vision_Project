@@ -509,7 +509,7 @@ void gnss_rxg_print(void)
 		      (char*)(m1 == RF_GAIN_MGC ? "manual" : "AGC"), (long)g1,
 		      (char*)(m2 == RF_GAIN_MGC ? "manual" : "AGC"), (long)g2,
 		      (char*)((m1 == RF_GAIN_MGC && m2 == RF_GAIN_MGC && g1 == g2)
-		          ? " (matched, OK for STAP_NLMS_PI)" : " (NOT matched)"));
+		          ? " (matched, OK for SFAP_PI)" : " (NOT matched)"));
 	if(rxg_mode == GNSS_RXG_MATCHED)
 		console_print("  reference %d dB, ADC peak %d of 2047, TX1 %d mdB "
 			      "(operator %d mdB, level hold +%d dB)\n",
