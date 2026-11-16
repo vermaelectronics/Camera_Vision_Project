@@ -123,7 +123,14 @@ Name each new design-A (pass-through + CRPA) package with the next number:
   axi_ad9361 + passthrough datapath + block design unchanged apart from the core. Suspects: Vivado timing
   (bigger designs), false JAMMER ON (crpa15 per-bin detector), setup/saved conf. A/B test asked:
   gnss_sfap=0 (core out of the TX1 path) vs =1, gnss_report?, conf file, WNS. Commit e9d429d.
-- Next package: `crpa20` (crpa18 renamed STAP NLMS PI).
+- `crpa20` (2026-11-17): **crpa18 renamed STAP NLMS PI**: same rename as crpa19 (gnss_stap= / gnss_stap? /
+  gnss_stap_freeze=, status "STAP NLMS PI: ...", old gnss_smi names hidden aliases). Firmware only, crpa18
+  bitstream fits (AJ_INFO 0x0A050C0E). User wants lock time "like crpa1 with Linux", "less time": crpa1 vs
+  crpa18 Linux/U-Boot/buildroot patches identical, Linux-side code only printing fixes + clip counter. Asked
+  the user for the gnss_smi=0 / =1 cold-start test on the current cards; if =0 is faster, next step = TX1
+  straight through gnss_passthrough (CONTROL[5] = 0) while no jammer, core switched in only when jammed.
+  Commit <pending20>.
+- Next package: `crpa21`.
 
 Files per package: `crpaN-full-src.zip.part1`, `crpaN-full-src.zip.part2`,
 `crpaN-kit.zip`, `SHA256SUMS-crpaN.txt`.
