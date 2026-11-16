@@ -198,7 +198,7 @@ void gnss_log_now(void)
 	console_print("\n----- gnss_tx? -----\n");               get_gnss_tx(&d, 0);
 	console_print("\n----- gnss_band? -----\n");             get_gnss_band(&d, 0);
 	console_print("\n----- gnss_rx_gain? -----\n");          get_gnss_rx_gain(&d, 0);
-	console_print("\n----- gnss_sfap_pi? -----\n");              get_gnss_smi(&d, 0);
+	console_print("\n----- gnss_stap_nlms_pi? -----\n");              get_gnss_smi(&d, 0);
 	console_print("\n----- tx1_attenuation? -----\n");       get_tx1_attenuation(&d, 0);
 	console_print("\n----- radio? -----\n");                 get_radio(&d, 0);
 	console_print("\n----- gnss_aj? -----\n");               get_gnss_aj(&d, 0);

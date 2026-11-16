@@ -134,7 +134,11 @@ Name each new design-A (pass-through + CRPA) package with the next number:
   SFAP_PI Not other"): console name **SFAP_PI**, commands gnss_sfap_pi=0|1 / gnss_sfap_pi? /
   gnss_sfap_pi_freeze= (old gnss_smi* hidden aliases). crpa19/20 superseded (sent minutes earlier). Firmware
   only, crpa15 bitstream fits. Script ren/under.py. Commit b7c6051.
-- Next package: `crpa22` (crpa20 with STAP_NLMS_PI / gnss_stap_nlms_pi).
+- `crpa22` (2026-11-17): crpa20 with the user's exact name **STAP_NLMS_PI**: commands gnss_stap_nlms_pi=0|1 /
+  gnss_stap_nlms_pi? / gnss_stap_nlms_pi_freeze= (old gnss_smi* hidden aliases). Supersedes crpa20. Firmware
+  only, crpa18 bitstream fits (AJ_INFO 0x0A050C0E). Commit <pending22>.
+- Open: slow satellite lock with no jammer (crpa15/18): waiting for the user's gnss_*=0 / =1 cold-start A/B test.
+- Next package: `crpa23`.
 
 Files per package: `crpaN-full-src.zip.part1`, `crpaN-full-src.zip.part2`,
 `crpaN-kit.zip`, `SHA256SUMS-crpaN.txt`.

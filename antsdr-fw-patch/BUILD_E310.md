@@ -6,7 +6,7 @@ of ADI `plutosdr-fw` v0.39:
 
 | Stage | Tool | Output |
 |---|---|---|
-| Anti-jam filter core `sfap_pi` (E310 only; crpa21: SFAP_PI 256, weights from the ARM) | Vitis HLS 2023.2 | `hdl/library/antsdr_ip/sfap_pi` IP |
+| Anti-jam filter core `stap_pi` (E310 only; crpa22: STAP_NLMS_PI 10 + 10 taps, weights from the ARM) | Vitis HLS 2023.2 | `hdl/library/antsdr_ip/stap_pi` IP |
 | FPGA hardware design (AD9361 LVDS 2R2T + ANTSDR VCXO/PPS logic + GNSS anti-jam, xc7z020clg400-2) | Vivado 2023.2 | `system_top.xsa`, `system_top.bit` |
 | First-stage boot loader | Vitis 2023.2 (`xsct`) | `fsbl.elf` |
 | U-Boot, Linux 6.1, device tree, buildroot rootfs | Linaro GCC 7.3 (downloaded by buildroot) | `u-boot.elf`, `zImage`/`uImage`, `zynq-ant.dtb`, `rootfs.cpio.gz` |
@@ -192,7 +192,7 @@ It then does a shallow fetch of each submodule at the commit v0.39 pins:
 | `patch/ant/0001-add-support-makefile-scripts.patch` | `plutosdr-fw` | `TARGET=ant`, `scripts/ant.its`, `make sdimg` |
 | `patch/ant/0002-hdl-add-gnss-passthrough.patch` | `hdl` | `library/gnss_passthrough` and its place in the `ant` block design (GPS L1 loopback, section 7) |
 | `patch/ant/0002-buildroot-add-gnss-loopback.patch` | `buildroot` | `/usr/sbin/gnss_loopback` command |
-| `patch/ant/0003-hdl-stap-antijam.patch` | `hdl` | v4.9.14 anti-jam: AD9361 **LVDS 2R2T** interface, `gnss_passthrough` v4.9.14 with the weight RAM, `sfap_pi` filter (crpa15: SFAP-PI 256, weights from the ARM) between two clock-crossing FIFOs (section 7) |
+| `patch/ant/0003-hdl-stap-antijam.patch` | `hdl` | v4.9.14 anti-jam: AD9361 **LVDS 2R2T** interface, `gnss_passthrough` v4.9.14, `stap_pi` filter (crpa18: 10 + 10 taps, weights from the ARM) between two clock-crossing FIFOs (section 7) |
 | `patch/ant/0003-linux-lvds-2r2t.patch` | `linux` | `zynq-ant.dtsi`: `adi,ad9361`, LVDS settings of the vendor E310 design |
 | `patch/ant/0003-uboot-mode-2r2t.patch` | `u-boot-xlnx` | default `mode=2r2t` (RX1 and RX2 both on) |
 | `patch/ant/0003-buildroot-gnss-crpa.patch` | `buildroot` | `gnss-crpa` package: the anti-jam firmware as a Linux service, the `gnss` console (section 7) |
@@ -206,12 +206,11 @@ It then does a shallow fetch of each submodule at the commit v0.39 pins:
 ./build.sh hls
 ```
 
-Builds `hls/sfap_pi` (C simulation of scenarios 1-18 with the firmware's solver,
-synthesis at 100 MHz, II=1) into `plutosdr-fw/hdl/library/antsdr_ip/sfap_pi`.
-It takes 20–40 minutes. It prints `SFAP_PI_HLS: PASS` at the end, and its log is
-`hls/sfap_pi/build/build_hls.log`. `SFAP_PI_SKIP_CSIM=1 ./build.sh hls` skips
-the simulation, `SFAP_PI_CSIM_LIST="1 2 4" ./build.sh hls` runs only those
-scenarios. `hdl`, `fsbl` and `firmware` run this step themselves if the
+Builds `hls/stap_pi` (C simulation of scenarios 1-9, 11-14 and 25-27,
+synthesis at 100 MHz, II=1) into `plutosdr-fw/hdl/library/antsdr_ip/stap_pi`.
+It takes 10–20 minutes. It prints `STAP_PI_HLS: PASS` at the end, and its log is
+`hls/stap_pi/build/build_hls.log`. `STAP_PI_SKIP_CSIM=1 ./build.sh hls` skips
+the simulation. `hdl`, `fsbl` and `firmware` run this step themselves if the
 core is missing.
 
 ### Step 4: Hardware (Vivado 2023.2): bitstream and XSA
@@ -357,105 +356,103 @@ sudo dfu-util -a uboot-env.dfu -D ./uboot-env.dfu
 
 ---
 
-## 7. GNSS anti-jam (crpa21: SFAP_PI 256, weights on the ARM): RX1 + RX2 -> FPGA -> TX1
+## 7. GNSS anti-jam (crpa22: STAP_NLMS_PI 10 + 10, direct start + NLMS on the ARM): RX1 + RX2 -> FPGA -> TX1
 
 The `0003` patches put the GNSS anti-jam into this Linux firmware ("design A"):
-AD9361 LVDS 2R2T, `gnss_passthrough` v4.9.14, a filter core between RX1/RX2 and
-TX1, and the `gnss_crpa` service with its console. One feature of the Linux port
-is new: **band 7, your own RF values, set at any time from PuTTY**.
+AD9361 LVDS 2R2T, `gnss_passthrough` v4.9.14, a space-time filter core between
+RX1/RX2 and TX1, and the `gnss_crpa` service with its console. One feature of
+the Linux port is new: **band 7, your own RF values, set at any time from PuTTY**.
 
 ```text
-antenna 1 -> RX1 \                    sfap_pi space-frequency anti-jam
-                  AD9361 -> FPGA  gnss_passthrough  (256 bins, b + 2 image taps per bin) -> AD9361 -> TX1
-antenna 2 -> RX2 /  LVDS 2R2T         + weight RAM + pulse blanker               -> coax + attenuator + DC block
-                    61.44 MS/s                                                     -> GNSS receiver -> GNSS Viewer
+antenna 1 -> RX1 \                    stap_pi space-time anti-jam (10 + 10 taps,
+                  AD9361 -> FPGA  gnss_passthrough  3 + 3 image taps)      -> AD9361 -> TX1
+antenna 2 -> RX2 /  LVDS 2R2T         + pulse blanker                     -> coax + attenuator + DC block
+                    61.44 MS/s                                               -> GNSS receiver -> GNSS Viewer
 ```
 
 * **FPGA (hdl 0003):** the AD9361 runs over **LVDS** (pins and I/O standards of
   the vendor E310 V1 design), so both receivers run at 61.44 MS/s.
-  `gnss_passthrough` v4.9.14 (`0x43C1_0000`) feeds RX1+RX2 to the `sfap_pi`
+  `gnss_passthrough` v4.9.14 (`0x43C1_0000`) feeds RX1+RX2 to the `stap_pi`
   filter (Vitis HLS, 100 MHz) and its output to TX1. TX2 carries a muted copy.
 * **Linux (0003):** the device tree switches the driver to `adi,ad9361` 2R2T
   LVDS. U-Boot defaults to `mode=2r2t`.
 * **Firmware (buildroot 0003):** `gnss_crpa`, started at boot: self-test,
   band, anti-jam on, TX1 on.
 
-### crpa21 (= crpa15): your SFAP_PI 256 (v6.2.1) under Linux
+### crpa22 (= crpa18): STAP_NLMS_PI, 10 + 10 taps, direct start, then NLMS on the ARM
 
-Three Linux packages were asked for, all with the weights calculated on the ARM:
-**crpa15** = SFAP-PI 256 (your v6.2.1), **crpa16** = STAP 8 + 8 with 3 + 3 image
-taps, **crpa17** = STAP 6 + 6 with 3 + 3 image taps. This package is **crpa21**:
-crpa15 with the console names changed from the old SMI-PI ones to **SFAP_PI**
-(`gnss_sfap_pi=0|1`, `gnss_sfap_pi?`, `gnss_sfap_pi_freeze=`; the status line reads
-`SFAP_PI: anti-jam ON ...`). The old `gnss_smi...` commands still work but are no
-longer listed. FPGA and HLS core are unchanged: a crpa15 `BOOT.bin` (bitstream) and the
-crpa21 firmware belong together, `AJ_INFO` is the same `0x08070C0F`.
+crpa22 is crpa18 with the console names changed from the old SMI-PI ones to **STAP_NLMS_PI**
+(`gnss_stap_nlms_pi=0|1`, `gnss_stap_nlms_pi?`, `gnss_stap_nlms_pi_freeze=`; the status line reads `STAP_NLMS_PI:
+anti-jam ON ...`). The old `gnss_smi...` commands still work but are no longer listed. FPGA
+and HLS core are unchanged (`AJ_INFO` `0x0A050C0E`, the crpa18 bitstream fits).
 
-* **FPGA:** your `sfap_pi` 4.0 core (`hls/sfap_pi`, from SFAP_PI_256v3 / v6.0
-  core, unchanged): RX2 normalisation g2, 256-bin sqrt-Hann filter bank with
-  50 % overlap (hop 128), per bin one weight `b` on RX2 plus two image taps
-  `c1`, `c2`, RX1 fixed at 1, exact bypass, make-up shift 0..4. Latency 766
-  samples (12.5 us at 61.44 MS/s).
-* **Weight RAM (new in `gnss_passthrough`):** 3 x 256 words, double-buffered:
-  the ARM writes `b` at 0x1000 + 4k, `c1` at 0x1400 + 4k, `c2` at 0x1800 + 4k
-  (bin k in FFT order, Q3.12) into the bank **not** in use; `AJ_COMMIT` (0x180)
-  switches banks only if weights were written, so the filter never runs a
-  half-old, half-new set. The core reads the bank in use through its memory
-  ports (two per array). 0x1B0 reads the bank in use.
-  **`AJ_INFO` = `0x08070C0F`** (log2 N 8, log2 hop 7, Q3.12, layout 15).
-  AJ_W, AJ_WC, AJ_WCX and AJ_GAIN of the STAP packages are gone; clip counters,
-  power meters and the pulse blanker are kept.
-* **ARM:** your v6.2.1 solver (`gnss_crpa/src/gnss_aj_math.c`, `aj_compute`),
-  unchanged, on every 4096-sample capture while jammed: per bin the 3 weights,
-  drift-aware averaging, the weight hold (v6.1), the per-bin detector, g2
-  following a jammer weaker at RX2 (v6.2). Then all 768 words are written and
-  committed with the make-up shift. About 10 ms per solve on the board (about
-  100 solves per second, as on your bare-metal build; one ARM core, Linux);
-  `gnss_aj_sfap?` shows the measured time.
-* **Detection:** the 4.9.14 detector (powers + RX1/RX2 coherence) **plus** your
-  per-bin detector (a narrowband jammer 8 dB above the learned per-bin floor
-  switches the filter in, 5 dB to release), so narrow and hopping jammers are
-  seen too. The floor is learned while no jammer is present (as before: switch
-  the jammer off for 10 s after a band change).
+crpa18 is crpa16 (STAP, weights calculated on the ARM) with two changes:
 
-C simulation (your `hls/sfap_pi/testbench.cpp`, run with this firmware's
-`gnss_aj_math.c`; all 18 scenarios pass):
+* **10 + 10 taps, reference delay 5** (3 + 3 image taps kept): 25 adaptive
+  weights instead of 21. `stap_pi` 1.0 with `ST_NT` 10 / `ST_REF` 5, weights at
+  `AJ_W` 0x400..0x44C (20 words) plus the six image-tap registers (AJ_WC
+  0x190/0x194, AJ_WCX 0x1C0..0x1CC), committed in one clock by AJ_COMMIT.
+  **`AJ_INFO` = `0x0A050C0E`** (layout 14). No feedback inside the core (no
+  weight smoothing, no NLMS loop).
+* **Direct start:** the first capture of a new jammer is solved directly on the
+  ARM (`aj_direct_solve()` in `gnss_crpa/src/gnss_aj_math.c`): the best weights
+  of the 25 taps for that capture (Wiener, `R w = p`, Cholesky), with a
+  **diagonal loading of 10 x the receiver noise**, so everything at or below the
+  noise (the satellites) is left alone and only the jammer is nulled. The NLMS
+  then continues from these weights on every capture, as in crpa16. Without the
+  direct start the NLMS starts from 0 and needs many captures for the weak parts
+  of a strong wideband jammer. The direct solve also runs again after a weight
+  restart. About 30-60 ms of one ARM core, once per jammer (5.6 ms on a PC);
+  `gnss_aj_nlms?` shows the measured time.
+* **NLMS (unchanged from crpa16):** every capture while jammed (8192 samples),
+  `aj_nlms_solve()`, `w += alpha y conj(u) / (|u|^2 + 1)`, 2 passes, step from
+  the detected J/N: 0.05 below 35 dB, 0.1 up to 50 dB, 0.2 above.
+* Kept: fine gain, ADC clip counters, FPGA power meters, pulse blanker, one ARM
+  core. Linux only.
 
-| Scenario | suppression | residual |
-|---|---|---|
-| 2: wideband, J/N 30 dB | 41.0 dB | +0.21 dB |
-| 3: no jammer (filter in) | – | +0.02 dB |
-| 4: CW, J/N 40 dB | 63.1 dB | +0.02 dB |
-| 5: wideband + reflection | 40.1 dB | +0.22 dB |
-| 6: wideband 50 dB, I/Q imbalance | 56.8 dB | +0.23 dB |
-| 7: RX2 25 dB weaker, J/N 40 dB | 38.6 dB | +3.65 dB |
-| 8: wideband 60 dB, I/Q imbalance | 58.4 dB | +1.51 dB |
-| 9: two CW from two directions | 63.0 dB | +0.03 dB |
-| 11: intermittent jammer (hold 100) | 52.0 dB | |
-| 12: hopping narrowband (hold 100) | 56.2 dB | |
-| 13: per-bin detector, 300 noise captures | 0 false alarms | |
-| 15: jammer changes direction | 46.0 dB | |
+C simulation (`hls/stap_pi/testbench.cpp`, the firmware's solvers on 20 captures
+of 8192 samples, then the weights in the core; satellite = a BPSK signal 20 dB
+below the noise, its SNR loss against RX1 alone with no jammer, negative = the
+second antenna adds signal). All 16 scenarios pass.
 
-Compared with crpa16/17 (STAP 8 + 8 / 6 + 6, NLMS on the ARM): SFAP nulls
-wideband and multipath jammers more deeply (each bin has its own weight, so a
-reflection or an I/Q error across the band costs little: J/N 60 dB +1.5 dB
-against +6 dB), at about 12.5 us latency instead of 0.1 us, and with more DSP48.
-A two-antenna array still nulls **one** direction per bin.
+| Scenario | crpa18: suppression | residual | satellite loss | crpa16 (8 + 8, NLMS from 0): residual | satellite loss |
+|---|---|---|---|---|---|
+| 2: wideband, J/N 30 dB | 39.8 dB | +0.27 dB | −1.6 dB | +0.30 dB | −0.9 dB |
+| 3: no jammer (filter in) | – | +0.02 dB | 0.3 dB | +0.02 dB | 0.2 dB |
+| 4: CW, J/N 40 dB | 53.7 dB | +0.19 dB | 0.0 dB | +0.11 dB | 0.0 dB |
+| 5: wideband + reflection | 39.7 dB | +0.26 dB | −3.8 dB | +0.34 dB | −4.1 dB |
+| 6: wideband 50 dB, I/Q imbalance | 50.4 dB | +1.5 dB | −0.2 dB | +1.8 dB | 1.2 dB |
+| 7: RX2 25 dB weaker, J/N 40 dB | 36.2 dB | +5.2 dB | 1.4 dB | +5.4 dB | – |
+| 8: wideband 60 dB, I/Q imbalance | 54.0 dB | **+3.9 dB** | **2.8 dB** | +6.1 dB | 6.7 dB |
+| 9: CW 62 dB on the satellite | 67.4 dB | +0.65 dB | 1.9 dB | +1.2 dB | 1.3 dB |
+| 11: field J/N 61 dB | 56.3 dB | **+3.6 dB** | **4.6 dB** | +7.0 dB | 7.1 dB |
+| 12: field J/N 51 dB | 53.2 dB | +0.93 dB | 1.1 dB | +1.6 dB | 1.2 dB |
+| 13: field J/N 41 dB | 48.3 dB | +0.42 dB | 0.1 dB | +0.6 dB | −0.1 dB |
+| 25: J/N 61, I/Q error across the band | 55.7 dB | +3.9 dB | 4.6 dB | – | – |
+| 26: jammer direction drifting | tracked, ARM residual +1.4 dB | | | +1.9 dB | |
+| 27: captures to ≤ 3 dB, J/N 30 / 50 dB | 1 / 1 | | | 1 / 6 | |
+
+The best possible weights of these 25 taps leave +3.4 dB at J/N 60: the direct
+start reaches that limit at once, where the NLMS alone needs hundreds of
+captures. The satellite measurement has about ±0.5–1 dB of uncertainty (a
+signal 20 dB below the noise on 40,000 samples). The loading of 10 x the noise
+was chosen from a sweep (0, 1, 3, 10, 30): without it the direct solve also
+partly cancels the satellite (field J/N 51: 2.7 dB loss instead of 1.0 dB).
+
+| Command | Does |
+|---|---|
+| `gnss_aj_direct=1` | Captures solved directly at the start of a jammer, 0..8 (default 1; 0 = NLMS from 0, as crpa16; saved) |
+| `gnss_aj_nlms?` | NLMS step, passes, weight scale, ARM time, and the direct start (count, time) |
 
 Resources (estimate; the Vivado report is the proof):
 
-| | crpa15 (SFAP 256) | crpa16 (STAP 8 + 8) | crpa17 (STAP 6 + 6) |
+| | crpa18 (10 + 10) | crpa16 (8 + 8) | crpa17 (6 + 6) |
 |---|---|---|---|
-| DSP48 in the core | about 158 | about 67 | about 55 |
-| DSP48 in design A | about 170-190 of 220 (77-86 %) | about 101 (46 %) | about 89 (40 %) |
-| BRAM36 | about 20-30 (FFT buffers + weight RAM 6 x 2 KB) | about 10-15 | about 10-15 |
-| ARM (CPU 0) while jammed | most of it (about 10 ms per solve) | most of it | about 3/4 of crpa16 |
-
-`gnss_aj_mode=0|1|2` chooses the solver: 0 = per bin b + 2 image taps
-(default), 1 = b only, 2 = one b for all bins (the narrowband v3 SMI-PI).
-`gnss_aj_hold=N` sets the weight hold (solves, default 100, 0 = off).
-`gnss_aj_sfap?` shows bins, hop, latency, mode, hold, per-bin floor, g2 and the
-solve time. Mode and hold are not saved (defaults at every start).
+| Adaptive weights | 25 | 21 | 17 |
+| DSP48 in the core | about 79 | about 67 | about 55 |
+| DSP48 in design A | about 113 of 220 (51 %) | about 101 (46 %) | about 89 (40 %) |
+| BRAM36 | about 10–15 | about 10–15 | about 10–15 |
+| ARM (CPU 0) while jammed | most of it (NLMS, about 20 % more than crpa16) + 30–60 ms once per jammer | most of it | about 3/4 of crpa16 |
 
 To build in a folder that was already patched for another package, start from
 clean sources; `./build.sh patch` stops with "does not apply" otherwise:
@@ -523,14 +520,16 @@ directly from the shell, e.g. `gnss gnss_band?`.
 | `gnss_band7?` | Band 7 values, whether it is in use, where they are saved |
 | `gnss_band_boot=7` / `gnss_band_boot?` | Band used at power-on (saved; 0 = default) |
 | `gnss_aj?` / `gnss_report?` | Anti-jam state / everything in one block |
-| `gnss_sfap_pi=0` / `gnss_sfap_pi=1` | Anti-jam off (TX1 = RX1, the filter core out of the path) / on (old name `gnss_smi=` still works) |
+| `gnss_stap_nlms_pi=0` / `gnss_stap_nlms_pi=1` | Anti-jam off (TX1 = RX1, the filter core out of the path) / on (old name `gnss_smi=` still works) |
 | `gnss_tx=0` / `gnss_tx=1` | Silence TX1 / switch it back on |
 | `tx1_attenuation=40000` | TX1 attenuation in mdB (bigger = quieter) |
 | `gnss_rx_gain=45` | RX1 and RX2 gain |
 | `gnss_rx_agc=2` | RX1 and RX2 gain together, automatic against clipping (saved) |
-| `gnss_aj_sfap?` | SFAP_PI: bins, hop, latency, mode, weight hold, per-bin floor, g2, ARM solve time |
-| `gnss_aj_mode=0` / `=1` / `=2` | Per bin b + 2 image taps (default) / b only / one b for all bins (not saved) |
-| `gnss_aj_hold=100` | Weight hold in solves, 0..1000 (default 100; 0 = off; not saved) |
+| `gnss_aj_nlms?` | ARM NLMS state, step alpha, passes, weight scale, ARM time per capture |
+| `gnss_aj_nlms_mu=0` / `gnss_aj_nlms_mu=0.1` | ARM NLMS step automatic from J/N (default) / by hand, 0.001..1 (saved) |
+| `gnss_aj_nlms_pass=2` | Passes over each capture, 1..8 (default 2; saved) |
+| `gnss_aj_direct=1` | Direct solve on the first capture of a jammer, then NLMS (default 1; 0 = NLMS from 0; saved) |
+| `gnss_aj_nlms=0` / `gnss_aj_nlms=1` | Hold the weights as they are / new weights every capture (default; not saved) |
 | `gnss_aj_csv=500` | CSV line every 500 ms (columns: J/N, suppression, residual, clip_ppm, FPGA meters ...) |
 
 Band 7 limits: LO 70–6000 MHz, 2.084–61.44 MS/s, bandwidth 0.2–56 MHz,
@@ -562,13 +561,14 @@ The service:
 |---|---|
 | `gnss: the gnss_crpa service is not running` | `/etc/init.d/S95gnss_crpa start`, then `tail /var/log/gnss_crpa.log` |
 | `hardware not available` | The board runs an older bitstream. Copy the new `BOOT.bin` to the SD card. |
-| `the bitstream's AJ_INFO is 0x8040c0e, this firmware (crpa21, SFAP_PI 256 bins) needs 0x8070c0f` | `BOOT.bin` of another package (STAP) with this firmware: copy the whole new SD image. |
+| `AJ_INFO layout is 13, this firmware (crpa22) needs 14` / `the bitstream has 8 taps per channel, this firmware needs 10` | `BOOT.bin` of another package with this firmware: copy the whole new SD image. |
+| `NLMS weights out of range: started again from 0` | The ARM NLMS weights went out of the Q3.12 range (should not happen); with `gnss_aj_nlms_mu=` set by hand, lower it or set 0 (automatic). |
 | `gnss_pt: … version` mismatch in the self-test | Same: old `BOOT.bin`. |
 | `no RX capture` | Another program (IIO Oscilloscope, `iio_readdev`) holds the RX buffer. Close it and restart the service. |
 | `dmesg | grep ad9361` shows a tuning failure | The LVDS interface did not train. Report the `dmesg` output. |
 | Only one RX channel in `iio_info` | U-Boot kept an old `mode=1r1t`. At the `ant>` prompt: `setenv mode 2r2t; saveenv; boot` |
 | Viewer shows no satellites | `gnss gnss_report?`, check RSSI and gain, try `gnss_band=1`, check the DC block and attenuator in the TX1 path. |
-| Satellites lock slowly even with no jammer | Cold start in GNSS Viewer twice: once after `gnss gnss_sfap_pi=0` (TX1 = RX1, the filter core and its FIFOs out of the path), once after `gnss gnss_sfap_pi=1`. Slow only with `=1`: look in `gnss gnss_report?` for a JAMMER ON event with no jammer, and in the Vivado report `system_top_timing_summary_routed.rpt` for a negative WNS. Slow in both: RF level, saved band/gain (`cat /mnt/jffs2/gnss_crpa.conf`), sky view. |
+| Satellites lock slowly even with no jammer | Cold start in GNSS Viewer twice: once after `gnss gnss_stap_nlms_pi=0` (TX1 = RX1, the filter core and its FIFOs out of the path), once after `gnss gnss_stap_nlms_pi=1`. Slow only with `=1`: look in `gnss gnss_report?` for a JAMMER ON event with no jammer, and in the Vivado report `system_top_timing_summary_routed.rpt` for a negative WNS. Slow in both: RF level, saved band/gain (`cat /mnt/jffs2/gnss_crpa.conf`), sky view. |
 
 ---
 
@@ -614,10 +614,9 @@ The service:
 The vendor patches are **unchanged**. This folder adds:
 
 * `patch/ant/0002-*.patch`: the GPS L1 RX1 -> FPGA -> TX1 loopback.
-* `patch/ant/0003-*.patch`, `hls/sfap_pi/`, `gnss_crpa/`: the v4.9.14
-  anti-jam (section 7): LVDS 2R2T, `gnss_passthrough` v4.9.14 + weight RAM +
-  `sfap_pi` (crpa21: your SFAP_PI 256, weights by your v6.2.1 solver on the
-  ARM), and the firmware as the
+* `patch/ant/0003-*.patch`, `hls/stap_pi/`, `gnss_crpa/`: the v4.9.14
+  anti-jam (section 7): LVDS 2R2T, `gnss_passthrough` v4.9.14 + `stap_pi`
+  (crpa22: STAP_NLMS_PI 10 + 10 taps, direct start + NLMS on the ARM), and the firmware as the
   `gnss_crpa` Linux service with custom band 7.
 
 * `build.sh`: fetches sources at the pinned commits (the vendor zip has no

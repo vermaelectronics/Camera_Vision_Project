@@ -4,10 +4,9 @@ This Repository is used to make Microphase software radio device firmware.
 > **ANTSDR E310 with Vivado/Vitis 2023.2:** see [BUILD_E310.md](BUILD_E310.md).
 > `./build.sh all` fetches the pinned plutosdr-fw v0.39 sources, applies these
 > patches and builds everything up to `boot.bin` / SD-card `BOOT.bin`. For the
-> E310 this includes the GNSS anti-jam (RX1+RX2 -> FPGA -> TX1, crpa21: the user's SFAP_PI 256
-> bins, b + 2 image taps per bin; the weights are calculated on the ARM by the v6.2.1 solver and
-> applied by the FPGA filter through a double-buffered weight RAM; ADC clip counters, power
-> meters) and the `gnss` console with custom band 7
+> E310 this includes the GNSS anti-jam (RX1+RX2 -> FPGA -> TX1, STAP_NLMS_PI 10 + 10 space-time taps (crpa22),
+> 3 + 3 image taps; the weights are calculated on the ARM (a direct solve on the first capture of a
+> jammer, then NLMS) and applied by the FPGA filter; fine output gain, ADC clip counters, power meters) and the `gnss` console with custom band 7
 > (BUILD_E310.md section 7). Linux only (no bare-metal build). The
 > original vendor instructions follow below.
 
