@@ -133,7 +133,7 @@ Name each new design-A (pass-through + CRPA) package with the next number:
 - `crpa21` (2026-11-17): crpa19 with the user's exact names (user: "use here in firmware STAP_NLMS_PI and
   SFAP_PI Not other"): console name **SFAP_PI**, commands gnss_sfap_pi=0|1 / gnss_sfap_pi? /
   gnss_sfap_pi_freeze= (old gnss_smi* hidden aliases). crpa19/20 superseded (sent minutes earlier). Firmware
-  only, crpa15 bitstream fits. Script ren/under.py. Commit <pending21>.
+  only, crpa15 bitstream fits. Script ren/under.py. Commit b7c6051.
 - Next package: `crpa22` (crpa20 with STAP_NLMS_PI / gnss_stap_nlms_pi).
 
 Files per package: `crpaN-full-src.zip.part1`, `crpaN-full-src.zip.part2`,
