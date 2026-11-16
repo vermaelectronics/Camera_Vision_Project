@@ -104,7 +104,16 @@ Name each new design-A (pass-through + CRPA) package with the next number:
   the user's design B); AJ_W/WC/WCX/GAIN removed; AJ_INFO 0x08070C0F (layout 15). Commands
   gnss_aj_mode=0|1|2, gnss_aj_hold=, gnss_aj_sfap? (not saved); nlms commands removed. csim 18/18 pass
   with the firmware's math (J/N 60 I/Q: +1.5 dB residual). ~170-190 DSP48. Linux only. Commit e9bba03.
-- Next package: `crpa18`.
+- `crpa18` (2026-11-16): crpa16 STAP at **10 + 10 taps** (ST_NT / AJ_NT 10, REF 5, 3 + 3 image, 25
+  weights, AJ_NWTS_DEF 20, AJ_INFO 0x0A050C0E, ~79 DSP48 core / ~113 in all) + **direct start**:
+  aj_direct_solve() (Wiener over one capture, integer covariance in 32-bit chunks, Cholesky, loading
+  AJ_DIRECT_LOAD_DEF = 10 x receiver noise so the satellites are not cancelled; loading sweep 0/1/3/10/30)
+  on the first capture of a jammer and after a weight restart, then NLMS as crpa16; gnss_aj_direct=0..8
+  (default 1, saved as aj_arm_direct), shown in gnss_aj_nlms?. hls/sfap_pi removed again (crpa15 is its
+  own package). csim 16/16 pass: J/N 60 residual +3.9 dB / satellite loss 2.8 dB (crpa16 +6.1 / 6.7),
+  field 61 +3.6 / 4.6 (crpa16 +7.0 / 7.1), 51 +0.9 / 1.1, 41 +0.4 / 0.1; converged after 1 capture at
+  J/N 50 (crpa16: 6). Host fake run: direct solve 5.6 ms on a PC, nulled. Commit <pending>.
+- Next package: `crpa19`.
 
 Files per package: `crpaN-full-src.zip.part1`, `crpaN-full-src.zip.part2`,
 `crpaN-kit.zip`, `SHA256SUMS-crpaN.txt`.
