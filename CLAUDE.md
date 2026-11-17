@@ -167,7 +167,23 @@ Name each new design-A (pass-through + CRPA) package with the next number:
   (2 banks x 8, LUT RAM, 2 read ports aj_wm_*), mask write sets dirty, AJ_INFO 0x08070C10 (layout 16); block design
   wm ports. build.sh LICENSE.html placeholder (crpa25). csim 23/23 pass with the firmware's math; Icarus 0 errors.
   Design A ~210 of 220 DSP48 (estimate). Commit dafc165.
-- Next package: `crpa27`.
+- `crpa27` / `crpa28` / `crpa29` (2026-11-17): STAP_NLMS_PI **8 + 8 / 10 + 10 / 14 + 14** (REF 4 / 5 / 7, 3 + 3
+  image) with the **moving-jammer fix** (user: "Make the STAP PI Algo 8+8, 10+10, 14 + 14 STAP PI algo with moving
+  jammer fix"), built on crpa25 (TX1 direct while no jammer, direct start + NLMS on the ARM, LICENSE fix). FPGA
+  unchanged: hdl patch of crpa16 (8 + 8, AJ_INFO 0x08040C0E), crpa18/24 (10 + 10, 0x0A050C0E), crpa25 (14 + 14,
+  0x0E070C0E). Firmware (gnss_aj_math.c/h, gnss_aj.c): **weight prediction** (aj_pred_*: staleness = residual of the
+  weights held from the last capture, arm_phold, minus the fresh solve; >= 3 dB for 2 captures -> commit
+  w + lead x v, v smoothed change per capture (beta 0.5, innovation reset), lead = (capture-to-commit time + period/2)
+  / period measured, off after 4 calm captures; gnss_aj_predict=0|1) and **tracking re-solve** (aj_track_*: fresh
+  residual 3 dB above the best since the last direct solve for 2 captures -> direct solve next capture, gap 3;
+  gnss_aj_track=0|1), gnss_aj_move?, arm_pcore = residual of the committed weights; both not saved, default 1.
+  Testbench: drift now stepwise between captures, scenarios 28 (3 deg/capture), 29 (jump 120 deg), 30 (jump, field
+  J/N 61), 31 (move then stop), 32 (field move); argv[8] track, argv[9] predict. csim 21/21 pass for all three; core
+  residual off/fix 14 + 14: 0.75 deg/capture +10.1/+1.8 dB, 3 deg +21.6/+5.3, field +17.7/+2.5, jump back in 12/2
+  captures (8 + 8: +10.6/+2.5, +22.1/+5.6; 10 + 10: +10.4/+2.1, +21.9/+5.4). Static scenarios unchanged (no
+  re-solve, no prediction). Variant switch script: scratchpad mvp/variant.py NT. Commits d0df4f5 (27), f098977 (28),
+  f4b7b91 (29).
+- Next package: `crpa30`.
 
 Files per package: `crpaN-full-src.zip.part1`, `crpaN-full-src.zip.part2`,
 `crpaN-kit.zip`, `SHA256SUMS-crpaN.txt`.
