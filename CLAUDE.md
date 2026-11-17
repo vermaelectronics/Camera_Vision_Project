@@ -154,7 +154,20 @@ Name each new design-A (pass-through + CRPA) package with the next number:
   SKIP_LEGAL=1 (fresh build failed in genimage without it, user's crpa23 build). csim 16/16 pass: J/N 60
   +3.2 dB / sat loss 3.0 (crpa24 +3.9 / 2.8), field 61 +2.9 / 4.1, 51 +0.7 / 1.1, 41 +0.3 / -0.1, CW 40 57.3 dB;
   optimum of 33 taps at J/N 60 +3.0 dB (10 + 10: +3.4). Icarus 0 errors. Commit 52efff4.
-- Next package: `crpa26`.
+- `crpa26` (2026-11-17): **SFAP_PI v6.3** (user's new Source.zip, sha256 85c6b334..., "in crpa6 remove the previous
+  crpa algo and add the algo given in the source file"; built on crpa23 = latest SFAP design A, crpa6 too old): hls/sfap_pi
+  = user's core 5.0 (input pulse blanker cfg[27:16], excision mask port wm rom_2p 8 x 32, latency 782, sfap_pi 5.0;
+  user's HLS report: 176 DSP48, 40 BRAM18, 23821 LUT, 40835 FF, 9.629 ns), gnss_aj_math = user's v6.3 + crpa15
+  helpers; Linux engine: ib_blank_capture() per capture (aj_blank_thr/aj_blank_buf, cap = blanked copy),
+  detection why = 5 (pulses), noise_ref x (1 - blanked fraction), res.excise, mask with the weights, cfg_in() adds
+  GNSS_PT_AJ_CFG_IBLANK, gnss_aj_gain_stepped() + gnss_rxg_set_blank_thr() in gnss_smi_agc.c, commands
+  gnss_sfap_pi_blank= / gnss_sfap_pi_excise= (default 1, not saved), report lines in gnss_aj_sfap?. **Excision only
+  with a learned noise floor** (nf0 > 0): host test of the v6.3 solver with noise_ref <= 0 excised 32 bins of a nulled
+  jammer (+28.6 dB), 0 with the floor (bare-metal v6.3 has the same issue). gnss_passthrough: mask RAM 0x1C00-0x1C1C
+  (2 banks x 8, LUT RAM, 2 read ports aj_wm_*), mask write sets dirty, AJ_INFO 0x08070C10 (layout 16); block design
+  wm ports. build.sh LICENSE.html placeholder (crpa25). csim 23/23 pass with the firmware's math; Icarus 0 errors.
+  Design A ~210 of 220 DSP48 (estimate). Commit <pending26>.
+- Next package: `crpa27`.
 
 Files per package: `crpaN-full-src.zip.part1`, `crpaN-full-src.zip.part2`,
 `crpaN-kit.zip`, `SHA256SUMS-crpaN.txt`.

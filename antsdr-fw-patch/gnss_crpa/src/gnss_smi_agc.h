@@ -69,5 +69,8 @@ int      gnss_rxg_comp_db(void);       /* TX level hold in effect [dB]      */
  * over the last gain-loop period; text for the reports */
 int         gnss_rxg_clip_ppm(void);
 const char *gnss_rxg_clip_txt(void);
+/* crpa26 (SFAP-PI v6.3): the core's input pulse blanker threshold [LSB] (0 = none): snapshot
+ * samples at or above it are left out of the peak while they are few */
+void        gnss_rxg_set_blank_thr(int thr);
 
 #endif
