@@ -57,6 +57,8 @@ while [[ $# -gt 0 ]]; do
     *)           echo "unknown option $1 (see --help)"; exit 2 ;;
   esac
 done
+# a single-algorithm package (make_algo_zip.sh) sets CRPA_DEFAULT_ALGO in crpa_algos.sh
+[[ -z "$algo" && -n "${CRPA_DEFAULT_ALGO:-}" ]] && algo="$CRPA_DEFAULT_ALGO"
 [[ -n "$algo" ]] || { echo "build_all.sh: --algo is required: one of ${CRPA_ALGOS[*]} or all"; exit 2; }
 
 # ---- all algorithms: one full build each, a summary at the end ------------------

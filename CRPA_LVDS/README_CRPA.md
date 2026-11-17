@@ -22,6 +22,12 @@ alone needs about 127 of the Zynq-7020's 220 DSP48s. The exact commands are in
 ./build_all.sh --algo crpa27        # or crpa1, crpa28 .. crpa31, or all
 ```
 
+**Operating system: none. The firmware is bare-metal (no-OS).** It runs on
+the Xilinx standalone BSP on Cortex-A9 core 0, with the Analog Devices no-OS
+AD9361 driver; the DMA and console are polled from `main()`'s idle loop.
+`BOOT.BIN` holds only FSBL + bitstream + `app_crpa_lvds.elf`. There is no
+U-Boot, Linux kernel, device tree or root filesystem.
+
 The algorithm sources are in `Source/CRPA/<algo>/{fpga,arm}`, exactly as
 delivered. The pipeline uses them unchanged. Everything around them is shared:
 `gnss_passthrough`, the block design, the ARM engine, the console and the
