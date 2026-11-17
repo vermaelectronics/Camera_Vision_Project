@@ -24,10 +24,10 @@
 #include "hls_stream.h"
 
 #ifndef ST_NT
-#define ST_NT      16    // taps per antenna (crpa31: 18 + 18; crpa30: 16 + 16; crpa25/29: 14 + 14; crpa18/24: 10 + 10; crpa16: 8 + 8; crpa17: 6 + 6)
+#define ST_NT      18    // taps per antenna (crpa31: 18 + 18; crpa30: 16 + 16; crpa25/29: 14 + 14; crpa18/24: 10 + 10; crpa16: 8 + 8; crpa17: 6 + 6)
 #endif
 #ifndef ST_REF
-#define ST_REF     8     // RX1 reference tap delay, fixed at 1 (crpa31: 9; crpa30: 8; crpa25/29: 7; crpa18/24: 5; crpa16: 4; crpa17: 3)
+#define ST_REF     9     // RX1 reference tap delay, fixed at 1 (crpa31: 9; crpa30: 8; crpa25/29: 7; crpa18/24: 5; crpa16: 4; crpa17: 3)
 #endif
 #define ST_NIMG    3     // image (conjugate) taps per antenna at delays REF-1, REF, REF+1
 #define ST_IMGH    ((ST_NIMG - 1) / 2)

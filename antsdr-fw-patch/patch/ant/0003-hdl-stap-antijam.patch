@@ -1,7 +1,7 @@
-From 43399805908a9631214234093a8f972fdf49489f Mon Sep 17 00:00:00 2001
+From 620ffdbd0f8c8bf6a0551e57a99e7202f274c41d Mon Sep 17 00:00:00 2001
 From: antsdr-fw-patch <antsdr-fw-patch@localhost>
 Date: Sat, 7 Nov 2026 11:57:58 +0000
-Subject: [PATCH] ant: STAP 16x16 v4.9.14 anti-jam, weights from the ARM
+Subject: [PATCH] ant: STAP 18x18 v4.9.14 anti-jam, weights from the ARM
  (stap_pi), AD9361 LVDS 2R2T
 
 Converts the E310 AD9361 interface to LVDS (pins and standards of the
@@ -20,7 +20,7 @@ crpa17: 6 + 6 taps, reference delay 3: AJ_NWTS 12, AJ_INFO 0x06030C0E.
 crpa18: 10 + 10 taps, reference delay 5: AJ_NWTS 20, AJ_INFO 0x0A050C0E
 (the firmware starts each jammer with a direct solve, then NLMS).
 crpa25: 14 + 14 taps, reference delay 7: AJ_NWTS 28, AJ_INFO 0x0E070C0E.
-crpa30: 16 + 16 taps, reference delay 8: AJ_NWTS 32, AJ_INFO 0x10080C0E; the
+crpa31: 18 + 18 taps, reference delay 9: AJ_NWTS 36, AJ_INFO 0x12090C0E; the
 weight register index is 6 bits (more than 32 words).
 ---
  library/gnss_passthrough/Makefile             |   3 +-
@@ -56,7 +56,7 @@ index ab4bcc0..58cad71 100644
  XILINX_DEPS += gnss_passthrough_constr.xdc
  XILINX_DEPS += gnss_passthrough_ip.tcl
 diff --git a/library/gnss_passthrough/gnss_passthrough.v b/library/gnss_passthrough/gnss_passthrough.v
-index feca02d..8f94383 100644
+index feca02d..a059dcd 100644
 --- a/library/gnss_passthrough/gnss_passthrough.v
 +++ b/library/gnss_passthrough/gnss_passthrough.v
 @@ -1,6 +1,6 @@
@@ -222,7 +222,7 @@ index feca02d..8f94383 100644
 +// crpa16 / crpa17 / crpa18: weight words of the space-time taps (2 x taps per antenna): 16 for 8 + 8,
 +// 12 for 6 + 6, 20 for 10 + 10, 28 for 14 + 14, 32 for 16 + 16, 36 for 18 + 18 (at most 64: 6-bit index).
 +// Must match ST_NST of stap_pi and 2 * AJ_NT of the firmware.
-+`define AJ_NWTS_DEF 32   // crpa30: 16 + 16 (crpa25: 28, crpa18/24: 20, crpa16: 16, crpa17: 12)
++`define AJ_NWTS_DEF 36   // crpa31: 18 + 18 (crpa25: 28, crpa18/24: 20, crpa16: 16, crpa17: 12)
 +
  module gnss_passthrough #(
 -  parameter FIFO_ADDR_WIDTH = 5   // elastic buffer depth = 2**FIFO_ADDR_WIDTH
@@ -298,7 +298,7 @@ index feca02d..8f94383 100644
 +  localparam [31:0] CORE_VERSION = 32'h0004090E;   // 4.9.14 (8 taps per channel (crpa10), low-DSP axi_ad9361, TX2 = CRPA copy, muted)
 +  // crpa16 -- stap_pi_0 1.0: the weights come from the ARM again (NLMS on the ARM), no smoothing
 +  //         (AJ_CFG[19:16] ignored), no FPGA NLMS (AJ_NLMS 0x1E0/0x1E4 gone). AJ_INFO layout 14.
-+  localparam [31:0] AJ_INFO      = 32'h10080C0E;   // crpa30: 16 taps per channel, reference delay 8, layout 14 (crpa25: 0x0E070C0E; crpa18/24: 0x0A050C0E) (crpa16: 0x08040C0E; crpa17: 0x06030C0E; crpa10-12: 0x08040C0C, layout 12)
++  localparam [31:0] AJ_INFO      = 32'h12090C0E;   // crpa31: 18 taps per channel, reference delay 9, layout 14 (crpa25: 0x0E070C0E; crpa18/24: 0x0A050C0E) (crpa16: 0x08040C0E; crpa17: 0x06030C0E; crpa10-12: 0x08040C0C, layout 12)
 +  localparam        AJ_NWTS      = AJ_NWTS_P;      // crpa16: 16 weight words (8 + 8); crpa17: 12 (6 + 6); crpa18: 20 (10 + 10); crpa25: 28 (14 + 14); crpa30: 32 (16 + 16); crpa31: 36 (18 + 18)
 +  localparam [31:0] AJ_GAIN_RESET = 32'h00004000;  // fine gain 1.0
 +  localparam [31:0] AJ_CFG_RESET = 32'h00000001;   // bypass
@@ -869,7 +869,7 @@ index a596ad5..0b593f0 100644
 +# clk_fpga_0 and {rx_clk clk_div_sel_*} (4.9.9, for TIMING-6/7) is kept, unscoped, in
 +# Source/XDC/gnss_passthrough_cdc.xdc. Everything above in this file is cell-based and stays.
 diff --git a/library/gnss_passthrough/gnss_passthrough_ip.tcl b/library/gnss_passthrough/gnss_passthrough_ip.tcl
-index 424bf66..1e4e674 100644
+index 424bf66..c5c4907 100644
 --- a/library/gnss_passthrough/gnss_passthrough_ip.tcl
 +++ b/library/gnss_passthrough/gnss_passthrough_ip.tcl
 @@ -1,10 +1,13 @@
@@ -883,7 +883,7 @@ index 424bf66..1e4e674 100644
 -## gnss_passthrough.v and gnss_passthrough_constr.xdc are copied unchanged
 -## from LoopBack_Pipeline_noCRPA (Source/HDL, Source/IP/gnss_passthrough).
 +## gnss_passthrough.v, gnss_pulse_blank.v and gnss_passthrough_constr.xdc are
-+## copied from LoopBack_Code_SMI_PI_STAP7x7_v4.9.14, AJ_INFO for 16 + 16 (crpa30, weights from the ARM) (Source/HDL,
++## copied from LoopBack_Code_SMI_PI_STAP7x7_v4.9.14, AJ_INFO for 18 + 18 (crpa31, weights from the ARM) (Source/HDL,
 +## Source/IP/gnss_passthrough). The AXI-Stream and reset interface definitions
 +## below are the ones of that project's gnss_passthrough_ip.tcl.
  ###############################################################################
@@ -1319,7 +1319,7 @@ index 0000000..71a5384
 +# The two clock names are Vivado's auto-derived ones (check with report_clocks if ADI renames the nets).
 +set_clock_groups -logically_exclusive -group [get_clocks -quiet clk_div_sel_0_s] -group [get_clocks -quiet clk_div_sel_1_s]
 diff --git a/projects/ant/system_bd.tcl b/projects/ant/system_bd.tcl
-index b091f87..fdbb6a6 100644
+index b091f87..48a561c 100644
 --- a/projects/ant/system_bd.tcl
 +++ b/projects/ant/system_bd.tcl
 @@ -167,218 +167,253 @@ ad_connect  sys_concat_intc/In0 GND
@@ -1342,7 +1342,7 @@ index b091f87..fdbb6a6 100644
 +#       sees the same cores at the same addresses as before.
 +#     - gnss_passthrough v4.9.14 (registers at 0x43C1_0000) between the
 +#       axi_ad9361 ADC outputs and DAC inputs, feeding the SMI-PI space-time
-+#       filter stap_pi_0 (Vitis HLS, crpa30: 16 + 16 taps, 3 + 3 image taps, weights from the
++#       filter stap_pi_0 (Vitis HLS, crpa31: 18 + 18 taps, 3 + 3 image taps, weights from the
 +#       ARM, sys_cpu_clk) through two
 +#       asynchronous AXI-Stream FIFOs.
 +#   The HDL x8 FIR interpolator/decimator of the Pluto design are removed.
@@ -1697,7 +1697,7 @@ index b091f87..fdbb6a6 100644
 -ad_connect  logic_or_1/Op1  axi_ad9361/rst
 -ad_connect  logic_or_1/Op2  axi_tdd_0/tdd_channel_2
 -ad_connect  logic_or_1/Res  tx_upack/reset
-+# Space-time power-inversion filter (Vitis HLS IP stap_pi 1.0, crpa30: 16 + 16 taps, 3 + 3 image
++# Space-time power-inversion filter (Vitis HLS IP stap_pi 1.0, crpa31: 18 + 18 taps, 3 + 3 image
 +# taps, fine gain, II = 1) on sys_cpu_clk (100 MHz), so its timing does not depend on the sample
 +# rate. Weights, image taps, cfg, RX2 normalisation and gain come from gnss_passthrough's AJ_*
 +# registers, written by gnss_crpa on the ARM (crpa16/17: the weights by NLMS on the ARM).
