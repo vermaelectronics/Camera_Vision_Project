@@ -183,7 +183,15 @@ Name each new design-A (pass-through + CRPA) package with the next number:
   captures (8 + 8: +10.6/+2.5, +22.1/+5.6; 10 + 10: +10.4/+2.1, +21.9/+5.4). Static scenarios unchanged (no
   re-solve, no prediction). Variant switch script: scratchpad mvp/variant.py NT. Commits d0df4f5 (27), f098977 (28),
   f4b7b91 (29).
-- Next package: `crpa30`.
+- `crpa30` / `crpa31` (2026-11-17): STAP_NLMS_PI **16 + 16 / 18 + 18** (user: "ceate 16+16 and 18+18"), crpa29 with
+  more taps (REF 8 / 9, 3 + 3 image, 37 / 41 weights, AJ_NWTS 32 / 36, AJ_INFO 0x10080C0E / 0x12090C0E, ~149 / ~161
+  of 220 DSP48 estimate), moving-jammer fix kept. RTL (scratchpad worktrees pt30/pt31 from c25, patches
+  0003-crpa30/31.patch): weight-register index widened to 6 bits (aj_shadow[reg_waddr[5:0]], rd_idx[5:0]; Icarus
+  vtest30/31 0 errors, old 5-bit index aliases words 32..35). stap_pi.h: AP_INT_MAX_W 2048 (1152-bit wts port; csim
+  failed at the 1024 default). csim 21/21 both: J/N 60 I/Q +3.0 / +2.8 dB (14 + 14 +3.2), sat loss 2.4 / 1.9;
+  field 61 +2.8 / +2.7; jump recovery off 14 / 19 captures, fix 2. variant.py handles 16/18 (patch from file).
+  Commits 1095c71 (30), 77032e2 (31).
+- Next package: `crpa32`.
 
 Files per package: `crpaN-full-src.zip.part1`, `crpaN-full-src.zip.part2`,
 `crpaN-kit.zip`, `SHA256SUMS-crpaN.txt`.
