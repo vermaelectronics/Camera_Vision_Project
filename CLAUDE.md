@@ -147,7 +147,14 @@ Name each new design-A (pass-through + CRPA) package with the next number:
 - `crpa23` (2026-11-17): crpa21 (SFAP_PI) + the same slow-lock fix as crpa24 (TX1 direct while no jammer,
   gnss_aj_passthru=, old names removed). SFAP core latency 766 samples: each switch is a 12.5/25 us step in
   TX1 timing (receiver may re-acquire briefly at jammer ON/OFF). crpa15 bitstream fits. Commit 6963d7e.
-- Next package: `crpa25`.
+- `crpa25` (2026-11-17): crpa24 with **14 + 14 taps** (user: "Making CRPA with stap size 14", "please create
+  .zip file"): ST_NT / AJ_NT 14, REF 7, 3 + 3 image, 33 weights, AJ_NWTS_DEF 28 (0x400..0x46C), AJ_INFO 0x0E070C0E,
+  ~103 DSP48 core / ~137 of 220 in all (estimate). STAP_NLMS_PI, TX1 direct while no jammer, direct start + NLMS
+  as crpa24. build.sh: ensure_license_html() writes a placeholder buildroot/board/ant/msd/LICENSE.html when
+  SKIP_LEGAL=1 (fresh build failed in genimage without it, user's crpa23 build). csim 16/16 pass: J/N 60
+  +3.2 dB / sat loss 3.0 (crpa24 +3.9 / 2.8), field 61 +2.9 / 4.1, 51 +0.7 / 1.1, 41 +0.3 / -0.1, CW 40 57.3 dB;
+  optimum of 33 taps at J/N 60 +3.0 dB (10 + 10: +3.4). Icarus 0 errors. Commit <pending25>.
+- Next package: `crpa26`.
 
 Files per package: `crpaN-full-src.zip.part1`, `crpaN-full-src.zip.part2`,
 `crpaN-kit.zip`, `SHA256SUMS-crpaN.txt`.

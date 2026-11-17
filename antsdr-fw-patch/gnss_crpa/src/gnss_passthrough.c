@@ -140,21 +140,30 @@ int gnss_pt_tx2_on(void)
 }
 
 void gnss_pt_write_aj(const int16_t *re, const int16_t *im,
-                      uint32_t cfg, int32_t g2_q13, uint32_t blk_thr)
+                      uint32_t cfg, int32_t g2_q13, uint32_t blk_thr, uint32_t gain)
 {
     uint32_t k;
     if (re && im) {
-        /* 0x1000 + 4i for word i = 0..767: b_k, then c1_k, then c2_k, one contiguous block.
-         * All of them, every time: the FPGA double-buffers the weights (the bank being
-         * written was in use two commits ago). */
-        for (k = 0; k < (uint32_t)AJ_NW; k++) {
-            gnss_pt_write(GNSS_PT_REG_AJ_WB(k),
+        for (k = 0; k < 2U * AJ_NT; k++) {
+            gnss_pt_write(GNSS_PT_REG_AJ_W(k),
                           ((uint32_t)(uint16_t)im[k] << 16) | (uint32_t)(uint16_t)re[k]);
+        }
+        {
+            /* image taps c1 / c2 at R (AJ_WC0/1) and at R-1, R+1 (AJ_WCX0..3) */
+            static const int wc[2] = {AJ_IMG(1, 0), AJ_IMG(2, 0)};
+            static const int wcx[4] = {AJ_IMG(1, -1), AJ_IMG(1, 1), AJ_IMG(2, -1), AJ_IMG(2, 1)};
+            for (k = 0; k < 2U; k++)
+                gnss_pt_write(GNSS_PT_REG_AJ_WC(k),
+                              ((uint32_t)(uint16_t)im[wc[k]] << 16) | (uint32_t)(uint16_t)re[wc[k]]);
+            for (k = 0; k < 4U; k++)
+                gnss_pt_write(GNSS_PT_REG_AJ_WCX(k),
+                              ((uint32_t)(uint16_t)im[wcx[k]] << 16) | (uint32_t)(uint16_t)re[wcx[k]]);
         }
     }
     gnss_pt_write(GNSS_PT_REG_AJ_CFG, cfg);
     gnss_pt_write(GNSS_PT_REG_AJ_NORM, (uint32_t)(uint16_t)(int16_t)g2_q13);
     gnss_pt_write(GNSS_PT_REG_AJ_BLK_THR, blk_thr);
+    gnss_pt_write(GNSS_PT_REG_AJ_GAIN, gain);          /* crpa8: fine output gain, committed with the rest */
     gnss_pt_write(GNSS_PT_REG_AJ_COMMIT, 1U);
 }
 
@@ -203,7 +212,7 @@ void gnss_pt_print_state(void)
     printf("  passthrough    : %s\n", s.passthrough_enabled ? "ON" : "off");
     {
         uint32_t cfg = gnss_pt_read(GNSS_PT_REG_AJ_CFG_ACTIVE);
-        printf("  SFAP_PI        : %s, %lu weight commits, layout 0x%08lx\n",
+        printf("  STAP_NLMS_PI   : %s, %lu weight commits, layout 0x%08lx\n",
                (s.status & GNSS_PT_ST_SMI_EN_SYNCED) ? "ON (TX1 = filter core)" : "off (TX1 = RX1 direct)",
                (unsigned long)gnss_pt_read(GNSS_PT_REG_AJ_COMMIT),
                (unsigned long)gnss_pt_read(GNSS_PT_REG_AJ_INFO));
