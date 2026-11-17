@@ -36,7 +36,7 @@
  *
  * app_config.h has its own include guard, so including it here is harmless. */
 #include "app_config.h"
-#include "gnss_aj_math.h"   /* AJ_LOG2N for GNSS_PT_AJ_INFO_EXPECTED */
+#include "gnss_aj_math.h"   /* AJ_NT, AJ_REF for GNSS_PT_AJ_INFO_EXPECTED */
 
 #ifdef XILINX_PLATFORM
 #include <xparameters.h>
@@ -76,20 +76,13 @@
  * AJ_COMMIT hands all of them to the filter in one clock. AJ_COMMIT reads back a
  * commit counter. crpa13: the weights are adapted in the FPGA (nlms_pi, hardware
  * NLMS); AJ_W, AJ_WC and AJ_WCX are READ ONLY: the weights the core runs now. */
-/* crpa15: SFAP-PI 256 per-bin weights, write only, into the bank NOT in use of the double-
- * buffered weight RAM; AJ_COMMIT switches banks (if any weight was written) together with
- * cfg, g2 and the blanker threshold. Word i = 0..767 at 0x1000 + 4i: b_k (k = i), c1_k
- * (0x1400 + 4k), c2_k (0x1800 + 4k), {imag[31:16], real[15:0]}, Q3.12. */
-#define GNSS_PT_REG_AJ_WB(k)        (0x1000U + ((k) * 4U)) /* W b_k,  k = 0..255 (the whole 768-word block from here) */
-#define GNSS_PT_REG_AJ_WC1(k)       (0x1400U + ((k) * 4U)) /* W c1_k, k = 0..255 */
-#define GNSS_PT_REG_AJ_WC2(k)       (0x1800U + ((k) * 4U)) /* W c2_k, k = 0..255 */
-/* crpa26 (SFAP-PI v6.3): bin excision mask, 8 words after the weights, same double-buffered bank:
- * word j bit b = bin 32 j + b; a set bin's output is zero. */
-#define GNSS_PT_REG_AJ_MASK(j)      (0x1C00U + ((j) * 4U)) /* W j = 0..7 */
+#define GNSS_PT_REG_AJ_W(k)         (0x400U + ((k) * 4U)) /* RW shadow (crpa16/17: the ARM's weights), k = 0..2*AJ_NT-1 */
 #define GNSS_PT_REG_AJ_COMMIT       0x180U  /* W: commit, R: count            */
 #define GNSS_PT_REG_AJ_INFO         0x184U  /* RO 0x10040C06                  */
 #define GNSS_PT_REG_AJ_CFG          0x188U  /* RW [0] bypass, [10:8] shift, [14:12] weight scale */
 #define GNSS_PT_REG_AJ_NORM         0x18CU  /* RW g2, Q3.13 {im, re}          */
+#define GNSS_PT_REG_AJ_WC(k)        (0x190U + ((k) * 4U)) /* RW shadow: image taps c1, c2 at the reference delay */
+#define GNSS_PT_REG_AJ_WCX(k)       (0x1C0U + ((k) * 4U)) /* RW shadow: image taps c1(R-1), c1(R+1), c2(R-1), c2(R+1) */
 #define GNSS_PT_REG_AJ_PWR_IN       0x1D0U  /* RO (crpa9) mean RX1 I^2+Q^2 over 2^16 samples */
 #define GNSS_PT_REG_AJ_PWR_OUT      0x1D4U  /* RO mean filter output I^2+Q^2 (to TX1)       */
 #define GNSS_PT_REG_AJ_PWR_IDX      0x1D8U  /* RO [15:0] RX1 window count, [31:16] output   */
@@ -100,11 +93,11 @@
 #define GNSS_PT_REG_AJ_BLK_COUNT    0x1A4U  /* RO samples blanked since the counter clear */
 #define GNSS_PT_REG_AJ_BLK_BURSTS   0x1A8U  /* RO bursts blanked since the counter clear  */
 #define GNSS_PT_REG_AJ_RX_PEAK      0x1ACU  /* RO [15:0] largest |I|,|Q| of RX1/RX2 in the last window, [31:16] window counter */
-/* AJ_INFO = {log2 N, log2 hop, weight fraction bits, layout}: crpa26 0x08070C10 (256 bins, hop 128,
- * Q3.12, layout 16 = sfap_pi 5.0 (v6.3: input pulse blanker cfg[27:16], excision mask at 0x1C00)
- * with the weight RAM in design A; crpa15/23: 0x08070C0F, layout 15 = sfap_pi 4.0) */
-#define GNSS_PT_AJ_LAYOUT_NEEDED    16U
-#define GNSS_PT_AJ_INFO_EXPECTED    (((uint32_t)AJ_LOG2N << 24) | ((uint32_t)(AJ_LOG2N - 1) << 16) | 0x0C00U | GNSS_PT_AJ_LAYOUT_NEEDED)
+/* AJ_INFO = {taps per channel, reference delay, 0x0C, layout}, built from AJ_NT / AJ_REF:
+ * crpa16 0x08040C0E (8 + 8), crpa17 0x06030C0E (6 + 6), crpa18 0x0A050C0E (10 + 10); layout 14 = stap_pi,
+ * weights from the ARM */
+#define GNSS_PT_AJ_LAYOUT_NEEDED    14U
+#define GNSS_PT_AJ_INFO_EXPECTED    (((uint32_t)AJ_NT << 24) | ((uint32_t)AJ_REF << 16) | 0x0C00U | GNSS_PT_AJ_LAYOUT_NEEDED)
 #define GNSS_PT_AJ_LAYOUT_RAMP      10U           /* crpa8: AJ_GAIN, AJ_CLIP1/2 (and AJ_CFG[19:16] smoothing up to crpa12) */
 #define GNSS_PT_REG_AJ_GAIN         0x1B0U  /* RW shadow (crpa8): fine output gain [15:0] Q2.14, 1.0 = 0x4000 */
 #define GNSS_PT_REG_AJ_GAIN_ACT     0x1B4U  /* RO committed gain                  */
@@ -117,7 +110,6 @@
 #define GNSS_PT_BLK_THR_OFF         0xFFFFFFFFU   /* threshold that never triggers */
 #define GNSS_PT_AJ_CFG_BYPASS       0x1U
 #define GNSS_PT_AJ_CFG_SHIFT(s)     ((uint32_t)((s) & 7) << 8)
-#define GNSS_PT_AJ_CFG_IBLANK(t)    ((uint32_t)((t) & 0xFFFU) << 16)  /* crpa26 (v6.3): core input blanker threshold [LSB], 0 = off */
 #define GNSS_PT_AJ_CFG_WS(w)        ((uint32_t)((w) & 7) << 12)   /* weight scale: words hold w * 2^ws (4.4) */
 
 /* ---- expected identity --------------------------------------------------- */
@@ -202,14 +194,13 @@ void     gnss_pt_set_smi(int enable);
  * gnss_pt_tx2_on() reads back whether TX2 is live. */
 void     gnss_pt_set_tx2(int on);
 int      gnss_pt_tx2_on(void);
-/* Writes the 768 SFAP-PI weight words (b, c1, c2 per bin, Q3.12, layout of gnss_aj_math.h)
- * into the bank not in use, cfg (GNSS_PT_AJ_CFG_*), the RX2 normalisation g2 (Q3.13 real part)
- * and the blanker threshold, and commits them in one go: the filter never runs a half-written
- * set. re/im NULL: no weights written, the bank in use stays (bypass switching). */
-void     gnss_pt_write_aj(const int16_t *re, const int16_t *im, const uint32_t *mask,
-                          uint32_t cfg, int32_t g2_q13, uint32_t blk_thr);
-/* crpa26: mask = the 8 excision-mask words (written with the weights into the same bank; NULL = no
- * bin excised). Ignored when re/im are NULL. */
+/* Writes the AJ_NW weight words (Q3.12 x 2^ws, layout of gnss_aj_math.h), cfg
+ * (GNSS_PT_AJ_CFG_*), the RX2 normalisation g2 (Q3.13 real part), the blanker
+ * threshold and the fine gain (Q2.14), and commits them in one go: the filter
+ * never runs a half-written set. re/im may be NULL to keep the weights in the
+ * shadow registers (bypass switching). */
+void     gnss_pt_write_aj(const int16_t *re, const int16_t *im,
+                          uint32_t cfg, int32_t g2_q13, uint32_t blk_thr, uint32_t gain);
 
 /* Snapshot of everything worth observing at runtime (requirement 58). */
 typedef struct {

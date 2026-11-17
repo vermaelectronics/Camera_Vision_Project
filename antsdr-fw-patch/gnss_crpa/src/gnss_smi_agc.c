@@ -96,23 +96,15 @@ static int32_t abs16(uint32_t half)
 }
 
 /* Peak |I|,|Q| of one RX channel over RXG_NSAMP snapshot reads. */
-/* crpa26 (SFAP-PI v6.3): level the core's input pulse blanker removes, 0 = none (gnss_aj.c sets it) */
-static int blank_thr;
-void gnss_rxg_set_blank_thr(int thr) { blank_thr = thr > 0 ? thr : 0; }
-
-/* v6.3: with the blanker active, the reads at or above its threshold (pulses, blanked in the
- * FPGA) are left out of the peak while they are few (<= 30 %). */
 static int rx_peak(uint32_t reg)
 {
-	int peak = 0, keep = 0, over = 0, i;
+	int peak = 0, i;
 	for(i = 0; i < RXG_NSAMP; i++) {
 		uint32_t s = gnss_pt_read(reg);
-		int32_t a = abs16(s), b = abs16(s >> 16), m = a > b ? a : b;
-		if(m > peak) peak = m;
-		if(blank_thr > 0 && m >= blank_thr) over++;
-		else if(m > keep) keep = m;
+		int32_t a = abs16(s), b = abs16(s >> 16);
+		if(a > peak) peak = a;
+		if(b > peak) peak = b;
 	}
-	if(blank_thr > 0 && over * 10 <= RXG_NSAMP * 3) return keep;
 	return peak;
 }
 
@@ -129,16 +121,12 @@ static double tx_power(void)
 	return acc / RXG_NSAMP;
 }
 
-void gnss_aj_gain_stepped(int delta_db);   /* gnss_aj.c (crpa26, v6.3 blanker) */
-
 static int set_both(int32_t db)
 {
-	int32_t old = rxg_gain;
 	rxg_changes++;
 	if(ad9361_set_rx_rf_gain(ad9361_phy, 0, db) != 0) return -1;
 	if(ad9361_set_rx_rf_gain(ad9361_phy, 1, db) != 0) return -1;
 	rxg_gain = db;
-	if(db != old) gnss_aj_gain_stepped((int)(db - old));   /* crpa26: v6.3 blanker threshold follows */
 	if(hw_peak_ok)      /* the window in progress mixes two gains: ignore it and the one that completes next */
 		hw_idx_ignore = (uint16_t)((gnss_pt_read(GNSS_PT_REG_AJ_RX_PEAK) >> 16) + 2U);
 	return 0;
@@ -521,7 +509,7 @@ void gnss_rxg_print(void)
 		      (char*)(m1 == RF_GAIN_MGC ? "manual" : "AGC"), (long)g1,
 		      (char*)(m2 == RF_GAIN_MGC ? "manual" : "AGC"), (long)g2,
 		      (char*)((m1 == RF_GAIN_MGC && m2 == RF_GAIN_MGC && g1 == g2)
-		          ? " (matched, OK for SFAP_PI)" : " (NOT matched)"));
+		          ? " (matched, OK for STAP_NLMS_PI)" : " (NOT matched)"));
 	if(rxg_mode == GNSS_RXG_MATCHED)
 		console_print("  reference %d dB, ADC peak %d of 2047, TX1 %d mdB "
 			      "(operator %d mdB, level hold +%d dB)\n",

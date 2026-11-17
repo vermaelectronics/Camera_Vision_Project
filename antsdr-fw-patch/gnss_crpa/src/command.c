@@ -139,19 +139,22 @@ command cmd_list[] = {
 	{"gnss_tx=", "1 = retransmit RX1 on TX1, 0 = silence TX1.", "gnss_tx=0", set_gnss_tx},
 	{"gnss_status?", "Prints AD9361 and gnss_passthrough runtime state.", "", get_gnss_status},
 	/* SMI-PI v4.1 space-time anti-jam (smi_pi_0 v2.1 + gnss_aj.c). */
-	{"gnss_sfap_pi?", "Anti-jam state: on/off, jammer, J/N, suppression.", "", get_gnss_smi},
-	{"gnss_sfap_pi=", "1 = anti-jam ON (default at boot), 0 = OFF (TX1 carries RX1).", "gnss_sfap_pi=1", set_gnss_smi},
-	{"gnss_sfap_pi_blank=", "SFAP_PI v6.3 input pulse blanker in the core: 1 = on (default), 0 = off (v6.2 behaviour). Not saved.", "gnss_sfap_pi_blank=1", set_gnss_sfap_pi_blank},
-	{"gnss_sfap_pi_excise=", "SFAP_PI v6.3 bin excision (bins holding two jammers from two directions, up to 32): 1 = on (default), 0 = off. Not saved.", "gnss_sfap_pi_excise=1", set_gnss_sfap_pi_excise},
-	{"gnss_sfap_pi_freeze=", "1 = hold the filter exactly as it is (weights, bypass), 0 = automatic (default).", "gnss_sfap_pi_freeze=0", set_gnss_smi_freeze},
+	{"gnss_stap_nlms_pi?", "Anti-jam state: on/off, jammer, J/N, suppression.", "", get_gnss_smi},
+	{"gnss_stap_nlms_pi=", "1 = anti-jam ON (default at boot), 0 = OFF (TX1 carries RX1).", "gnss_stap_nlms_pi=1", set_gnss_smi},
+	{"gnss_stap_nlms_pi_freeze=", "1 = hold the filter exactly as it is (NLMS weights held, bypass), 0 = automatic (default).", "gnss_stap_nlms_pi_freeze=0", set_gnss_smi_freeze},
 	{"gnss_aj?", "Anti-jam status: bypass/filter, jammer type and frequency, J/N, suppression.", "", get_gnss_aj},
 	{"gnss_report?", "EVERYTHING in one block (radio, gains, g2, jammer, events) to copy into a report.", "", get_gnss_report},
-	{"gnss_aj_passthru=", "1 = with no jammer TX1 = RX1 straight through, the filter core switched in only while a jammer is on (default: fastest satellite lock); 0 = the core always in the TX1 path, bypassed while no jammer (as up to crpa22). Not saved.", "gnss_aj_passthru=1", set_gnss_aj_passthru},
+	{"gnss_aj_passthru=", "1 = with no jammer TX1 = RX1 straight through, the filter core switched in only while a jammer is on (default: fastest satellite lock); 0 = the core always in the TX1 path, bypassed while no jammer (as up to crpa24). Not saved.", "gnss_aj_passthru=1", set_gnss_aj_passthru},
 	{"gnss_aj_log=", "Status line every N s on the console (default 0 = off: only JAMMER ON/OFF events; held back while you type).", "gnss_aj_log=30", set_gnss_aj_log},
 	{"gnss_aj_events=", "1 = print JAMMER ON/NULLED/OFF events (default), 0 = console silent (gnss_report? still lists them).", "gnss_aj_events=0", set_gnss_aj_events},
-	{"gnss_aj_mode=", "crpa26 SFAP_PI: 0 = per bin b + 2 image taps (default), 1 = b only, 2 = one b for all bins (v3).", "gnss_aj_mode=0", set_gnss_aj_mode},
-	{"gnss_aj_hold=", "crpa26 SFAP_PI v6.1 weight hold in solves, 0..1000 (default 100; 0 = off: gated bins drop to zero weight).", "gnss_aj_hold=100", set_gnss_aj_hold},
-	{"gnss_aj_sfap?", "crpa26 SFAP_PI: bins, hop, latency, mode, weight hold, per-bin floor, g2, solve time.", "", get_gnss_aj_sfap},
+	{"gnss_aj_nlms=", "crpa16/17: the NLMS on the ARM: 1 = new weights every capture (default), 0 = hold the weights as they are (not saved; same as gnss_stap_nlms_pi_freeze=1).", "gnss_aj_nlms=1", set_gnss_aj_nlms},
+	{"gnss_aj_nlms_mu=", "crpa16/17: ARM NLMS step alpha 0.001 .. 1 by hand, 0 = automatic (default: 0.05 below J/N 35 dB, 0.1 below 50 dB, 0.2 above; saved).", "gnss_aj_nlms_mu=0", set_gnss_aj_nlms_mu},
+	{"gnss_aj_nlms_pass=", "crpa16/17: passes of the ARM NLMS over each capture, 1..8 (default 2; more = deeper null on a strong jammer, more ARM time; saved).", "gnss_aj_nlms_pass=2", set_gnss_aj_nlms_pass},
+	{"gnss_aj_direct=", "crpa24/25: captures solved directly (Wiener, ARM) at the start of a jammer before the NLMS takes over, 0..8 (default 1; 0 = NLMS from 0 as crpa16; saved).", "gnss_aj_direct=1", set_gnss_aj_direct},
+	{"gnss_aj_track=", "Moving jammer: 1 = when the null is lost (the jammer moved or jumped) solve the next capture directly (default), 0 = NLMS only. Not saved.", "gnss_aj_track=1", set_gnss_aj_track},
+	{"gnss_aj_predict=", "Moving jammer: 1 = while the jammer keeps moving, write weights predicted ahead to the core (default), 0 = the solved weights as they are. Not saved.", "gnss_aj_predict=1", set_gnss_aj_predict},
+	{"gnss_aj_move?", "Moving jammer: tracking, prediction, residual of the fresh solve and of the core, staleness, lead.", "", get_gnss_aj_move},
+	{"gnss_aj_nlms?", "crpa16/17: NLMS state, step, passes, weight scale, ARM time per capture.", "", get_gnss_aj_nlms},
 	{"gnss_aj_csv=", "CSV line (AJCSV,...) every N ms, 100 to 60000; 0 = off (default).", "gnss_aj_csv=0", set_gnss_aj_csv},
 	{"gnss_aj_blank=", "Pulse blanker (bitstream 4.6): 0 = off (default since 4.9.3), 1 = automatic, 2 = always on.", "gnss_aj_blank=0", set_gnss_aj_blank},
 	{"gnss_aj_blank_db=", "Pulse blanker threshold above the output noise [dB], 3..30, default 7.", "gnss_aj_blank_db=7", set_gnss_aj_blank_db},
@@ -381,7 +384,7 @@ void get_gnss_smi(double* param, char param_no)
 
 	(void)param; (void)param_no;
 	if(ver < 0x00040001U) {
-		console_print("SFAP_PI: bitstream v%d.%d has no SFAP_PI filter "
+		console_print("STAP_NLMS_PI: bitstream v%d.%d has no STAP_NLMS_PI filter "
 			      "(this firmware needs v4.1)\n",
 			      (long)(ver >> 16), (long)(ver & 0xFFFFU));
 		return;
@@ -400,11 +403,11 @@ void get_gnss_smi(double* param, char param_no)
 void set_gnss_smi(double* param, char param_no)
 {
 	if(param_no < 1) {
-		console_print("gnss_sfap_pi= needs 0 or 1\n");
+		console_print("gnss_stap_nlms_pi= needs 0 or 1\n");
 		return;
 	}
 	if(gnss_pt_read(GNSS_PT_REG_VERSION) < 0x00040001U) {
-		console_print("gnss_sfap_pi: this bitstream has no SFAP_PI filter\n");
+		console_print("gnss_stap_nlms_pi: this bitstream has no STAP_NLMS_PI filter\n");
 		return;
 	}
 	gnss_aj_command((int)param[0] != 0);
@@ -427,44 +430,52 @@ void get_gnss_report(double* param, char param_no)
 	gnss_aj_report();
 }
 
-/* crpa15: SFAP-PI mode, weight hold */
-void set_gnss_aj_mode(double* param, char param_no)
+/* crpa16/17: the NLMS on the ARM */
+void set_gnss_aj_nlms(double* param, char param_no)
 {
-	if(param_no < 1 || param[0] < 0.0 || param[0] > 2.0) {
-		console_print("gnss_aj_mode= needs 0 (per bin b + 2 image taps), 1 (b only) or 2 (one b for all bins)\n");
+	if(param_no < 1 || (param[0] != 0.0 && param[0] != 1.0)) {
+		console_print("gnss_aj_nlms= needs 1 (adapt) or 0 (hold the weights). Example: gnss_aj_nlms=1\n");
 		return;
 	}
-	gnss_aj_set_mode((int)param[0]);
+	gnss_aj_set_nlms((int)param[0], -1.0, 0);
 }
 
-/* crpa26: SFAP_PI v6.3 input pulse blanker and bin excision */
-void set_gnss_sfap_pi_blank(double* param, char param_no)
+void set_gnss_aj_nlms_mu(double* param, char param_no)
 {
-	if(param_no < 1 || (param[0] != 0.0 && param[0] != 1.0)) { console_print("gnss_sfap_pi_blank= needs 0 or 1\n"); return; }
-	gnss_aj_set_iblank((int)param[0]);
-	console_print("gnss_sfap_pi_blank: %s\n", (char*)(gnss_aj_iblank() ? "ON (samples over 5 x the robust sigma are blanked in the core)" : "OFF"));
-}
-
-void set_gnss_sfap_pi_excise(double* param, char param_no)
-{
-	if(param_no < 1 || (param[0] != 0.0 && param[0] != 1.0)) { console_print("gnss_sfap_pi_excise= needs 0 or 1\n"); return; }
-	gnss_aj_set_excise((int)param[0]);
-	console_print("gnss_sfap_pi_excise: %s\n", (char*)(gnss_aj_excise() ? "ON (up to 32 bins with two jammers are removed)" : "OFF"));
-}
-
-void set_gnss_aj_hold(double* param, char param_no)
-{
-	if(param_no < 1 || param[0] < 0.0 || param[0] > 1000.0) {
-		console_print("gnss_aj_hold= needs 0..1000 solves (default %d, 0 = off)\n", (long)AJ_HOLD_SOLVES);
+	if(param_no < 1 || param[0] < 0.0 || param[0] > 1.0 || (param[0] > 0.0 && param[0] < 0.001)) {
+		console_print("gnss_aj_nlms_mu= needs 0 (automatic) or a step 0.001 .. 1. Example: gnss_aj_nlms_mu=0\n");
 		return;
 	}
-	gnss_aj_set_hold((int)param[0]);
+	gnss_aj_set_nlms(-1, param[0], 0);
+	gnss_settings_save(-1, (int)(param[0] * 1e6 + 0.5), -1, -1);
 }
 
-void get_gnss_aj_sfap(double* param, char param_no)
+void set_gnss_aj_nlms_pass(double* param, char param_no)
+{
+	if(param_no < 1 || param[0] < 1.0 || param[0] > 8.0) {
+		console_print("gnss_aj_nlms_pass= needs 1 .. 8 passes per capture. Example: gnss_aj_nlms_pass=2\n");
+		return;
+	}
+	gnss_aj_set_nlms(-1, -1.0, (int)param[0]);
+	gnss_settings_save(-1, -1, (int)param[0], -1);
+}
+
+/* crpa18: the direct start (captures solved directly at the start of a jammer, then NLMS) */
+void set_gnss_aj_direct(double* param, char param_no)
+{
+	if(param_no < 1 || param[0] < 0.0 || param[0] > (double)AJ_DIRECT_MAX || param[0] != (double)(int)param[0]) {
+		console_print("gnss_aj_direct= needs 0 (NLMS from 0, as crpa16) .. %d captures solved directly at the start of a jammer (default %d). Example: gnss_aj_direct=1\n",
+			      (long)AJ_DIRECT_MAX, (long)AJ_DIRECT_DEF);
+		return;
+	}
+	gnss_aj_set_direct((int)param[0]);
+	gnss_settings_save(-1, -1, -1, (int)param[0]);
+}
+
+void get_gnss_aj_nlms(double* param, char param_no)
 {
 	(void)param; (void)param_no;
-	gnss_aj_sfap_line();
+	gnss_aj_nlms_line();
 }
 
 void set_gnss_aj_csv(double* param, char param_no)
@@ -627,16 +638,16 @@ void set_gnss_rx_agc(double* param, char param_no)
 	}
 	gnss_rxg_set_mode((int)param[0]);
 	gnss_rxg_print();
-	gnss_settings_save((int)param[0]);   /* crpa5 */
+	gnss_settings_save((int)param[0], -1, -1, -1);   /* crpa5 */
 }
 
 /**************************************************************************//***
- * @brief Hold (1) the filter as it is (no new weights committed), or automatic (0).
+ * @brief Hold (1) the filter as it is (crpa13: the NLMS loop stops, weights held), or automatic (0).
 *******************************************************************************/
 void set_gnss_smi_freeze(double* param, char param_no)
 {
 	if(param_no < 1) {
-		console_print("gnss_sfap_pi_freeze= needs 0 or 1\n");
+		console_print("gnss_stap_nlms_pi_freeze= needs 0 or 1\n");
 		return;
 	}
 	gnss_aj_freeze((int)param[0] != 0);
@@ -1753,6 +1764,31 @@ void set_dds_tx2_tone2_scale(double* param, char param_no)	// dds_tx2_tone2_scal
 	}
 	else
 		show_invalid_param_message(1);
+}
+
+/* crpa27/28/29: moving jammer */
+void set_gnss_aj_track(double* param, char param_no)
+{
+	if(param_no < 1 || (param[0] != 0.0 && param[0] != 1.0)) {
+		console_print("gnss_aj_track= needs 1 (direct re-solve when the jammer moved, default) or 0 (NLMS only)\n");
+		return;
+	}
+	gnss_aj_set_track((int)param[0]);
+}
+
+void set_gnss_aj_predict(double* param, char param_no)
+{
+	if(param_no < 1 || (param[0] != 0.0 && param[0] != 1.0)) {
+		console_print("gnss_aj_predict= needs 1 (weights predicted ahead while the jammer moves, default) or 0 (off)\n");
+		return;
+	}
+	gnss_aj_set_predict((int)param[0]);
+}
+
+void get_gnss_aj_move(double* param, char param_no)
+{
+	(void)param; (void)param_no;
+	gnss_aj_move_line();
 }
 
 /* crpa23/24: TX1 straight through while no jammer */
