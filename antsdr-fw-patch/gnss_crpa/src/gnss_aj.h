@@ -33,8 +33,15 @@
 
 #include <stdint.h>
 #include "gnss_aj_math.h"
-/* crpa27 = 8 + 8, crpa28 = 10 + 10, crpa29 = 14 + 14: STAP_NLMS_PI with the moving-jammer fix */
-#if AJ_NT == 14
+/* crpa27 = 8 + 8, crpa28 = 10 + 10, crpa29 = 14 + 14, crpa30 = 16 + 16, crpa31 = 18 + 18:
+ * STAP_NLMS_PI with the moving-jammer fix */
+#if AJ_NT == 18
+#define AJ_TAPS_TXT "18 + 18"
+#define AJ_PKG_TXT  "crpa31"
+#elif AJ_NT == 16
+#define AJ_TAPS_TXT "16 + 16"
+#define AJ_PKG_TXT  "crpa30"
+#elif AJ_NT == 14
 #define AJ_TAPS_TXT "14 + 14"
 #define AJ_PKG_TXT  "crpa29"
 #elif AJ_NT == 10

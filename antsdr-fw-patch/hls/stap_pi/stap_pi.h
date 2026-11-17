@@ -15,14 +15,19 @@
 #ifndef STAP_PI_H
 #define STAP_PI_H
 
+// crpa31: 18 + 18 taps need a 1152-bit weight port (32 x 36); ap_int stops at 1024 bits unless
+// AP_INT_MAX_W is set before the first ap_int.h (Vitis HLS allows up to 4096).
+#ifndef AP_INT_MAX_W
+#define AP_INT_MAX_W 2048
+#endif
 #include "ap_int.h"
 #include "hls_stream.h"
 
 #ifndef ST_NT
-#define ST_NT      14    // taps per antenna (crpa25: 14 + 14; crpa18/24: 10 + 10; crpa16: 8 + 8; crpa17: 6 + 6)
+#define ST_NT      16    // taps per antenna (crpa31: 18 + 18; crpa30: 16 + 16; crpa25/29: 14 + 14; crpa18/24: 10 + 10; crpa16: 8 + 8; crpa17: 6 + 6)
 #endif
 #ifndef ST_REF
-#define ST_REF     7     // RX1 reference tap delay, fixed at 1 (crpa25: 7; crpa18/24: 5; crpa16: 4; crpa17: 3)
+#define ST_REF     8     // RX1 reference tap delay, fixed at 1 (crpa31: 9; crpa30: 8; crpa25/29: 7; crpa18/24: 5; crpa16: 4; crpa17: 3)
 #endif
 #define ST_NIMG    3     // image (conjugate) taps per antenna at delays REF-1, REF, REF+1
 #define ST_IMGH    ((ST_NIMG - 1) / 2)

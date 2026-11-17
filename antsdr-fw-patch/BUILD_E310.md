@@ -6,7 +6,7 @@ of ADI `plutosdr-fw` v0.39:
 
 | Stage | Tool | Output |
 |---|---|---|
-| Anti-jam filter core `stap_pi` (E310 only; crpa29: STAP_NLMS_PI 14 + 14 taps, weights from the ARM, moving-jammer fix) | Vitis HLS 2023.2 | `hdl/library/antsdr_ip/stap_pi` IP |
+| Anti-jam filter core `stap_pi` (E310 only; crpa30: STAP_NLMS_PI 16 + 16 taps, weights from the ARM, moving-jammer fix) | Vitis HLS 2023.2 | `hdl/library/antsdr_ip/stap_pi` IP |
 | FPGA hardware design (AD9361 LVDS 2R2T + ANTSDR VCXO/PPS logic + GNSS anti-jam, xc7z020clg400-2) | Vivado 2023.2 | `system_top.xsa`, `system_top.bit` |
 | First-stage boot loader | Vitis 2023.2 (`xsct`) | `fsbl.elf` |
 | U-Boot, Linux 6.1, device tree, buildroot rootfs | Linaro GCC 7.3 (downloaded by buildroot) | `u-boot.elf`, `zImage`/`uImage`, `zynq-ant.dtb`, `rootfs.cpio.gz` |
@@ -356,7 +356,7 @@ sudo dfu-util -a uboot-env.dfu -D ./uboot-env.dfu
 
 ---
 
-## 7. GNSS anti-jam (crpa29: STAP_NLMS_PI 14 + 14, direct start + NLMS on the ARM, moving-jammer fix): RX1 + RX2 -> FPGA -> TX1
+## 7. GNSS anti-jam (crpa30: STAP_NLMS_PI 16 + 16, direct start + NLMS on the ARM, moving-jammer fix): RX1 + RX2 -> FPGA -> TX1
 
 The `0003` patches put the GNSS anti-jam into this Linux firmware ("design A"):
 AD9361 LVDS 2R2T, `gnss_passthrough` v4.9.14, a space-time filter core between
@@ -364,7 +364,7 @@ RX1/RX2 and TX1, and the `gnss_crpa` service with its console. One feature of
 the Linux port is new: **band 7, your own RF values, set at any time from PuTTY**.
 
 ```text
-antenna 1 -> RX1 \                    stap_pi space-time anti-jam (14 + 14 taps,
+antenna 1 -> RX1 \                    stap_pi space-time anti-jam (16 + 16 taps,
                   AD9361 -> FPGA  gnss_passthrough  3 + 3 image taps)      -> AD9361 -> TX1
 antenna 2 -> RX2 /  LVDS 2R2T         + pulse blanker                     -> coax + attenuator + DC block
                     61.44 MS/s                                               -> GNSS receiver -> GNSS Viewer
@@ -378,6 +378,39 @@ antenna 2 -> RX2 /  LVDS 2R2T         + pulse blanker                     -> coa
   LVDS. U-Boot defaults to `mode=2r2t`.
 * **Firmware (buildroot 0003):** `gnss_crpa`, started at boot: self-test,
   band, anti-jam on, TX1 on.
+
+### crpa30 / crpa31: STAP_NLMS_PI 16 + 16 / 18 + 18 with the moving-jammer fix
+
+crpa29 (below) with more taps; everything else the same (moving-jammer tracking and weight
+prediction, TX1 straight through while no jammer, direct start + NLMS on the ARM, 3 + 3 image taps):
+
+| Package | Taps (REF) | Weights | Weight words (`AJ_W`) | `AJ_INFO` | DSP48 (estimate) |
+|---|---|---|---|---|---|
+| `crpa30` | 16 + 16 (8) | 37 | 32, 0x400..0x47C | `0x10080C0E` | ~115 core / ~149 of 220 (68 %) |
+| `crpa31` | 18 + 18 (9) | 41 | 36, 0x400..0x48C | `0x12090C0E` | ~127 core / ~161 of 220 (73 %) |
+
+New in the FPGA for these two: the weight-register index in `gnss_passthrough` is 6 bits (it was 5,
+enough for 32 words; 18 + 18 needs 36: with 5 bits words 32..35 landed on words 0..3, shown by the
+Icarus test), and `stap_pi.h` sets `AP_INT_MAX_W` 2048 (the 18 + 18 weight port is 1152 bits, over
+the 1024-bit default of `ap_int`). Icarus register test (AJ_INFO, words 0 / 30 or 31 / last, the
+word after the last reads 0, commit): 0 errors for both.
+
+C simulation, 21 scenarios, **all pass** for both (leftover jammer / satellite SNR loss):
+
+| Case | 14 + 14 (crpa29) | 16 + 16 (crpa30) | 18 + 18 (crpa31) |
+|---|---|---|---|
+| J/N 60 dB, I/Q imbalance | +3.2 dB / 3.0 dB | +3.0 dB / 2.4 dB | +2.8 dB / 1.9 dB |
+| Field J/N 61 dB | +2.9 dB / 4.1 dB | +2.8 dB / 4.2 dB | +2.7 dB / 4.1 dB |
+| Field J/N 51 dB | +0.7 dB / 1.1 dB | +0.7 dB / 1.0 dB | +0.6 dB / 1.1 dB |
+| Moving 0.75 deg per capture, off / fix | +10.1 / +1.8 dB | +10.0 / +1.8 dB | +10.0 / +1.8 dB |
+| Moving 3 deg per capture, off / fix | +21.6 / +5.3 dB | +21.6 / +5.5 dB | +21.6 / +5.6 dB |
+| Jump 120 deg: captures to recover, off / fix | 12 / 2 | 14 / 2 | 19 / 2 |
+
+More taps help a little on a strong jammer with I/Q error and multipath (the optimum of the taps
+falls from +3.0 to +2.9 dB at J/N 60), less than from 10 + 10 to 14 + 14. Without the tracking a jump
+takes longer the more weights there are; with it, 2 captures. ARM per capture: NLMS +12 % (16 + 16)
+/ +24 % (18 + 18) over 14 + 14, the direct solve +26 % / +54 % (it grows with the square of the
+weights). Vivado's utilisation and timing report is the proof of the resource figures.
 
 ### crpa27 / crpa28 / crpa29: STAP_NLMS_PI 8 + 8 / 10 + 10 / 14 + 14 with the moving-jammer fix
 
@@ -658,7 +691,7 @@ The service:
 |---|---|
 | `gnss: the gnss_crpa service is not running` | `/etc/init.d/S95gnss_crpa start`, then `tail /var/log/gnss_crpa.log` |
 | `hardware not available` | The board runs an older bitstream. Copy the new `BOOT.bin` to the SD card. |
-| `AJ_INFO layout is 13, this firmware (crpa29) needs 14` / `the bitstream has 10 taps per channel, this firmware needs 14` | `BOOT.bin` of another package with this firmware: copy the whole new SD image. |
+| `AJ_INFO layout is 13, this firmware (crpa30) needs 14` / `the bitstream has 10 taps per channel, this firmware needs 16` | `BOOT.bin` of another package with this firmware: copy the whole new SD image. |
 | `NLMS weights out of range: started again from 0` | The ARM NLMS weights went out of the Q3.12 range (should not happen); with `gnss_aj_nlms_mu=` set by hand, lower it or set 0 (automatic). |
 | `gnss_pt: … version` mismatch in the self-test | Same: old `BOOT.bin`. |
 | `no RX capture` | Another program (IIO Oscilloscope, `iio_readdev`) holds the RX buffer. Close it and restart the service. |
@@ -713,7 +746,7 @@ The vendor patches are **unchanged**. This folder adds:
 * `patch/ant/0002-*.patch`: the GPS L1 RX1 -> FPGA -> TX1 loopback.
 * `patch/ant/0003-*.patch`, `hls/stap_pi/`, `gnss_crpa/`: the v4.9.14
   anti-jam (section 7): LVDS 2R2T, `gnss_passthrough` v4.9.14 + `stap_pi`
-  (crpa29: STAP_NLMS_PI 14 + 14 taps, direct start + NLMS on the ARM, moving-jammer fix), and the firmware as the
+  (crpa30: STAP_NLMS_PI 16 + 16 taps, direct start + NLMS on the ARM, moving-jammer fix), and the firmware as the
   `gnss_crpa` Linux service with custom band 7.
 
 * `build.sh`: fetches sources at the pinned commits (the vendor zip has no
