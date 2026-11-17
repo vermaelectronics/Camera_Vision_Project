@@ -1,0 +1,238 @@
+diff --git a/Source/BlockDesign/system_bd.tcl b/Source/BlockDesign/system_bd.tcl
+index 4836ddc..a0ff2d4 100644
+--- a/Source/BlockDesign/system_bd.tcl
++++ b/Source/BlockDesign/system_bd.tcl
+@@ -1,6 +1,6 @@
+ # ============================================================================
+ #  system_bd.tcl  --  ANTSDR E310, AD9361 LVDS 2R2T 61.44 MSPS
+-#                     Passthrough_LVDS + SFAP-PI v6.0 (256 bins) anti-jam
++#                     Passthrough_LVDS + SFAP-PI v6.3 (256 bins) anti-jam
+ #
+ #  Identical to the working passthrough_lvds block design (antsdr-fw-patch
+ #  "ant" base, Vivado 2023.2, VCXO controller, axi_tdd, no FIR) except:
+@@ -33,8 +33,8 @@ update_ip_catalog -rebuild
+ 
+ # Exact VLNVs: an older analog.com:user:gnss_passthrough (or sfap_pi) may
+ # also sit in the ADI library tree, so never look the IP up by name alone.
+-set gnss_vlnv antsdr:gnss:gnss_passthrough:2.0
+-set sfap_vlnv antsdr:gnss:sfap_pi:4.0
++set gnss_vlnv antsdr:gnss:gnss_passthrough:3.0
++set sfap_vlnv antsdr:gnss:sfap_pi:5.0
+ set gnss_ipdef [get_ipdefs -all -quiet -filter "VLNV == $gnss_vlnv"]
+ set sfap_ipdef [get_ipdefs -all -quiet -filter "VLNV == $sfap_vlnv"]
+ if {[llength $gnss_ipdef] == 0 || [llength $sfap_ipdef] == 0} {
+@@ -340,13 +340,14 @@ ad_connect  gnss_passthrough/dac_data_q0 axi_ad9361/dac_data_q0
+ ad_connect  gnss_passthrough/dac_data_i1 axi_ad9361/dac_data_i1
+ ad_connect  gnss_passthrough/dac_data_q1 axi_ad9361/dac_data_q1
+ 
+-# SFAP-PI v6.0 filter (Vitis HLS sfap_pi 4.0, II = 1, 256 bins, latency 766
+-# samples) on sys_cpu_clk (100 MHz). l_clk is 245.76 MHz at 61.44 MS/s, so the
++# SFAP-PI v6.3 filter (Vitis HLS sfap_pi 5.0, II = 1, 256 bins, pulse blanker +
++# bin excision mask, latency 782 samples) on sys_cpu_clk (100 MHz). l_clk is 245.76 MHz at 61.44 MS/s, so the
+ # filter does not run on it; two async AXI-Stream FIFOs carry the samples:
+ #   gnss_passthrough/m_axis_smi (l_clk) -> smi_fifo_in -> sfap_pi_0 (100 MHz)
+ #   sfap_pi_0 -> smi_fifo_out -> gnss_passthrough/s_axis_smi (l_clk)
+ # cfg / nrm come from gnss_passthrough's AJ_* registers; the 3 x 256 weights
+-# are read by sfap_pi_0 through memory ports (2 per array) from
++# and (v6.3) the 8-word excision mask are read by sfap_pi_0 through memory
++# ports (2 per array) from
+ # gnss_passthrough's double-buffered weight RAM. All on sys_cpu_clk
+ # (= gnss_passthrough s_axi_aclk), the filter's own clock.
+ ad_ip_instance axis_data_fifo smi_fifo_in
+@@ -364,14 +365,14 @@ ad_connect  sys_cpu_resetn              sfap_pi_0/ap_rst_n
+ ad_connect  smi_fifo_in/M_AXIS          sfap_pi_0/s_axis_x
+ # weight memory ports: sfap_pi_0/<arr>_{address,ce}<p> -> gnss_passthrough,
+ # gnss_passthrough/aj_<arr>_q<p> -> sfap_pi_0/<arr>_q<p>
+-foreach arr {wb wc1 wc2} {
++foreach arr {wb wc1 wc2 wm} {
+   foreach prt {0 1} {
+     foreach sig [list address$prt ce$prt q$prt] {
+       if {[llength [get_bd_pins -quiet sfap_pi_0/${arr}_${sig}]] == 0} {
+         puts "SFAP_LVDS: sfap_pi_0 pins: [get_bd_pins sfap_pi_0/*]"
+         puts "SFAP_LVDS: sfap_pi_0 interfaces: [get_bd_intf_pins -quiet sfap_pi_0/*]"
+         error "ERROR: sfap_pi_0 has no pin ${arr}_${sig} (expected the ap_memory\
+-               ports of sfap_pi 4.0; see the pin list above)."
++               ports of sfap_pi 5.0; see the pin list above)."
+       }
+       ad_connect  sfap_pi_0/${arr}_${sig} gnss_passthrough/aj_${arr}_${sig}
+     }
+diff --git a/Source/HDL/gnss_passthrough.v b/Source/HDL/gnss_passthrough.v
+index 9fdebd4..a208496 100644
+--- a/Source/HDL/gnss_passthrough.v
++++ b/Source/HDL/gnss_passthrough.v
+@@ -118,12 +118,17 @@
+ //                                    = 0x08070C04 (256 bins, hop 128, Q3.12,
+ //                                    layout 4 = SFAP-PI v6.0)
+ //    0x188   AJ_CFG          RW      SHADOW. [0] bypass: 1 = TX1 carries RX1
+-//                                    delayed by 766 samples (the filter's own
+-//                                    latency), no weights (reset value 0x1:
+-//                                    nothing is filtered until the firmware
+-//                                    has seen a jammer).
++//                                    delayed by 782 samples (the filter's own
++//                                    latency), no weights, never blanked
++//                                    (reset value 0x1: nothing is filtered
++//                                    until the firmware has seen a jammer).
+ //                                    [10:8] output make-up shift s, 0..4: the
+ //                                    filter output x 2^s (6 dB per step).
++//                                    [27:16] v6.3 pulse-blanker threshold in
++//                                    ADC LSB, 0 = off: a sample with |I| or
++//                                    |Q| of RX1 or RX2 at or above it zeroes
++//                                    both channels from 16 samples before to
++//                                    16 after it (inside sfap_pi_0).
+ //    0x18C   AJ_NORM         RW      SHADOW. RX2 input normalisation g2,
+ //                                    {imag[31:16], real[15:0]} signed Q3.13
+ //                                    (1.0 = 0x2000, the reset value). The core
+@@ -136,14 +141,19 @@
+ //    0x1400.. AJ_WC1[0..255] WO      Image tap c1_k on conj(X1 at bin -k).
+ //    0x17FC
+ //    0x1800.. AJ_WC2[0..255] WO      Image tap c2_k on conj(X2n at bin -k).
+-//    0x1BFC                          The weights live in a DOUBLE-BUFFERED
+-//                                    RAM: writes go to the spare bank;
+-//                                    AJ_COMMIT swaps the banks if at least
+-//                                    one weight was written since the last
+-//                                    commit (otherwise the running weights
+-//                                    stay). So a commit that changes the
+-//                                    weights must be preceded by writes of
+-//                                    ALL 768 words. They read back 0.
++//    0x1BFC
++//    0x1C00.. AJ_MASK[0..7]  WO      v6.3 bin excision mask: word j bit b =
++//    0x1C1C                          bin 32 j + b (natural FFT order); 1 =
++//                                    the filter output of that bin is zero.
++//                                    The weights and the mask live in a
++//                                    DOUBLE-BUFFERED RAM: writes go to the
++//                                    spare bank; AJ_COMMIT swaps the banks if
++//                                    at least one word was written since the
++//                                    last commit (otherwise the running set
++//                                    stays). So a commit that changes them
++//                                    must be preceded by writes of ALL 776
++//                                    words (768 weights + 8 mask words).
++//                                    They read back 0.
+ //
+ //  SFAP-PI CLOCKING
+ //    sfap_pi_0 runs on sys_cpu_clk (= s_axi_aclk), not on clk: the block design
+@@ -211,6 +221,8 @@ module gnss_passthrough #(
+   //    aj_wc1_* <-> sfap_pi_0/wc1_* : c1_k,  aj_wc2_* <-> sfap_pi_0/wc2_* : c2_k
+   //      (address 8 bits = bin k, ce, q 32 bits, read latency 1, s_axi_aclk;
+   //       the committed bank is selected here)
++  //    aj_wm_*  <-> sfap_pi_0/wm_*  : v6.3 excision mask (address 3 bits =
++  //      mask word, 2 ports, read latency 1)
+   //    aj_cfg (s_axi_aclk) -> sfap_pi_0/cfg, the committed AJ_CFG
+   //    aj_nrm (s_axi_aclk) -> sfap_pi_0/nrm, the committed AJ_NORM
+   output     [63:0]   m_axis_smi_tdata,
+@@ -226,6 +238,8 @@ module gnss_passthrough #(
+   input      [7:0]    aj_wc1_address1, input aj_wc1_ce1, output [31:0] aj_wc1_q1,
+   input      [7:0]    aj_wc2_address0, input aj_wc2_ce0, output [31:0] aj_wc2_q0,
+   input      [7:0]    aj_wc2_address1, input aj_wc2_ce1, output [31:0] aj_wc2_q1,
++  input      [2:0]    aj_wm_address0,  input aj_wm_ce0,  output [31:0] aj_wm_q0,
++  input      [2:0]    aj_wm_address1,  input aj_wm_ce1,  output [31:0] aj_wm_q1,
+   output     [31:0]   aj_cfg,
+   output     [31:0]   aj_nrm,
+ 
+@@ -279,8 +293,12 @@ module gnss_passthrough #(
+   //         3 x 256 weights at 0x1000-0x1BFC (8 KB map) are kept in a
+   //         double-buffered block RAM that sfap_pi_0 reads through memory
+   //         ports; AJ_COMMIT swaps the banks. 0x200-0x4FC read 0.
+-  localparam [31:0] CORE_VERSION = 32'h00060000;   // v6.0
+-  localparam [31:0] AJ_INFO      = 32'h08070C04;
++  // v6.3 -- sfap_pi_0 v5.0: pulse blanker (threshold AJ_CFG[27:16]) and a
++  //         per-bin excision mask, 8 words at 0x1C00-0x1C1C in the same
++  //         double-buffered bank as the weights (aj_wm_* memory ports).
++  //         Latency 782 samples. AJ_INFO layout 5.
++  localparam [31:0] CORE_VERSION = 32'h00060003;   // v6.3
++  localparam [31:0] AJ_INFO      = 32'h08070C05;
+   localparam [31:0] AJ_CFG_RESET = 32'h00000001;   // bypass
+   localparam [31:0] AJ_NRM_RESET = 32'h00002000;   // g2 = 1.0
+   localparam        AW           = FIFO_ADDR_WIDTH;
+@@ -386,7 +404,8 @@ module gnss_passthrough #(
+   reg  [31:0]   aj_commits = 32'd0;
+   reg           aj_bank    = 1'b0;      // bank the core reads
+   reg           aj_dirty   = 1'b0;      // weights written since the last commit
+-  wire          aj_w_sel   = (reg_waddr >= 12'h400) && (reg_waddr <= 12'h6FF);
++  // 0x1000..0x1BFC weights, 0x1C00..0x1C1C (v6.3) excision mask
++  wire          aj_w_sel   = (reg_waddr >= 12'h400) && (reg_waddr <= 12'h707);
+   wire          aj_commit  = reg_wr && (reg_waddr == 12'h060);
+   wire          aj_w_we    = reg_wr && aj_w_sel;
+   wire [8:0]    aj_w_addr  = {~aj_bank, reg_waddr[7:0]};
+@@ -420,10 +439,11 @@ module gnss_passthrough #(
+   assign aj_cfg = aj_cfg_act;
+   assign aj_nrm = aj_nrm_act;
+ 
+-  // reg_waddr[9:8]: 0x4xx -> 2'b00 (b), 0x5xx -> 2'b01 (c1), 0x6xx -> 2'b10 (c2)
+-  wire we_b  = aj_w_we && (reg_waddr[9:8] == 2'b00);
+-  wire we_c1 = aj_w_we && (reg_waddr[9:8] == 2'b01);
+-  wire we_c2 = aj_w_we && (reg_waddr[9:8] == 2'b10);
++  // reg_waddr[10:8]: 0x4xx -> b, 0x5xx -> c1, 0x6xx -> c2, 0x700-0x707 -> mask
++  wire we_b  = aj_w_we && (reg_waddr[10:8] == 3'b100);
++  wire we_c1 = aj_w_we && (reg_waddr[10:8] == 3'b101);
++  wire we_c2 = aj_w_we && (reg_waddr[10:8] == 3'b110);
++  wire we_m  = aj_w_we && (reg_waddr[10:8] == 3'b111);   // 0x700..0x707 only (aj_w_sel)
+ 
+   gnss_pt_wram u_wb_0  (.clk(s_axi_aclk), .we(we_b),  .waddr(aj_w_addr), .wdata(s_axi_wdata),
+                         .re(aj_wb_ce0),  .raddr({aj_bank, aj_wb_address0}),  .rdata(aj_wb_q0));
+@@ -437,6 +457,12 @@ module gnss_passthrough #(
+                         .re(aj_wc2_ce0), .raddr({aj_bank, aj_wc2_address0}), .rdata(aj_wc2_q0));
+   gnss_pt_wram u_wc2_1 (.clk(s_axi_aclk), .we(we_c2), .waddr(aj_w_addr), .wdata(s_axi_wdata),
+                         .re(aj_wc2_ce1), .raddr({aj_bank, aj_wc2_address1}), .rdata(aj_wc2_q1));
++  // v6.3 excision mask: 2 banks x 8 words, one copy per read port (LUT RAM)
++  wire [3:0] aj_m_addr = {~aj_bank, reg_waddr[2:0]};
++  gnss_pt_mram u_wm_0  (.clk(s_axi_aclk), .we(we_m),  .waddr(aj_m_addr), .wdata(s_axi_wdata),
++                        .re(aj_wm_ce0),  .raddr({aj_bank, aj_wm_address0}),  .rdata(aj_wm_q0));
++  gnss_pt_mram u_wm_1  (.clk(s_axi_aclk), .we(we_m),  .waddr(aj_m_addr), .wdata(s_axi_wdata),
++                        .re(aj_wm_ce1),  .raddr({aj_bank, aj_wm_address1}),  .rdata(aj_wm_q1));
+ 
+   // Status view, refreshed from the clk domain (see CDC section).
+   wire [31:0] v_status, v_rx_cnt0, v_tx_cnt0, v_ovf_cnt, v_unf_cnt;
+@@ -870,3 +896,28 @@ module gnss_pt_wram (
+     if (re) rdata <= mem[raddr];
+   end
+ endmodule
++
++// ============================================================================
++//  gnss_pt_mram -- 16 x 32 simple dual-port RAM (v6.3 excision mask, two
++//  banks of 8 words), registered read like gnss_pt_wram. Distributed RAM.
++// ============================================================================
++module gnss_pt_mram (
++  input             clk,
++  input             we,
++  input      [3:0]  waddr,
++  input      [31:0] wdata,
++  input             re,
++  input      [3:0]  raddr,
++  output reg [31:0] rdata
++);
++  (* ram_style = "distributed" *) reg [31:0] mem [0:15];
++  integer i;
++  initial begin
++    for (i = 0; i < 16; i = i + 1) mem[i] = 32'd0;
++    rdata = 32'd0;
++  end
++  always @(posedge clk) begin
++    if (we) mem[waddr] <= wdata;
++    if (re) rdata <= mem[raddr];
++  end
++endmodule
+diff --git a/Source/IP/gnss_passthrough/gnss_passthrough_ip.tcl b/Source/IP/gnss_passthrough/gnss_passthrough_ip.tcl
+index 137a96a..2e8a6a3 100644
+--- a/Source/IP/gnss_passthrough/gnss_passthrough_ip.tcl
++++ b/Source/IP/gnss_passthrough/gnss_passthrough_ip.tcl
+@@ -67,9 +67,9 @@ ipx::package_project -root_dir $ip_dir -vendor antsdr -library gnss \
+ set core [ipx::current_core]
+ 
+ set_property name           $ip_name                                  $core
+-set_property version        2.0                                       $core
++set_property version        3.0                                       $core
+ set_property display_name   "GNSS CRPA Passthrough"                   $core
+-set_property description    "RX->TX I/Q passthrough and SFAP-PI 256-bin control + double-buffered weight RAM, ANTSDR E310" $core
++set_property description    "RX->TX I/Q passthrough and SFAP-PI 256-bin control + double-buffered weight/excision-mask RAM (v6.3), ANTSDR E310" $core
+ set_property vendor_display_name "ANTSDR GNSS CRPA project"           $core
+ set_property company_url    "https://github.com/MicroPhase"           $core
+ 
+@@ -149,7 +149,7 @@ set prst_if [ensure_bus_if $core smi_rst_n xilinx.com:signal:reset_rtl:1.0]
+ set_bus_param $prst_if POLARITY ACTIVE_LOW
+ 
+ # ---------------------------------------------------------------------------
+-#  Memory map: 8 kB aperture (v6.0: weights at 0x1000-0x1BFC).  The actual base address is assigned by the
++#  Memory map: 8 kB aperture (v6.3: weights at 0x1000-0x1BFC, excision mask at 0x1C00-0x1C1C).  The actual base address is assigned by the
+ #  block design (Source/BlockDesign/system_bd.tcl), not here.
+ # ---------------------------------------------------------------------------
+ ipx::add_memory_map s_axi $core

@@ -1,0 +1,23 @@
+
+==== [16:38:36] hdl: ADI libraries + Vivado project in /home/manoranjan/CRPA_Project/NEW_PASSTHROUGH/workspace/antsdr-fw-patch/plutosdr-fw/hdl/projects/passthrough_lvds_sfap256 (30-90 min)
+Building passthrough_lvds_sfap256 project [/home/manoranjan/CRPA_Project/NEW_PASSTHROUGH/workspace/antsdr-fw-patch/plutosdr-fw/hdl/projects/passthrough_lvds_sfap256/passthrough_lvds_sfap256_vivado.log] ...
+Build passthrough_lvds_sfap256 project [/home/manoranjan/CRPA_Project/NEW_PASSTHROUGH/workspace/antsdr-fw-patch/plutosdr-fw/hdl/projects/passthrough_lvds_sfap256/passthrough_lvds_sfap256_vivado.log] OK
+HDL: timing WNS 0.129 ns, WHS 0.011 ns
+| Slice LUTs                 | 25121 |     0 |          0 |     53200 | 47.22 |
+| Slice Registers            | 31201 |     0 |          0 |    106400 | 29.32 |
+| Slice Registers                            | 31201 |     0 |          0 |    106400 | 29.32 |
+| Block RAM Tile    |   23 |     0 |          0 |       140 | 16.43 |
+HDL: PASS -> /home/manoranjan/CRPA_Project/NEW_PASSTHROUGH/NISHANT/SFAP_PI_256v3.2/Build/hdl/system_top.{bit,xsa} (timing met)
+
+==== [16:43:10] sw: XSCT platform + FSBL + app_sfap_lvds
+SFAP_SW: application domain 'standalone_domain'
+SFAP_SW: application build configuration 'release'
+SFAP_SW: FSBL /home/manoranjan/CRPA_Project/NEW_PASSTHROUGH/NISHANT/SFAP_PI_256v3.2/Build/vitis_ws/e310_lvds_plat/export/e310_lvds_plat/sw/e310_lvds_plat/boot/fsbl.elf
+SFAP_SW: PASS /home/manoranjan/CRPA_Project/NEW_PASSTHROUGH/NISHANT/SFAP_PI_256v3.2/Build/vitis_ws/app_sfap_lvds/Release/app_sfap_lvds.elf
+SW: PASS -> /home/manoranjan/CRPA_Project/NEW_PASSTHROUGH/NISHANT/SFAP_PI_256v3.2/Build/sw/{fsbl,app_sfap_lvds}.elf
+
+==== [16:43:31] boot: bootgen BOOT.BIN
+-rw-rw-r-- 1 manoranjan manoranjan 3060560 Nov 16 16:43 /home/manoranjan/CRPA_Project/NEW_PASSTHROUGH/NISHANT/SFAP_PI_256v3.2/Build/boot/BOOT.BIN
+BOOT: PASS -> /home/manoranjan/CRPA_Project/NEW_PASSTHROUGH/NISHANT/SFAP_PI_256v3.2/Build/boot/BOOT.BIN  (copy to a FAT32 SD card, boot jumpers on SD)
+
+==== [16:43:32] done

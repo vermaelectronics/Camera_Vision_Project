@@ -1,0 +1,1015 @@
+diff --git a/Source/Firmware/app_sfap_lvds/command.c b/Source/Firmware/app_sfap_lvds/command.c
+index b1395b7..1581bac 100644
+--- a/Source/Firmware/app_sfap_lvds/command.c
++++ b/Source/Firmware/app_sfap_lvds/command.c
+@@ -137,6 +137,8 @@ command cmd_list[] = {
+ 	{"sfap-pi=", "1 = anti-jam ON (default at boot), 0 = OFF (TX1 carries RX1).", "sfap-pi=1", set_gnss_smi},
+ 	{"sfap-pi_freeze=", "1 = hold the filter exactly as it is (weights, bypass), 0 = automatic (default).", "sfap-pi_freeze=0", set_gnss_smi_freeze},
+ 	{"sfap-pi_hold=", "Weight hold for pulsed/hopping jammers, in solves (~10 ms each): 100 = default, 0 = off (v6.0).", "sfap-pi_hold=100", set_gnss_smi_hold},
++	{"sfap-pi_blank=", "v6.3 pulse blanker: 1 = on (default), 0 = off (v6.2 behaviour).", "sfap-pi_blank=1", set_gnss_aj_blank},
++	{"sfap-pi_excise=", "v6.3 bin excision (bins holding two jammers from two directions): 1 = on (default), 0 = off.", "sfap-pi_excise=1", set_gnss_aj_excise},
+ 	{"sfap-pi_aj?", "Anti-jam status: bypass/filter, jammer type and frequency, J/N, suppression.", "", get_gnss_aj},
+ 	{"sfap-pi_report?", "EVERYTHING in one block (radio, gains, g2, jammer, events) to copy into a report.", "", get_gnss_report},
+ 	{"sfap-pi_log=", "Status line every N s on the console (default 30; held back while you type), 0 = only JAMMER ON/OFF events.", "sfap-pi_log=30", set_gnss_aj_log},
+@@ -319,9 +321,9 @@ void get_gnss_smi(double* param, char param_no)
+ 	uint32_t ver = gnss_pt_read(GNSS_PT_REG_VERSION);
+ 
+ 	(void)param; (void)param_no;
+-	if(ver < 0x00060000U) {
+-		console_print("SFAP-PI: bitstream v%d.%d has no SFAP-PI v6.0 filter "
+-			      "(this firmware needs v6.0)\n",
++	if(ver < GNSS_PT_EXPECTED_VERSION) {
++		console_print("SFAP-PI: bitstream v%d.%d has no SFAP-PI v6.3 filter "
++			      "(this firmware needs v6.3)\n",
+ 			      (long)(ver >> 16), (long)(ver & 0xFFFFU));
+ 		return;
+ 	}
+@@ -342,8 +344,8 @@ void set_gnss_smi(double* param, char param_no)
+ 		console_print("sfap-pi= needs 0 or 1\n");
+ 		return;
+ 	}
+-	if(gnss_pt_read(GNSS_PT_REG_VERSION) < 0x00060000U) {
+-		console_print("sfap-pi: this bitstream has no SFAP-PI v6.0 filter\n");
++	if(gnss_pt_read(GNSS_PT_REG_VERSION) < GNSS_PT_EXPECTED_VERSION) {
++		console_print("sfap-pi: this bitstream has no SFAP-PI v6.3 filter\n");
+ 		return;
+ 	}
+ 	gnss_aj_command((int)param[0] != 0);
+@@ -500,6 +502,23 @@ void set_gnss_smi_hold(double* param, char param_no)
+ 		      (char*)(aj_get_hold() ? "" : " (off: gated bins drop to zero weight, as in v6.0)"));
+ }
+ 
++/**************************************************************************//***
++ * @brief SFAP-PI v6.3. Pulse blanker and bin excision on (1) / off (0).
++*******************************************************************************/
++void set_gnss_aj_blank(double* param, char param_no)
++{
++	if(param_no < 1) { console_print("sfap-pi_blank= needs 0 or 1\n"); return; }
++	gnss_aj_set_blank((int)param[0] != 0);
++	console_print("sfap-pi_blank: %s\n", (char*)(gnss_aj_get_blank() ? "ON (pulses over 5 x the robust sigma are blanked)" : "OFF"));
++}
++
++void set_gnss_aj_excise(double* param, char param_no)
++{
++	if(param_no < 1) { console_print("sfap-pi_excise= needs 0 or 1\n"); return; }
++	gnss_aj_set_excise((int)param[0] != 0);
++	console_print("sfap-pi_excise: %s\n", (char*)(gnss_aj_get_excise() ? "ON (up to 32 bins with two jammers are removed)" : "OFF"));
++}
++
+ /* GNSS-CRPA MOD-7: the DDR round trip.
+  * rx_dmac / tx_dmac are created unconditionally in main.c (~line 715). */
+ extern struct axi_dmac *rx_dmac;
+diff --git a/Source/Firmware/app_sfap_lvds/command.h b/Source/Firmware/app_sfap_lvds/command.h
+index 34836a0..b0d0a47 100644
+--- a/Source/Firmware/app_sfap_lvds/command.h
++++ b/Source/Firmware/app_sfap_lvds/command.h
+@@ -247,6 +247,8 @@ void get_gnss_smi(double* param, char param_no);
+ void set_gnss_smi(double* param, char param_no);
+ void set_gnss_smi_freeze(double* param, char param_no);
+ void set_gnss_smi_hold(double* param, char param_no);   /* v6.1 */
++void set_gnss_aj_blank(double* param, char param_no);   /* v6.3 */
++void set_gnss_aj_excise(double* param, char param_no);  /* v6.3 */
+ void get_gnss_aj(double* param, char param_no);
+ void get_gnss_report(double* param, char param_no);
+ void set_gnss_aj_log(double* param, char param_no);
+diff --git a/Source/Firmware/app_sfap_lvds/gnss_aj.c b/Source/Firmware/app_sfap_lvds/gnss_aj.c
+index b1cfeea..da0edc7 100644
+--- a/Source/Firmware/app_sfap_lvds/gnss_aj.c
++++ b/Source/Firmware/app_sfap_lvds/gnss_aj.c
+@@ -1,5 +1,9 @@
+ /******************************************************************************
+- *  gnss_aj.c  --  SFAP-PI v6.0 anti-jam engine. See gnss_aj.h.
++ *  gnss_aj.c  --  SFAP-PI v6.3 anti-jam engine. See gnss_aj.h.
++ *  v6.3: pulse blanking of every capture (blank_capture) with the same
++ *  threshold committed to the FPGA, pulses as a detection reason, bin
++ *  excision mask committed with the weights, blanker threshold rescaled on
++ *  every RX gain step (gnss_aj_gain_stepped).
+  *****************************************************************************/
+ 
+ #include "gnss_aj.h"
+@@ -12,6 +16,7 @@
+ #include "console.h"
+ #include "xtime_l.h"
+ #include "xil_cache.h"
++#include <string.h>
+ 
+ extern struct ad9361_rf_phy *ad9361_phy;
+ extern struct axi_dmac *rx_dmac;
+@@ -68,6 +73,25 @@ extern struct axi_dmac *rx_dmac;
+ #define AJ_NEV            16      /* event history for sfap-pi_report?             */
+ 
+ enum { ST_CLEAR = 0, ST_JAMMED = 1 };
++
++/* ---- v6.3 pulse blanking / bin excision ------------------------------------ */
++static int      aj_blank_on = 1, aj_exc_on = 1;
++static int      blk_thr;              /* threshold committed to the FPGA [LSB]  */
++static int      blk_n, blk_hits;      /* last capture: blanked, over threshold  */
++static double   blk_frac;             /* blanked fraction of the last capture   */
++static int      blk_pulsed;           /* last capture held pulses               */
++static uint32_t blk_caps;             /* captures with pulses since start       */
++static XTime    blk_t;                /* last capture with pulses               */
++static int      blk_seen;             /* blk_t is valid                         */
++/* A 4096-sample capture is 67 us at 61.44 MS/s; a low-rate pulsed source
++ * (e.g. 1 kHz) is in only a few % of the captures, so pulses count as present
++ * for this long after the last capture that held them. */
++#define AJ_PULSE_HOLD_US  100000U
++/* the capture the math works on: the DMA buffer, or this copy of it when
++ * something had to be blanked (the DMA buffer itself is never written: a
++ * dirty cache line written back later could land on the next capture) */
++static uint32_t aj_work[2 * AJ_NSAMP];
++static const uint32_t *cap = (const uint32_t *)GNSS_AJ_BUF_ADDR;
+ enum { EV_ON = 1, EV_NULLED, EV_OFF, EV_LEAK, EV_TX, EV_START };
+ 
+ /* ---- state --------------------------------------------------------------- */
+@@ -240,15 +264,92 @@ static void commit_bypass(void)
+ {
+ 	shift = 0;
+ 	gnss_rxg_set_digital_db(0);
+-	gnss_pt_write_aj(0, 0, GNSS_PT_AJ_CFG_BYPASS, g2_q13());
++	gnss_pt_write_aj(0, 0, 0, GNSS_PT_AJ_CFG_BYPASS, g2_q13());
++}
++
++/* v6.3: cfg with the blanker threshold (filter in) */
++static uint32_t cfg_in(void)
++{
++	return GNSS_PT_AJ_CFG_SHIFT(shift) | GNSS_PT_AJ_CFG_BLANK(aj_blank_on ? blk_thr : 0);
+ }
+ 
+ static void commit_weights(void)
+ {
+ 	gnss_rxg_set_digital_db(6 * shift);
+-	gnss_pt_write_aj(res.wre, res.wim, GNSS_PT_AJ_CFG_SHIFT(shift), g2_q13());
++	gnss_pt_write_aj(res.wre, res.wim, aj_exc_on ? res.exc_mask : 0, cfg_in(), g2_q13());
++}
++
++/* v6.3: blank this capture as the FPGA blanks the stream. The threshold is
++ * also the one committed with the next weights. More than AJ_BLK_MAX_FRAC
++ * over it means the signal itself is not pulsed: no blanking. */
++static void blank_capture(void)
++{
++	const uint32_t *raw = (const uint32_t *)GNSS_AJ_BUF_ADDR;
++	int thr, n, h = 0;
++	cap = raw;
++	blk_n = 0; blk_hits = 0; blk_frac = 0.0; blk_pulsed = 0;
++	if(!aj_blank_on) { blk_thr = 0; return; }
++	thr = aj_blank_thr(raw, AJ_NSAMP);
++	n = aj_blank_buf((uint32_t *)raw, AJ_NSAMP, thr, 0, &h);      /* count only */
++	if(n > (int)(AJ_BLK_MAX_FRAC * AJ_NSAMP)) { thr = 0; n = 0; h = 0; }
++	blk_thr = thr;
++	if(n > 0) {
++		memcpy(aj_work, raw, sizeof(aj_work));
++		aj_blank_buf(aj_work, AJ_NSAMP, thr, 1, 0);
++		cap = aj_work;
++	}
++	blk_n = n;
++	blk_hits = h;
++	blk_frac = (double)n / (double)AJ_NSAMP;
++	blk_pulsed = (h >= AJ_BLK_ON_HITS);
++	if(blk_pulsed) {
++		blk_caps++;
++		XTime_GetTime(&blk_t);
++		blk_seen = 1;
++	}
++}
++
++static int pulses_recent(XTime now)
++{
++	return aj_blank_on && blk_seen && (now - blk_t < us(AJ_PULSE_HOLD_US));
+ }
+ 
++/* the gain loop only leaves pulses out of its peak while the blanker is
++ * really removing them from TX1: filter in, blanker on */
++static void agc_blank(void)
++{
++	gnss_rxg_set_blank_thr((state == ST_JAMMED && aj_blank_on && !aj_frozen) ? blk_thr : 0);
++}
++
++void gnss_aj_gain_stepped(int delta_db)
++{
++	double t;
++	int i, n;
++	if(state != ST_JAMMED || !aj_blank_on || aj_frozen || blk_thr <= 0) return;
++	/* 10^(delta/20) without libm: 1.122 per dB */
++	t = (double)blk_thr;
++	n = delta_db < 0 ? -delta_db : delta_db;
++	for(i = 0; i < n; i++) t = (delta_db < 0) ? t / 1.12202 : t * 1.12202;
++	blk_thr = (int)(t + 0.5);
++	if(blk_thr < AJ_BLK_MIN) blk_thr = AJ_BLK_MIN;
++	if(blk_thr > 2047) blk_thr = 2047;
++	/* cfg only: no weight RAM writes, so the running weights and mask stay */
++	gnss_pt_write_aj(0, 0, 0, cfg_in(), g2_q13());
++	agc_blank();
++}
++
++void gnss_aj_set_blank(int on)
++{
++	aj_blank_on = on ? 1 : 0;
++	if(!aj_blank_on) { blk_thr = 0; blk_pulsed = 0; }
++	if(aj_on && state == ST_JAMMED && !aj_frozen)
++		gnss_pt_write_aj(0, 0, 0, cfg_in(), g2_q13());
++	agc_blank();
++}
++int  gnss_aj_get_blank(void)  { return aj_blank_on; }
++void gnss_aj_set_excise(int on) { aj_exc_on = on ? 1 : 0; }   /* next solve */
++int  gnss_aj_get_excise(void) { return aj_exc_on; }
++
+ /* ---- DMA --------------------------------------------------------------------- */
+ static void dma_start(void)
+ {
+@@ -338,6 +439,7 @@ static const char *why_txt(int why)
+ 	case 2:  return "RX power above the learned noise floor";
+ 	case 3:  return "the RX gain loop (it had to cut the gain)";
+ 	case 4:  return "one frequency bin far above its learned noise floor (narrowband)";
++	case 5:  return "pulses far above the noise (blanked, v6.3)";
+ 	default: return "?";
+ 	}
+ }
+@@ -349,6 +451,8 @@ static void print_line(XTime now)
+ 		console_print("JAMMED  J/N %s dB  suppression %s dB  residual %s dB | ",
+ 			      f1(res.jn_db), supp_txt(res.supp_db), f1u(res_disp(res.res_db)));
+ 		print_type();
++		if(blk_pulsed) console_print(" + PULSES (%s %% blanked)", f1u(100.0 * blk_frac));
++		if(aj_exc_on && res.exc_bins > 0) console_print(" | %d bins excised", (long)res.exc_bins);
+ 		console_print(" | RX %d/%d dB  make-up +%d dB  TX att %s dB | %d solves/s%s\n",
+ 			      (long)cur_gain(), (long)gnss_rxg_ref(), (long)(6 * shift),
+ 			      f2u(tx_att_db()), (long)upd_rate, (char*)(aj_frozen ? " FROZEN" : ""));
+@@ -369,10 +473,10 @@ static void print_csv(XTime now)
+ 	if(!csv_hdr) {
+ 		csv_hdr = 1;
+ 		console_print("AJCSV,t_s,state,jn_db,coh_db,supp_db,res_db,rx_gain_db,cut_db,"
+-			      "makeup_db,tx_att_db,g2_db,rate_per_s,bw_mhz,centre_mhz\n");
++			      "makeup_db,tx_att_db,g2_db,rate_per_s,bw_mhz,centre_mhz,blank_pct,exc_bins\n");
+ 	}
+ 	radio(&fs, &lo);
+-	console_print("AJCSV,%s,%s,%s,%s,%s,%s,%d,%d,%d,%s,%s,%d,%s,%s\n",
++	console_print("AJCSV,%s,%s,%s,%s,%s,%s,%d,%d,%d,%s,%s,%d,%s,%s,%s,%d\n",
+ 		      f3u((double)ms_since(t_boot, now) / 1000.0),
+ 		      (char*)(state == ST_JAMMED ? "JAMMED" : "CLEAR"),
+ 		      fmt(res.jn_db < -99.0 ? -99.0 : res.jn_db, 1, 0),
+@@ -382,7 +486,8 @@ static void print_csv(XTime now)
+ 		      (long)cur_gain(), (long)cut_db(), (long)(6 * shift),
+ 		      f2u(tx_att_db()), fmt(aj_db10(g2 * g2), 1, 0),
+ 		      (long)(state == ST_JAMMED ? upd_rate : det_rate),
+-		      fmt(res.bw * (double)fs / 1e6, 1, 0), fmt(res.foff * (double)fs / 1e6, 1, 0));
++		      fmt(res.bw * (double)fs / 1e6, 1, 0), fmt(res.foff * (double)fs / 1e6, 1, 0),
++		      f1u(100.0 * blk_frac), (long)((state == ST_JAMMED && aj_exc_on) ? res.exc_bins : 0));
+ }
+ 
+ /* ---- learning ------------------------------------------------------------------ */
+@@ -525,11 +630,12 @@ static int detect_capture(XTime now)
+ {
+ 	int cut = cut_db(), why = 0, quiet;
+ 
+-	res.noise_ref = noise_now();
++	/* v6.3: the blanked samples carry no noise either */
++	res.noise_ref = noise_now() * (1.0 - blk_frac);
+ 	res.rho_noise_re = rho_n_re;
+ 	res.rho_noise_im = rho_n_im;
+ 	res.gain_lin = gain_lin();
+-	if(aj_detect((const uint32_t *)GNSS_AJ_BUF_ADDR, AJ_NSAMP, &res) != 0 || !res.ok) {
++	if(aj_detect(cap, AJ_NSAMP, &res) != 0 || !res.ok) {
+ 		n_fail++;
+ 		return 0;
+ 	}
+@@ -542,8 +648,9 @@ static int detect_capture(XTime now)
+ 	else if(nf0 > 0.0 && res.jn_db >= AJ_ON_DB)    why = 2;
+ 	else if(cut >= AJ_CUT_DB)                      why = 3;
+ 	else if(res.bin_jn_max >= AJ_ON_BIN_DB)        why = 4;
++	else if(pulses_recent(now))                    why = 5;   /* v6.3 */
+ 	quiet = !why && res.jn_coh_db < AJ_QUIET_COH_DB && res.bin_jn_max < AJ_OFF_BIN_DB &&
+-	        (nf0 <= 0.0 || res.jn_db < AJ_OFF_DB) && cut == 0;
++	        (nf0 <= 0.0 || res.jn_db < AJ_OFF_DB) && cut == 0 && blk_hits == 0;
+ 	if(quiet && gnss_rxg_ref() == cur_gain())
+ 		learn(now);
+ 
+@@ -576,7 +683,7 @@ static void jammed_state(XTime now)
+ 	if(jam_announced && res.jn_db > jam_peak) jam_peak = res.jn_db;
+ 
+ 	quiet = res.jn_coh_db < AJ_OFF_COH_DB && res.jn_db < AJ_OFF_DB && cut_db() == 0 &&
+-	        res.bin_jn_max < AJ_OFF_BIN_DB;
++	        res.bin_jn_max < AJ_OFF_BIN_DB && !pulses_recent(now);
+ 	if(!quiet) {
+ 		quiet_t0 = now;
+ 	} else if(now - quiet_t0 >= us(AJ_OFF_US)) {
+@@ -620,17 +727,18 @@ static void solve_capture(XTime now)
+ 		n_ep = 0;
+ 	}
+ 	res.mode = aj_mode;
++	res.excise = aj_exc_on;                                  /* v6.3 */
+ 	res.gain_lin = gain_lin();
+ 	/* v6.2 drift-aware averaging, from the last solves' residuals */
+ 	res.avg = aj_avg_policy(n_ep, res.res_db, res_prev);   /* v6.2.1: shared */
+ 	res_prev = (n_ep > 0) ? res.res_db : 99.0;
+ 	n_ep++;
+-	res.noise_ref = noise_now();
++	res.noise_ref = noise_now() * (1.0 - blk_frac);         /* v6.3 */
+ 	res.rho_noise_re = rho_n_re;
+ 	res.rho_noise_im = rho_n_im;
+ 	res.g2 = g2;
+ 	res.rx2_noise = rx2n;
+-	if(aj_compute((const uint32_t *)GNSS_AJ_BUF_ADDR, AJ_NSAMP, &res) != 0 || !res.ok) {
++	if(aj_compute(cap, AJ_NSAMP, &res) != 0 || !res.ok) {
+ 		n_fail++;
+ 		return;
+ 	}
+@@ -679,6 +787,7 @@ void gnss_aj_poll(void)
+ 		return;
+ 	}
+ 	Xil_DCacheInvalidateRange((uintptr_t)GNSS_AJ_BUF_ADDR, AJ_BYTES);
++	blank_capture();                                         /* v6.3 */
+ 
+ 	if(state == ST_CLEAR) {
+ 		/* the capture that confirmed the jammer is solved straight away */
+@@ -687,6 +796,7 @@ void gnss_aj_poll(void)
+ 	} else {
+ 		solve_capture(now);
+ 	}
++	agc_blank();
+ 
+ 	XTime_GetTime(&now);
+ 	if(now - t_rate >= us(1000000U)) {
+@@ -736,10 +846,10 @@ void gnss_aj_enable(int on)
+ 	XTime_GetTime(&now);
+ 	if(on) {
+ 		uint32_t ver = gnss_pt_read(GNSS_PT_REG_VERSION);
+-		if(ver < 0x00060000U ||
++		if(ver < GNSS_PT_EXPECTED_VERSION ||
+ 		   gnss_pt_read(GNSS_PT_REG_AJ_INFO) != GNSS_PT_AJ_INFO_EXPECTED) {
+ 			console_print("sfap-pi: the FPGA reports gnss_passthrough %d.%d, layout 0x%x; SFAP-PI\n"
+-				      "         v6.0 needs 6.0 / 0x08070C04 (256-bin space-frequency filter).\n"
++				      "         v6.3 needs 6.3 / 0x08070C05 (256 bins + pulse blanker + bin excision).\n"
+ 				      "         Anti-jam NOT started: program the BOOT.BIN / bitstream built\n"
+ 				      "         from this source.\n",
+ 				      (long)(ver >> 16), (long)(ver & 0xFFFFU),
+@@ -772,6 +882,7 @@ void gnss_aj_enable(int on)
+ 			console_print("[AJ] anti-jam switched off (jammer state no longer monitored)\n");
+ 		state = ST_CLEAR;
+ 		shift = 0;
++		gnss_rxg_set_blank_thr(0);                /* v6.3: pulses count again */
+ 	}
+ 	/* The enable crosses into the sample domain and back; wait (<= ~1 ms)
+ 	 * until STATUS confirms it, so a status print straight after is right. */
+@@ -874,6 +985,9 @@ void gnss_aj_print(void)
+ 			console_print("  suppression : %s dB, residual %s dB above the output noise (0 = fully nulled)%s\n",
+ 				      supp_txt(res.supp_db), f1u(res_disp(res.res_db)),
+ 				      (char*)(res.res_db > AJ_WARN_RES_DB ? "  <-- jammer leaking" : ""));
++		if(res_solved && aj_exc_on && res.exc_bins > 0)
++			console_print("  excision    : %d bins removed (two jammers from two directions in them)\n",
++				      (long)res.exc_bins);
+ 	} else {
+ 		console_print("  jammer      : none for %s s (coherence %s dB, ON above %s; power J/N %s, ON above %s)\n",
+ 			      f1u((double)ms_since(clear_t0, now) / 1000.0),
+@@ -881,6 +995,9 @@ void gnss_aj_print(void)
+ 			      (char*)(nf0 > 0.0 ? f1(res.jn_db < -9.9 ? -9.9 : res.jn_db) : "(learning)"),
+ 			      f1u(AJ_ON_DB));
+ 	}
++	if(aj_blank_on && blk_pulsed)
++		console_print("  pulses      : %s %% of the last capture blanked (threshold %d LSB)\n",
++			      f1u(100.0 * blk_frac), (long)blk_thr);
+ 	console_print("  more        : sfap-pi_report? prints everything (paste it into a report)\n");
+ }
+ 
+@@ -967,7 +1084,27 @@ void gnss_aj_report(void)
+ 			      (long)res.jam_bins, (long)AJ_N, f2u((double)fs / (double)AJ_N / 1e6), (long)res.held_bins);
+ 		console_print("solver        : loading %s LSB^2 (mean over bins), up to %d passes\n",
+ 			      f1u(res.sig2), (long)res.iters);
++		if(aj_exc_on) {
++			int k, first = 1;
++			console_print("excision      : %d bins removed (worst bin %d at %s dB over its noise)",
++				      (long)res.exc_bins, (long)res.exc_kmax, f1(res.exc_max_db));
++			for(k = 0; k < AJ_N; k++)
++				if(res.exc_mask[k >> 5] & (1U << (k & 31))) {
++					console_print("%s%d", (char*)(first ? ": " : " "), (long)(k < AJ_N / 2 ? k : k - AJ_N));
++					first = 0;
++				}
++			console_print("\n");
++		} else {
++			console_print("excision      : OFF (sfap-pi_excise=1)\n");
++		}
+ 	}
++	/* v6.3 pulse blanker, also while clear */
++	if(aj_blank_on)
++		console_print("pulse blanker : ON, threshold %d LSB, last capture %d over it / %s %% blanked, "
++			      "%d captures with pulses so far\n",
++			      (long)blk_thr, (long)blk_hits, f1u(100.0 * blk_frac), (long)blk_caps);
++	else
++		console_print("pulse blanker : OFF (sfap-pi_blank=1)\n");
+ 	if(state == ST_JAMMED && null_ms >= 0.0)
+ 		console_print("time to null  : %s ms (this jammer)\n", fmt(null_ms, 0, 0));
+ 	else if(null_ms_last >= 0.0)
+diff --git a/Source/Firmware/app_sfap_lvds/gnss_aj.h b/Source/Firmware/app_sfap_lvds/gnss_aj.h
+index 18bb286..5343ddd 100644
+--- a/Source/Firmware/app_sfap_lvds/gnss_aj.h
++++ b/Source/Firmware/app_sfap_lvds/gnss_aj.h
+@@ -1,11 +1,11 @@
+ /******************************************************************************
+- *  gnss_aj.h  --  SFAP-PI v6.1 anti-jam engine, 256 bins (runs on the ARM)
++ *  gnss_aj.h  --  SFAP-PI v6.3 anti-jam engine, 256 bins (runs on the ARM)
+  *
+  *  WHAT IT DOES, CONTINUOUSLY, WITH NO OPERATOR SETTING
+  *    1. Captures AJ_NSAMP (v6.2: 4096) samples of RX1 and RX2 into DDR over the existing ADC
+  *       DMA (a fan-out of the RX stream; the PL path is not interrupted).
+  *    2. CLEAR (no jammer): the filter is BYPASSED -- TX1 carries RX1 exactly,
+- *       766 samples later -- and each capture only goes through a cheap
++ *       782 samples later -- and each capture only goes through a cheap
+  *       detector (aj_detect: powers + RX1/RX2 coherence + v6.1 per-bin
+  *       narrowband check). Meanwhile it learns the receiver noise floor (also
+  *       per bin, v6.1) and the RX2/RX1 level ratio (the input normalisation
+@@ -21,6 +21,13 @@
+  *       (weight hold, sfap-pi_hold=); an RX gain step no longer drops them.
+  *    4. Back to CLEAR (bypass) once the jammer has been gone for 0.5 s (v6.1:
+  *       including the per-bin check, so a narrowband jammer keeps it on).
++ *    v6.3: every capture is first BLANKED like the FPGA blanks the stream
++ *       (threshold 5 x the capture's robust sigma, committed in AJ_CFG), so
++ *       pulses never enter the statistics; pulses alone (> 0.5 % blanked)
++ *       also switch the filter in (it then carries the blanked RX1). After
++ *       each solve the bins that still hold two jammers from two directions
++ *       are EXCISED (mask committed with the weights). The gain loop ignores
++ *       the blanked pulses, so they no longer pull the RX gain down.
+  *    Every change is printed on the console with a time stamp:
+  *         [AJ   12.345 s] *** JAMMER ON *** ...
+  *         [AJ   12.361 s] NULLED in 16 ms ...
+@@ -42,7 +49,7 @@
+ #define GNSS_AJ_BUF_ADDR   0x11000000U
+ #endif
+ 
+-#define GNSS_AJ_VERSION_STR  "6.2.2"
++#define GNSS_AJ_VERSION_STR  "6.3"
+ 
+ /* RF profiles (gnss_band=). RX and TX are always set together, so the
+  * retransmitted signal comes out on the frequency it came in on and the
+@@ -71,6 +78,16 @@ void gnss_aj_freeze(int on);        /* keep the present weights              */
+ void gnss_aj_set_mode(int mode);    /* AJ_MODE_SFAP / _LIN / _NB             */
+ void gnss_aj_set_log(int seconds);  /* periodic status line, 0 = events only */
+ void gnss_aj_set_csv(int ms);       /* CSV line period, 0 = off              */
++/* v6.3: pulse blanker and bin excision, 1 = on (default) */
++void gnss_aj_set_blank(int on);
++int  gnss_aj_get_blank(void);
++void gnss_aj_set_excise(int on);
++int  gnss_aj_get_excise(void);
++/* v6.3: the matched gain loop stepped both RX gains by delta_db; the blanker
++ * threshold (ADC LSB) is rescaled and re-committed at once, so a gain step
++ * between two captures neither blanks the continuous signal nor lets pulses
++ * through. */
++void gnss_aj_gain_stepped(int delta_db);
+ int  gnss_aj_jammer_on(void);
+ void gnss_aj_poll(void);
+ void gnss_aj_print(void);           /* sfap-pi_aj? / sfap-pi?                  */
+diff --git a/Source/Firmware/app_sfap_lvds/gnss_aj_math.c b/Source/Firmware/app_sfap_lvds/gnss_aj_math.c
+index 39285f5..40bb814 100644
+--- a/Source/Firmware/app_sfap_lvds/gnss_aj_math.c
++++ b/Source/Firmware/app_sfap_lvds/gnss_aj_math.c
+@@ -1,7 +1,8 @@
+ /******************************************************************************
+  *  gnss_aj_math.c
+- *  Space-frequency SMI power inversion (SFAP-PI v6.0): the weight
+- *  computation. See gnss_aj_math.h.
++ *  Space-frequency SMI power inversion (SFAP-PI v6.3): the weight
++ *  computation, the v6.3 pulse blanking of each capture and the bin
++ *  excision decision. See gnss_aj_math.h.
+  *****************************************************************************/
+ 
+ /* The Vitis XSCT flow builds the application in its Debug configuration
+@@ -151,6 +152,71 @@ static void unpack(const uint32_t *buf, int nsamp)
+ 	pk2_last = pk;
+ }
+ 
++/* ---- v6.3 pulse blanking ----------------------------------------------------- */
++static int mag12(uint32_t half)                 /* |sample| of a 12-bit word half */
++{
++	int v = sx12(half);
++	return v < 0 ? -v : v;
++}
++
++int aj_blank_thr(const uint32_t *buf, int nsamp)
++{
++	/* median of |I|,|Q| over both channels from a histogram (no sort): 4
++	 * values per sample instant, 0..2048 */
++	static uint32_t hist[2049];
++	uint32_t half, acc = 0;
++	int t, m = 0, thr;
++	double sig;
++	if(!buf || nsamp <= 0) return 0;
++	for(t = 0; t <= 2048; t++) hist[t] = 0;
++	for(t = 0; t < nsamp; t++) {
++		uint32_t w1 = buf[2 * t], w2 = buf[2 * t + 1];
++		hist[mag12(w1)]++; hist[mag12(w1 >> 16)]++;
++		hist[mag12(w2)]++; hist[mag12(w2 >> 16)]++;
++	}
++	half = (uint32_t)(2 * nsamp);                /* half of the 4 nsamp values */
++	for(m = 0; m <= 2048; m++) {
++		acc += hist[m];
++		if(acc >= half) break;
++	}
++	/* Gaussian per component: median |x| = 0.6745 sigma; +0.5: the
++	 * histogram bin's centre */
++	sig = ((double)m + 0.5) / 0.6745;
++	thr = (int)(AJ_BLK_K * sig + 0.999);
++	if(thr < AJ_BLK_MIN) thr = AJ_BLK_MIN;
++	if(thr > 2047) thr = 2047;
++	return thr;
++}
++
++int aj_blank_buf(uint32_t *buf, int nsamp, int thr, int apply, int *hits)
++{
++	/* exactly the FPGA's rule (sfap_pi.cpp): a hit at sample i restarts a
++	 * counter of 2G+1; each step blanks sample i-G while it runs */
++	int i, hold = 0, nb = 0, nh = 0;
++	if(hits) *hits = 0;
++	if(!buf || thr <= 0) return 0;
++	for(i = 0; i < nsamp + AJ_BLK_G; i++) {
++		int j = i - AJ_BLK_G;
++		if(i < nsamp) {
++			uint32_t w1 = buf[2 * i], w2 = buf[2 * i + 1];
++			if(mag12(w1) >= thr || mag12(w1 >> 16) >= thr ||
++			   mag12(w2) >= thr || mag12(w2 >> 16) >= thr) {
++				hold = 2 * AJ_BLK_G + 1;
++				nh++;
++			}
++		}
++		if(hold > 0) {
++			if(j >= 0) {
++				nb++;
++				if(apply) { buf[2 * j] = 0; buf[2 * j + 1] = 0; }
++			}
++			hold--;
++		}
++	}
++	if(hits) *hits = nh;
++	return nb;
++}
++
+ /* Each product of two 12-bit samples is below 2^22, so 128 of them (two per
+  * term) fit a 32-bit accumulator: summing in chunks of AJ_CHUNK in 32 bits
+  * and only then in 64 is exact and about twice as fast on the Cortex-A9. */
+@@ -344,6 +410,7 @@ static int    avg_valid;
+ 
+ /* The weights a WOLA pass applies: per bin k up to 3 taps on v_1..v_3. */
+ static int    wola_n, wola_idx[AJ_MAXDIM];
++static unsigned char wola_mask[AJ_N];          /* v6.3: bins the FPGA excises */
+ static double wola_wr[AJ_N][AJ_MAXDIM], wola_wi[AJ_N][AJ_MAXDIM];
+ static double OLR[AJ_NSAMP], OLI[AJ_NSAMP];
+ 
+@@ -476,6 +543,7 @@ static void frame_out(int f, const double *b1r, const double *b1i,
+ 	for(k = 0; k < AJ_N; k++) {
+ 		int m = (AJ_N - k) & (AJ_N - 1);
+ 		double ar = b1r[k], ai = b1i[k];
++		if(wola_mask[k]) { yr[k] = 0.0; yi[k] = 0.0; continue; }   /* v6.3 */
+ 		for(i = 0; i < wola_n; i++) {
+ 			double vr, vi, wr = wola_wr[k][i], wi = wola_wi[k][i];
+ 			switch(wola_idx[i]) {
+@@ -682,6 +750,16 @@ static double hjn[AJ_N];                 /* J/N of the bin when stored [dB] */
+ static int    hold_init;
+ static int    hold_n = AJ_HOLD_SOLVES;   /* run-time setting, 0 = off */
+ 
++/* v6.3 excision: last solve's exceedance and the bins excised now */
++static unsigned char exc_prev[AJ_N], exc_on[AJ_N];
++static double        exc_x[AJ_N];
++
++static void exc_clear(void)
++{
++	int k;
++	for(k = 0; k < AJ_N; k++) { exc_prev[k] = 0; exc_on[k] = 0; wola_mask[k] = 0; }
++}
++
+ void aj_set_hold(int solves) { hold_n = (solves < 0) ? 0 : solves; }
+ int  aj_get_hold(void)       { return hold_n; }
+ 
+@@ -757,6 +835,15 @@ void aj_reset(void)
+ {
+ 	aj_reset_stats();
+ 	hold_clear();
++	exc_clear();
++}
++
++static double db2lin_(double db)               /* 10^(db/10), |db| < ~30, no libm */
++{
++	double x = db * 0.2302585092994046, t = 1.0, s = 1.0;
++	int i;
++	for(i = 1; i < 30; i++) { t *= x / (double)i; s += t; }
++	return s;
+ }
+ 
+ static int16_t q312(double v)
+@@ -842,9 +929,11 @@ int aj_compute(const uint32_t *buf, int nsamp, aj_result_t *r)
+ 	 * what the synthesis window removes. */
+ 	if(wola_n > 0) {
+ 		pev = ol_power();
+-		for(k = 0; k < AJ_N; k++)
++		for(k = 0; k < AJ_N; k++) {
++			if(wola_mask[k]) { pev_wn2 -= 1.0; continue; }   /* v6.3: no noise out */
+ 			for(i = 0; i < wola_n; i++)
+ 				pev_wn2 += (wola_wr[k][i] * wola_wr[k][i] + wola_wi[k][i] * wola_wi[k][i]) * prev_nr[i];
++		}
+ 		pev_wn2 /= (double)AJ_N;
+ 	}
+ 
+@@ -961,6 +1050,12 @@ int aj_compute(const uint32_t *buf, int nsamp, aj_result_t *r)
+ 					hage[k]++;
+ 				}
+ 			}
++			/* v6.3: what this bin will still put out with these weights,
++			 * against its expected noise output */
++			{
++				double po = out_power(AR[k], AI[k], n, idx, wr, wi);
++				exc_x[k] = po / (bin_nb(r, k, nbin) * (1.0 + wn2));
++			}
+ 			s2_bin[k] = s2;
+ 			s2sum += s2;
+ 			wn2sum += wn2;
+@@ -979,6 +1074,43 @@ int aj_compute(const uint32_t *buf, int nsamp, aj_result_t *r)
+ 	}
+ 	s2_valid = 1;
+ 
++	/* v6.3 bin excision: two jammers from two directions in one bin leave
++	 * the bin's output far above its noise whatever the weight; remove it.
++	 * A bin goes in after two solves in a row over AJ_EXC_DB (a jammer that
++	 * has just appeared is not yet nulled anywhere), stays while within
++	 * AJ_EXC_HYST_DB of it, at most AJ_EXC_MAX bins, the worst first. */
++	{
++		const double lim_on = db2lin_(AJ_EXC_DB), lim_keep = db2lin_(AJ_EXC_DB - AJ_EXC_HYST_DB);
++		int nsel = 0, j;
++		r->exc_bins = 0; r->exc_max_db = -99.0; r->exc_kmax = 0;
++		for(j = 0; j < AJ_NMW; j++) r->exc_mask[j] = 0;
++		for(k = 0; k < AJ_N; k++) {
++			int want = 0;
++			if(r->mode != AJ_MODE_NB && r->excise) {
++				double xdb = aj_db10(exc_x[k]);
++				if(xdb > r->exc_max_db) { r->exc_max_db = xdb; r->exc_kmax = k; }
++				want = exc_on[k] ? (exc_x[k] > lim_keep) : (exc_x[k] > lim_on && exc_prev[k]);
++				exc_prev[k] = (exc_x[k] > lim_on);
++			} else {
++				exc_prev[k] = 0;
++			}
++			exc_on[k] = (unsigned char)want;
++			nsel += want;
++		}
++		/* over the cap: keep the worst AJ_EXC_MAX */
++		while(nsel > AJ_EXC_MAX) {
++			int kmin = -1;
++			for(k = 0; k < AJ_N; k++)
++				if(exc_on[k] && (kmin < 0 || exc_x[k] < exc_x[kmin])) kmin = k;
++			exc_on[kmin] = 0;
++			nsel--;
++		}
++		for(k = 0; k < AJ_N; k++) {
++			wola_mask[k] = exc_on[k];             /* what the FPGA will run */
++			if(exc_on[k]) { r->exc_mask[k >> 5] |= 1U << (k & 31); r->exc_bins++; }
++		}
++	}
++
+ 	/* J/N per bin (vs. the per-bin floor when learned, else white) */
+ 	for(k = 0; k < AJ_N; k++) {
+ 		double p = AR[k][0][0], nb = bin_nb(r, k, nbin);
+diff --git a/Source/Firmware/app_sfap_lvds/gnss_aj_math.h b/Source/Firmware/app_sfap_lvds/gnss_aj_math.h
+index b6aff43..3e1c9bf 100644
+--- a/Source/Firmware/app_sfap_lvds/gnss_aj_math.h
++++ b/Source/Firmware/app_sfap_lvds/gnss_aj_math.h
+@@ -1,7 +1,7 @@
+ /******************************************************************************
+  *  gnss_aj_math.h
+- *  Space-frequency SMI power inversion: the weight computation (SFAP-PI v6.1,
+- *  256 bins; the FPGA core is unchanged from v6.0).
++ *  Space-frequency SMI power inversion: the weight computation (SFAP-PI v6.3,
++ *  256 bins; FPGA core 5.0 = the v6.0 filter + pulse blanker + bin excision).
+  *
+  *  Pure C, no hardware access, no libm. The same file is compiled into the
+  *  firmware (gnss_aj.c calls it once per captured block) and into the HLS
+@@ -40,10 +40,25 @@
+  *      under the total noise is seen. Run on every capture while there is no
+  *      jammer; the full solve only runs once one is detected.
+  *
++ *  v6.3 PULSE BLANKING (aj_blank_thr, aj_blank_buf): the threshold is
++ *      AJ_BLK_K x a robust noise-plus-jammer sigma (median of |I|,|Q| of both
++ *      channels / 0.6745) of each capture; the capture is blanked in software
++ *      exactly as the FPGA blanks the live samples, before detection and the
++ *      solve, so a pulsed jammer never takes the per-bin null.
++ *  v6.3 BIN EXCISION (aj_compute, r->excise = 1): after the solve, a bin whose
++ *      output with its new weights stays more than AJ_EXC_DB above the bin's
++ *      expected output noise -- two jammers from two directions in one bin,
++ *      more than two antennas can null -- is set in r->exc_mask (at most
++ *      AJ_EXC_MAX bins, the worst first; a bin must exceed on two solves in a
++ *      row, and stays while it is within AJ_EXC_HYST_DB of the limit). The
++ *      FPGA sets those bins' output to zero.
++ *
+  *  WEIGHT WORDS (gnss_passthrough):
+  *      i =   0..255  (0x1000 + 4i)         b_k,  k = i        (RX2, linear)
+  *      i = 256..511  (0x1400 + 4(i-256))   c1_k, k = i - 256  (image, RX1)
+  *      i = 512..767  (0x1800 + 4(i-512))   c2_k, k = i - 512  (image, RX2)
++ *      i = 768..775  (0x1C00 + 4(i-768))   excision mask, bins 32(i-768)..+31,
++ *                                          bit b = bin 32(i-768) + b (v6.3)
+  *      k is the bin in natural FFT order (k >= 128: negative frequencies).
+  *      [15:0] real, [31:16] imaginary, signed Q3.12 (1.0 = 4096).
+  *****************************************************************************/
+@@ -74,7 +89,28 @@ extern "C" {
+ #endif                      /*   (obstacle, reflector) is tracked ~3x closer.  */
+                             /* AJ_SHOP: solver frame spacing, AJ_HOP (50 %     */
+                             /*   overlap, as the FPGA) or AJ_N (no overlap).   */
+-#define AJ_LAT      766     /* FPGA input -> output latency [samples], 3N-2   */
++#define AJ_LAT      782     /* FPGA input -> output latency [samples],        */
++                            /*   3N-2 + AJ_BLK_G (v6.3; v6.0: 766)            */
++#define AJ_NMW        8     /* excision mask words (256 bits)                 */
++
++/* v6.3 pulse blanker (FPGA core 5.0 + the same rule on each capture) */
++#define AJ_BLK_G        16      /* guard each side [samples], = SFAP_BLK_G    */
++#define AJ_BLK_K        5.0     /* threshold = K x robust sigma per component */
++                                /*   (noise alone: ~2e-6 false hits/sample)   */
++#define AJ_BLK_MIN      12      /* lowest threshold [LSB]                     */
++#define AJ_BLK_MAX_FRAC 0.40    /* would blank more: it is not pulsed, off    */
++#define AJ_BLK_ON_HITS  8       /* samples over the threshold in one capture  */
++                                /*   that count as pulses (noise alone: an    */
++                                /*   isolated hit in ~1 % of captures)        */
++
++/* v6.3 bin excision */
++#ifndef AJ_EXC_DB
++#define AJ_EXC_DB       6.0     /* output over expected noise to excise [dB]  */
++#endif
++#define AJ_EXC_HYST_DB  3.0     /* an excised bin stays down to AJ_EXC_DB - 3 */
++#ifndef AJ_EXC_MAX
++#define AJ_EXC_MAX      32      /* most bins excised (1/8 of the band)        */
++#endif
+ 
+ /* Space-time names kept for code that still refers to them. */
+ #define AJ_NT        16     /* lag sums used by detection                     */
+@@ -153,6 +189,7 @@ typedef struct {
+                             /*   gain the bin floor is normalised to (the     */
+                             /*   engine passes 10^(gain_dB/10)); <= 0: the    */
+                             /*   per-bin floor is not used                    */
++    int     excise;         /* v6.3: 1 = decide the bin excision mask         */
+ 
+     /* ---- results ------------------------------------------------------ */
+     int16_t wre[AJ_NW], wim[AJ_NW];   /* weights to write, Q3.12             */
+@@ -183,6 +220,10 @@ typedef struct {
+     int     bin_jn_kmax;    /* its bin                                        */
+     int     held_bins;      /* v6.1: bins running held weights                */
+     int     pk2;            /* v6.2: largest |I| or |Q| of RX2 in the capture */
++    uint32_t exc_mask[AJ_NMW]; /* v6.3: bins to excise (write to 0x1C00..)    */
++    int     exc_bins;       /* v6.3: bins set in exc_mask                     */
++    double  exc_max_db;     /* v6.3: largest bin output over its noise [dB]   */
++    int     exc_kmax;       /* v6.3: that bin                                 */
+     int     ok;             /* 1 = weights valid                              */
+ } aj_result_t;
+ 
+@@ -234,6 +275,18 @@ int  aj_bins_known(void);            /* 1 once the floor has been learned */
+ double aj_avg_policy(int n_ep, double res_db, double res_prev_db);
+ int    aj_g2_follow(const aj_result_t *r, double g2_now, double g2_floor, double *g2_out);
+ 
++/* v6.3 pulse blanking.
++ * aj_blank_thr: the threshold for this capture [LSB, |I| or |Q| of either
++ *   channel], AJ_BLK_K x the median of |I|,|Q| of both channels / 0.6745,
++ *   clamped to AJ_BLK_MIN..2047.
++ * aj_blank_buf: blanks the capture as the FPGA blanks the stream (a sample
++ *   of either channel at or above thr zeroes both channels from AJ_BLK_G
++ *   before to AJ_BLK_G after it). apply = 0 only counts. Returns the number
++ *   of blanked sample instants; *hits (may be NULL) = the sample instants
++ *   at or above thr. thr <= 0: nothing. */
++int aj_blank_thr(const uint32_t *buf, int nsamp);
++int aj_blank_buf(uint32_t *buf, int nsamp, int thr, int apply, int *hits);
++
+ /* Helpers (no libm on the board). */
+ double aj_sqrt(double x);
+ double aj_db10(double x);              /* 10*log10(x), -200 for x <= 0   */
+diff --git a/Source/Firmware/app_sfap_lvds/gnss_info.c b/Source/Firmware/app_sfap_lvds/gnss_info.c
+index a353096..685ca89 100644
+--- a/Source/Firmware/app_sfap_lvds/gnss_info.c
++++ b/Source/Firmware/app_sfap_lvds/gnss_info.c
+@@ -177,7 +177,7 @@ static void info_hardware(struct ad9361_rf_phy *phy)
+                   (long)GNSS_PT_BASEADDR);
+     console_print("   ID register     : 0x%08x  (expect 0x47435031, ASCII 'GCP1')\n",
+                   (long)gnss_pt_read(GNSS_PT_REG_ID));
+-    console_print("   VERSION         : 0x%08x  (expect 0x00060000 = v6.0)\n",
++    console_print("   VERSION         : 0x%08x  (expect 0x00060003 = v6.3)\n",
+                   (long)gnss_pt_read(GNSS_PT_REG_VERSION));
+     console_print("     v1.0 is the original identity passthrough and transmits\n");
+     console_print("     24 dB LOW. v1.1 adds the RX->TX sample alignment stage.\n");
+@@ -185,9 +185,11 @@ static void info_hardware(struct ad9361_rf_phy *phy)
+     console_print("     v4.0 is the SMI-PI space-time build: a 16+16-tap filter\n");
+     console_print("     (smi_pi_0) on TX1, 31 weights computed by the ARM. v4.1\n");
+     console_print("     adds bypass, RX2 normalisation, 2 image taps, make-up gain.\n");
+-    console_print("     v5.0 was the 64-bin SFAP-PI build. v6.0 (this one) is the\n");
+-    console_print("     256-bin space-frequency filter (sfap_pi_0 v4.0), one weight\n");
+-    console_print("     + 2 image taps per bin, weights in a double-buffered RAM.\n");
++    console_print("     v5.0 was the 64-bin SFAP-PI build. v6.0 is the 256-bin\n");
++    console_print("     space-frequency filter (sfap_pi_0 v4.0), one weight + 2 image\n");
++    console_print("     taps per bin, weights in a double-buffered RAM. v6.3 (this\n");
++    console_print("     one, sfap_pi_0 v5.0) adds a pulse blanker and a per-bin\n");
++    console_print("     excision mask.\n");
+     rule();
+ 
+     console_print(" RF FRONT END                                            [cfg]\n");
+@@ -391,7 +393,7 @@ static void info_pl(void)
+     console_print("   axi_ad9361 -> AD9361 -> [TX1 SMA]\n");
+     rule();
+ 
+-    console_print("\n SFAP-PI SPACE-FREQUENCY POWER INVERSION (v6.0)         [cfg]\n");
++    console_print("\n SFAP-PI SPACE-FREQUENCY POWER INVERSION (v6.3)         [cfg]\n");
+     rule();
+     console_print("   sfap_pi_0 is a Vitis HLS filter on sys_cpu_clk (100 MHz), fed\n");
+     console_print("   from gnss_passthrough through an async FIFO and returning\n");
+@@ -402,12 +404,17 @@ static void info_pl(void)
+     console_print("     Y_k = X1_k - b_k X2n_k - c1_k conj(X1_-k) - c2_k conj(X2n_-k)\n");
+     console_print("   then back to time (inverse FFT, overlap-add). RX1 is fixed at\n");
+     console_print("   1, so the output can never be turned down as a whole. With no\n");
+-    console_print("   jammer the filter is BYPASSED (y = x1[n-766] exactly) and the\n");
++    console_print("   jammer the filter is BYPASSED (y = x1[n-782] exactly) and the\n");
+     console_print("   ARM only runs a cheap detector. When a jammer appears the ARM\n");
+     console_print("   computes the 3 x 256 weights from 4096-sample DMA captures of\n");
+     console_print("   both channels (gnss_aj.c), bin by bin, and commits weights,\n");
+     console_print("   bypass, make-up gain and g2 all at once (0x188-0x1BFC, AJ_COMMIT\n");
+-    console_print("   0x180). Latency 766 samples (12.5 us) in both modes.\n");
++    console_print("   0x180). Latency 782 samples (12.7 us) in both modes.\n");
++    console_print("   v6.3: a PULSE BLANKER in front of the bins zeroes both channels\n");
++    console_print("   around any sample above AJ_CFG[27:16] (5 x the capture's robust\n");
++    console_print("   sigma, sfap-pi_blank=), so pulses never take the null; and an\n");
++    console_print("   EXCISION MASK (0x1C00) zeroes the bins that still hold two\n");
++    console_print("   jammers from two directions after the solve (sfap-pi_excise=).\n");
+     console_print("   CONTROL[5] puts it on TX1. TX2 always carries plain RX2.\n");
+     rule();
+ 
+@@ -518,7 +525,7 @@ static void info_about(void)
+     console_print("     Galileo, QZSS, SBAS, BeiDou B1I/B1C and GLONASS G1. The\n");
+     console_print("     receiver must have each system switched on.\n");
+     console_print("   * Position ACCURACY was never checked against a reference.\n");
+-    console_print("   * SFAP-PI v6.0 is verified in C simulation against wideband\n");
++    console_print("   * SFAP-PI v6.3 is verified in C simulation against wideband\n");
+     console_print("     (to 60 dB), CW, two CW and reflected jammers, I/Q imbalance\n");
+     console_print("     and a weak RX2, NOT yet on this board.\n");
+     console_print("     Treat it as under test until sfap-pi_aj? confirms it.\n");
+@@ -544,7 +551,7 @@ static void info_registers(void)
+     head("6  gnss_passthrough REGISTER MAP  (8 kB, base from xparameters)");
+ 
+     console_print("   0x00  ID              RO  0x47435031, ASCII 'GCP1'\n");
+-    console_print("   0x04  VERSION         RO  0x00060000 = v6.0\n");
++    console_print("   0x04  VERSION         RO  0x00060003 = v6.3\n");
+     console_print("   0x08  SCRATCH         RW  read/write test\n");
+     console_print("   0x0C  CONTROL         RW  [0] pass_en  [1] mute\n");
+     console_print("                             [2] swap_iq  [3] ch1_copy\n");
+diff --git a/Source/Firmware/app_sfap_lvds/gnss_passthrough.c b/Source/Firmware/app_sfap_lvds/gnss_passthrough.c
+index 6076264..44ddfb2 100644
+--- a/Source/Firmware/app_sfap_lvds/gnss_passthrough.c
++++ b/Source/Firmware/app_sfap_lvds/gnss_passthrough.c
+@@ -104,7 +104,7 @@ void gnss_pt_set_smi(int enable)
+     gnss_pt_write(GNSS_PT_REG_CONTROL, c);
+ }
+ 
+-void gnss_pt_write_aj(const int16_t *re, const int16_t *im,
++void gnss_pt_write_aj(const int16_t *re, const int16_t *im, const uint32_t *mask,
+                       uint32_t cfg, int32_t g2_q13)
+ {
+     uint32_t k;
+@@ -116,6 +116,9 @@ void gnss_pt_write_aj(const int16_t *re, const int16_t *im,
+             gnss_pt_write(GNSS_PT_REG_AJ_WB(k),
+                           ((uint32_t)(uint16_t)im[k] << 16) | (uint32_t)(uint16_t)re[k]);
+         }
++        /* v6.3: the excision mask belongs to the same bank: always all 8 */
++        for (k = 0; k < GNSS_PT_AJ_NMASK; k++)
++            gnss_pt_write(GNSS_PT_REG_AJ_MASK(k), mask ? mask[k] : 0U);
+     }
+     gnss_pt_write(GNSS_PT_REG_AJ_CFG, cfg);
+     gnss_pt_write(GNSS_PT_REG_AJ_NORM, (uint32_t)(uint16_t)(int16_t)g2_q13);
+diff --git a/Source/Firmware/app_sfap_lvds/gnss_passthrough.h b/Source/Firmware/app_sfap_lvds/gnss_passthrough.h
+index dbdf858..4c01504 100644
+--- a/Source/Firmware/app_sfap_lvds/gnss_passthrough.h
++++ b/Source/Firmware/app_sfap_lvds/gnss_passthrough.h
+@@ -76,7 +76,8 @@
+  * back a commit counter. */
+ #define GNSS_PT_REG_AJ_COMMIT       0x180U  /* W: commit, R: count            */
+ #define GNSS_PT_REG_AJ_INFO         0x184U  /* RO 0x08070C04                  */
+-#define GNSS_PT_REG_AJ_CFG          0x188U  /* RW [0] bypass, [10:8] shift    */
++#define GNSS_PT_REG_AJ_CFG          0x188U  /* RW [0] bypass, [10:8] shift,   */
++                                            /*    [27:16] blank thr (v6.3)   */
+ #define GNSS_PT_REG_AJ_NORM         0x18CU  /* RW g2, Q3.13 {im, re}          */
+ #define GNSS_PT_REG_AJ_CFG_ACTIVE   0x198U  /* RO AJ_CFG as committed         */
+ /* v6.0: 3 x 256 words, WRITE-ONLY (read 0), double-buffered in the FPGA:
+@@ -88,10 +89,16 @@
+ #define GNSS_PT_REG_AJ_WC2(k)       (0x1800U + ((k) * 4U)) /* W c2_k, k = 0..255 */
+ #define GNSS_PT_AJ_NBIN             256U
+ #define GNSS_PT_AJ_NWORD            768U    /* b, c1, c2 x 256 bins           */
++/* v6.3: bin excision mask, 8 words after the weights, same double buffer.
++ * Word j bit b = bin 32 j + b; 1 = that bin's filter output is zero. A
++ * commit that changes the weights writes all 768 + 8 words. */
++#define GNSS_PT_REG_AJ_MASK(j)      (0x1C00U + ((j) * 4U)) /* W j = 0..7         */
++#define GNSS_PT_AJ_NMASK            8U
+ /* AJ_INFO v6: {8'd log2 N, 8'd log2 hop, 8'd weight fraction bits, 8'd layout} */
+-#define GNSS_PT_AJ_INFO_EXPECTED    0x08070C04U
++#define GNSS_PT_AJ_INFO_EXPECTED    0x08070C05U  /* v6.3: layout 5 (blanker + mask) */
+ #define GNSS_PT_AJ_CFG_BYPASS       0x1U
+ #define GNSS_PT_AJ_CFG_SHIFT(s)     ((uint32_t)((s) & 7) << 8)
++#define GNSS_PT_AJ_CFG_BLANK(t)     ((uint32_t)((t) & 0xFFF) << 16)  /* v6.3, 0 = off */
+ 
+ /* ---- expected identity --------------------------------------------------- */
+ #define GNSS_PT_EXPECTED_ID         0x47435031U
+@@ -113,8 +120,10 @@
+  *       samples; AJ_W (0x100) and AJ_WC (0x190) are gone.
+  * 6.0 = SFAP-PI 256 bins (sfap_pi_0 v4.0): 3 x 256 weights at 0x1000-0x1BFC
+  *       in a double-buffered RAM (write-only), 8 KB register map, latency 766
+- *       samples, AJ_INFO 0x08070C04. */
+-#define GNSS_PT_EXPECTED_VERSION    0x00060000U
++ *       samples, AJ_INFO 0x08070C04.
++ * 6.3 = sfap_pi_0 v5.0: pulse blanker (AJ_CFG[27:16]) and per-bin excision
++ *       mask at 0x1C00-0x1C1C, latency 782 samples, AJ_INFO 0x08070C05. */
++#define GNSS_PT_EXPECTED_VERSION    0x00060003U
+ 
+ /* ---- CONTROL bits -------------------------------------------------------- */
+ #define GNSS_PT_CTRL_PASS_EN        (1U << 0)  /* 1 = RX->TX passthrough      */
+@@ -168,11 +177,13 @@ void     gnss_pt_clear_counters(void);
+  * (The name is kept from the SMI-PI builds: same CONTROL bit.) */
+ void     gnss_pt_set_smi(int enable);
+ /* Writes the 768 weight words (256 b_k, 256 c1_k, 256 c2_k, Q3.12, see
+- * gnss_aj_math.h), cfg (GNSS_PT_AJ_CFG_*) and the RX2 normalisation g2
+- * (Q3.13 real part; imaginary 0), and commits them in one go: the filter
+- * never runs a half-written set. re/im may be NULL to keep the weights that
+- * are in the shadow registers (bypass switching). */
+-void     gnss_pt_write_aj(const int16_t *re, const int16_t *im,
++ * gnss_aj_math.h), the 8 excision-mask words (v6.3; mask NULL = no bin
++ * excised), cfg (GNSS_PT_AJ_CFG_*) and the RX2 normalisation g2 (Q3.13 real
++ * part; imaginary 0), and commits them in one go: the filter never runs a
++ * half-written set. re/im NULL: nothing goes into the weight RAM, so the
++ * commit keeps the running weights and mask and only changes cfg / g2
++ * (bypass switching, a blanker threshold update). */
++void     gnss_pt_write_aj(const int16_t *re, const int16_t *im, const uint32_t *mask,
+                           uint32_t cfg, int32_t g2_q13);
+ 
+ /* Snapshot of everything worth observing at runtime (requirement 58). */
+diff --git a/Source/Firmware/app_sfap_lvds/gnss_smi_agc.c b/Source/Firmware/app_sfap_lvds/gnss_smi_agc.c
+index 09e826d..f60557b 100644
+--- a/Source/Firmware/app_sfap_lvds/gnss_smi_agc.c
++++ b/Source/Firmware/app_sfap_lvds/gnss_smi_agc.c
+@@ -4,6 +4,7 @@
+  *****************************************************************************/
+ 
+ #include "gnss_smi_agc.h"
++#include "gnss_aj.h"
+ #include "gnss_passthrough.h"
+ #include "ad9361_api.h"
+ #include "console.h"
+@@ -42,16 +43,24 @@ static int32_t abs16(uint32_t half)
+ 	return v < 0 ? -v : v;
+ }
+ 
+-/* Peak |I|,|Q| of one RX channel over RXG_NSAMP snapshot reads. */
++/* v6.3: level the pulse blanker removes, 0 = none (gnss_aj.c sets it) */
++static int blank_thr;
++void gnss_rxg_set_blank_thr(int thr) { blank_thr = thr > 0 ? thr : 0; }
++
++/* Peak |I|,|Q| of one RX channel over RXG_NSAMP snapshot reads. v6.3: with
++ * the blanker active, the reads at or above its threshold (pulses, blanked
++ * in the FPGA) are left out while they are few (<= 30 %). */
+ static int rx_peak(uint32_t reg)
+ {
+-	int peak = 0, i;
++	int peak = 0, keep = 0, over = 0, i;
+ 	for(i = 0; i < RXG_NSAMP; i++) {
+ 		uint32_t s = gnss_pt_read(reg);
+-		int32_t a = abs16(s), b = abs16(s >> 16);
+-		if(a > peak) peak = a;
+-		if(b > peak) peak = b;
++		int32_t a = abs16(s), b = abs16(s >> 16), m = a > b ? a : b;
++		if(m > peak) peak = m;
++		if(blank_thr > 0 && m >= blank_thr) over++;
++		else if(m > keep) keep = m;
+ 	}
++	if(blank_thr > 0 && over * 10 <= RXG_NSAMP * 3) return keep;
+ 	return peak;
+ }
+ 
+@@ -70,10 +79,12 @@ static double tx_power(void)
+ 
+ static int set_both(int32_t db)
+ {
++	int32_t old = rxg_gain;
+ 	rxg_changes++;
+ 	if(ad9361_set_rx_rf_gain(ad9361_phy, 0, db) != 0) return -1;
+ 	if(ad9361_set_rx_rf_gain(ad9361_phy, 1, db) != 0) return -1;
+ 	rxg_gain = db;
++	if(db != old) gnss_aj_gain_stepped((int)(db - old));   /* v6.3 blanker */
+ 	return 0;
+ }
+ 
+diff --git a/Source/Firmware/app_sfap_lvds/gnss_smi_agc.h b/Source/Firmware/app_sfap_lvds/gnss_smi_agc.h
+index d17b8f6..45c1745 100644
+--- a/Source/Firmware/app_sfap_lvds/gnss_smi_agc.h
++++ b/Source/Firmware/app_sfap_lvds/gnss_smi_agc.h
+@@ -13,6 +13,9 @@
+  * WHAT (mode GNSS_RXG_MATCHED, the default with sfap-pi=1)
+  *   - Both channels in manual gain, ALWAYS at the same value, so the SMI-PI
+  *     weight is not disturbed by gain changes.
++ *   - v6.3: samples the pulse blanker removes are not counted (see
++ *     gnss_rxg_set_blank_thr), and every gain step tells the anti-jam engine
++ *     (gnss_aj_gain_stepped) so the blanker threshold follows at once.
+  *   - Every 5 ms the firmware reads 256 RX samples of each channel from the
+  *     gnss_passthrough snapshot registers. Peak above GNSS_RXG_PEAK_HIGH
+  *     (close to ADC clipping): both gains down together, by up to 12 dB per
+@@ -61,6 +64,12 @@ uint32_t gnss_rxg_changes(void);       /* counts every gain step            */
+ void     gnss_rxg_set_digital_db(int db); /* make-up gain already applied in */
+                                        /* the filter (6 dB per shift step)  */
+ int      gnss_rxg_peak(void);          /* last ADC peak of both channels    */
++/* v6.3: while the FPGA blanks pulses (filter in, blanker on), snapshot
++ * samples at or above this level [LSB] are left out of the peak -- as long
++ * as they are at most 30 % of the reads, otherwise the signal itself is
++ * that strong and counts. The pulses may then clip: they are blanked anyway.
++ * 0 = every sample counts (v6.2). */
++void     gnss_rxg_set_blank_thr(int thr);
+ uint32_t gnss_rxg_att_base(void);      /* operator's TX1 attenuation [mdB]  */
+ int      gnss_rxg_comp_db(void);       /* TX level hold in effect [dB]      */
+ 
