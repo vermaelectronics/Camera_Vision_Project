@@ -59,6 +59,7 @@
 #include "axi_dmac.h"
 /* GNSS-CRPA MOD-10 */
 #include "gnss_info.h"
+#include "no_os_delay.h"
 
 /******************************************************************************/
 /************************ Constants Definitions *******************************/
@@ -133,6 +134,11 @@ command cmd_list[] = {
 	{"gnss_tx?", "Gets the GNSS L1 retransmit state.", "", get_gnss_tx},
 	{"gnss_tx=", "1 = retransmit RX1 on TX1, 0 = silence TX1.", "gnss_tx=0", set_gnss_tx},
 	{"gnss_status?", "Prints AD9361 and gnss_passthrough runtime state.", "", get_gnss_status},
+	/* RX->TX elastic buffer check: real RX / TX sample rates over 1 s, under/overflows per second */
+	{"gnss_fifo?", "Measures RX and TX sample rates of the passthrough over 1 s, buffer level, under/overflows per second, verdict.", "", get_gnss_fifo},
+	{"gnss_fifo_clear=", "1 = clear the passthrough counters and sticky flags.", "gnss_fifo_clear=1", set_gnss_fifo_clear},
+	{"gnss_dac_rate?", "Gets the AD9361 DAC rate control (axi_ad9361 TX REG_RATECNTRL 0x4C): dac_valid every N+1 clocks.", "", get_gnss_dac_rate},
+	{"gnss_dac_rate=", "Sets the DAC rate control N (0..255; boot value 3). Only to match TX to RX, see gnss_fifo?.", "gnss_dac_rate=3", set_gnss_dac_rate},
 	/* CRPA space-time anti-jam (crpa_core_0 + gnss_aj.c; the algorithm this
 	 * BOOT.BIN was built for: crpa1 or crpa27..31). */
 	{"crpa?", "Anti-jam state: algorithm, on/off, jammer, J/N, suppression.", "", get_gnss_smi},
@@ -306,6 +312,103 @@ void get_gnss_tx(double* param, char param_no)
 /**************************************************************************//***
  * @brief GNSS-CRPA MOD-6. Dump AD9361 and gnss_passthrough runtime state.
 *******************************************************************************/
+/**************************************************************************//***
+ * @brief RX->TX elastic buffer check. The passthrough writes one sample per
+ * adc_valid and reads one per dac_valid into a 32-deep buffer per channel; it
+ * only stays half full (16) when both run at the same rate. Snapshot the
+ * counters, wait 1 s, snapshot again, print the rates and a verdict.
+*******************************************************************************/
+extern int32_t axi_dac_read(struct axi_dac *dac, uint32_t reg_addr, uint32_t *reg_data);
+extern int32_t axi_dac_write(struct axi_dac *dac, uint32_t reg_addr, uint32_t reg_data);
+#define GNSS_DAC_REG_RATECNTRL 0x4CU
+
+static uint32_t dac_rate_read(void)
+{
+	uint32_t v = 0;
+	if(ad9361_phy && ad9361_phy->tx_dac) axi_dac_read(ad9361_phy->tx_dac, GNSS_DAC_REG_RATECNTRL, &v);
+	return v & 0xFFU;
+}
+
+void get_gnss_fifo(double* param, char param_no)
+{
+	gnss_pt_state_t a, b;
+	uint32_t ua, ub, oa, ob, fs = 0, rate = dac_rate_read();
+	uint32_t drx0, dtx0, drx1, dtx1, dunf, dovf;
+	(void)param; (void)param_no;
+
+	if(ad9361_phy) ad9361_get_rx_sampling_freq(ad9361_phy, &fs);
+	gnss_pt_get_state(&a);
+	ua = gnss_pt_read(GNSS_PT_REG_UNDERFLOW_COUNT);
+	oa = gnss_pt_read(GNSS_PT_REG_OVERFLOW_COUNT);
+	no_os_mdelay(1000);
+	gnss_pt_get_state(&b);
+	ub = gnss_pt_read(GNSS_PT_REG_UNDERFLOW_COUNT);
+	ob = gnss_pt_read(GNSS_PT_REG_OVERFLOW_COUNT);
+	drx0 = b.rx_count_ch0 - a.rx_count_ch0;  dtx0 = b.tx_count_ch0 - a.tx_count_ch0;
+	drx1 = b.rx_count_ch1 - a.rx_count_ch1;  dtx1 = b.tx_count_ch1 - a.tx_count_ch1;
+	dunf = ub - ua;  dovf = ob - oa;
+
+	console_print("GNSS_FIFO over 1 s (AD9361 sample rate %d Hz, DAC rate control %d):\n", (long)fs, (long)rate);
+	console_print("  ch0  RX %d /s  TX %d /s\n", (long)drx0, (long)dtx0);
+	console_print("  ch1  RX %d /s  TX %d /s\n", (long)drx1, (long)dtx1);
+	console_print("  buffer level ch0 %d ch1 %d (of 32; healthy = about 16)\n",
+		      (long)b.fifo_level_ch0, (long)b.fifo_level_ch1);
+	console_print("  underflows %d /s, overflows %d /s\n", (long)dunf, (long)dovf);
+	if(drx0 == 0) {
+		console_print("  VERDICT: no RX samples. The AD9361 RX is not streaming (ENSM, RX enable).\n");
+		return;
+	}
+	if(dtx0 == 0) {
+		console_print("  VERDICT: no TX requests. TX is not running (ENSM must be FDD 0x0a, TX enabled).\n");
+		return;
+	}
+	{
+		/* TX/RX ratio x 100 */
+		uint32_t r100 = (uint32_t)(((uint64_t)dtx0 * 100U + drx0 / 2U) / drx0);
+		console_print("  TX / RX = %d.%02d\n", (long)(r100 / 100U), (long)(r100 % 100U));
+		if(r100 >= 99U && r100 <= 101U) {
+			if(dunf == 0 && dovf == 0)
+				console_print("  VERDICT: OK. RX and TX run at the same rate and the buffers do not under/overflow.\n");
+			else
+				console_print("  VERDICT: rates match but the buffer still under/overflows (bursty requests).\n"
+					      "           Send this output.\n");
+		} else {
+			/* the DAC requests one sample every (rate+1) clocks: scale it by the ratio */
+			uint32_t want = (uint32_t)((((uint64_t)(rate + 1U) * r100) + 50U) / 100U);
+			if(want < 1U) want = 1U;
+			console_print("  VERDICT: TX requests samples %s than RX delivers: every sample is repeated or lost,\n"
+				      "           which destroys the GNSS signal. Try:  gnss_dac_rate=%d  then  gnss_fifo?\n",
+				      (char*)(r100 > 100U ? "FASTER" : "SLOWER"), (long)(want - 1U));
+		}
+	}
+}
+
+void set_gnss_fifo_clear(double* param, char param_no)
+{
+	(void)param; (void)param_no;
+	gnss_pt_clear_counters();
+	console_print("GNSS_FIFO: counters and sticky flags cleared\n");
+}
+
+void get_gnss_dac_rate(double* param, char param_no)
+{
+	(void)param; (void)param_no;
+	console_print("GNSS_DAC_RATE: %d (dac_valid every %d clocks)\n", (long)dac_rate_read(), (long)(dac_rate_read() + 1U));
+}
+
+void set_gnss_dac_rate(double* param, char param_no)
+{
+	if(param_no < 1 || param[0] < 0.0 || param[0] > 255.0) {
+		console_print("gnss_dac_rate= needs 0..255 (boot value 3)\n");
+		return;
+	}
+	if(!ad9361_phy || !ad9361_phy->tx_dac) { console_print("gnss_dac_rate: no TX DAC\n"); return; }
+	axi_dac_write(ad9361_phy->tx_dac, GNSS_DAC_REG_RATECNTRL, (uint32_t)param[0] & 0xFFU);
+	gnss_pt_clear_counters();
+	console_print("GNSS_DAC_RATE: set to %d; measuring...\n", (long)dac_rate_read());
+	get_gnss_fifo(param, param_no);
+}
+
 void get_gnss_status(double* param, char param_no)
 {
 	if(!ad9361_phy) {
