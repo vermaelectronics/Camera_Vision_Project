@@ -166,7 +166,7 @@ Name each new design-A (pass-through + CRPA) package with the next number:
   jammer (+28.6 dB), 0 with the floor (bare-metal v6.3 has the same issue). gnss_passthrough: mask RAM 0x1C00-0x1C1C
   (2 banks x 8, LUT RAM, 2 read ports aj_wm_*), mask write sets dirty, AJ_INFO 0x08070C10 (layout 16); block design
   wm ports. build.sh LICENSE.html placeholder (crpa25). csim 23/23 pass with the firmware's math; Icarus 0 errors.
-  Design A ~210 of 220 DSP48 (estimate). Commit <pending26>.
+  Design A ~210 of 220 DSP48 (estimate). Commit dafc165.
 - Next package: `crpa27`.
 
 Files per package: `crpaN-full-src.zip.part1`, `crpaN-full-src.zip.part2`,
