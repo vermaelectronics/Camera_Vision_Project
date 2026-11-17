@@ -1,0 +1,150 @@
+weights   : error 0.424 LSB rms (max 0.69) on a 841 LSB rms output, SER 65.9 dB, latency 766 (expect 766)
+zero w    : max |y - x1[n-766]| = 0 LSB
+bypass    : exact for s = 0..7 (20 saturated samples checked)
+overload  : 5361 / 5361 samples at +/- full scale
+SFAP_PI_CSIM: PASS (scenario 1)
+
+scenario 2: JNR 30 dB wideband, RX gain cut 5.0 dB
+  SFAP 256 bins b+c1+c2: suppression 41.0 dB, residual +0.21 dB, satellite SNR loss -1.35 dB, output -27.43 dB re RX1
+  firmware figures  : J/N 30.0 dB, suppression 60.0 dB, residual -1.1 dB, mean |w|^2 0.75, loading 238.4 LSB^2 (2 passes), 231 jammed bins
+  detection         : coherence 0.981 at lag 0 -> J/N 17.2 dB, RX1 250744 RX2 302322 LSB^2
+  jammer estimate   : bandwidth 0.82 fs, centre -0.006 fs
+  one weight (v3)   : suppression 14.5 dB, satellite SNR loss 12.35 dB
+SFAP_PI_CSIM: PASS (scenario 2)
+
+scenario 3: JNR -99 dB wideband, RX gain cut -0.0 dB
+  bypass           : 0 of 19234 samples differ from x1[n-766]
+  SFAP 256 bins b+c1+c2: suppression 0.0 dB, residual +0.02 dB, satellite SNR loss -0.00 dB, output -0.00 dB re RX1
+  firmware figures  : J/N -15.0 dB, suppression 60.0 dB, residual -1.2 dB, mean |w|^2 0.00, loading 695.2 LSB^2 (2 passes), 0 jammed bins
+  detection         : coherence 0.031 at lag -13 -> J/N -15.0 dB, RX1 826 RX2 808 LSB^2
+SFAP_PI_CSIM: PASS (scenario 3)
+
+scenario 4: JNR 40 dB CW, RX gain cut 5.0 dB
+  SFAP 256 bins b+c1+c2: suppression 63.1 dB, residual +0.02 dB, satellite SNR loss 0.23 dB, output -39.73 dB re RX1
+  firmware figures  : J/N 40.0 dB, suppression 60.0 dB, residual -1.2 dB, mean |w|^2 0.06, loading 229.8 LSB^2 (2 passes), 21 jammed bins
+  detection         : coherence 0.999 at lag 14 -> J/N 30.0 dB, RX1 2530867 RX2 3111419 LSB^2
+  jammer estimate   : bandwidth 0.0002 fs, centre +0.0600 fs (true 0.06)
+SFAP_PI_CSIM: PASS (scenario 4)
+
+scenario 5: JNR 30 dB wideband + reflection, RX gain cut 5.0 dB
+  SFAP 256 bins b+c1+c2: suppression 40.1 dB, residual +0.22 dB, satellite SNR loss -0.65 dB, output -26.86 dB re RX1
+  firmware figures  : J/N 30.0 dB, suppression 60.0 dB, residual -1.0 dB, mean |w|^2 0.98, loading 263.9 LSB^2 (2 passes), 229 jammed bins
+  detection         : coherence 0.923 at lag 0 -> J/N 10.8 dB, RX1 252854 RX2 268717 LSB^2
+  jammer estimate   : bandwidth 0.83 fs, centre -0.046 fs
+SFAP_PI_CSIM: PASS (scenario 5)
+
+scenario 6: JNR 50 dB wideband, RX gain cut 25.0 dB, I/Q image rejection 49.7 / 48.4 dB
+  SFAP 256 bins b+c1+c2: suppression 56.8 dB, residual +0.23 dB, satellite SNR loss -0.95 dB, output -47.06 dB re RX1
+  output make-up    : 4 (x16, +24 dB)
+  firmware figures  : J/N 49.7 dB, suppression 60.0 dB, residual -0.9 dB, mean |w|^2 0.78, loading 3.0 LSB^2 (2 passes), 236 jammed bins
+  detection         : coherence 0.982 at lag 0 -> J/N 17.4 dB, RX1 251411 RX2 301560 LSB^2
+  jammer estimate   : bandwidth 0.82 fs, centre -0.006 fs
+  without image taps: suppression 44.2 dB, residual +4.58 dB, satellite SNR loss 3.55 dB
+  without make-up   : satellite SNR loss -0.81 dB
+SFAP_PI_CSIM: PASS (scenario 6)
+
+scenario 7: JNR 40 dB wideband, RX gain cut 14.0 dB, RX2 -25 dB (g2 4.000 = +12.0 dB)
+  SFAP 256 bins b+c1+c2: suppression 38.6 dB, residual +3.65 dB, satellite SNR loss 1.13 dB, output -35.02 dB re RX1
+  output make-up    : 2 (x4, +12 dB)
+  firmware figures  : J/N 39.9 dB, suppression 43.4 dB, residual +1.0 dB, mean |w|^2 0.81, loading 46.5 LSB^2 (2 passes), 233 jammed bins
+  detection         : coherence 0.982 at lag 0 -> J/N 17.4 dB, RX1 315291 RX2 1205 LSB^2
+  jammer estimate   : bandwidth 0.82 fs, centre -0.006 fs
+  largest |w|       : 4.14 with normalisation
+  no normalisation  : suppression 9.3 dB, residual +30.03 dB, largest |w| 11.31, 234 weight components at the Q3.12 limit
+SFAP_PI_CSIM: PASS (scenario 7)
+
+scenario 8: JNR 60 dB wideband, RX gain cut 35.0 dB, I/Q image rejection 49.7 / 48.4 dB
+  SFAP 256 bins b+c1+c2: suppression 58.4 dB, residual +1.51 dB, satellite SNR loss 1.14 dB, output -54.92 dB re RX1
+  output make-up    : 4 (x16, +24 dB)
+  firmware figures  : J/N 57.7 dB, suppression 60.0 dB, residual +0.1 dB, mean |w|^2 0.80, loading 0.8 LSB^2 (2 passes), 248 jammed bins
+  detection         : coherence 0.982 at lag 0 -> J/N 17.4 dB, RX1 251406 RX2 301585 LSB^2
+  jammer estimate   : bandwidth 0.82 fs, centre -0.006 fs
+SFAP_PI_CSIM: PASS (scenario 8)
+
+scenario 9: JNR 40 dB TWO CW, RX gain cut 10.0 dB
+  SFAP 256 bins b+c1+c2: suppression 63.0 dB, residual +0.03 dB, satellite SNR loss 2.43 dB, output -42.31 dB re RX1
+  output make-up    : 1 (x2, +6 dB)
+  firmware figures  : J/N 43.0 dB, suppression 60.0 dB, residual -1.2 dB, mean |w|^2 0.17, loading 78.4 LSB^2 (2 passes), 49 jammed bins
+  detection         : coherence 0.989 at lag 9 -> J/N 19.7 dB, RX1 1600299 RX2 1550182 LSB^2
+  jammer estimate   : bandwidth 0.4804 fs, centre -0.0750 fs (true 0.06)
+  one weight (v3)   : suppression 0.3 dB, satellite SNR loss 43.46 dB
+SFAP_PI_CSIM: PASS (scenario 9)
+
+scenario 10: JNR 30 dB CW, RX gain cut -0.0 dB
+  SFAP 256 bins b+c1+c2: suppression 59.6 dB, residual +0.01 dB, satellite SNR loss 4.63 dB, output -29.95 dB re RX1
+  firmware figures  : J/N 30.0 dB, suppression 60.0 dB, residual -1.3 dB, mean |w|^2 0.01, loading 697.7 LSB^2 (2 passes), 4 jammed bins
+  detection         : coherence 0.999 at lag -12 -> J/N 30.0 dB, RX1 801421 RX2 963473 LSB^2
+  jammer estimate   : bandwidth 0.0002 fs, centre -0.1816 fs (true 0.06)
+  notch             : bin width 0.240 MHz at 61.44 MS/s; satellite loss = the
+                      part of its spectrum inside the CW notch
+SFAP_PI_CSIM: PASS (scenario 10)
+
+scenario 11: INTERMITTENT wideband jammer 40 dB: on for 3 captures, off for the next 15
+             (~0.4 s, less than the 0.5 s jammer-OFF delay), then back
+  v6.0 (avg 0.5, no hold)           : suppression   0.0 dB, satellite SNR loss 40.04 dB
+  drift-aware avg, hold off         : suppression   0.0 dB, satellite SNR loss 40.01 dB
+  v6.2 drift-aware avg + hold 100   : suppression  52.0 dB, satellite SNR loss -1.36 dB, 233 bins on held weights
+SFAP_PI_CSIM: PASS (scenario 11)
+
+scenario 12: HOPPING narrowband jammer 40 dB, 16 channels, 1 hop per capture;
+             evaluated on the channel it used 12 captures before the last solve
+  v6.0 (avg 0.5, no hold)           : suppression  21.2 dB, satellite SNR loss 15.30 dB
+  drift-aware avg, hold off         : suppression   0.0 dB, satellite SNR loss 40.01 dB
+  v6.2 drift-aware avg + hold 100   : suppression  56.2 dB, satellite SNR loss -1.58 dB, 196 bins on held weights
+SFAP_PI_CSIM: PASS (scenario 12)
+
+scenario 13: per-bin narrowband detector (CW half-way between two bins: worst case)
+  wide profile (white noise): armed after 64 quiet captures; 300 noise-only captures: 0 false alarms,
+    largest bin J/N 1.7 dB (ON at 8, OFF under 5)
+  CW at total J/N  -25 dB: coherence J/N  -15.3, power J/N  -22.4, largest bin J/N  -0.9 dB -> v6.0 off, v6.1 off
+  CW at total J/N  -20 dB: coherence J/N  -13.8, power J/N  -20.5, largest bin J/N  +1.2 dB -> v6.0 off, v6.1 off
+  CW at total J/N  -15 dB: coherence J/N  -11.9, power J/N  -99.0, largest bin J/N  +6.7 dB -> v6.0 off, v6.1 off
+  CW at total J/N  -10 dB: coherence J/N   -8.1, power J/N   -8.9, largest bin J/N +11.3 dB -> v6.0 off, v6.1 ON
+  CW at total J/N   -5 dB: coherence J/N   -4.5, power J/N   -5.3, largest bin J/N +15.9 dB -> v6.0 off, v6.1 ON
+  8 MHz profile (noise in the middle quarter): armed after 64 quiet captures; 300 noise-only captures: 0 false alarms,
+    largest bin J/N 0.8 dB (ON at 8, OFF under 5)
+  CW at total J/N  -25 dB: coherence J/N  -13.2, power J/N  -14.7, largest bin J/N  -1.2 dB -> v6.0 off, v6.1 off
+  CW at total J/N  -20 dB: coherence J/N  -11.3, power J/N  -14.7, largest bin J/N  -1.7 dB -> v6.0 off, v6.1 off
+  CW at total J/N  -15 dB: coherence J/N  -11.0, power J/N  -16.7, largest bin J/N  +2.2 dB -> v6.0 off, v6.1 off
+  CW at total J/N  -10 dB: coherence J/N   -8.6, power J/N  -10.5, largest bin J/N  +5.6 dB -> v6.0 off, v6.1 off
+  CW at total J/N   -5 dB: coherence J/N   -4.0, power J/N   -4.9, largest bin J/N  +9.8 dB -> v6.0 off, v6.1 ON
+SFAP_PI_CSIM: PASS (scenario 13)
+
+scenario 14: STEADY wideband jammer 40 dB, 12 captures
+  fixed avg 0.5 (v6.0)       : suppression 51.1 dB, satellite SNR loss -1.35 dB
+  drift-aware avg (v6.2)     : suppression 51.0 dB, satellite SNR loss -1.29 dB
+SFAP_PI_CSIM: PASS (scenario 14)
+
+scenario 15: jammer A 40 dB in one channel for 4 captures, then jammer B 15 dB weaker,
+             SAME channel, OTHER direction, for 8 captures: the held A weights must not be used
+  v6.0 (avg 0.5, no hold)           : suppression   5.3 dB, satellite SNR loss 37.17 dB
+  drift-aware avg, hold off         : suppression  46.6 dB, satellite SNR loss  5.05 dB
+  v6.2 drift-aware avg + hold 100   : suppression  46.0 dB, satellite SNR loss  5.07 dB, 18 bins on held weights
+SFAP_PI_CSIM: PASS (scenario 15)
+
+scenario 16: OBSTACLE shadowing the jammer at RX2 only (J/N 40 dB at RX1)
+  RX2 shadowed 12 dB: g2 fixed  41.1 dB supp., sat. loss  -1.0 dB | v6.2 g2 3.62:  40.6 dB, loss  -0.9 dB
+  RX2 shadowed 18 dB: g2 fixed  33.8 dB supp., sat. loss  -0.6 dB | v6.2 g2 4.00:  31.6 dB, loss  -0.4 dB
+  RX2 shadowed 24 dB: g2 fixed  11.2 dB supp., sat. loss   8.0 dB | v6.2 g2 4.00:  23.7 dB, loss   0.1 dB
+  RX2 shadowed 30 dB: g2 fixed   4.1 dB supp., sat. loss  14.7 dB | v6.2 g2 4.00:  13.6 dB, loss   1.4 dB
+  jammer present at start-up (no noise floor learned, g2 from the jammer, rx2n = 1):
+  RX2 shadowed  0 dB: g2 0.91:  51.4 dB supp., sat. loss  -1.3 dB
+  RX2 shadowed 12 dB: g2 3.62:  42.3 dB supp., sat. loss  -1.0 dB
+  RX2 shadowed 18 dB: g2 4.00:  35.2 dB supp., sat. loss  -0.6 dB
+  RX2 shadowed 24 dB: g2 4.00:  26.1 dB supp., sat. loss  -0.4 dB
+  RX2 shadowed 30 dB: g2 4.00:  15.4 dB supp., sat. loss   1.0 dB
+SFAP_PI_CSIM: PASS (scenario 16)
+
+scenario 17: MOVING CHANNEL, the RX2/RX1 jammer ratio turns (J/N 40 dB)
+   30 deg/s: v6.1 timing (25 ms, its averaging)  32.1 dB, sat. loss   4.8 dB | v6.2 (8.8 ms, drift-aware)  38.4 dB, loss   0.9 dB
+  100 deg/s: v6.1 timing (25 ms, its averaging)  21.8 dB, sat. loss  13.2 dB | v6.2 (8.8 ms, drift-aware)  32.5 dB, loss   4.3 dB
+SFAP_PI_CSIM: PASS (scenario 17)
+
+scenario 18: MULTIPATH, reflection -6 dB from another direction (J/N 40 dB)
+  delay  4 samples = 0.07 us at 61.44 MS/s, 0.26 us at 15.36 MS/s: suppression  43.3 dB, sat. loss  -0.8 dB
+  delay  8 samples = 0.13 us at 61.44 MS/s, 0.52 us at 15.36 MS/s: suppression  37.0 dB, sat. loss   3.2 dB
+  delay 16 samples = 0.26 us at 61.44 MS/s, 1.04 us at 15.36 MS/s: suppression  28.9 dB, sat. loss   7.4 dB
+  delay 31 samples = 0.50 us at 61.44 MS/s, 2.02 us at 15.36 MS/s: suppression  20.9 dB, sat. loss  16.0 dB
+  a 0.5 us reflection: satellite loss 16.0 dB at 61.44 MS/s, 3.2 dB with gnss_band=5 (15.36 MS/s)
+SFAP_PI_CSIM: PASS (scenario 18)
+
