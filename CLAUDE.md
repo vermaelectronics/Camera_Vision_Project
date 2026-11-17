@@ -153,7 +153,7 @@ Name each new design-A (pass-through + CRPA) package with the next number:
   as crpa24. build.sh: ensure_license_html() writes a placeholder buildroot/board/ant/msd/LICENSE.html when
   SKIP_LEGAL=1 (fresh build failed in genimage without it, user's crpa23 build). csim 16/16 pass: J/N 60
   +3.2 dB / sat loss 3.0 (crpa24 +3.9 / 2.8), field 61 +2.9 / 4.1, 51 +0.7 / 1.1, 41 +0.3 / -0.1, CW 40 57.3 dB;
-  optimum of 33 taps at J/N 60 +3.0 dB (10 + 10: +3.4). Icarus 0 errors. Commit <pending25>.
+  optimum of 33 taps at J/N 60 +3.0 dB (10 + 10: +3.4). Icarus 0 errors. Commit 52efff4.
 - Next package: `crpa26`.
 
 Files per package: `crpaN-full-src.zip.part1`, `crpaN-full-src.zip.part2`,
