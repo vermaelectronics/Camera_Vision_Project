@@ -191,6 +191,16 @@ Name each new design-A (pass-through + CRPA) package with the next number:
   failed at the 1024 default). csim 21/21 both: J/N 60 I/Q +3.0 / +2.8 dB (14 + 14 +3.2), sat loss 2.4 / 1.9;
   field 61 +2.8 / +2.7; jump recovery off 14 / 19 captures, fix 2. variant.py handles 16/18 (patch from file).
   Commits 1095c71 (30), 77032e2 (31).
+- 2026-11-17 theoretical report (Claude Doc "CRPA Anti-Jam Algorithms", claude.ai/artifact/GkA5uxnLw9Pi1oNc8WTfXQ) + deck
+  (scratchpad deck/build_deck.js, 22 slides) comparing crpa1/25/27/28/29/31. Jammer-type scenarios 40-45 in the testbench
+  (commit 6017846: CW, pulse 10 us / 100 us, barrage, sweep 16 MHz / 1 ms, 10 MHz wideband, chirp 16 MHz / 10 us; J/N 50
+  field conditions, captures 616553 samples apart). **Finding: STAP_NLMS_PI as built (crpa25-31) fails pulse (+39-42 dB)
+  and sweep (+27-39 dB)**; CW / barrage / wideband / chirp fine (+0.1-1.4). crpa1 (SMI with AJ_AVG averaging, pulse gate,
+  sweep detector 0.98) handles them (+2.1 / +4.9). crpa1 model in scratchpad c1m (6 + 6, no image taps, averaged SMI).
+  **Proposed crpa32 fix** (prototype scratchpad fx/, fx_patch.py, not in the repo): NLMS normaliser floor 0.5 x mean tap
+  power (pulse alone -> +1.7 dB) + averaged solve (memory 0.9) with best-of-two selection by held residual (1 dB
+  hysteresis): all six types <= +2.5 dB at 8/10/14/18 taps, static and moving scenarios unchanged; cost ~2-3 x ARM per
+  capture (decimate the covariance). Not built yet; user not yet asked.
 - Next package: `crpa32`.
 
 Files per package: `crpaN-full-src.zip.part1`, `crpaN-full-src.zip.part2`,
