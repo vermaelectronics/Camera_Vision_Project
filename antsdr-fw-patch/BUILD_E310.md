@@ -6,7 +6,7 @@ of ADI `plutosdr-fw` v0.39:
 
 | Stage | Tool | Output |
 |---|---|---|
-| Anti-jam filter core `stap_pi` (E310 only; crpa28: STAP_NLMS_PI 10 + 10 taps, weights from the ARM, moving-jammer fix) | Vitis HLS 2023.2 | `hdl/library/antsdr_ip/stap_pi` IP |
+| Anti-jam filter core `stap_pi` (E310 only; crpa29: STAP_NLMS_PI 14 + 14 taps, weights from the ARM, moving-jammer fix) | Vitis HLS 2023.2 | `hdl/library/antsdr_ip/stap_pi` IP |
 | FPGA hardware design (AD9361 LVDS 2R2T + ANTSDR VCXO/PPS logic + GNSS anti-jam, xc7z020clg400-2) | Vivado 2023.2 | `system_top.xsa`, `system_top.bit` |
 | First-stage boot loader | Vitis 2023.2 (`xsct`) | `fsbl.elf` |
 | U-Boot, Linux 6.1, device tree, buildroot rootfs | Linaro GCC 7.3 (downloaded by buildroot) | `u-boot.elf`, `zImage`/`uImage`, `zynq-ant.dtb`, `rootfs.cpio.gz` |
@@ -356,7 +356,7 @@ sudo dfu-util -a uboot-env.dfu -D ./uboot-env.dfu
 
 ---
 
-## 7. GNSS anti-jam (crpa28: STAP_NLMS_PI 10 + 10, direct start + NLMS on the ARM, moving-jammer fix): RX1 + RX2 -> FPGA -> TX1
+## 7. GNSS anti-jam (crpa29: STAP_NLMS_PI 14 + 14, direct start + NLMS on the ARM, moving-jammer fix): RX1 + RX2 -> FPGA -> TX1
 
 The `0003` patches put the GNSS anti-jam into this Linux firmware ("design A"):
 AD9361 LVDS 2R2T, `gnss_passthrough` v4.9.14, a space-time filter core between
@@ -364,7 +364,7 @@ RX1/RX2 and TX1, and the `gnss_crpa` service with its console. One feature of
 the Linux port is new: **band 7, your own RF values, set at any time from PuTTY**.
 
 ```text
-antenna 1 -> RX1 \                    stap_pi space-time anti-jam (10 + 10 taps,
+antenna 1 -> RX1 \                    stap_pi space-time anti-jam (14 + 14 taps,
                   AD9361 -> FPGA  gnss_passthrough  3 + 3 image taps)      -> AD9361 -> TX1
 antenna 2 -> RX2 /  LVDS 2R2T         + pulse blanker                     -> coax + attenuator + DC block
                     61.44 MS/s                                               -> GNSS receiver -> GNSS Viewer
@@ -658,7 +658,7 @@ The service:
 |---|---|
 | `gnss: the gnss_crpa service is not running` | `/etc/init.d/S95gnss_crpa start`, then `tail /var/log/gnss_crpa.log` |
 | `hardware not available` | The board runs an older bitstream. Copy the new `BOOT.bin` to the SD card. |
-| `AJ_INFO layout is 13, this firmware (crpa28) needs 14` / `the bitstream has 8 taps per channel, this firmware needs 10` | `BOOT.bin` of another package with this firmware: copy the whole new SD image. |
+| `AJ_INFO layout is 13, this firmware (crpa29) needs 14` / `the bitstream has 10 taps per channel, this firmware needs 14` | `BOOT.bin` of another package with this firmware: copy the whole new SD image. |
 | `NLMS weights out of range: started again from 0` | The ARM NLMS weights went out of the Q3.12 range (should not happen); with `gnss_aj_nlms_mu=` set by hand, lower it or set 0 (automatic). |
 | `gnss_pt: … version` mismatch in the self-test | Same: old `BOOT.bin`. |
 | `no RX capture` | Another program (IIO Oscilloscope, `iio_readdev`) holds the RX buffer. Close it and restart the service. |
@@ -713,7 +713,7 @@ The vendor patches are **unchanged**. This folder adds:
 * `patch/ant/0002-*.patch`: the GPS L1 RX1 -> FPGA -> TX1 loopback.
 * `patch/ant/0003-*.patch`, `hls/stap_pi/`, `gnss_crpa/`: the v4.9.14
   anti-jam (section 7): LVDS 2R2T, `gnss_passthrough` v4.9.14 + `stap_pi`
-  (crpa28: STAP_NLMS_PI 10 + 10 taps, direct start + NLMS on the ARM, moving-jammer fix), and the firmware as the
+  (crpa29: STAP_NLMS_PI 14 + 14 taps, direct start + NLMS on the ARM, moving-jammer fix), and the firmware as the
   `gnss_crpa` Linux service with custom band 7.
 
 * `build.sh`: fetches sources at the pinned commits (the vendor zip has no

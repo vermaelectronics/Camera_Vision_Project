@@ -1,7 +1,7 @@
-From 3761aad3eed81f92037893857c6ce3d0d9a986c9 Mon Sep 17 00:00:00 2001
+From 4c761eb8224b6b8b06b3467fe13f39451c5a6a52 Mon Sep 17 00:00:00 2001
 From: antsdr-fw-patch <antsdr-fw-patch@localhost>
 Date: Sat, 7 Nov 2026 11:57:58 +0000
-Subject: [PATCH] ant: STAP 10x10 v4.9.14 anti-jam, weights from the ARM
+Subject: [PATCH] ant: STAP 14x14 v4.9.14 anti-jam, weights from the ARM
  (stap_pi), AD9361 LVDS 2R2T
 
 Converts the E310 AD9361 interface to LVDS (pins and standards of the
@@ -19,19 +19,20 @@ NLMS (AJ_NLMS gone); aj_wts is 32 x AJ_NWTS bits; AJ_INFO 0x08040C0E
 crpa17: 6 + 6 taps, reference delay 3: AJ_NWTS 12, AJ_INFO 0x06030C0E.
 crpa18: 10 + 10 taps, reference delay 5: AJ_NWTS 20, AJ_INFO 0x0A050C0E
 (the firmware starts each jammer with a direct solve, then NLMS).
+crpa25: 14 + 14 taps, reference delay 7: AJ_NWTS 28, AJ_INFO 0x0E070C0E.
 ---
  library/gnss_passthrough/Makefile             |   3 +-
- library/gnss_passthrough/gnss_passthrough.v   | 539 ++++++++++++++++--
+ library/gnss_passthrough/gnss_passthrough.v   | 540 ++++++++++++++++--
  .../gnss_passthrough_constr.xdc               |  19 +-
  .../gnss_passthrough/gnss_passthrough_ip.tcl  |  68 ++-
- library/gnss_passthrough/gnss_pulse_blank.v   | 222 ++++++++
+ library/gnss_passthrough/gnss_pulse_blank.v   | 222 +++++++
  projects/ant/Makefile                         |   4 +
  projects/ant/gnss_passthrough_cdc.xdc         | 100 ++++
  projects/ant/system_bd.tcl                    | 383 +++++++------
  projects/ant/system_constr.xdc                | 131 ++---
  projects/ant/system_project.tcl               |   5 +
  projects/ant/system_top.v                     |  37 +-
- 11 files changed, 1208 insertions(+), 303 deletions(-)
+ 11 files changed, 1209 insertions(+), 303 deletions(-)
  create mode 100644 library/gnss_passthrough/gnss_pulse_blank.v
  create mode 100644 projects/ant/gnss_passthrough_cdc.xdc
 
@@ -53,7 +54,7 @@ index ab4bcc0..58cad71 100644
  XILINX_DEPS += gnss_passthrough_constr.xdc
  XILINX_DEPS += gnss_passthrough_ip.tcl
 diff --git a/library/gnss_passthrough/gnss_passthrough.v b/library/gnss_passthrough/gnss_passthrough.v
-index feca02d..ff11ea7 100644
+index feca02d..c69fb40 100644
 --- a/library/gnss_passthrough/gnss_passthrough.v
 +++ b/library/gnss_passthrough/gnss_passthrough.v
 @@ -1,6 +1,6 @@
@@ -121,7 +122,7 @@ index feca02d..ff11ea7 100644
  //
  //            READ [2]/[3] CAREFULLY. dac_enable_* is NOT an enable this block
  //            drives, and it is NOT derived from the valid strobes. It is a
-@@ -88,8 +116,86 @@
+@@ -88,8 +116,87 @@
  //    0x34    TX_COUNT_CH1    RO      dac_valid_i1 pulses served
  //    0x38    RX_SNAPSHOT_CH1 RO      {adc_data_q1, adc_data_i1} last accepted
  //    0x3C    RESERVED        RO      reads 0
@@ -153,7 +154,8 @@ index feca02d..ff11ea7 100644
 +//                                    3 + 3 image taps, weights from the ARM (AJ_W, AJ_WC, AJ_WCX, NLMS on
 +//                                    the ARM), no smoothing, no FPGA NLMS; AJ_GAIN, clip counters, meters;
 +//                                    crpa17: 0x06030C0E, 6 + 6 taps, delay 3; crpa18: 0x0A050C0E,
-+//                                    10 + 10 taps, delay 5; crpa13/14: layout 13 = FPGA
++//                                    10 + 10 taps, delay 5; crpa25: 0x0E070C0E, 14 + 14, delay 7;
++//                                    crpa13/14: layout 13 = FPGA
 +//                                    NLMS only; crpa10-12: layout 12; crpa9: 11; crpa8: 10; layout 7 = v4.9;
 +//                                    6 = v4.7; 5 = v4.6; 4 = v4.5; 3 = v4.4; 2 = v4.1)
 +//    0x188   AJ_CFG          RW      SHADOW. [0] bypass: 1 = TX1 carries RX1
@@ -210,13 +212,13 @@ index feca02d..ff11ea7 100644
  //
  //  LICENCE
  //    Original work for this project.  Not derived from Analog Devices or
-@@ -98,8 +204,13 @@
+@@ -98,8 +205,13 @@
  
  `timescale 1ns/100ps
  
 +// crpa16 / crpa17 / crpa18: weight words of the space-time taps (2 x taps per antenna): 16 for 8 + 8,
-+// 12 for 6 + 6, 20 for 10 + 10. Must match ST_NST of stap_pi and 2 * AJ_NT of the firmware.
-+`define AJ_NWTS_DEF 20   // crpa18: 10 + 10 (crpa16: 16, crpa17: 12)
++// 12 for 6 + 6, 20 for 10 + 10, 28 for 14 + 14. Must match ST_NST of stap_pi and 2 * AJ_NT of the firmware.
++`define AJ_NWTS_DEF 28   // crpa25: 14 + 14 (crpa18/24: 20, crpa16: 16, crpa17: 12)
 +
  module gnss_passthrough #(
 -  parameter FIFO_ADDR_WIDTH = 5   // elastic buffer depth = 2**FIFO_ADDR_WIDTH
@@ -225,7 +227,7 @@ index feca02d..ff11ea7 100644
  ) (
    // ---- sample-domain clock / reset (axi_ad9361 l_clk / rst) ----------------
    input               clk,
-@@ -141,6 +252,30 @@ module gnss_passthrough #(
+@@ -141,6 +253,30 @@ module gnss_passthrough #(
    output     [15:0]   dac_data_i1,
    output     [15:0]   dac_data_q1,
  
@@ -256,7 +258,7 @@ index feca02d..ff11ea7 100644
    // ---- AXI4-Lite slave (sys_cpu_clk domain) -------------------------------
    input               s_axi_aclk,
    input               s_axi_aresetn,
-@@ -168,7 +303,42 @@ module gnss_passthrough #(
+@@ -168,7 +304,42 @@ module gnss_passthrough #(
    localparam [31:0] CORE_ID      = 32'h47435031;   // "GCP1"
    // v1.1 -- adds the RX->TX sample alignment stage. Bumped so a running board
    // reports which of the two behaviours its bitstream actually has.
@@ -292,15 +294,15 @@ index feca02d..ff11ea7 100644
 +  localparam [31:0] CORE_VERSION = 32'h0004090E;   // 4.9.14 (8 taps per channel (crpa10), low-DSP axi_ad9361, TX2 = CRPA copy, muted)
 +  // crpa16 -- stap_pi_0 1.0: the weights come from the ARM again (NLMS on the ARM), no smoothing
 +  //         (AJ_CFG[19:16] ignored), no FPGA NLMS (AJ_NLMS 0x1E0/0x1E4 gone). AJ_INFO layout 14.
-+  localparam [31:0] AJ_INFO      = 32'h0A050C0E;   // crpa18: 10 taps per channel, reference delay 5, layout 14 (crpa16: 0x08040C0E; crpa17: 0x06030C0E; crpa10-12: 0x08040C0C, layout 12)
-+  localparam        AJ_NWTS      = AJ_NWTS_P;      // crpa16: 16 weight words (8 + 8); crpa17: 12 (6 + 6); crpa18: 20 (10 + 10)
++  localparam [31:0] AJ_INFO      = 32'h0E070C0E;   // crpa25: 14 taps per channel, reference delay 7, layout 14 (crpa18/24: 0x0A050C0E) (crpa16: 0x08040C0E; crpa17: 0x06030C0E; crpa10-12: 0x08040C0C, layout 12)
++  localparam        AJ_NWTS      = AJ_NWTS_P;      // crpa16: 16 weight words (8 + 8); crpa17: 12 (6 + 6); crpa18: 20 (10 + 10); crpa25: 28 (14 + 14)
 +  localparam [31:0] AJ_GAIN_RESET = 32'h00004000;  // fine gain 1.0
 +  localparam [31:0] AJ_CFG_RESET = 32'h00000001;   // bypass
 +  localparam [31:0] AJ_NRM_RESET = 32'h00002000;   // g2 = 1.0
    localparam        AW           = FIFO_ADDR_WIDTH;
  
    // ==========================================================================
-@@ -236,6 +406,10 @@ module gnss_passthrough #(
+@@ -236,6 +407,10 @@ module gnss_passthrough #(
    // ---- software-writable state --------------------------------------------
    reg  [31:0] reg_scratch = 32'd0;
    reg  [31:0] reg_control = 32'd0;
@@ -311,7 +313,7 @@ index feca02d..ff11ea7 100644
  
    always @(posedge s_axi_aclk) begin
      if (s_axi_aresetn == 1'b0) begin
-@@ -247,8 +421,80 @@ module gnss_passthrough #(
+@@ -247,8 +422,80 @@ module gnss_passthrough #(
          12'h003: reg_control <= s_axi_wdata;   // 0x0C
          default: ;
        endcase
@@ -392,7 +394,7 @@ index feca02d..ff11ea7 100644
  
    // Status view, refreshed from the clk domain (see CDC section).
    wire [31:0] v_status, v_rx_cnt0, v_tx_cnt0, v_ovf_cnt, v_unf_cnt;
-@@ -264,9 +510,15 @@ module gnss_passthrough #(
+@@ -264,9 +511,15 @@ module gnss_passthrough #(
    // 0x47435031 -- the ID -- because the ID read had immediately preceded it.
    // The first read after reset happened to be correct only because
    // axi_araddr_r resets to 0, which is the ID offset.
@@ -409,7 +411,7 @@ index feca02d..ff11ea7 100644
        12'h000: axi_rdata <= CORE_ID;
        12'h001: axi_rdata <= CORE_VERSION;
        12'h002: axi_rdata <= reg_scratch;
-@@ -282,6 +534,34 @@ module gnss_passthrough #(
+@@ -282,6 +535,34 @@ module gnss_passthrough #(
        12'h00C: axi_rdata <= v_rx_cnt1;
        12'h00D: axi_rdata <= v_tx_cnt1;
        12'h00E: axi_rdata <= v_rx_snap1;
@@ -444,7 +446,7 @@ index feca02d..ff11ea7 100644
        default: axi_rdata <= 32'd0;
      endcase
      end
-@@ -294,7 +574,7 @@ module gnss_passthrough #(
+@@ -294,7 +575,7 @@ module gnss_passthrough #(
    // ==========================================================================
    (* ASYNC_REG = "TRUE" *) reg [8:0] ctrl_meta = 9'd0;
    (* ASYNC_REG = "TRUE" *) reg [8:0] ctrl_sync = 9'd0;
@@ -453,7 +455,7 @@ index feca02d..ff11ea7 100644
  
    always @(posedge clk) begin
      ctrl_meta <= ctrl_raw;
-@@ -304,9 +584,19 @@ module gnss_passthrough #(
+@@ -304,9 +585,19 @@ module gnss_passthrough #(
    wire pass_en   = ctrl_sync[0];
    wire mute      = ctrl_sync[1];
    wire swap_iq   = ctrl_sync[2];
@@ -474,7 +476,7 @@ index feca02d..ff11ea7 100644
    // ==========================================================================
    //  Elastic buffer (one per channel)
    //  RX and TX sample strobes are both in the clk domain and run at the same
-@@ -316,17 +606,20 @@ module gnss_passthrough #(
+@@ -316,17 +607,20 @@ module gnss_passthrough #(
    //  filled to the midpoint.
    // ==========================================================================
    // Distributed (LUT) RAM: at depth 32 a block RAM would be wasteful, and
@@ -498,7 +500,7 @@ index feca02d..ff11ea7 100644
    wire        empty1 = (level1 == 0);
  
    // Prime the buffer to half depth before the first read, so that a small
-@@ -336,24 +629,150 @@ module gnss_passthrough #(
+@@ -336,24 +630,150 @@ module gnss_passthrough #(
      if (rst || !pass_en) begin
        primed0 <= 1'b0;
        primed1 <= 1'b0;
@@ -655,7 +657,7 @@ index feca02d..ff11ea7 100644
    wire [15:0] proc_i1 = adc_data_i1;
    wire [15:0] proc_q1 = adc_data_q1;
    // ======================= END PROCESSING CORE ==============================
-@@ -364,15 +783,19 @@ module gnss_passthrough #(
+@@ -364,15 +784,19 @@ module gnss_passthrough #(
    always @(posedge clk) begin
      if (rst) begin
        wptr0 <= 0; rptr0 <= 0;
@@ -683,7 +685,7 @@ index feca02d..ff11ea7 100644
        end
        if (wr_en1 && !full1) begin
          fifo1[wptr1[AW-1:0]] <= {proc_q1, proc_i1};
-@@ -382,6 +805,11 @@ module gnss_passthrough #(
+@@ -382,6 +806,11 @@ module gnss_passthrough #(
          rd_data1 <= fifo1[rptr1[AW-1:0]];
          rptr1 <= rptr1 + 1'b1;
        end
@@ -695,7 +697,7 @@ index feca02d..ff11ea7 100644
      end
    end
  
-@@ -392,7 +820,11 @@ module gnss_passthrough #(
+@@ -392,7 +821,11 @@ module gnss_passthrough #(
    // ==========================================================================
    wire [15:0] pt_i0 = swap_iq ? rd_data0[31:16] : rd_data0[15:0];
    wire [15:0] pt_q0 = swap_iq ? rd_data0[15:0]  : rd_data0[31:16];
@@ -708,7 +710,7 @@ index feca02d..ff11ea7 100644
    wire [15:0] pt_i1 = swap_iq ? src1[31:16] : src1[15:0];
    wire [15:0] pt_q1 = swap_iq ? src1[15:0]  : src1[31:16];
  
-@@ -424,8 +856,9 @@ module gnss_passthrough #(
+@@ -424,8 +857,9 @@ module gnss_passthrough #(
    //  Only the low 12 bits are taken, so this is correct whatever the ADC
    //  data-format control does with [15:12] (sign-extend or zero-fill).
    //
@@ -720,7 +722,7 @@ index feca02d..ff11ea7 100644
    //  Truncating to [11:0] here would wrap, turning a large sample into an
    //  opposite-signed small one. That is a silent, hard-to-see failure.
    // ==========================================================================
-@@ -436,8 +869,11 @@ module gnss_passthrough #(
+@@ -436,8 +870,11 @@ module gnss_passthrough #(
  
    assign dac_data_i0 = mute ? 16'd0 : (pass_en ? al_i0 : dma_dac_data_i0);
    assign dac_data_q0 = mute ? 16'd0 : (pass_en ? al_q0 : dma_dac_data_q0);
@@ -734,7 +736,7 @@ index feca02d..ff11ea7 100644
  
    // ==========================================================================
    //  Counters and sticky flags  (requirement 59: prove data is flowing)
-@@ -447,6 +883,7 @@ module gnss_passthrough #(
+@@ -447,6 +884,7 @@ module gnss_passthrough #(
    reg [31:0] ovf_cnt = 32'd0, unf_cnt = 32'd0;
    reg [31:0] rx_snap0 = 32'd0, tx_snap0 = 32'd0, rx_snap1 = 32'd0;
    reg        ovf_sticky = 1'b0, unf_sticky = 1'b0;
@@ -742,7 +744,7 @@ index feca02d..ff11ea7 100644
  
    always @(posedge clk) begin
      if (rst || cnt_clear) begin
-@@ -454,6 +891,7 @@ module gnss_passthrough #(
+@@ -454,6 +892,7 @@ module gnss_passthrough #(
        rx_cnt1 <= 32'd0; tx_cnt1 <= 32'd0;
        ovf_cnt <= 32'd0; unf_cnt <= 32'd0;
        ovf_sticky <= 1'b0; unf_sticky <= 1'b0;
@@ -750,7 +752,7 @@ index feca02d..ff11ea7 100644
        rx_snap0 <= 32'd0; tx_snap0 <= 32'd0; rx_snap1 <= 32'd0;
      end else begin
        if (adc_valid_i0) begin
-@@ -479,12 +917,14 @@ module gnss_passthrough #(
+@@ -479,12 +918,14 @@ module gnss_passthrough #(
          unf_cnt    <= unf_cnt + 1'b1;
          unf_sticky <= 1'b1;
        end
@@ -767,7 +769,7 @@ index feca02d..ff11ea7 100644
                        full1, empty1, full0, empty0,
                        dac_enable_q0, dac_enable_i0,
                        adc_enable_q0, adc_enable_i0 };
-@@ -506,6 +946,7 @@ module gnss_passthrough #(
+@@ -506,6 +947,7 @@ module gnss_passthrough #(
    reg         cap_toggle = 1'b0;
    reg  [31:0] cap_status, cap_rx0, cap_tx0, cap_ovf, cap_unf;
    reg  [31:0] cap_rxs0, cap_txs0, cap_lvl, cap_rx1, cap_tx1, cap_rxs1;
@@ -775,7 +777,7 @@ index feca02d..ff11ea7 100644
  
    always @(posedge clk) begin
      cap_div <= cap_div + 1'b1;
-@@ -521,6 +962,14 @@ module gnss_passthrough #(
+@@ -521,6 +963,14 @@ module gnss_passthrough #(
        cap_rx1    <= rx_cnt1;
        cap_tx1    <= tx_cnt1;
        cap_rxs1   <= rx_snap1;
@@ -790,7 +792,7 @@ index feca02d..ff11ea7 100644
        cap_toggle <= ~cap_toggle;
      end
    end
-@@ -532,6 +981,8 @@ module gnss_passthrough #(
+@@ -532,6 +982,8 @@ module gnss_passthrough #(
    reg [31:0] h_status = 32'd0, h_rx0 = 32'd0, h_tx0 = 32'd0;
    reg [31:0] h_ovf = 32'd0, h_unf = 32'd0, h_rxs0 = 32'd0, h_txs0 = 32'd0;
    reg [31:0] h_lvl = 32'd0, h_rx1 = 32'd0, h_tx1 = 32'd0, h_rxs1 = 32'd0;
@@ -799,7 +801,7 @@ index feca02d..ff11ea7 100644
  
    always @(posedge s_axi_aclk) begin
      tog_meta <= cap_toggle;
-@@ -549,6 +1000,14 @@ module gnss_passthrough #(
+@@ -549,6 +1001,14 @@ module gnss_passthrough #(
        h_rx1    <= cap_rx1;
        h_tx1    <= cap_tx1;
        h_rxs1   <= cap_rxs1;
@@ -814,7 +816,7 @@ index feca02d..ff11ea7 100644
      end
    end
  
-@@ -563,5 +1022,13 @@ module gnss_passthrough #(
+@@ -563,5 +1023,13 @@ module gnss_passthrough #(
    assign v_rx_cnt1  = h_rx1;
    assign v_tx_cnt1  = h_tx1;
    assign v_rx_snap1 = h_rxs1;
@@ -863,7 +865,7 @@ index a596ad5..0b593f0 100644
 +# clk_fpga_0 and {rx_clk clk_div_sel_*} (4.9.9, for TIMING-6/7) is kept, unscoped, in
 +# Source/XDC/gnss_passthrough_cdc.xdc. Everything above in this file is cell-based and stays.
 diff --git a/library/gnss_passthrough/gnss_passthrough_ip.tcl b/library/gnss_passthrough/gnss_passthrough_ip.tcl
-index 424bf66..246adf9 100644
+index 424bf66..54608ff 100644
 --- a/library/gnss_passthrough/gnss_passthrough_ip.tcl
 +++ b/library/gnss_passthrough/gnss_passthrough_ip.tcl
 @@ -1,10 +1,13 @@
@@ -877,7 +879,7 @@ index 424bf66..246adf9 100644
 -## gnss_passthrough.v and gnss_passthrough_constr.xdc are copied unchanged
 -## from LoopBack_Pipeline_noCRPA (Source/HDL, Source/IP/gnss_passthrough).
 +## gnss_passthrough.v, gnss_pulse_blank.v and gnss_passthrough_constr.xdc are
-+## copied from LoopBack_Code_SMI_PI_STAP7x7_v4.9.14, AJ_INFO for 10 + 10 (crpa18, weights from the ARM) (Source/HDL,
++## copied from LoopBack_Code_SMI_PI_STAP7x7_v4.9.14, AJ_INFO for 14 + 14 (crpa25, weights from the ARM) (Source/HDL,
 +## Source/IP/gnss_passthrough). The AXI-Stream and reset interface definitions
 +## below are the ones of that project's gnss_passthrough_ip.tcl.
  ###############################################################################
@@ -1313,7 +1315,7 @@ index 0000000..71a5384
 +# The two clock names are Vivado's auto-derived ones (check with report_clocks if ADI renames the nets).
 +set_clock_groups -logically_exclusive -group [get_clocks -quiet clk_div_sel_0_s] -group [get_clocks -quiet clk_div_sel_1_s]
 diff --git a/projects/ant/system_bd.tcl b/projects/ant/system_bd.tcl
-index b091f87..207ec4b 100644
+index b091f87..01b8960 100644
 --- a/projects/ant/system_bd.tcl
 +++ b/projects/ant/system_bd.tcl
 @@ -167,218 +167,253 @@ ad_connect  sys_concat_intc/In0 GND
@@ -1336,7 +1338,7 @@ index b091f87..207ec4b 100644
 +#       sees the same cores at the same addresses as before.
 +#     - gnss_passthrough v4.9.14 (registers at 0x43C1_0000) between the
 +#       axi_ad9361 ADC outputs and DAC inputs, feeding the SMI-PI space-time
-+#       filter stap_pi_0 (Vitis HLS, crpa18: 10 + 10 taps, 3 + 3 image taps, weights from the
++#       filter stap_pi_0 (Vitis HLS, crpa25: 14 + 14 taps, 3 + 3 image taps, weights from the
 +#       ARM, sys_cpu_clk) through two
 +#       asynchronous AXI-Stream FIFOs.
 +#   The HDL x8 FIR interpolator/decimator of the Pluto design are removed.
@@ -1691,7 +1693,7 @@ index b091f87..207ec4b 100644
 -ad_connect  logic_or_1/Op1  axi_ad9361/rst
 -ad_connect  logic_or_1/Op2  axi_tdd_0/tdd_channel_2
 -ad_connect  logic_or_1/Res  tx_upack/reset
-+# Space-time power-inversion filter (Vitis HLS IP stap_pi 1.0, crpa18: 10 + 10 taps, 3 + 3 image
++# Space-time power-inversion filter (Vitis HLS IP stap_pi 1.0, crpa25: 14 + 14 taps, 3 + 3 image
 +# taps, fine gain, II = 1) on sys_cpu_clk (100 MHz), so its timing does not depend on the sample
 +# rate. Weights, image taps, cfg, RX2 normalisation and gain come from gnss_passthrough's AJ_*
 +# registers, written by gnss_crpa on the ARM (crpa16/17: the weights by NLMS on the ARM).
