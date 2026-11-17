@@ -41,6 +41,8 @@
 //    30 the same jump at the field level (J/N 61, I/Q error, 18 MHz)
 //    31 moves 1.5 deg per capture for 20 captures, then stops (the prediction must let go, J/N 50)
 //    32 moves 0.75 deg per capture at the field level (J/N 61, I/Q error, 18 MHz)
+//    40-45 jammer types at field conditions, captures 20 ms apart: 40 CW, 41 pulsed noise (10 us every 100 us),
+//       42 barrage (whole band), 43 swept CW (16 MHz in 1 ms), 44 partial-band noise (~10 MHz), 45 chirp (16 MHz in 10 us)
 //  The direction moves in steps between the captures; "held" = what the core gives out with the
 //  committed weights until the next solve (the FPGA meter on the board).
 //  argv[8] = moving-jammer tracking 1|0 (default 1, the firmware's gnss_aj_track=)
@@ -323,7 +325,12 @@ static int test_makeup() {
 // ---- jammer scenarios ------------------------------------------------------------
 struct Scen { double jnr_db; bool cw; double echo; double rx2_db; bool iq; double cwf; double satf; double chip; double delay;
               int ncap = 20; double drift = 0; double iqfd = 0; int echod = 3;
-              double jump = 0; double jdel = 0; int mstop = 0; };   // mstop: the movement stops at this capture   // crpa27: direction jump (deg) + new RX2 delay at the middle capture
+              double jump = 0; double jdel = 0; int mstop = 0;
+              // jammer types (scenarios 40-45): 0 = the model above (cw / wideband), 2 = barrage (noise over
+              // the whole band), 3 = pulsed noise, 4 = swept CW, 5 = chirp (fast sweep), 6 = partial-band noise.
+              // jper / jon = period / on time [samples], jspan = sweep span [fs], jbw = noise half-band [fs],
+              // tcap = time between two captures [samples] (0 = captures back to back)
+              int jtype = 0; double jper = 0, jon = 0, jspan = 0, jbw = 0, tcap = 0; };   // mstop: the movement stops at this capture   // crpa27: direction jump (deg) + new RX2 delay at the middle capture
 
 static void iq_freqdep(cvec &x, double fd) {
     if (fd == 0) return;
@@ -405,10 +412,22 @@ static int test_jammer(int id, Scen sc) {
                  chip_step = (sc.chip != 0) ? sc.chip : 1.023 / 50.0;
     const double IQ1_EPS = 0.004, IQ1_PH = 0.3, IQ2_EPS = -0.003, IQ2_PH = -0.4;
     cvec J(N), J2, n1(N), n2(N), s1(N), s2(N);
-    if (sc.cw) for (int i = 0; i < N; i++) J[i] = std::polar(1.0, 2 * M_PI * cwf * i);
+    // board time of sample i: captures tcap apart, the evaluation one capture period after the last one
+    auto tt = [&](int i) -> double {
+        if (sc.tcap <= 0) return (double)i;
+        const int c = i / AJ_NSAMP;
+        if (c < sc.ncap) return c * sc.tcap + (i - c * AJ_NSAMP);
+        return sc.ncap * sc.tcap + (i - NT);
+    };
+    if (sc.jtype == 4 || sc.jtype == 5) {                // swept CW / chirp: linear FM sawtooth over jspan
+        for (int i = 0; i < N; i++) {
+            const double tau = std::fmod(tt(i), sc.jper);
+            J[i] = std::polar(1.0, 2 * M_PI * (-0.5 * sc.jspan * tau + 0.5 * sc.jspan / sc.jper * tau * tau));
+        }
+    } else if (sc.cw) for (int i = 0; i < N; i++) J[i] = std::polar(1.0, 2 * M_PI * cwf * tt(i));
     else {
         for (int i = 0; i < N; i++) J[i] = cd(grand(), grand());
-        J = fir(J, lowpass(0.42, 41), 20);
+        J = fir(J, lowpass(sc.jtype == 6 ? sc.jbw : sc.jtype == 2 ? 0.45 : 0.42, 41), 20);
     }
     cvec h2 = frac_delay((sc.delay != 0) ? sc.delay : 0.15, 21);
     cvec hd = {cd(0.03, 0.01), 1.0, cd(-0.02, 0.015)};
@@ -433,6 +452,8 @@ static int test_jammer(int id, Scen sc) {
     double pj = pwr(J, 0), pn = 2 * nrms * nrms;
     double js = (sc.jnr_db > -90) ? std::sqrt(pn * std::pow(10, sc.jnr_db / 10) / pj) : 0.0;
     for (int i = 0; i < N; i++) { J[i] *= js; J2[i] *= js; }
+    if (sc.jtype == 3)                                   // pulsed: J/N is the power while the pulse is on
+        for (int i = 0; i < N; i++) if (std::fmod(tt(i), sc.jper) >= sc.jon) { J[i] = 0; J2[i] = 0; }
     int chip = 1; double cph = 0;
     for (int i = 0; i < N; i++) {
         n1[i] = cd(grand(), grand()) * nrms;
@@ -484,8 +505,12 @@ static int test_jammer(int id, Scen sc) {
         x2[i] = cd(q12((x2[i] * g).real()), q12((x2[i] * g).imag()));
     }
 
-    std::printf("scenario %d: J/N %.0f dB%s%s, RX gain cut %.1f dB", id, sc.jnr_db,
-                sc.jnr_db < -90 ? " (no jammer)" : sc.cw ? " CW" : " wideband", sc.echo > 0 ? " + reflection" : "", cut_db);
+    const char *jname = sc.jnr_db < -90 ? " (no jammer)" : sc.jtype == 2 ? " barrage" : sc.jtype == 3 ? " pulsed noise" :
+                        sc.jtype == 4 ? " swept CW" : sc.jtype == 5 ? " chirp" : sc.jtype == 6 ? " partial-band noise" : sc.cw ? " CW" : " wideband";
+    std::printf("scenario %d: J/N %.0f dB%s%s, RX gain cut %.1f dB", id, sc.jnr_db, jname, sc.echo > 0 ? " + reflection" : "", cut_db);
+    if (sc.jtype == 3) std::printf(", pulses %.0f of every %.0f samples", sc.jon, sc.jper);
+    if (sc.jtype == 4 || sc.jtype == 5) std::printf(", span %.2f fs every %.0f samples", sc.jspan, sc.jper);
+    if (sc.tcap > 0) std::printf(", captures %.0f samples apart", sc.tcap);
     if (sc.rx2_db != 0) std::printf(", RX2 %+.0f dB (g2 %.3f)", sc.rx2_db, g2);
     if (sc.iq) std::printf(", I/Q image rejection %.1f / %.1f dB", irr_db(IQ1_EPS, IQ1_PH), irr_db(IQ2_EPS, IQ2_PH));
     if (sc.drift != 0) std::printf(", direction moving %.0f deg over the run (%.2f deg per capture)", sc.drift, sc.drift / sc.ncap);
@@ -721,6 +746,18 @@ int main(int argc, char **argv) {
         case 29: sc = {J(50), false, 0, 0, true, 0, 0, 0, 0}; sc.jump = 120; sc.ncap = 40; break;
         case 31: sc = {J(50), false, 0, 0, true, 0, 0, 0, 0}; sc.drift = 60; sc.mstop = 20; sc.ncap = 40; break;
         case 32: sc = {J(61), false, 0, 0, true, 0, -0.02 / 18.0, 1.023 / 18.0, 0.055}; sc.drift = 30; sc.ncap = 40; break;
+        // jammer types, field conditions (18 MHz, I/Q error, RX2 delay), J/N 50 by default; the board's time base
+        // (30.72 MS/s), captures 20 ms apart: CW, pulsed (10 us every 100 us), barrage, swept CW (16 MHz in 1 ms),
+        // partial-band noise (about 10 MHz), chirp (16 MHz in 10 us)
+        case 40: case 41: case 42: case 43: case 44: case 45:
+            sc = {J(50), scen == 40, 0, 0, true, 0.11, -0.02 / 18.0, 1.023 / 18.0, 0.055};
+            sc.tcap = 616553; sc.ncap = 20;   // ~20.07 ms: not a multiple of any jammer period
+            if (scen == 41) { sc.jtype = 3; sc.jper = 3072; sc.jon = 307; }
+            if (scen == 42) sc.jtype = 2;
+            if (scen == 43) { sc.jtype = 4; sc.jper = 30720; sc.jspan = 0.52; }
+            if (scen == 44) { sc.jtype = 6; sc.jbw = 0.16; }
+            if (scen == 45) { sc.jtype = 5; sc.jper = 307; sc.jspan = 0.52; }
+            break;
         case 30: sc = {J(61), false, 0, 0, true, 0, -0.02 / 18.0, 1.023 / 18.0, 0.055}; sc.jump = 120; sc.jdel = 0.35; sc.ncap = 40; break;
         default: std::printf("unknown scenario %d\n", scen); return 1;
         }
