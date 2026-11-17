@@ -1,0 +1,8 @@
+# Source/HDL/sim/run_iverilog.sh  (Icarus Verilog 12.0, 2026-11-17)
+HDL_TB: PASS  crpa1  (263 checks; NT 6, REF 3, wts 64 words, 12 used, wcj 2)
+HDL_TB: PASS  crpa27  (151 checks; NT 8, REF 4, wts 16 words, 16 used, wcj 6)
+HDL_TB: PASS  crpa28  (179 checks; NT 10, REF 5, wts 20 words, 20 used, wcj 6)
+HDL_TB: PASS  crpa29  (235 checks; NT 14, REF 7, wts 28 words, 28 used, wcj 6)
+HDL_TB: PASS  crpa30  (263 checks; NT 16, REF 8, wts 32 words, 32 used, wcj 6)
+HDL_TB: PASS  crpa31  (291 checks; NT 18, REF 9, wts 36 words, 36 used, wcj 6)
+HDL_TB: ALL PASS

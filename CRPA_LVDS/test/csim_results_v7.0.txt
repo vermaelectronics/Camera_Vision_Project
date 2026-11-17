@@ -1,0 +1,80 @@
+# Automation/Linux/csim_gcc.sh  (g++ 13, open-source Xilinx ap_int headers + hls_stream stand-in, 2026-11-17)
+==== crpa1 (smi_pi, 6 + 6 taps)
+scenario 1 core accuracy: 0 of 17928 outputs off by more than 1 LSB (bypass: exact)
+CRPA_CSIM: PASS (scenario 1)
+scenario 2 wideband 40 dB: J/N 40.0 dB, suppression 55.7 dB (min 30), residual -0.01 dB (max 3.0), output noise +3.04 dB, |w|^2 1.000, 6 captures, 0 solver failures -> PASS
+CRPA_CSIM: PASS (scenario 2)
+scenario 3 CW 45 dB: J/N 45.0 dB, suppression 60.0 dB (min 35), residual -0.01 dB (max 3.0), output noise +0.45 dB, |w|^2 0.101, 6 captures, 0 solver failures -> PASS
+CRPA_CSIM: PASS (scenario 3)
+scenario 4 wideband 40 dB, 2-tap RX2 channel, RX2 -6 dB: J/N 40.0 dB, suppression 51.3 dB (min 25), residual -0.00 dB (max 3.0), output noise +4.04 dB, |w|^2 1.506, 8 captures, 0 solver failures -> PASS
+CRPA_CSIM: PASS (scenario 4)
+scenario 5 no jammer: J/N -99.0 dB, suppression 0.0 dB (min 0), residual 0.00 dB (max 1.0), output noise +0.00 dB, |w|^2 0.000, 4 captures, 0 solver failures -> PASS
+CRPA_CSIM: PASS (scenario 5)
+scenario 6 wideband 40 dB, moving 2 deg/capture (crpa1: no prediction, informational): J/N 40.0 dB, suppression 26.1 dB (min 20), residual 11.07 dB (max 6.0), output noise +3.00 dB, |w|^2 0.999, 12 captures, 0 solver failures -> INFO
+CRPA_CSIM: PASS (scenario 6)
+==== crpa27 (stap_pi, 8 + 8 taps)
+scenario 1 core accuracy: 0 of 17904 outputs off by more than 1 LSB (bypass: exact)
+CRPA_CSIM: PASS (scenario 1)
+scenario 2 wideband 40 dB: J/N 40.0 dB, suppression 50.1 dB (min 30), residual 0.15 dB (max 3.0), output noise +3.04 dB, |w|^2 1.000, 6 captures, 0 solver failures -> PASS
+CRPA_CSIM: PASS (scenario 2)
+scenario 3 CW 45 dB: J/N 45.0 dB, suppression 57.2 dB (min 35), residual 0.14 dB (max 3.0), output noise +0.33 dB, |w|^2 0.067, 6 captures, 0 solver failures -> PASS
+CRPA_CSIM: PASS (scenario 3)
+scenario 4 wideband 40 dB, 2-tap RX2 channel, RX2 -6 dB: J/N 40.0 dB, suppression 45.6 dB (min 25), residual 0.31 dB (max 3.0), output noise +4.02 dB, |w|^2 1.487, 8 captures, 0 solver failures -> PASS
+CRPA_CSIM: PASS (scenario 4)
+scenario 5 no jammer: J/N -99.0 dB, suppression 0.0 dB (min 0), residual 0.00 dB (max 1.0), output noise +0.13 dB, |w|^2 0.023, 4 captures, 0 solver failures -> PASS
+CRPA_CSIM: PASS (scenario 5)
+scenario 6 wideband 40 dB, moving 2 deg/capture: J/N 40.0 dB, suppression 44.6 dB (min 20), residual 0.63 dB (max 6.0), output noise +3.00 dB, |w|^2 1.004, 12 captures, 0 solver failures -> PASS
+CRPA_CSIM: PASS (scenario 6)
+==== crpa28 (stap_pi, 10 + 10 taps)
+scenario 1 core accuracy: 0 of 17880 outputs off by more than 1 LSB (bypass: exact)
+CRPA_CSIM: PASS (scenario 1)
+scenario 2 wideband 40 dB: J/N 40.0 dB, suppression 49.9 dB (min 30), residual 0.15 dB (max 3.0), output noise +3.04 dB, |w|^2 1.000, 6 captures, 0 solver failures -> PASS
+CRPA_CSIM: PASS (scenario 2)
+scenario 3 CW 45 dB: J/N 45.0 dB, suppression 58.2 dB (min 35), residual 0.10 dB (max 3.0), output noise +0.27 dB, |w|^2 0.053, 6 captures, 0 solver failures -> PASS
+CRPA_CSIM: PASS (scenario 3)
+scenario 4 wideband 40 dB, 2-tap RX2 channel, RX2 -6 dB: J/N 40.0 dB, suppression 45.7 dB (min 25), residual 0.30 dB (max 3.0), output noise +4.02 dB, |w|^2 1.487, 8 captures, 0 solver failures -> PASS
+CRPA_CSIM: PASS (scenario 4)
+scenario 5 no jammer: J/N -99.0 dB, suppression 0.0 dB (min 0), residual 0.00 dB (max 1.0), output noise +0.14 dB, |w|^2 0.025, 4 captures, 0 solver failures -> PASS
+CRPA_CSIM: PASS (scenario 5)
+scenario 6 wideband 40 dB, moving 2 deg/capture: J/N 40.0 dB, suppression 43.8 dB (min 20), residual 0.76 dB (max 6.0), output noise +3.00 dB, |w|^2 1.004, 12 captures, 0 solver failures -> PASS
+CRPA_CSIM: PASS (scenario 6)
+==== crpa29 (stap_pi, 14 + 14 taps)
+scenario 1 core accuracy: 0 of 17832 outputs off by more than 1 LSB (bypass: exact)
+CRPA_CSIM: PASS (scenario 1)
+scenario 2 wideband 40 dB: J/N 40.0 dB, suppression 49.1 dB (min 30), residual 0.20 dB (max 3.0), output noise +3.04 dB, |w|^2 1.001, 6 captures, 0 solver failures -> PASS
+CRPA_CSIM: PASS (scenario 2)
+scenario 3 CW 45 dB: J/N 45.0 dB, suppression 59.9 dB (min 35), residual 0.00 dB (max 3.0), output noise +0.22 dB, |w|^2 0.037, 6 captures, 0 solver failures -> PASS
+CRPA_CSIM: PASS (scenario 3)
+scenario 4 wideband 40 dB, 2-tap RX2 channel, RX2 -6 dB: J/N 40.0 dB, suppression 46.5 dB (min 25), residual 0.23 dB (max 3.0), output noise +4.02 dB, |w|^2 1.488, 8 captures, 0 solver failures -> PASS
+CRPA_CSIM: PASS (scenario 4)
+scenario 5 no jammer: J/N -99.0 dB, suppression 0.0 dB (min 0), residual 0.00 dB (max 1.0), output noise +0.10 dB, |w|^2 0.020, 4 captures, 0 solver failures -> PASS
+CRPA_CSIM: PASS (scenario 5)
+scenario 6 wideband 40 dB, moving 2 deg/capture: J/N 40.0 dB, suppression 44.7 dB (min 20), residual 0.65 dB (max 6.0), output noise +3.00 dB, |w|^2 1.004, 12 captures, 0 solver failures -> PASS
+CRPA_CSIM: PASS (scenario 6)
+==== crpa30 (stap_pi, 16 + 16 taps)
+scenario 1 core accuracy: 0 of 17808 outputs off by more than 1 LSB (bypass: exact)
+CRPA_CSIM: PASS (scenario 1)
+scenario 2 wideband 40 dB: J/N 40.0 dB, suppression 49.4 dB (min 30), residual 0.19 dB (max 3.0), output noise +3.04 dB, |w|^2 1.001, 6 captures, 0 solver failures -> PASS
+CRPA_CSIM: PASS (scenario 2)
+scenario 3 CW 45 dB: J/N 45.0 dB, suppression 58.2 dB (min 35), residual 0.06 dB (max 3.0), output noise +0.18 dB, |w|^2 0.032, 6 captures, 0 solver failures -> PASS
+CRPA_CSIM: PASS (scenario 3)
+scenario 4 wideband 40 dB, 2-tap RX2 channel, RX2 -6 dB: J/N 40.0 dB, suppression 46.7 dB (min 25), residual 0.22 dB (max 3.0), output noise +4.02 dB, |w|^2 1.488, 8 captures, 0 solver failures -> PASS
+CRPA_CSIM: PASS (scenario 4)
+scenario 5 no jammer: J/N -99.0 dB, suppression 0.0 dB (min 0), residual 0.00 dB (max 1.0), output noise +0.08 dB, |w|^2 0.018, 4 captures, 0 solver failures -> PASS
+CRPA_CSIM: PASS (scenario 5)
+scenario 6 wideband 40 dB, moving 2 deg/capture: J/N 40.0 dB, suppression 45.0 dB (min 20), residual 0.60 dB (max 6.0), output noise +3.00 dB, |w|^2 1.003, 12 captures, 0 solver failures -> PASS
+CRPA_CSIM: PASS (scenario 6)
+==== crpa31 (stap_pi, 18 + 18 taps)
+scenario 1 core accuracy: 0 of 17784 outputs off by more than 1 LSB (bypass: exact)
+CRPA_CSIM: PASS (scenario 1)
+scenario 2 wideband 40 dB: J/N 40.0 dB, suppression 49.6 dB (min 30), residual 0.18 dB (max 3.0), output noise +3.04 dB, |w|^2 1.001, 6 captures, 0 solver failures -> PASS
+CRPA_CSIM: PASS (scenario 2)
+scenario 3 CW 45 dB: J/N 45.0 dB, suppression 58.5 dB (min 35), residual 0.06 dB (max 3.0), output noise +0.16 dB, |w|^2 0.029, 6 captures, 0 solver failures -> PASS
+CRPA_CSIM: PASS (scenario 3)
+scenario 4 wideband 40 dB, 2-tap RX2 channel, RX2 -6 dB: J/N 40.0 dB, suppression 46.8 dB (min 25), residual 0.22 dB (max 3.0), output noise +4.02 dB, |w|^2 1.488, 8 captures, 0 solver failures -> PASS
+CRPA_CSIM: PASS (scenario 4)
+scenario 5 no jammer: J/N -99.0 dB, suppression 0.0 dB (min 0), residual 0.00 dB (max 1.0), output noise +0.11 dB, |w|^2 0.020, 4 captures, 0 solver failures -> PASS
+CRPA_CSIM: PASS (scenario 5)
+scenario 6 wideband 40 dB, moving 2 deg/capture: J/N 40.0 dB, suppression 45.1 dB (min 20), residual 0.59 dB (max 6.0), output noise +3.00 dB, |w|^2 1.003, 12 captures, 0 solver failures -> PASS
+CRPA_CSIM: PASS (scenario 6)
+CSIM_GCC: PASS

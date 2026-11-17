@@ -1,6 +1,0 @@
-the_ROM_image:
-{
-  [bootloader] /home/manoranjan/CRPA_Project/NEW_PASSTHROUGH/NISHANT/SFAP_PI_256v3.2/Build/sw/fsbl.elf
-  /home/manoranjan/CRPA_Project/NEW_PASSTHROUGH/NISHANT/SFAP_PI_256v3.2/Build/hdl/system_top.bit
-  /home/manoranjan/CRPA_Project/NEW_PASSTHROUGH/NISHANT/SFAP_PI_256v3.2/Build/sw/app_sfap_lvds.elf
-}

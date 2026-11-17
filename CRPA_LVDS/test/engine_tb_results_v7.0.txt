@@ -1,0 +1,259 @@
+# Source/Firmware/host_test/run_engine_test.sh -v  (gcc 13, 2026-11-17)
+ENGINE_TB: crpa1 (6 + 6 taps, REF 3, 12 weights + 2 image), engine 7.0
+
+[AJ 1.613 s] *** JAMMER ON ***  J/N +40.1 dB, WIDEBAND, fills the whole 61.4 MHz band (~61.1 MHz seen)
+           detected because RX1/RX2 coherence (both antennas see the same signal); RX gain cut 0 dB
+[AJ 1.613 s] NULLED in 2 ms: suppression 50.4 dB, residual 0.2 dB, make-up +0.0 dB
+
+===== GNSS-AJ REPORT (copy from here) =====
+firmware      : CRPA crpa1 (smi_pi), engine 7.0, bitstream 7.0, AJ_INFO 0x1060307, dims 0x20c40, uptime 3.5 s
+algorithm     : SMI-PI (smi_pi): RX1 + RX2 space-time taps + 2 image taps (crpa_mode=0), 6 + 6 taps, reference delay 3, 12 weights + 2 image taps
+radio         : LO 1582.500 MHz, 61.44 MS/s, RF bandwidth 56.0 MHz (gnss_band=1)
+band          : GPS OK, Galileo/B1C OK, BeiDou B1I OK, GLONASS OK
+tx            : TRANSMITTING, TX1 attenuation 40.00 dB (operator 40.00 dB, level hold +0 dB)
+rx gain       : 60 dB both channels (clean reference 60), ADC peak 1500 of 2047
+normalisation : g2 = 0.999 (+0.0 dB) from the noise floors; RX2 noise after it = 1.00 x RX1
+noise floor   : RX1 17.4 LSB^2 at the present gain (learned)
+anti-jam      : ON, filter IN (cfg 0x3000, make-up shift 0 + fine 0.0 = +0.0 dB, ws 3)
+state         : JAMMED for 2.0 s (since t = 1.501 s)
+detection     : coherence 0.999 at lag 0 (+30.0 dB; ON above -3.0), power J/N +40.1 dB
+powers        : RX1 179875.9, RX2 179859.2 LSB^2 (raw)
+jammer        : J/N +40.1 dB (peak +40.3), WIDEBAND, fills the whole 61.4 MHz band (~60.5 MHz seen)
+suppression   : 50.7 dB, residual 0.2 dB (0 = fully nulled)
+weights       : |w|^2 1.002, largest |w| 1.001 at RX2 tap delay 3, largest image tap 0.006, weight scale 3
+solver        : SMI, loading 18.2 LSB^2, 1 iterations, averaging 0.50 (adaptive)
+time to null  : 2 ms (this jammer)
+engine        : 46 solves/s, 0 checks/s; 91 solves, 752 checks, 0 skipped (gain step), 0 errors
+printing      : status every 0 s (crpa_log=), CSV every 0 ms (crpa_csv=)
+events        : 3 in total, the last 3:
+  0.000 s  anti-jam started (bypass)
+  1.501 s  JAMMER ON   J/N +40.1 dB, bandwidth 0.99 of fs, trigger: RX1/RX2 coherence (both antennas see the same signal)
+  1.503 s  NULLED      after 2 ms, suppression 51.4 dB, residual 0.2 dB
+===== END REPORT =====
+[AJ 5.001 s] WARNING residual +15.6 dB: the jammer is not fully nulled.
+     Two antennas null ONE direction (plus its reflections). Check that
+     RX2 has its antenna, that there is a single jammer, and the ADC peak
+     (gnss_rx_gain?). A moving jammer needs crpa27..31 (prediction).
+
+[AJ 6.491 s] jammer OFF after 5.0 s (peak J/N +40.3 dB) -> filter bypassed, TX1 = RX1
+
+ENGINE_TB: 445 weight commits, 2 bypass commits
+ENGINE_TB: static jammer: mean residual of the committed weights over their hold 0.00 dB (worst 0.01), 100 commits
+ENGINE_TB: moving jammer: mean residual 17.77 dB (worst 18.12) over 77 commits
+ENGINE_TB: note - crpa1 has no weight prediction; moving-jammer residual is informational
+ENGINE_TB: PASS  crpa1
+ENGINE_TB: crpa27 (8 + 8 taps, REF 4, 16 weights + 6 image), engine 7.0
+
+[AJ 1.613 s] *** JAMMER ON ***  J/N +40.1 dB, WIDEBAND, fills the whole 61.4 MHz band (~61.1 MHz seen)
+           detected because RX1/RX2 coherence (both antennas see the same signal); RX gain cut 0 dB
+[AJ 1.613 s] NULLED in 2 ms: suppression 47.7 dB, residual 0.4 dB, make-up +0.0 dB
+
+===== GNSS-AJ REPORT (copy from here) =====
+firmware      : CRPA crpa27 (stap_pi), engine 7.0, bitstream 7.0, AJ_INFO 0x1b080407, dims 0x61010, uptime 3.5 s
+algorithm     : STAP-NLMS (stap_pi): direct start + NLMS, moving-jammer tracking, weight prediction, 8 + 8 taps, reference delay 4, 16 weights + 6 image taps
+radio         : LO 1582.500 MHz, 61.44 MS/s, RF bandwidth 56.0 MHz (gnss_band=1)
+band          : GPS OK, Galileo/B1C OK, BeiDou B1I OK, GLONASS OK
+tx            : TRANSMITTING, TX1 attenuation 40.00 dB (operator 40.00 dB, level hold +0 dB)
+rx gain       : 60 dB both channels (clean reference 60), ADC peak 1500 of 2047
+normalisation : g2 = 0.999 (+0.0 dB) from the noise floors; RX2 noise after it = 1.00 x RX1
+noise floor   : RX1 17.4 LSB^2 at the present gain (learned)
+anti-jam      : ON, filter IN (cfg 0x2000, make-up shift 0 + fine 0.0 = +0.0 dB, ws 2)
+state         : JAMMED for 2.0 s (since t = 1.501 s)
+detection     : coherence 0.999 at lag 0 (+30.0 dB; ON above -3.0), power J/N +40.1 dB
+powers        : RX1 179878.9, RX2 179861.4 LSB^2 (raw)
+jammer        : J/N +40.1 dB (peak +40.3), WIDEBAND, fills the whole 61.4 MHz band (~60.5 MHz seen)
+suppression   : 47.0 dB, residual 0.4 dB (0 = fully nulled)
+weights       : |w|^2 1.002, largest |w| 1.001 at RX2 tap delay 4, largest image tap 0.003, weight scale 2
+solver        : 1 direct + 90 NLMS solves, last NLMS; NLMS step 0.100, 2 passes; ARM residual 0.5 dB
+moving jammer : tracking ON (0 re-solves), prediction ON (idle, staleness +0.0 dB, lead 1.45, 0 predicted commits)
+time to null  : 2 ms (this jammer)
+engine        : 46 solves/s, 0 checks/s; 91 solves, 752 checks, 0 skipped (gain step), 0 errors
+printing      : status every 0 s (crpa_log=), CSV every 0 ms (crpa_csv=)
+events        : 3 in total, the last 3:
+  0.000 s  anti-jam started (bypass)
+  1.501 s  JAMMER ON   J/N +40.1 dB, bandwidth 0.99 of fs, trigger: RX1/RX2 coherence (both antennas see the same signal)
+  1.503 s  NULLED      after 2 ms, suppression 50.8 dB, residual 0.2 dB
+===== END REPORT =====
+[AJ 5.001 s] WARNING residual +7.1 dB: the jammer is not fully nulled.
+     Two antennas null ONE direction (plus its reflections). Check that
+     RX2 has its antenna, that there is a single jammer, and the ADC peak
+     (gnss_rx_gain?).
+
+[AJ 6.491 s] jammer OFF after 5.0 s (peak J/N +40.3 dB) -> filter bypassed, TX1 = RX1
+
+ENGINE_TB: 445 weight commits, 2 bypass commits
+ENGINE_TB: static jammer: mean residual of the committed weights over their hold 0.25 dB (worst 0.55), 100 commits
+ENGINE_TB: moving jammer: mean residual 2.39 dB (worst 2.94) over 77 commits
+ENGINE_TB: PASS  crpa27
+ENGINE_TB: crpa28 (10 + 10 taps, REF 5, 20 weights + 6 image), engine 7.0
+
+[AJ 1.613 s] *** JAMMER ON ***  J/N +40.1 dB, WIDEBAND, fills the whole 61.4 MHz band (~61.1 MHz seen)
+           detected because RX1/RX2 coherence (both antennas see the same signal); RX gain cut 0 dB
+[AJ 1.613 s] NULLED in 2 ms: suppression 47.4 dB, residual 0.4 dB, make-up +0.0 dB
+
+===== GNSS-AJ REPORT (copy from here) =====
+firmware      : CRPA crpa28 (stap_pi), engine 7.0, bitstream 7.0, AJ_INFO 0x1c0a0507, dims 0x61414, uptime 3.5 s
+algorithm     : STAP-NLMS (stap_pi): direct start + NLMS, moving-jammer tracking, weight prediction, 10 + 10 taps, reference delay 5, 20 weights + 6 image taps
+radio         : LO 1582.500 MHz, 61.44 MS/s, RF bandwidth 56.0 MHz (gnss_band=1)
+band          : GPS OK, Galileo/B1C OK, BeiDou B1I OK, GLONASS OK
+tx            : TRANSMITTING, TX1 attenuation 40.00 dB (operator 40.00 dB, level hold +0 dB)
+rx gain       : 60 dB both channels (clean reference 60), ADC peak 1500 of 2047
+normalisation : g2 = 0.999 (+0.0 dB) from the noise floors; RX2 noise after it = 1.00 x RX1
+noise floor   : RX1 17.4 LSB^2 at the present gain (learned)
+anti-jam      : ON, filter IN (cfg 0x2000, make-up shift 0 + fine 0.0 = +0.0 dB, ws 2)
+state         : JAMMED for 2.0 s (since t = 1.501 s)
+detection     : coherence 0.999 at lag 0 (+30.0 dB; ON above -3.0), power J/N +40.1 dB
+powers        : RX1 179814.5, RX2 179796.7 LSB^2 (raw)
+jammer        : J/N +40.1 dB (peak +40.3), WIDEBAND, fills the whole 61.4 MHz band (~60.5 MHz seen)
+suppression   : 47.5 dB, residual 0.4 dB (0 = fully nulled)
+weights       : |w|^2 1.001, largest |w| 1.000 at RX2 tap delay 5, largest image tap 0.003, weight scale 2
+solver        : 1 direct + 90 NLMS solves, last NLMS; NLMS step 0.100, 2 passes; ARM residual 0.5 dB
+moving jammer : tracking ON (0 re-solves), prediction ON (idle, staleness -0.1 dB, lead 1.45, 0 predicted commits)
+time to null  : 2 ms (this jammer)
+engine        : 46 solves/s, 0 checks/s; 91 solves, 752 checks, 0 skipped (gain step), 0 errors
+printing      : status every 0 s (crpa_log=), CSV every 0 ms (crpa_csv=)
+events        : 3 in total, the last 3:
+  0.000 s  anti-jam started (bypass)
+  1.501 s  JAMMER ON   J/N +40.1 dB, bandwidth 0.99 of fs, trigger: RX1/RX2 coherence (both antennas see the same signal)
+  1.503 s  NULLED      after 2 ms, suppression 50.9 dB, residual 0.2 dB
+===== END REPORT =====
+[AJ 5.001 s] WARNING residual +7.2 dB: the jammer is not fully nulled.
+     Two antennas null ONE direction (plus its reflections). Check that
+     RX2 has its antenna, that there is a single jammer, and the ADC peak
+     (gnss_rx_gain?).
+
+[AJ 6.491 s] jammer OFF after 5.0 s (peak J/N +40.3 dB) -> filter bypassed, TX1 = RX1
+
+ENGINE_TB: 445 weight commits, 2 bypass commits
+ENGINE_TB: static jammer: mean residual of the committed weights over their hold 0.25 dB (worst 0.48), 100 commits
+ENGINE_TB: moving jammer: mean residual 2.39 dB (worst 2.86) over 77 commits
+ENGINE_TB: PASS  crpa28
+ENGINE_TB: crpa29 (14 + 14 taps, REF 7, 28 weights + 6 image), engine 7.0
+
+[AJ 1.613 s] *** JAMMER ON ***  J/N +40.1 dB, WIDEBAND, fills the whole 61.4 MHz band (~61.1 MHz seen)
+           detected because RX1/RX2 coherence (both antennas see the same signal); RX gain cut 0 dB
+[AJ 1.613 s] NULLED in 2 ms: suppression 47.4 dB, residual 0.4 dB, make-up +0.0 dB
+
+===== GNSS-AJ REPORT (copy from here) =====
+firmware      : CRPA crpa29 (stap_pi), engine 7.0, bitstream 7.0, AJ_INFO 0x1d0e0707, dims 0x61c1c, uptime 3.5 s
+algorithm     : STAP-NLMS (stap_pi): direct start + NLMS, moving-jammer tracking, weight prediction, 14 + 14 taps, reference delay 7, 28 weights + 6 image taps
+radio         : LO 1582.500 MHz, 61.44 MS/s, RF bandwidth 56.0 MHz (gnss_band=1)
+band          : GPS OK, Galileo/B1C OK, BeiDou B1I OK, GLONASS OK
+tx            : TRANSMITTING, TX1 attenuation 40.00 dB (operator 40.00 dB, level hold +0 dB)
+rx gain       : 60 dB both channels (clean reference 60), ADC peak 1500 of 2047
+normalisation : g2 = 0.999 (+0.0 dB) from the noise floors; RX2 noise after it = 1.00 x RX1
+noise floor   : RX1 17.4 LSB^2 at the present gain (learned)
+anti-jam      : ON, filter IN (cfg 0x2000, make-up shift 0 + fine 0.0 = +0.0 dB, ws 2)
+state         : JAMMED for 2.0 s (since t = 1.501 s)
+detection     : coherence 0.999 at lag 0 (+30.0 dB; ON above -3.0), power J/N +40.1 dB
+powers        : RX1 179837.6, RX2 179821.2 LSB^2 (raw)
+jammer        : J/N +40.1 dB (peak +40.3), WIDEBAND, fills the whole 61.4 MHz band (~60.5 MHz seen)
+suppression   : 47.9 dB, residual 0.3 dB (0 = fully nulled)
+weights       : |w|^2 1.001, largest |w| 1.001 at RX2 tap delay 7, largest image tap 0.002, weight scale 2
+solver        : 1 direct + 90 NLMS solves, last NLMS; NLMS step 0.100, 2 passes; ARM residual 0.4 dB
+moving jammer : tracking ON (0 re-solves), prediction ON (idle, staleness -0.1 dB, lead 1.45, 0 predicted commits)
+time to null  : 2 ms (this jammer)
+engine        : 46 solves/s, 0 checks/s; 91 solves, 752 checks, 0 skipped (gain step), 0 errors
+printing      : status every 0 s (crpa_log=), CSV every 0 ms (crpa_csv=)
+events        : 3 in total, the last 3:
+  0.000 s  anti-jam started (bypass)
+  1.501 s  JAMMER ON   J/N +40.1 dB, bandwidth 0.99 of fs, trigger: RX1/RX2 coherence (both antennas see the same signal)
+  1.503 s  NULLED      after 2 ms, suppression 51.0 dB, residual 0.2 dB
+===== END REPORT =====
+[AJ 5.001 s] WARNING residual +7.1 dB: the jammer is not fully nulled.
+     Two antennas null ONE direction (plus its reflections). Check that
+     RX2 has its antenna, that there is a single jammer, and the ADC peak
+     (gnss_rx_gain?).
+
+[AJ 6.491 s] jammer OFF after 5.0 s (peak J/N +40.3 dB) -> filter bypassed, TX1 = RX1
+
+ENGINE_TB: 445 weight commits, 2 bypass commits
+ENGINE_TB: static jammer: mean residual of the committed weights over their hold 0.25 dB (worst 0.43), 100 commits
+ENGINE_TB: moving jammer: mean residual 2.39 dB (worst 2.80) over 77 commits
+ENGINE_TB: PASS  crpa29
+ENGINE_TB: crpa30 (16 + 16 taps, REF 8, 32 weights + 6 image), engine 7.0
+
+[AJ 1.613 s] *** JAMMER ON ***  J/N +40.1 dB, WIDEBAND, fills the whole 61.4 MHz band (~61.1 MHz seen)
+           detected because RX1/RX2 coherence (both antennas see the same signal); RX gain cut 0 dB
+[AJ 1.613 s] NULLED in 2 ms: suppression 47.5 dB, residual 0.4 dB, make-up +0.0 dB
+
+===== GNSS-AJ REPORT (copy from here) =====
+firmware      : CRPA crpa30 (stap_pi), engine 7.0, bitstream 7.0, AJ_INFO 0x1e100807, dims 0x62020, uptime 3.5 s
+algorithm     : STAP-NLMS (stap_pi): direct start + NLMS, moving-jammer tracking, weight prediction, 16 + 16 taps, reference delay 8, 32 weights + 6 image taps
+radio         : LO 1582.500 MHz, 61.44 MS/s, RF bandwidth 56.0 MHz (gnss_band=1)
+band          : GPS OK, Galileo/B1C OK, BeiDou B1I OK, GLONASS OK
+tx            : TRANSMITTING, TX1 attenuation 40.00 dB (operator 40.00 dB, level hold +0 dB)
+rx gain       : 60 dB both channels (clean reference 60), ADC peak 1500 of 2047
+normalisation : g2 = 0.999 (+0.0 dB) from the noise floors; RX2 noise after it = 1.00 x RX1
+noise floor   : RX1 17.4 LSB^2 at the present gain (learned)
+anti-jam      : ON, filter IN (cfg 0x2000, make-up shift 0 + fine 0.0 = +0.0 dB, ws 2)
+state         : JAMMED for 2.0 s (since t = 1.501 s)
+detection     : coherence 0.999 at lag 0 (+30.0 dB; ON above -3.0), power J/N +40.1 dB
+powers        : RX1 179829.5, RX2 179813.1 LSB^2 (raw)
+jammer        : J/N +40.1 dB (peak +40.3), WIDEBAND, fills the whole 61.4 MHz band (~60.4 MHz seen)
+suppression   : 47.3 dB, residual 0.4 dB (0 = fully nulled)
+weights       : |w|^2 1.002, largest |w| 1.001 at RX2 tap delay 8, largest image tap 0.002, weight scale 2
+solver        : 1 direct + 90 NLMS solves, last NLMS; NLMS step 0.100, 2 passes; ARM residual 0.4 dB
+moving jammer : tracking ON (0 re-solves), prediction ON (idle, staleness +0.0 dB, lead 1.45, 0 predicted commits)
+time to null  : 2 ms (this jammer)
+engine        : 46 solves/s, 0 checks/s; 91 solves, 752 checks, 0 skipped (gain step), 0 errors
+printing      : status every 0 s (crpa_log=), CSV every 0 ms (crpa_csv=)
+events        : 3 in total, the last 3:
+  0.000 s  anti-jam started (bypass)
+  1.501 s  JAMMER ON   J/N +40.1 dB, bandwidth 0.99 of fs, trigger: RX1/RX2 coherence (both antennas see the same signal)
+  1.503 s  NULLED      after 2 ms, suppression 51.0 dB, residual 0.2 dB
+===== END REPORT =====
+[AJ 5.001 s] WARNING residual +7.1 dB: the jammer is not fully nulled.
+     Two antennas null ONE direction (plus its reflections). Check that
+     RX2 has its antenna, that there is a single jammer, and the ADC peak
+     (gnss_rx_gain?).
+
+[AJ 6.491 s] jammer OFF after 5.0 s (peak J/N +40.3 dB) -> filter bypassed, TX1 = RX1
+
+ENGINE_TB: 445 weight commits, 2 bypass commits
+ENGINE_TB: static jammer: mean residual of the committed weights over their hold 0.24 dB (worst 0.41), 100 commits
+ENGINE_TB: moving jammer: mean residual 2.38 dB (worst 2.83) over 77 commits
+ENGINE_TB: PASS  crpa30
+ENGINE_TB: crpa31 (18 + 18 taps, REF 9, 36 weights + 6 image), engine 7.0
+
+[AJ 1.613 s] *** JAMMER ON ***  J/N +40.1 dB, WIDEBAND, fills the whole 61.4 MHz band (~61.1 MHz seen)
+           detected because RX1/RX2 coherence (both antennas see the same signal); RX gain cut 0 dB
+[AJ 1.613 s] NULLED in 2 ms: suppression 47.5 dB, residual 0.4 dB, make-up +0.0 dB
+
+===== GNSS-AJ REPORT (copy from here) =====
+firmware      : CRPA crpa31 (stap_pi), engine 7.0, bitstream 7.0, AJ_INFO 0x1f120907, dims 0x62424, uptime 3.5 s
+algorithm     : STAP-NLMS (stap_pi): direct start + NLMS, moving-jammer tracking, weight prediction, 18 + 18 taps, reference delay 9, 36 weights + 6 image taps
+radio         : LO 1582.500 MHz, 61.44 MS/s, RF bandwidth 56.0 MHz (gnss_band=1)
+band          : GPS OK, Galileo/B1C OK, BeiDou B1I OK, GLONASS OK
+tx            : TRANSMITTING, TX1 attenuation 40.00 dB (operator 40.00 dB, level hold +0 dB)
+rx gain       : 60 dB both channels (clean reference 60), ADC peak 1500 of 2047
+normalisation : g2 = 0.999 (+0.0 dB) from the noise floors; RX2 noise after it = 1.00 x RX1
+noise floor   : RX1 17.5 LSB^2 at the present gain (learned)
+anti-jam      : ON, filter IN (cfg 0x2000, make-up shift 0 + fine 0.0 = +0.0 dB, ws 2)
+state         : JAMMED for 2.0 s (since t = 1.501 s)
+detection     : coherence 0.999 at lag 0 (+30.0 dB; ON above -3.0), power J/N +40.1 dB
+powers        : RX1 179853.5, RX2 179837.4 LSB^2 (raw)
+jammer        : J/N +40.1 dB (peak +40.3), WIDEBAND, fills the whole 61.4 MHz band (~60.4 MHz seen)
+suppression   : 46.8 dB, residual 0.4 dB (0 = fully nulled)
+weights       : |w|^2 1.002, largest |w| 1.001 at RX2 tap delay 9, largest image tap 0.002, weight scale 2
+solver        : 1 direct + 90 NLMS solves, last NLMS; NLMS step 0.100, 2 passes; ARM residual 0.4 dB
+moving jammer : tracking ON (0 re-solves), prediction ON (idle, staleness +0.0 dB, lead 1.45, 0 predicted commits)
+time to null  : 2 ms (this jammer)
+engine        : 46 solves/s, 0 checks/s; 91 solves, 752 checks, 0 skipped (gain step), 0 errors
+printing      : status every 0 s (crpa_log=), CSV every 0 ms (crpa_csv=)
+events        : 3 in total, the last 3:
+  0.000 s  anti-jam started (bypass)
+  1.501 s  JAMMER ON   J/N +40.1 dB, bandwidth 0.99 of fs, trigger: RX1/RX2 coherence (both antennas see the same signal)
+  1.503 s  NULLED      after 2 ms, suppression 51.1 dB, residual 0.2 dB
+===== END REPORT =====
+[AJ 5.001 s] WARNING residual +7.1 dB: the jammer is not fully nulled.
+     Two antennas null ONE direction (plus its reflections). Check that
+     RX2 has its antenna, that there is a single jammer, and the ADC peak
+     (gnss_rx_gain?).
+
+[AJ 6.491 s] jammer OFF after 5.0 s (peak J/N +40.3 dB) -> filter bypassed, TX1 = RX1
+
+ENGINE_TB: 445 weight commits, 2 bypass commits
+ENGINE_TB: static jammer: mean residual of the committed weights over their hold 0.24 dB (worst 0.41), 100 commits
+ENGINE_TB: moving jammer: mean residual 2.37 dB (worst 2.81) over 77 commits
+ENGINE_TB: PASS  crpa31
