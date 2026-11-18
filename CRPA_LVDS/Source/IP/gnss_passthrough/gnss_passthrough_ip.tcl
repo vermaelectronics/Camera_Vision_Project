@@ -186,6 +186,19 @@ set_property range        8192         $ablk
 set_property width        32           $ablk
 set_property usage        register     $ablk
 
+# Default (tie-off) values of the filter-side inputs. In the loop-back build
+# (no filter core) nothing drives them; with a declared driver value the block
+# design ties them off quietly instead of reporting [BD 41-759]. In the CRPA
+# builds they are connected and the default is not used.
+foreach {pn dv} {s_axis_smi_tvalid 0 s_axis_smi_tdata 0 m_axis_smi_tready 0} {
+  set p [ipx::get_ports $pn -of_objects $core]
+  if {[llength $p] == 1} {
+    set_property driver_value $dv $p
+  } else {
+    puts "IP_PACKAGE: WARNING - port $pn not found, no driver value set"
+  }
+}
+
 ipx::create_xgui_files $core
 ipx::update_checksums  $core
 ipx::check_integrity   $core
