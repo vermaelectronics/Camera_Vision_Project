@@ -1,0 +1,18 @@
+{
+  "name": "PASS_MVDR_STAP_test",
+  "type": "HOST",
+  "platform": "/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/export/PASS_MVDR_STAP/PASS_MVDR_STAP.xpfm",
+  "domain": "standalone_ps7_cortexa9_0",
+  "cpuInstance": "ps7_cortexa9_0",
+  "cpuType": "cortex-a9",
+  "os": "standalone",
+  "configuration": {
+    "componentType": "HOST",
+    "hostToolchainConfigurations": []
+  },
+  "domainRealName": "standalone_ps7_cortexa9_0",
+  "applicationFlow": "EMBEDDED",
+  "previousBuildStatusMap": {
+    "hw": "SUCCESS"
+  }
+}
