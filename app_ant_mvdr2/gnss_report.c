@@ -207,8 +207,10 @@ void gnss_rep_on_solve(void)
     }
 
     /* state machine */
+    /* MOD11: a jammer must make RX1/RX2 coherent (gnss_smi.c coh_gate):
+     * incoherent in-band excess (antenna noise, a hot LNA) is noise */
     if (!aj.jammed) {
-        if (aj.jnr_db > JAM_ON_DB) {
+        if (aj.jnr_db > JAM_ON_DB && !ss.incoh && ss.jc_db > 3.0) {
             aj.jammed = 1;  aj.since_s = t;  t_jam_on = t;  t_below = -1.0;
             aj.jnr_peak_db = aj.jnr_db;  aj.t_null_ms = -1.0;  nulled = 0;
             res_warned = 0;  t_res_high = -1.0;
@@ -236,7 +238,7 @@ void gnss_rep_on_solve(void)
         } else {
             t_res_high = -1.0;
         }
-        if (aj.jnr_db < JAM_OFF_DB) {
+        if (aj.jnr_db < JAM_OFF_DB || ss.incoh) {
             if (t_below < 0.0) { t_below = t; }
             if (t - t_below >= JAM_OFF_HOLD) {
                 aj.jammed = 0;  aj.since_s = t;
@@ -419,7 +421,7 @@ void gnss_rep_print(void)
 
     printf("\n===================== GNSS ANTI-JAM REPORT (copy from here) =====================\n");
     hdr("SYSTEM");
-    printf("firmware MOD10, MVDR core %lu.%lu, uptime %s s\n",
+    printf("firmware MOD11, MVDR core %lu.%lu, uptime %s s\n",
            (unsigned long)(s.version >> 16), (unsigned long)(s.version & 0xFFFFU), f1(b1, t));
     if (have_smi) {
         printf("%sSMI layout v%d: 2 antennas x %d taps IN USE (of %d) + 2 image taps = %d solved (INFO 0x%08lX)\n",
@@ -652,6 +654,8 @@ void gnss_rep_print_kpi(void)
     kv1("jbw", jam && smi_ok, ss.jbw_hz / 1e6);
     kv1("jrf", jam && smi_ok, ((double)lo + ss.jf_hz) / 1e6);
     kv3("coh", jam && smi_ok, ss.coh12);
+    kv1("jcoh", smi_ok, ss.jc_db);                      /* MOD11: coherent J/N, dB */
+    printf(" incoh=%d", smi_ok ? ss.incoh : 0);
     kv1("ph", jam && smi_ok, ss.ph21_deg);
     kv1("ang", jam && j.available && j.valid && j.present, (double)j.theta_cdeg / 100.0);
     kv1("tnull", jam && a.t_null_ms >= 0.0, a.t_null_ms);

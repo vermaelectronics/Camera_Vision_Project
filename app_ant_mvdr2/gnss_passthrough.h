@@ -202,8 +202,13 @@
  * coherence 0.003..0.006 between two antennas), so 8 flagged a "jammer" on
  * and off every few hundred ms with no jammer present (COH_L2 7..9 in the
  * 2026-10-30 log). 4 = coherence > 1/16: a signal about -12 dB vs the noise
- * or stronger -- every jammer that matters, never the satellites. */
-#define GNSS_PT_SM_COH_DEFAULT       4U
+ * or stronger -- every jammer that matters, never the satellites.
+ * MOD11: 4 -> 2 (coherence > 1/4 = a source at about 0 dB J/N or more).
+ * Two active antennas side by side on a bench read 0.09..0.14 with NO
+ * jammer (mutual coupling of the LNA noise): 4 flagged it as a jammer, on
+ * and off every 1-2 s (18 Nov MOD10 bench log). A jammer under 0 dB J/N
+ * costs the receiver < 3 dB and needs no null. */
+#define GNSS_PT_SM_COH_DEFAULT       2U
 #define GNSS_PT_SMOOTH_DEFAULT       (GNSS_PT_SM_HOLD(GNSS_PT_SM_HOLD_DEFAULT) | \
                                       GNSS_PT_SM_REL_SH(GNSS_PT_SM_REL_DEFAULT) | \
                                       GNSS_PT_SM_COH_SH(GNSS_PT_SM_COH_DEFAULT))

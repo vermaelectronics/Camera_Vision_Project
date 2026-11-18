@@ -209,6 +209,34 @@ static double   ant_sn2 = 0.0;                    /* antenna noise per element, 
 static gnss_time_t t_restart;                     /* last tracking restart             */
 static int      have_t_restart = 0;
 static double noise_ref(void) { return (ant_sn2 > 0.0) ? ant_sn2 + floor_sn2 : 0.0; }
+/* MOD11: spatial gate on the solved (averaged) R, reference taps.
+ * One source in both antennas with J/N x1, x2 per antenna gives
+ *     coh = |R12|^2/(R11 R22) = x1/(1+x1) * x2/(1+x2),
+ * so s = sqrt(coh) = x/(1+x) for the geometric-mean x: x = s/(1-s), free
+ * of any noise estimate. Jammer J/N 6 dB -> coh 0.64; 3 dB -> 0.44;
+ * 0 dB -> 0.25. Bench, no jammer, two active antennas side by side: 0.10
+ * (mutual coupling) = -2.6 dB. Incoherent when under 0 dB, coherent again
+ * over +3 dB. A source in ONE antenna only (other blocked) is the exception:
+ * the power then differs by > 12 dB between the antennas, and the gate is
+ * not applied (MVDR uses the other antenna). */
+#define COH_IN_DB    0.0
+#define COH_OUT_DB   3.0
+#define COH_BAL_DB  12.0
+static void coh_gate(void)
+{
+    double r11 = Rr[REF][REF], r22 = Rr[nL + REF][nL + REF];
+    double xr = Rr[REF][nL + REF], xi = Ri[REF][nL + REF], c, sq, bal;
+    if (!(r11 > 0.0) || !(r22 > 0.0)) { sm.incoh = 0; sm.jc_db = 99.0; return; }
+    c  = (xr * xr + xi * xi) / (r11 * r22);
+    if (c < 1e-12) { c = 1e-12; }
+    sq = sqrt(c);
+    if (sq > 0.9999) { sq = 0.9999; }
+    sm.jc_db = 10.0 * log10(sq / (1.0 - sq));
+    bal = 10.0 * log10(r11 / r22);
+    if (fabs(bal) > COH_BAL_DB)        { sm.incoh = 0; }
+    else if (sm.jc_db < COH_IN_DB)     { sm.incoh = 1; }
+    else if (sm.jc_db > COH_OUT_DB)    { sm.incoh = 0; }
+}
 void gnss_smi_set_floor_dbfs(double dbfs)
 {
     floor_sn2 = (dbfs > -150.0) ? pow(10.0, dbfs / 10.0) * X_PER_LSB2 * FS2_12 : 0.0;
@@ -281,7 +309,7 @@ static void mod7_classify(gnss_time_t now, double trw)
     float f = 0.0f;
 
     if (!(nz > 0.0)) { nz = sn2_last; }
-    if (nz > 0.0 && p0 > 2.0 * nz && nL >= 4) {        /* J/N over 0 dB */
+    if (!sm.incoh && nz > 0.0 && p0 > 2.0 * nz && nL >= 4) {   /* J/N over 0 dB; MOD11: coherent */
         double pj = p0 - nz, mn = 1.0;
         int dips = 0, below = 0, revive = 0;
         for (k = 0; k < nL; k++) {
@@ -309,7 +337,7 @@ static void mod7_classify(gnss_time_t now, double trw)
         else if (revive >= 1)                    { cls = 1; sm.ntones = dips + 1; }
         else if (rr[1] < 0.5)                    { cls = 3; }
         else                                     { cls = 2; }
-        if (rr[1] > 0.5 && fs > 0.0) { fv = 1; f = (float)(atan2(r1i, r1r) / (2.0 * PI_D) * fs); }
+        if (rr[1] > 0.85 && fs > 0.0) { fv = 1; f = (float)(atan2(r1i, r1r) / (2.0 * PI_D) * fs); }   /* MOD11: narrow windows only (was 0.5) */
         jt_t_seen = now;
         have_jt_seen = 1;
     }
@@ -1057,6 +1085,13 @@ int gnss_smi_poll(void)
                 jn = o.jn_in_db;
                 sn2_last = pow(10.0, o.sn2_dbfs / 10.0) * X_PER_LSB2 * FS2_12;
             }
+            /* MOD11: J/N above is against the spectral minimum of R (the
+             * AD9361 floor at the band edges). Antenna noise shaped by the
+             * antenna's own filter is coloured, so it reads as a "band-limited
+             * jammer" there (bench, no jammer: 21 dB, and the null cut L1 by
+             * 24 dB). Incoherent excess = noise: no jammer, clean hold. */
+            coh_gate();
+            if (sm.incoh && jn > -10.0) { jn = -10.0; sm.incoh_n++; }
             jn_last_db = jn;
             if (jn < -3.0 && tr_win > 0.0) {
                 double a = tr_win / (double)N - floor_sn2;          /* MOD7: antenna part */

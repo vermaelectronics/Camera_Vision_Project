@@ -95,4 +95,8 @@ int  gnss_rx2_off_set(int db);              /* RX2 gain = RX1 gain - db */
 int  gnss_rx2_off_get(void);
 void gnss_rx2_off_apply(void);
 
+/* MOD11: an RX filter retune (gnss_ajbw) is about to happen: the FIFO /
+ * SMI-overrun glitch it causes in the next ~3 s is expected, reported once */
+void gnss_mon_retune(void);
+
 #endif /* GNSS_AUTOSTART_H_ */

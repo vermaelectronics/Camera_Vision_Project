@@ -1454,6 +1454,9 @@ static int   wb_count = 0, wb_reported = 0;     /* MOD-23: wideband jammer */
 static uint32_t stap_ns_last = 0;               /* MOD-24: STAP anti-windup count */
 static uint32_t smi_fail_last = 0, smi_novr_last = 0;   /* MOD-25: SMI solver / overruns */
 static int      smi_mon_init = 0;                       /* baseline taken             */
+static int      mon_retune = 0;                         /* MOD11: retune glitch window, monitor ticks */
+static int      mon_retune_said = 0;
+void gnss_mon_retune(void) { mon_retune = 4; mon_retune_said = 0; }
 
 /* Worst (largest) IQ-image coefficient of RX1/RX2 in dBc, Q20 values. */
 static double iq_worst_dbc(const gnss_pt_mvdr_state_t *s)
@@ -1613,7 +1616,12 @@ void gnss_monitor_poll(int show_status)
         } else if (!m.jam && mon.jam) {
             ev("jammer gone%s.\n", m.hold ? ": null held, then gliding back" : "");
         }
-        if ((m.ovf > mon.ovf || m.unf > mon.unf) && m.ovf >= mon.ovf && m.unf >= mon.unf) {
+        if (mon_retune > 0 && (m.ovf != mon.ovf || m.unf != mon.unf)) {
+            if (!mon_retune_said) {               /* MOD11: expected, once */
+                ev("RX filter retune: brief FIFO / SMI-window glitch (expected; null rebuilt).\n");
+                mon_retune_said = 1;
+            }
+        } else if ((m.ovf > mon.ovf || m.unf > mon.unf) && m.ovf >= mon.ovf && m.unf >= mon.unf) {
             ev("FIFO overflow +%lu / underflow +%lu: RX and TX rates differ.\n",
                (unsigned long)(m.ovf - mon.ovf), (unsigned long)(m.unf - mon.unf));
         }
@@ -1686,7 +1694,12 @@ void gnss_monitor_poll(int show_status)
                    (unsigned long)(ss.fails - smi_fail_last));
             }
             if (!smi_mon_init) { smi_novr_last = ss.novr; smi_fail_last = ss.fails; smi_mon_init = 1; }
-            if (ss.novr != smi_novr_last) {
+            if (ss.novr != smi_novr_last && mon_retune > 0) {
+                if (!mon_retune_said) {           /* MOD11 */
+                    ev("RX filter retune: brief FIFO / SMI-window glitch (expected; null rebuilt).\n");
+                    mon_retune_said = 1;
+                }
+            } else if (ss.novr != smi_novr_last) {
                 ev("SMI: %lu sample overrun(s): samples closer than 4 clocks (needs 2R2T).\n",
                    (unsigned long)((ss.novr - smi_novr_last) & 0xFFFFU));
             }
@@ -1758,6 +1771,7 @@ void gnss_monitor_poll(int show_status)
         }
     }
     mon = m;
+    if (mon_retune > 0) { mon_retune--; }   /* MOD11 */
 
     if (show_status) {
         ad9361_get_tx_attenuation(ad9361_phy, 0, &a);

@@ -874,8 +874,8 @@ static void info_quickstart(void)
     console_print("      tx1_attenuation= for the receiver. gnss_aolc=0 goes back\n");
     console_print("      to the manual gain (gnss_ogain?).\n");
     console_print("   2a. Bench with ONE signal split into RX1+RX2: gnss_mvdr?\n");
-    console_print("      COH_L2 with the jammer OFF must read ABOVE gnss_coh= (4).\n");
-    console_print("      If not, lower it, e.g. gnss_coh=2.\n");
+    console_print("      COH_L2 with the jammer OFF must read ABOVE gnss_coh= (2).\n");
+    console_print("      If not, lower it, e.g. gnss_coh=1.\n");
     console_print("   3. Jammer ON. gnss_mvdr? -- ADC clipping must stay 0, and the\n");
     console_print("      DIAG line should read OK. Clipping = lower the RX gain:\n");
     console_print("      a clipped jammer cannot be nulled.\n");

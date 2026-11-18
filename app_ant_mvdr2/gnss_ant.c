@@ -175,6 +175,11 @@ static void line_jammer(const gm_t *m)
 		return;
 	}
 	if (!m->aj.jammed) {
+		if (m->smi_ok && m->ss.incoh && m->jn >= 1.0) {   /* MOD11 */
+			printf("  JAMMER   CLEAR   in-band noise, RX1/RX2 incoherent (coh %.2f): not a jammer\r\n",
+			       m->ss.coh12);
+			return;
+		}
 		if (m->jn >= 1.0) {
 			printf("  JAMMER   WEAK    J/N %.1f dB at the ADC (under the 6 dB alarm; %s)\r\n",
 			       m->jn, m->stap ? "the null works on it" : "stap=1 nulls it");
@@ -241,7 +246,7 @@ void gnss_ant_menu(void)
 	gnss_autoprint_get(&ks, &rs);
 	snprintf(ag, sizeof(ag), "%dppm", gnss_agc_get_clip_ppm());
 
-	printf("\r\n========== E310 GNSS ANTI-JAM    SMI-STAP 2 x 16 taps    firmware MOD10 ========\r\n");
+	printf("\r\n========== E310 GNSS ANTI-JAM    SMI-STAP 2 x 16 taps    firmware MOD11 ========\r\n");
 	printf(" NOW\r\n");
 	printf("  STATE    %s   [gnss_tx=%d pass=%d stap=%d]\r\n", mode_name(&m), m.tx, m.pass, m.stap);
 	printf("  RADIO    LO %.2f MHz  BW %.0f MHz  %.2f MSPS  band %d%s\r\n",
@@ -266,6 +271,7 @@ void gnss_ant_menu(void)
 	printf(" %c %-11s %-30s %s\r\n", (m.stap && m.ss.pulse_mode) ? '*' : ' ', "+ PULSED",
 	       "power on/off, 4 starts in 2 s", "null held, AGC +1 dB per 5 s");
 	printf("   %-11s %-30s %s\r\n", "none", "J/N under -3 dB for 2 s", "fixed RX1 path (fast lock)");
+	printf("   %-11s %-30s %s\r\n", "", "or RX1/RX2 incoherent (noise)", "MOD11: jammer = coherent >3 dB");
 	printf("   peak -4: jammer peak kept 4 dB under ADC full scale.  narrowed*: only if\r\n");
 	printf("   the jammer reaches outside: band 3 -> 20 MHz, band 2 -> 24 MHz (L1 inside)\r\n");
 
@@ -949,6 +955,7 @@ static void ajbw_tick(void)
 		if (ad9361_set_rx_rf_bandwidth(ad9361_phy, (uint32_t)mhz * 1000000U) == 0) {
 			ajbw_on = 1;
 			ajbw_cur = mhz;
+			gnss_mon_retune();          /* MOD11: the retune glitch is expected */
 			gnss_smi_gain_changed_db(0.0);
 			gnss_rep_event("AJ BAND     RX filter %d MHz (was %.0f): %s jammer%s", mhz, ajbw_saved / 1e6,
 				       gnss_smi_jtype_name(m.ss.jtype), ajbw_mhz == 1 ? " (auto)" : "");
@@ -956,6 +963,7 @@ static void ajbw_tick(void)
 	} else if (ajbw_on && (ajbw_clr_t >= 20 || !ajbw_mhz)) {
 		if (ad9361_set_rx_rf_bandwidth(ad9361_phy, ajbw_saved) == 0) {
 			ajbw_on = 0;
+			gnss_mon_retune();          /* MOD11 */
 			gnss_smi_gain_changed_db(0.0);
 			gnss_rep_event("AJ BAND     RX filter back to %.0f MHz", ajbw_saved / 1e6);
 		}

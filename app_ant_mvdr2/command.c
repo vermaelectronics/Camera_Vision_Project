@@ -192,7 +192,7 @@ command cmd_list[] = {
 	{"gnss_aolc=", "Automatic output level: target in dB below FS (6..40), 0 = off.", "gnss_aolc=24", set_gnss_aolc},
 	{"gnss_iq?", "Receiver IQ-image correction: coefficients (dBc) and updates.", "", get_gnss_iq},
 	{"gnss_iq=", "IQ-image correction: 1 = on, 0 = off, 2 = clear and restart.", "gnss_iq=1", set_gnss_iq},
-	{"gnss_coh=", "Jammer detect: coherence > 2^-N (1..15, default 4). Splitter benches.", "gnss_coh=4", set_gnss_coh},
+	{"gnss_coh=", "Jammer detect: coherence > 2^-N (1..15, default 2). Splitter benches.", "gnss_coh=2", set_gnss_coh},
 	{"gnss_auto=", "1 = redo the whole automatic MVDR start (as at boot), 0 = TX1 silent.", "gnss_auto=1", set_gnss_auto},
 	{"gnss_health?", "Full PASS/WARN/FAIL health check. Changes nothing.", "", get_gnss_health},
 	{"gnss_rxauto=", "1 = level the RX gain (noise -60 dBFS, or 10 dB over the chip floor).", "gnss_rxauto=1", set_gnss_rxauto},
@@ -1824,7 +1824,7 @@ void set_gnss_coh(double* param, char param_no)
 	int32_t r;
 
 	if(param_no < 1) {
-		console_print("gnss_coh= needs 1..15 (default 4)\n");
+		console_print("gnss_coh= needs 1..15 (default 2)\n");
 		return;
 	}
 	n = (long)param[0];

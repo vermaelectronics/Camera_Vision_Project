@@ -205,3 +205,29 @@ periodic printing in main.c. Now:
 - the KPI (10 s) / report (11 s) scheduling is in gnss_ant_poll_events() (every 0.5 s)
   and the spool is sent by gnss_background_tick() (<= 64 bytes per 10 ms).
 - main.c is back to its MOD7 content (no MOD8 code: nothing runs twice).
+
+## MOD11 (18 Nov 2026) -- firmware only: no false jammer on a bench / with coloured antenna noise
+
+Seen on the bench with NO jammer (MOD10): "JAMMED", J/N 21 dB, type WIDEBAND
+then CHIRP, RX gain pushed 61 -> 71 dB, RX filter narrowed to 20 MHz, GPS L1
+cut by 24 dB in the SMI response. Cause: J/N was measured against the
+smallest eigenvalue of R (the AD9361 floor at the band edges). The active
+antennas' own filters make the antenna noise band-limited (~27 MHz around
+1584 MHz), so it looked like a band-limited jammer. RX1/RX2 coherence was
+only 0.09..0.14 (mutual coupling), i.e. not one source seen by both antennas.
+
+* Spatial gate (gnss_smi.c coh_gate): coherent J/N = s/(1-s), s = sqrt(coh12)
+  at the reference taps (no noise estimate needed). Under 0 dB = incoherent:
+  J/N forced to -10 dB -> clean hold (fixed RX1 path), the in-band noise is
+  learned as the noise reference, no jammer type. Coherent again over +3 dB.
+  Not applied when RX1/RX2 power differs by > 12 dB (a source in one antenna).
+* Report / KPI: JAMMER ON needs J/N > 6 dB AND coherent J/N > 3 dB; an
+  incoherent excess clears it after 0.5 s. KPI adds jcoh= and incoh=.
+  The AGC, gnss_ajbw and the steering follow this decision.
+* HDL jammer flag: gnss_coh default 4 -> 2 (coherence > 1/4).
+* Sweep test: a window counts for the chirp/sawtooth frequency track only
+  when narrow (lag-1 correlation > 0.85, was 0.5).
+* RX filter retune (gnss_ajbw): the one FIFO / SMI-overrun glitch it causes
+  is reported once as expected, not as a rate fault.
+* Host test (host5/m11.c): bench coloured noise -> incoh, clean hold, type
+  none; CW 3 / 6 / 30 dB, 3 tones, barrage, chirp, sawtooth, pulsed: as MOD10.

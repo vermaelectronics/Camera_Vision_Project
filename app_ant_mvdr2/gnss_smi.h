@@ -134,6 +134,13 @@ typedef struct {
     double   sweep_lo_hz, sweep_hi_hz;   /* swept range, offset from the LO      */
     double   sweep_period_ms;            /* sawtooth period (0 = unknown)        */
     int      ntones;        /* multi-tone: tones seen (lag-correlation revivals)  */
+    /* MOD11: spatial gate -- a jammer is ONE source seen by BOTH antennas, so
+     * it makes RX1/RX2 coherent. Excess power that is not coherent (antenna /
+     * LNA noise shaped by the antenna's own filter, a hot RX1 LNA, local
+     * noise picked up by one cable) is NOT a jammer and is not nulled. */
+    double   jc_db;         /* coherent J/N equivalent: s/(1-s), s = sqrt(coh12), dB */
+    int      incoh;         /* 1 = excess power is incoherent: no jammer         */
+    uint32_t incoh_n;       /* windows where the gate overruled the J/N          */
 } gnss_smi_state_t;
 
 /* MOD7 jammer types */
