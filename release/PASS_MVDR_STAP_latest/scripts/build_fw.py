@@ -91,7 +91,7 @@ vitis.dispose()
 
 step(5, "bootgen -> BOOT.bin")
 fsbl = find_one(os.path.join(WS, PLAT, "export", PLAT, "sw", "boot", "fsbl.elf"), "fsbl.elf")
-bit = find_one(os.path.join(WS, PLAT, "**", PLAT + ".bit"), "bitstream")
+bit = find_one(os.path.join(WS, PLAT, "**", "*.bit"), "bitstream")
 bif = os.path.join(OUT, "boot.bif")
 with open(bif, "w") as fh:
     fh.write("//arch = zynq; split = false; format = BIN\n")
