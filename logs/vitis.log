@@ -1,0 +1,874 @@
+18:46:02 INFO  : updated workspace path: /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis
+18:46:02 INFO  : Marking the target connection as default Local
+18:46:02 INFO  : Marking the target connection as default Linux Agent
+18:46:02 INFO  : Marking the target connection as default XRTServer
+18:46:02 INFO  : Marking the target connection as default LinuxEmulation
+18:46:02 INFO  : Marking the target connection as default QEMU
+18:46:02 INFO  : created .gitignore file for the project /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis
+18:46:02 INFO  : updated workspace path: /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis
+18:46:02 INFO  : Successfully created repository data at /tmp/rigel_lopper_nishant12972469921763385194
+18:46:02 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//get_template_data.py -d /tmp/rigel_lopper_nishant11711943303479626845 -r /tmp/rigel_lopper_nishant12972469921763385194/.repo.yaml && deactivate
+18:46:03 INFO  : Embedded Template List generated successfully
+18:46:03 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//repo.py -st   /tools/Xilinx/Vitis/2023.2/data/embeddedsw && deactivate
+18:46:03 INFO  : Successfully created repository data at /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis
+18:46:03 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//get_template_data.py -d /tmp/rigel_lopper_nishant3067877125194951014 -r /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/.repo.yaml && deactivate
+18:46:03 INFO  : Embedded Template List generated successfully
+18:46:03 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//get_template_data.py -d /tmp/rigel_lopper_nishant16654211960338911311 -r /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/.repo.yaml && deactivate
+18:46:04 INFO  : Embedded Template List generated successfully
+18:46:31 INFO  : Found no platform with name 'PASS_MVDR_STAP' in install repositories
+18:46:31 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && xsct /tools/Xilinx/Vitis/2023.2/vitisng-server/scripts/platformutil.tcl /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP.xsa /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/.rigel_lopper_temp_platform/PASS_MVDR_STAP/hw/sdt && deactivate
+18:46:39 INFO  : INFO: [Hsi 55-2053] elapsed time for repository (/tools/Xilinx/Vitis/2023.2/data/embeddedsw) loading 0 seconds
+18:46:39 INFO  : WARNING: [Common 17-673] Cannot get value of property 'CONFIG.EDK_SPECIAL' because this property is not valid in conjunction with other property setting on this object.
+18:46:39 INFO  : WARNING: [Common 17-673] Cannot get value of property 'CONFIG.EDK_SPECIAL' because this property is not valid in conjunction with other property setting on this object.
+18:46:39 INFO  : WARNING: [Common 17-673] Cannot get value of property 'CONFIG.EDK_SPECIAL' because this property is not valid in conjunction with other property setting on this object.
+18:46:39 INFO  : WARNING: [Common 17-673] Cannot get value of property 'CONFIG.EDK_SPECIAL' because this property is not valid in conjunction with other property setting on this object.
+18:46:39 INFO  : WARNING: [Common 17-673] Cannot get value of property 'CONFIG.EDK_SPECIAL' because this property is not valid in conjunction with other property setting on this object.
+18:46:39 INFO  : WARNING: [Common 17-673] Cannot get value of property 'CONFIG.EDK_SPECIAL' because this property is not valid in conjunction with other property setting on this object.
+18:46:39 INFO  : WARNING: [Common 17-673] Cannot get value of property 'CONFIG.EDK_SPECIAL' because this property is not valid in conjunction with other property setting on this object.
+18:46:39 INFO  : WARNING: [Common 17-673] Cannot get value of property 'CONFIG.EDK_SPECIAL' because this property is not valid in conjunction with other property setting on this object.
+18:46:39 INFO  : WARNING: [Common 17-673] Cannot get value of property 'CONFIG.EDK_SPECIAL' because this property is not valid in conjunction with other property setting on this object.
+18:46:39 INFO  : WARNING: [Common 17-673] Cannot get value of property 'CONFIG.EDK_SPECIAL' because this property is not valid in conjunction with other property setting on this object.
+18:46:39 INFO  : WARNING: [Common 17-673] Cannot get value of property 'CONFIG.EDK_SPECIAL' because this property is not valid in conjunction with other property setting on this object.
+18:46:39 INFO  : WARNING: [Common 17-673] Cannot get value of property 'CONFIG.EDK_SPECIAL' because this property is not valid in conjunction with other property setting on this object.
+18:46:39 INFO  : WARNING: [Common 17-673] Cannot get value of property 'CONFIG.EDK_SPECIAL' because this property is not valid in conjunction with other property setting on this object.
+18:46:39 INFO  : WARNING: [Common 17-673] Cannot get value of property 'CONFIG.EDK_SPECIAL' because this property is not valid in conjunction with other property setting on this object.
+18:46:39 INFO  : WARNING: [Common 17-673] Cannot get value of property 'CONFIG.EDK_SPECIAL' because this property is not valid in conjunction with other property setting on this object.
+18:46:39 INFO  : WARNING: [Common 17-673] Cannot get value of property 'CONFIG.EDK_SPECIAL' because this property is not valid in conjunction with other property setting on this object.
+18:46:39 INFO  : WARNING: [Common 17-673] Cannot get value of property 'C_QSPI_MODE' because this property is not valid in conjunction with other property setting on this object.
+18:46:39 INFO  : WARNING: [Common 17-673] Cannot get value of property 'C_ETH_MODE' because this property is not valid in conjunction with other property setting on this object.
+18:46:39 INFO  : WARNING: [Common 17-673] Cannot get value of property 'C_CPU_1X_CLK_FREQ_HZ' because this property is not valid in conjunction with other property setting on this object.
+18:46:39 INFO  : WARNING: [Common 17-673] Cannot get value of property 'C_EMIO_GPIO_WIDTH' because this property is not valid in conjunction with other property setting on this object.
+18:46:39 INFO  : WARNING: [Common 17-673] Cannot get value of property 'C_MIO_GPIO_MASK' because this property is not valid in conjunction with other property setting on this object.
+18:46:39 INFO  : SDT generated successfully
+18:46:39 INFO  : Lopper command for cpu List generation: lopper -O /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/.rigel_lopper -f -i /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/lib/python3.8/site-packages/lopper/lops/lop-cpulist.dts /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/.rigel_lopper_temp_platform/PASS_MVDR_STAP/hw/sdt/system-top.dts
+18:46:39 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && lopper -O /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/.rigel_lopper -f -i /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/lib/python3.8/site-packages/lopper/lops/lop-cpulist.dts /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/.rigel_lopper_temp_platform/PASS_MVDR_STAP/hw/sdt/system-top.dts && deactivate
+18:46:40 INFO  : ps7_cortexa9_0
+18:46:40 INFO  : ps7_cortexa9_1
+18:46:40 INFO  : CPU List generated successfully
+18:46:42 INFO  : Platform  PASS_MVDR_STAP creation started.
+18:46:42 INFO  : Found no platform with name 'PASS_MVDR_STAP' in install repositories
+18:46:42 INFO  : Lopper command for cpu List generation: lopper -O /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/.rigel_lopper -f -i /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/lib/python3.8/site-packages/lopper/lops/lop-cpulist.dts /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/hw/sdt/system-top.dts
+18:46:42 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && lopper -O /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/.rigel_lopper -f -i /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/lib/python3.8/site-packages/lopper/lops/lop-cpulist.dts /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/hw/sdt/system-top.dts && deactivate
+18:46:42 INFO  : ps7_cortexa9_0
+18:46:42 INFO  : ps7_cortexa9_1
+18:46:42 INFO  : CPU List generated successfully
+18:46:42 INFO  : SDT generated successfully.
+18:46:42 INFO  : created .gitignore file for the project /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP
+18:46:42 INFO  : ZYNQ: Using the QEMU args from install at  : /tools/Xilinx/Vitis/2023.2/data/emulation/platforms/zynq/sw/a9_linux/qemu/qemu_args.txt
+18:46:42 INFO  : ZYNQ: Using the QEMU args from install at  : /tools/Xilinx/Vitis/2023.2/data/emulation/platforms/zynq/sw/a9_standalone/qemu/qemu_args.txt
+18:46:42 INFO  : ZYNQ: Using the QEMU args from install at  : /tools/Xilinx/Vitis/2023.2/data/emulation/platforms/zynq/sw/a9_standalone/qemu/qemu_args.txt
+18:46:42 INFO  : lopper command to generate BSP :python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//create_bsp.py -w /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/zynq_fsbl/zynq_fsbl_bsp -p ps7_cortexa9_0 -o standalone -s /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/hw/sdt/system-top.dts -t zynq_fsbl -r /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/.repo.yaml
+18:46:42 INFO  : lopper command to generate BSP :python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//create_bsp.py -w /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/ps7_cortexa9_0/standalone_ps7_cortexa9_0/bsp -p ps7_cortexa9_0 -o standalone -s /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/hw/sdt/system-top.dts -t empty_application -r /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/.repo.yaml
+18:46:42 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//create_bsp.py -w /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/ps7_cortexa9_0/standalone_ps7_cortexa9_0/bsp -p ps7_cortexa9_0 -o standalone -s /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/hw/sdt/system-top.dts -t empty_application -r /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/.repo.yaml && deactivate
+18:46:42 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//create_bsp.py -w /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/zynq_fsbl/zynq_fsbl_bsp -p ps7_cortexa9_0 -o standalone -s /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/hw/sdt/system-top.dts -t zynq_fsbl -r /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/.repo.yaml && deactivate
+18:46:50 INFO  : -- The C compiler identification is GNU 12.2.0
+18:46:50 INFO  : -- The CXX compiler identification is GNU 12.2.0
+18:46:50 INFO  : -- Detecting C compiler ABI info
+18:46:50 INFO  : -- Detecting C compiler ABI info - done
+18:46:50 INFO  : -- Check for working C compiler: /tools/Xilinx/Vitis/2023.2/gnu/aarch32/lin/gcc-arm-none-eabi/bin/arm-none-eabi-gcc - skipped
+18:46:50 INFO  : -- Detecting C compile features
+18:46:50 INFO  : -- Detecting C compile features - done
+18:46:50 INFO  : -- Detecting CXX compiler ABI info
+18:46:50 INFO  : -- Detecting CXX compiler ABI info - done
+18:46:50 INFO  : -- Check for working CXX compiler: /tools/Xilinx/Vitis/2023.2/gnu/aarch32/lin/gcc-arm-none-eabi/bin/arm-none-eabi-g++ - skipped
+18:46:50 INFO  : -- Detecting CXX compile features
+18:46:50 INFO  : -- Detecting CXX compile features - done
+18:46:50 INFO  : -- Configuring done
+18:46:50 INFO  : -- Generating done
+18:46:50 INFO  : CMake Warning:
+18:46:50 INFO  :   Manually-specified variables were not used by the project:
+18:46:50 INFO  : 
+18:46:50 INFO  :     CMAKE_LIBRARY_PATH
+18:46:50 INFO  : 
+18:46:50 INFO  : 
+18:46:50 INFO  : -- Build files have been written to: /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/zynq_fsbl/zynq_fsbl_bsp/libsrc/build_configs/gen_bsp
+18:46:50 INFO  : Successfully created Domain at /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/zynq_fsbl/zynq_fsbl_bsp
+18:46:50 INFO  : Successfully Generated Domain /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/zynq_fsbl/zynq_fsbl_bsp
+18:46:50 INFO  : lopper command to create baremetal application :python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//create_app.py -s /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/zynq_fsbl -t zynq_fsbl -d /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/zynq_fsbl/zynq_fsbl_bsp -n fsbl -r /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/.repo.yaml
+18:46:50 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//validate_bsp.py -t zynq_fsbl -d /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/zynq_fsbl/zynq_fsbl_bsp -r /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/.repo.yaml && deactivate
+18:46:50 INFO  : -- The C compiler identification is GNU 12.2.0
+18:46:50 INFO  : -- The CXX compiler identification is GNU 12.2.0
+18:46:50 INFO  : -- Detecting C compiler ABI info
+18:46:50 INFO  : -- Detecting C compiler ABI info - done
+18:46:50 INFO  : -- Check for working C compiler: /tools/Xilinx/Vitis/2023.2/gnu/aarch32/lin/gcc-arm-none-eabi/bin/arm-none-eabi-gcc - skipped
+18:46:50 INFO  : -- Detecting C compile features
+18:46:50 INFO  : -- Detecting C compile features - done
+18:46:50 INFO  : -- Detecting CXX compiler ABI info
+18:46:50 INFO  : -- Detecting CXX compiler ABI info - done
+18:46:50 INFO  : -- Check for working CXX compiler: /tools/Xilinx/Vitis/2023.2/gnu/aarch32/lin/gcc-arm-none-eabi/bin/arm-none-eabi-g++ - skipped
+18:46:50 INFO  : -- Detecting CXX compile features
+18:46:50 INFO  : -- Detecting CXX compile features - done
+18:46:50 INFO  : -- Configuring done
+18:46:50 INFO  : -- Generating done
+18:46:50 INFO  : CMake Warning:
+18:46:50 INFO  :   Manually-specified variables were not used by the project:
+18:46:50 INFO  : 
+18:46:50 INFO  :     CMAKE_LIBRARY_PATH
+18:46:50 INFO  : 
+18:46:50 INFO  : 
+18:46:50 INFO  : -- Build files have been written to: /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/ps7_cortexa9_0/standalone_ps7_cortexa9_0/bsp/libsrc/build_configs/gen_bsp
+18:46:50 INFO  : Successfully created Domain at /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/ps7_cortexa9_0/standalone_ps7_cortexa9_0/bsp
+18:46:50 INFO  : Successfully Generated Domain /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/ps7_cortexa9_0/standalone_ps7_cortexa9_0/bsp
+18:46:50 INFO  : Domain standalone_ps7_cortexa9_0 added successfully.
+18:46:50 INFO  : Successfully validated template zynq_fsbl
+18:46:50 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//create_app.py -s /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/zynq_fsbl -t zynq_fsbl -d /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/zynq_fsbl/zynq_fsbl_bsp -n fsbl -r /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/.repo.yaml && deactivate
+18:46:52 INFO  : Successfully Created Application sources at /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/zynq_fsbl
+18:46:52 INFO  : Successfully created Application /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/zynq_fsbl
+18:46:52 INFO  : Platform FSBL Boot domain added successfully.
+18:46:52 INFO  : Platform creation finished successfully.
+18:46:52 INFO  : Platform Quick Build initiated.
+18:46:52 INFO  : Generating Export directory
+18:46:52 INFO  : Generated platform metadata for creating application(s) based on platform PASS_MVDR_STAP.
+18:47:11 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//validate_bsp.py -t empty_application -d /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/export/PASS_MVDR_STAP/sw/standalone_ps7_cortexa9_0 -r /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/.repo.yaml && deactivate
+18:47:12 INFO  : Successfully validated template empty_application
+18:47:17 INFO  : lopper command to create baremetal application :python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//create_app.py -s /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/src -t empty_application -d /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/export/PASS_MVDR_STAP/sw/standalone_ps7_cortexa9_0 -n PASS_MVDR_STAP_test -r /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/.repo.yaml
+18:47:17 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//validate_bsp.py -t empty_application -d /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/export/PASS_MVDR_STAP/sw/standalone_ps7_cortexa9_0 -r /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/.repo.yaml && deactivate
+18:47:18 INFO  : Successfully validated template empty_application
+18:47:18 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//create_app.py -s /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/src -t empty_application -d /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/export/PASS_MVDR_STAP/sw/standalone_ps7_cortexa9_0 -n PASS_MVDR_STAP_test -r /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/.repo.yaml && deactivate
+18:47:19 INFO  : CMake Warning:
+18:47:19 INFO  :   Manually-specified variables were not used by the project:
+18:47:19 INFO  : 
+18:47:19 INFO  :     CMAKE_LIBRARY_PATH
+18:47:19 INFO  : 
+18:47:19 INFO  : 
+18:47:19 INFO  : Successfully Created Application sources at /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/src
+18:47:19 INFO  : Successfully created Application /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/src
+18:47:19 INFO  : created .gitignore file for the project /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test
+18:47:19 INFO  : The hardware specification used by project '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test' is out of sync with the platform. Resource files extracted from the hardware specification will be updated.
+18:47:19 INFO  : The updated bitstream files are copied from platform to folder '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/bitstream' in project '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test'.
+18:47:19 INFO  : The updated ps init files are copied from platform to folder '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/psinit' in project '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test'.
+18:47:42 INFO  : BSP build will be initiated for Domain zynq_fsbl
+18:47:42 INFO  : BSP build will be initiated for Domain standalone_ps7_cortexa9_0
+18:47:42 INFO  : Generating BSP for the domain /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/zynq_fsbl/zynq_fsbl_bsp
+18:47:42 INFO  : Generating BSP for the domain /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/ps7_cortexa9_0/standalone_ps7_cortexa9_0/bsp
+18:47:42 INFO  : lopper command to build BSP :python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//build_bsp.py -d /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/zynq_fsbl/zynq_fsbl_bsp
+18:47:42 INFO  : lopper command to build BSP :python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//build_bsp.py -d /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/ps7_cortexa9_0/standalone_ps7_cortexa9_0/bsp
+18:47:42 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//build_bsp.py -d /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/zynq_fsbl/zynq_fsbl_bsp && deactivate
+18:47:42 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//build_bsp.py -d /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/ps7_cortexa9_0/standalone_ps7_cortexa9_0/bsp && deactivate
+18:47:45 INFO  : Domain build successfully
+18:47:46 INFO  : Domain build successfully
+18:47:46 INFO  : Generating Boot ELFs
+18:47:46 INFO  : lopper command to build baremetal application :python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//build_app.py -s /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/zynq_fsbl -b /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/zynq_fsbl/build
+18:47:46 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//build_app.py -s /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/zynq_fsbl -b /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/zynq_fsbl/build && deactivate
+18:47:47 INFO  : Successfully building the baremetal application/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/zynq_fsbl/build
+18:47:47 INFO  : Generating Export directory
+18:47:47 INFO  : Platform Build Finished successfully.
+18:47:49 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//build_app.py -s /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/src -b /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/build && deactivate
+18:47:50 ERROR : PASS_MVDR_STAP_test build failed. 
+18:48:10 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//build_app.py -s /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/src -b /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/build && deactivate
+18:48:11 ERROR : PASS_MVDR_STAP_test build failed. 
+18:56:42 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//build_app.py -s /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/src -b /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/build && deactivate
+18:56:42 ERROR : PASS_MVDR_STAP_test build failed. 
+18:57:10 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//build_app.py -s /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/src -b /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/build && deactivate
+18:57:18 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//build_app.py -s /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/src -b /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/build && deactivate
+18:57:43 INFO  : XSDB server has started successfully from frontend.
+18:57:43 INFO  : It has taken  1secs.
+18:57:44 INFO  : Connection to XSDB Server established.
+18:57:44 INFO  : It has taken  1secs.
+18:57:44 INFO  : Done
+18:57:44 INFO  : connect -url tcp:127.0.0.1:3121
+18:57:45 INFO  : bpremove -all
+18:57:45 INFO  : Context for 'APU' is selected.
+18:57:45 INFO  : System reset is completed.
+18:57:48 INFO  : 'after 3000' command is executed.
+18:57:48 INFO  : 'targets -set -filter {jtag_cable_name =~ "Digilent Zybo 210279334932A" && level==0 && jtag_device_ctx=="jsn-Zybo-210279334932A-23727093-0"}' command is executed.
+18:57:50 INFO  : Device configured successfully with "/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/bitstream/PASS_MVDR_STAP.bit"
+18:57:50 INFO  : targets -set -nocase -filter {name =~"APU*"}
+18:57:50 INFO  : loadhw -hw /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/export/PASS_MVDR_STAP/hw/PASS_MVDR_STAP.xsa -mem-ranges [list {0x40000000 0xbfffffff}]
+18:57:50 INFO  : configparams force-mem-access 1
+18:57:50 INFO  : targets -set -nocase -filter {name =~"APU*"}
+18:57:50 INFO  : source /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/psinit/ps7_init.tcl
+18:57:50 INFO  : ps7_init
+18:57:50 INFO  : ps7_post_config
+18:57:50 INFO  : targets -set -nocase -filter {name =~ "*A9*#0"}
+18:57:50 INFO  : rst -processor
+18:57:51 INFO  : dow /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/build/PASS_MVDR_STAP_test.elf
+18:57:51 INFO  : con
+18:57:51 INFO  : configparams force-mem-access 0
+18:57:52 INFO  : Testing the connection for 127.0.0.1
+19:00:13 INFO  : The updated bitstream files are copied from platform to folder '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/bitstream' in project '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test'.
+19:00:13 INFO  : The updated ps init files are copied from platform to folder '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/psinit' in project '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test'.
+19:01:57 INFO  : disconnect
+20:23:55 INFO  : Terminating Vitis C++ Server
+09:37:18 INFO  : updated workspace path: /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis
+09:37:18 INFO  : created .gitignore file for the project /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis
+09:37:18 INFO  : updated workspace path: /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis
+09:37:19 INFO  : Successfully created repository data at /tmp/rigel_lopper_nishant7823222190501319794
+09:37:19 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//get_template_data.py -d /tmp/rigel_lopper_nishant17531342173024483201 -r /tmp/rigel_lopper_nishant7823222190501319794/.repo.yaml && deactivate
+09:37:19 INFO  : Embedded Template List generated successfully
+09:37:19 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//get_template_data.py -d /tmp/rigel_lopper_nishant2678008052134775667 -r /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/.repo.yaml && deactivate
+09:37:19 INFO  : Embedded Template List generated successfully
+09:37:19 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//get_template_data.py -d /tmp/rigel_lopper_nishant15845949196669725580 -r /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/.repo.yaml && deactivate
+09:37:19 INFO  : Embedded Template List generated successfully
+09:38:10 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//build_app.py -s /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/src -b /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/build && deactivate
+09:38:28 INFO  : XSDB server has started successfully from frontend.
+09:38:28 INFO  : It has taken  2secs.
+09:38:29 INFO  : Connection to XSDB Server established.
+09:38:29 INFO  : It has taken  1secs.
+09:38:29 INFO  : connect -url tcp:127.0.0.1:3121
+09:38:29 INFO  : Done
+09:38:30 INFO  : bpremove -all
+09:38:30 INFO  : Context for 'APU' is selected.
+09:38:30 INFO  : System reset is completed.
+09:38:33 INFO  : 'after 3000' command is executed.
+09:38:33 INFO  : 'targets -set -filter {jtag_cable_name =~ "Digilent Zybo 210279334932A" && level==0 && jtag_device_ctx=="jsn-Zybo-210279334932A-23727093-0"}' command is executed.
+09:38:34 INFO  : Device configured successfully with "/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/bitstream/PASS_MVDR_STAP.bit"
+09:38:34 INFO  : targets -set -nocase -filter {name =~"APU*"}
+09:38:35 INFO  : loadhw -hw /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/export/PASS_MVDR_STAP/hw/PASS_MVDR_STAP.xsa -mem-ranges [list {0x40000000 0xbfffffff}]
+09:38:35 INFO  : configparams force-mem-access 1
+09:38:35 INFO  : targets -set -nocase -filter {name =~"APU*"}
+09:38:35 INFO  : source /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/psinit/ps7_init.tcl
+09:38:35 INFO  : ps7_init
+09:38:35 INFO  : ps7_post_config
+09:38:35 INFO  : targets -set -nocase -filter {name =~ "*A9*#0"}
+09:38:35 INFO  : rst -processor
+09:38:36 INFO  : dow /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/build/PASS_MVDR_STAP_test.elf
+09:38:36 INFO  : con
+09:38:36 INFO  : configparams force-mem-access 0
+09:38:37 INFO  : Testing the connection for 127.0.0.1
+10:02:42 INFO  : disconnect
+10:07:19 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//build_app.py -s /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/src -b /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/build && deactivate
+10:07:26 INFO  : The updated bitstream files are copied from platform to folder '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/bitstream' in project '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test'.
+10:07:26 INFO  : The updated ps init files are copied from platform to folder '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/psinit' in project '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test'.
+11:50:01 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//build_app.py -s /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/src -b /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/build && deactivate
+11:51:14 INFO  : connect -url tcp:127.0.0.1:3121
+11:51:14 INFO  : bpremove -all
+11:51:14 INFO  : Context for 'APU' is selected.
+11:51:14 INFO  : System reset is completed.
+11:51:17 INFO  : 'after 3000' command is executed.
+11:51:18 INFO  : 'targets -set -filter {jtag_cable_name =~ "Digilent Zybo 210279334932A" && level==0 && jtag_device_ctx=="jsn-Zybo-210279334932A-23727093-0"}' command is executed.
+11:51:19 INFO  : Device configured successfully with "/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/bitstream/PASS_MVDR_STAP.bit"
+11:51:19 INFO  : targets -set -nocase -filter {name =~"APU*"}
+11:51:20 INFO  : loadhw -hw /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/export/PASS_MVDR_STAP/hw/PASS_MVDR_STAP.xsa -mem-ranges [list {0x40000000 0xbfffffff}]
+11:51:20 INFO  : configparams force-mem-access 1
+11:51:20 INFO  : targets -set -nocase -filter {name =~"APU*"}
+11:51:20 INFO  : source /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/psinit/ps7_init.tcl
+11:51:20 INFO  : ps7_init
+11:51:20 INFO  : ps7_post_config
+11:51:20 INFO  : targets -set -nocase -filter {name =~ "*A9*#0"}
+11:51:20 INFO  : rst -processor
+11:51:22 INFO  : dow /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/build/PASS_MVDR_STAP_test.elf
+11:51:22 INFO  : con
+11:51:22 INFO  : configparams force-mem-access 0
+11:51:23 INFO  : Testing the connection for 127.0.0.1
+12:10:14 INFO  : connect -url tcp:127.0.0.1:3121
+12:10:14 INFO  : bpremove -all
+12:10:14 INFO  : Context for 'APU' is selected.
+12:10:14 INFO  : System reset is completed.
+12:10:17 INFO  : 'after 3000' command is executed.
+12:10:17 INFO  : 'targets -set -filter {jtag_cable_name =~ "Digilent Zybo 210279334932A" && level==0 && jtag_device_ctx=="jsn-Zybo-210279334932A-23727093-0"}' command is executed.
+12:10:19 INFO  : Device configured successfully with "/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/bitstream/PASS_MVDR_STAP.bit"
+12:10:19 INFO  : targets -set -nocase -filter {name =~"APU*"}
+12:10:19 INFO  : loadhw -hw /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/export/PASS_MVDR_STAP/hw/PASS_MVDR_STAP.xsa -mem-ranges [list {0x40000000 0xbfffffff}]
+12:10:19 INFO  : configparams force-mem-access 1
+12:10:19 INFO  : targets -set -nocase -filter {name =~"APU*"}
+12:10:19 INFO  : source /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/psinit/ps7_init.tcl
+12:10:19 INFO  : ps7_init
+12:10:19 INFO  : ps7_post_config
+12:10:19 INFO  : targets -set -nocase -filter {name =~ "*A9*#0"}
+12:10:19 INFO  : rst -processor
+12:10:20 INFO  : dow /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/build/PASS_MVDR_STAP_test.elf
+12:10:20 INFO  : con
+12:10:20 INFO  : configparams force-mem-access 0
+12:10:21 INFO  : Testing the connection for 127.0.0.1
+12:13:33 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//build_app.py -s /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/src -b /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/build && deactivate
+12:13:35 INFO  : connect -url tcp:127.0.0.1:3121
+12:13:35 INFO  : bpremove -all
+12:13:35 INFO  : Context for 'APU' is selected.
+12:13:35 INFO  : System reset is completed.
+12:13:38 INFO  : 'after 3000' command is executed.
+12:13:38 INFO  : 'targets -set -filter {jtag_cable_name =~ "Digilent Zybo 210279334932A" && level==0 && jtag_device_ctx=="jsn-Zybo-210279334932A-23727093-0"}' command is executed.
+12:13:39 INFO  : Device configured successfully with "/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/bitstream/PASS_MVDR_STAP.bit"
+12:13:39 INFO  : targets -set -nocase -filter {name =~"APU*"}
+12:13:39 INFO  : loadhw -hw /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/export/PASS_MVDR_STAP/hw/PASS_MVDR_STAP.xsa -mem-ranges [list {0x40000000 0xbfffffff}]
+12:13:39 INFO  : configparams force-mem-access 1
+12:13:39 INFO  : targets -set -nocase -filter {name =~"APU*"}
+12:13:39 INFO  : source /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/psinit/ps7_init.tcl
+12:13:39 INFO  : ps7_init
+12:13:39 INFO  : ps7_post_config
+12:13:39 INFO  : targets -set -nocase -filter {name =~ "*A9*#0"}
+12:13:40 INFO  : rst -processor
+12:13:41 INFO  : dow /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/build/PASS_MVDR_STAP_test.elf
+12:13:41 INFO  : con
+12:13:41 INFO  : configparams force-mem-access 0
+12:13:42 INFO  : Testing the connection for 127.0.0.1
+12:16:48 INFO  : connect -url tcp:127.0.0.1:3121
+12:16:48 INFO  : bpremove -all
+12:16:48 INFO  : Context for 'APU' is selected.
+12:16:48 INFO  : System reset is completed.
+12:16:51 INFO  : 'after 3000' command is executed.
+12:16:51 INFO  : 'targets -set -filter {jtag_cable_name =~ "Digilent Zybo 210279334932A" && level==0 && jtag_device_ctx=="jsn-Zybo-210279334932A-23727093-0"}' command is executed.
+12:16:53 INFO  : Device configured successfully with "/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/bitstream/PASS_MVDR_STAP.bit"
+12:16:53 INFO  : targets -set -nocase -filter {name =~"APU*"}
+12:16:53 INFO  : loadhw -hw /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/export/PASS_MVDR_STAP/hw/PASS_MVDR_STAP.xsa -mem-ranges [list {0x40000000 0xbfffffff}]
+12:16:53 INFO  : configparams force-mem-access 1
+12:16:53 INFO  : targets -set -nocase -filter {name =~"APU*"}
+12:16:53 INFO  : source /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/psinit/ps7_init.tcl
+12:16:53 INFO  : ps7_init
+12:16:53 INFO  : ps7_post_config
+12:16:53 INFO  : targets -set -nocase -filter {name =~ "*A9*#0"}
+12:16:53 INFO  : rst -processor
+12:16:54 INFO  : dow /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/build/PASS_MVDR_STAP_test.elf
+12:16:54 INFO  : con
+12:16:54 INFO  : configparams force-mem-access 0
+12:16:55 INFO  : Testing the connection for 127.0.0.1
+12:22:09 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//build_app.py -s /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/src -b /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/build && deactivate
+12:22:11 INFO  : connect -url tcp:127.0.0.1:3121
+12:22:11 INFO  : bpremove -all
+12:22:11 INFO  : Context for 'APU' is selected.
+12:22:11 INFO  : System reset is completed.
+12:22:14 INFO  : 'after 3000' command is executed.
+12:22:14 INFO  : 'targets -set -filter {jtag_cable_name =~ "Digilent Zybo 210279334932A" && level==0 && jtag_device_ctx=="jsn-Zybo-210279334932A-23727093-0"}' command is executed.
+12:22:15 INFO  : Device configured successfully with "/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/bitstream/PASS_MVDR_STAP.bit"
+12:22:15 INFO  : targets -set -nocase -filter {name =~"APU*"}
+12:22:15 INFO  : loadhw -hw /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/export/PASS_MVDR_STAP/hw/PASS_MVDR_STAP.xsa -mem-ranges [list {0x40000000 0xbfffffff}]
+12:22:15 INFO  : configparams force-mem-access 1
+12:22:15 INFO  : targets -set -nocase -filter {name =~"APU*"}
+12:22:15 INFO  : source /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/psinit/ps7_init.tcl
+12:22:16 INFO  : ps7_init
+12:22:16 INFO  : ps7_post_config
+12:22:16 INFO  : targets -set -nocase -filter {name =~ "*A9*#0"}
+12:22:16 INFO  : rst -processor
+12:22:17 INFO  : dow /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/build/PASS_MVDR_STAP_test.elf
+12:22:17 INFO  : con
+12:22:17 INFO  : configparams force-mem-access 0
+12:22:18 INFO  : Testing the connection for 127.0.0.1
+12:29:13 INFO  : The updated bitstream files are copied from platform to folder '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/bitstream' in project '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test'.
+12:29:13 INFO  : The updated ps init files are copied from platform to folder '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/psinit' in project '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test'.
+12:34:20 INFO  : disconnect
+15:11:13 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//build_app.py -s /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/src -b /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/build && deactivate
+15:11:38 INFO  : connect -url tcp:127.0.0.1:3121
+15:11:38 INFO  : bpremove -all
+15:11:38 INFO  : Context for 'APU' is selected.
+15:11:38 INFO  : System reset is completed.
+15:11:41 INFO  : 'after 3000' command is executed.
+15:11:41 INFO  : 'targets -set -filter {jtag_cable_name =~ "Digilent Zybo 210279334932A" && level==0 && jtag_device_ctx=="jsn-Zybo-210279334932A-23727093-0"}' command is executed.
+15:11:43 INFO  : Device configured successfully with "/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/bitstream/PASS_MVDR_STAP.bit"
+15:11:43 INFO  : targets -set -nocase -filter {name =~"APU*"}
+15:11:44 INFO  : loadhw -hw /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/export/PASS_MVDR_STAP/hw/PASS_MVDR_STAP.xsa -mem-ranges [list {0x40000000 0xbfffffff}]
+15:11:44 INFO  : configparams force-mem-access 1
+15:11:44 INFO  : targets -set -nocase -filter {name =~"APU*"}
+15:11:44 INFO  : source /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/psinit/ps7_init.tcl
+15:11:44 INFO  : ps7_init
+15:11:44 INFO  : ps7_post_config
+15:11:44 INFO  : targets -set -nocase -filter {name =~ "*A9*#0"}
+15:11:44 INFO  : rst -processor
+15:11:45 INFO  : dow /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/build/PASS_MVDR_STAP_test.elf
+15:11:45 INFO  : con
+15:11:45 INFO  : configparams force-mem-access 0
+15:11:46 INFO  : Testing the connection for 127.0.0.1
+15:26:16 INFO  : Found no platform with name 'LVDS_MVDR_STAP' in install repositories
+15:26:16 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && xsct /tools/Xilinx/Vitis/2023.2/vitisng-server/scripts/platformutil.tcl /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/LVDS_MVDR_STAP/LVDS_MVDR_STAP.xsa /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/.rigel_lopper_temp_platform/LVDS_MVDR_STAP/hw/sdt && deactivate
+15:26:24 INFO  : INFO: [Hsi 55-2053] elapsed time for repository (/tools/Xilinx/Vitis/2023.2/data/embeddedsw) loading 0 seconds
+15:26:24 INFO  : WARNING: [Common 17-673] Cannot get value of property 'CONFIG.EDK_SPECIAL' because this property is not valid in conjunction with other property setting on this object.
+15:26:24 INFO  : WARNING: [Common 17-673] Cannot get value of property 'CONFIG.EDK_SPECIAL' because this property is not valid in conjunction with other property setting on this object.
+15:26:24 INFO  : WARNING: [Common 17-673] Cannot get value of property 'CONFIG.EDK_SPECIAL' because this property is not valid in conjunction with other property setting on this object.
+15:26:24 INFO  : WARNING: [Common 17-673] Cannot get value of property 'CONFIG.EDK_SPECIAL' because this property is not valid in conjunction with other property setting on this object.
+15:26:24 INFO  : WARNING: [Common 17-673] Cannot get value of property 'CONFIG.EDK_SPECIAL' because this property is not valid in conjunction with other property setting on this object.
+15:26:24 INFO  : WARNING: [Common 17-673] Cannot get value of property 'CONFIG.EDK_SPECIAL' because this property is not valid in conjunction with other property setting on this object.
+15:26:24 INFO  : WARNING: [Common 17-673] Cannot get value of property 'CONFIG.EDK_SPECIAL' because this property is not valid in conjunction with other property setting on this object.
+15:26:24 INFO  : WARNING: [Common 17-673] Cannot get value of property 'CONFIG.EDK_SPECIAL' because this property is not valid in conjunction with other property setting on this object.
+15:26:24 INFO  : WARNING: [Common 17-673] Cannot get value of property 'CONFIG.EDK_SPECIAL' because this property is not valid in conjunction with other property setting on this object.
+15:26:24 INFO  : WARNING: [Common 17-673] Cannot get value of property 'CONFIG.EDK_SPECIAL' because this property is not valid in conjunction with other property setting on this object.
+15:26:24 INFO  : WARNING: [Common 17-673] Cannot get value of property 'CONFIG.EDK_SPECIAL' because this property is not valid in conjunction with other property setting on this object.
+15:26:24 INFO  : WARNING: [Common 17-673] Cannot get value of property 'CONFIG.EDK_SPECIAL' because this property is not valid in conjunction with other property setting on this object.
+15:26:24 INFO  : WARNING: [Common 17-673] Cannot get value of property 'CONFIG.EDK_SPECIAL' because this property is not valid in conjunction with other property setting on this object.
+15:26:24 INFO  : WARNING: [Common 17-673] Cannot get value of property 'CONFIG.EDK_SPECIAL' because this property is not valid in conjunction with other property setting on this object.
+15:26:24 INFO  : WARNING: [Common 17-673] Cannot get value of property 'CONFIG.EDK_SPECIAL' because this property is not valid in conjunction with other property setting on this object.
+15:26:24 INFO  : WARNING: [Common 17-673] Cannot get value of property 'CONFIG.EDK_SPECIAL' because this property is not valid in conjunction with other property setting on this object.
+15:26:24 INFO  : WARNING: [Common 17-673] Cannot get value of property 'C_QSPI_MODE' because this property is not valid in conjunction with other property setting on this object.
+15:26:24 INFO  : WARNING: [Common 17-673] Cannot get value of property 'C_ETH_MODE' because this property is not valid in conjunction with other property setting on this object.
+15:26:24 INFO  : WARNING: [Common 17-673] Cannot get value of property 'C_CPU_1X_CLK_FREQ_HZ' because this property is not valid in conjunction with other property setting on this object.
+15:26:24 INFO  : WARNING: [Common 17-673] Cannot get value of property 'C_EMIO_GPIO_WIDTH' because this property is not valid in conjunction with other property setting on this object.
+15:26:24 INFO  : WARNING: [Common 17-673] Cannot get value of property 'C_MIO_GPIO_MASK' because this property is not valid in conjunction with other property setting on this object.
+15:26:24 INFO  : SDT generated successfully
+15:26:24 INFO  : Lopper command for cpu List generation: lopper -O /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/.rigel_lopper -f -i /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/lib/python3.8/site-packages/lopper/lops/lop-cpulist.dts /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/.rigel_lopper_temp_platform/LVDS_MVDR_STAP/hw/sdt/system-top.dts
+15:26:24 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && lopper -O /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/.rigel_lopper -f -i /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/lib/python3.8/site-packages/lopper/lops/lop-cpulist.dts /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/.rigel_lopper_temp_platform/LVDS_MVDR_STAP/hw/sdt/system-top.dts && deactivate
+15:26:24 INFO  : ps7_cortexa9_0
+15:26:24 INFO  : ps7_cortexa9_1
+15:26:24 INFO  : CPU List generated successfully
+15:26:32 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//get_template_data.py -d /tmp/rigel_lopper_nishant734708981782805137 -r /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/.repo.yaml && deactivate
+15:26:32 INFO  : created .gitignore file for the project /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/LVDS_MVDR_STAP/LVDRMVDR_STAP_Vitis
+15:32:34 INFO  : updated workspace path: /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis
+15:32:34 INFO  : created .gitignore file for the project /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis
+15:32:34 INFO  : updated workspace path: /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis
+15:32:34 INFO  : Embedded Template List generated successfully
+15:32:34 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//get_template_data.py -d /tmp/rigel_lopper_nishant15688536576894676829 -r /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/.repo.yaml && deactivate
+15:32:34 INFO  : Embedded Template List generated successfully
+15:32:34 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//get_template_data.py -d /tmp/rigel_lopper_nishant17292321621061035242 -r /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/.repo.yaml && deactivate
+15:32:34 INFO  : Embedded Template List generated successfully
+15:32:58 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//build_app.py -s /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/src -b /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/build && deactivate
+15:40:13 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//get_template_data.py -d /tmp/rigel_lopper_nishant3272297383119971267 -r /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/.repo.yaml && deactivate
+15:40:13 INFO  : created .gitignore file for the project /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/LVDS_MVDR_STAP/LVDRMVDR_STAP_Vitis
+15:48:45 INFO  : updated workspace path: /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis
+15:48:45 INFO  : created .gitignore file for the project /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis
+15:48:45 INFO  : updated workspace path: /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis
+15:48:45 INFO  : Embedded Template List generated successfully
+15:48:45 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//get_template_data.py -d /tmp/rigel_lopper_nishant15804419389966047593 -r /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/.repo.yaml && deactivate
+15:48:45 INFO  : Embedded Template List generated successfully
+15:48:45 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//get_template_data.py -d /tmp/rigel_lopper_nishant2398829189239171001 -r /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/.repo.yaml && deactivate
+15:48:45 INFO  : Embedded Template List generated successfully
+15:05:42 INFO  : updated workspace path: /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis
+15:05:42 INFO  : created .gitignore file for the project /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis
+15:05:42 INFO  : updated workspace path: /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis
+15:05:42 INFO  : Embedded Template List generated successfully
+15:05:42 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//get_template_data.py -d /tmp/rigel_lopper_nishant16851667026091860316 -r /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/.repo.yaml && deactivate
+15:05:42 INFO  : Embedded Template List generated successfully
+15:05:42 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//get_template_data.py -d /tmp/rigel_lopper_nishant8557038270318625327 -r /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/.repo.yaml && deactivate
+15:05:42 INFO  : Embedded Template List generated successfully
+15:06:03 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//build_app.py -s /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/src -b /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/build && deactivate
+15:06:21 INFO  : connect -url tcp:127.0.0.1:3121
+15:06:22 INFO  : bpremove -all
+15:06:22 INFO  : Context for 'APU' is selected.
+15:06:22 INFO  : System reset is completed.
+15:06:25 INFO  : 'after 3000' command is executed.
+15:06:25 INFO  : 'targets -set -filter {jtag_cable_name =~ "Digilent Zybo 210279334932A" && level==0 && jtag_device_ctx=="jsn-Zybo-210279334932A-23727093-0"}' command is executed.
+15:06:26 INFO  : Device configured successfully with "/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/bitstream/PASS_MVDR_STAP.bit"
+15:06:27 INFO  : targets -set -nocase -filter {name =~"APU*"}
+15:06:27 INFO  : loadhw -hw /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/export/PASS_MVDR_STAP/hw/PASS_MVDR_STAP.xsa -mem-ranges [list {0x40000000 0xbfffffff}]
+15:06:27 INFO  : configparams force-mem-access 1
+15:06:27 INFO  : targets -set -nocase -filter {name =~"APU*"}
+15:06:27 INFO  : source /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/psinit/ps7_init.tcl
+15:06:27 INFO  : ps7_init
+15:06:27 INFO  : ps7_post_config
+15:06:27 INFO  : targets -set -nocase -filter {name =~ "*A9*#0"}
+15:06:27 INFO  : rst -processor
+15:06:28 INFO  : dow /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/build/PASS_MVDR_STAP_test.elf
+15:06:28 INFO  : con
+15:06:28 INFO  : configparams force-mem-access 0
+15:06:29 INFO  : Testing the connection for 127.0.0.1
+15:14:23 INFO  : The updated bitstream files are copied from platform to folder '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/bitstream' in project '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test'.
+15:14:23 INFO  : The updated ps init files are copied from platform to folder '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/psinit' in project '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test'.
+15:14:56 INFO  : The updated bitstream files are copied from platform to folder '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/bitstream' in project '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test'.
+15:14:56 INFO  : The updated ps init files are copied from platform to folder '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/psinit' in project '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test'.
+15:15:40 INFO  : disconnect
+15:17:21 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//get_template_data.py -d /tmp/rigel_lopper_nishant6309685589460118917 -r /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/.repo.yaml && deactivate
+15:17:21 INFO  : created .gitignore file for the project /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Passthrough_LVDS_SFAP/LVDS_SFAP_Vitis
+10:31:14 INFO  : updated workspace path: /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis
+10:31:14 INFO  : created .gitignore file for the project /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis
+10:31:14 INFO  : updated workspace path: /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis
+10:31:14 INFO  : Successfully created repository data at /tmp/rigel_lopper_nishant15177727267989162688
+10:31:14 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//get_template_data.py -d /tmp/rigel_lopper_nishant12555768570721767745 -r /tmp/rigel_lopper_nishant15177727267989162688/.repo.yaml && deactivate
+10:31:14 INFO  : Embedded Template List generated successfully
+10:31:14 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//get_template_data.py -d /tmp/rigel_lopper_nishant7073722283464335625 -r /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/.repo.yaml && deactivate
+10:31:14 INFO  : Embedded Template List generated successfully
+10:31:14 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//get_template_data.py -d /tmp/rigel_lopper_nishant14115318264012579202 -r /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/.repo.yaml && deactivate
+10:31:15 INFO  : Embedded Template List generated successfully
+10:32:33 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//build_app.py -s /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/src -b /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/build && deactivate
+11:00:42 INFO  : XSDB server has started successfully from frontend.
+11:00:42 INFO  : It has taken  2secs.
+11:00:43 INFO  : Connection to XSDB Server established.
+11:00:43 INFO  : It has taken  1secs.
+11:00:44 INFO  : connect -url tcp:127.0.0.1:3121
+11:00:44 INFO  : Done
+11:00:45 INFO  : bpremove -all
+11:00:45 INFO  : Context for 'APU' is selected.
+11:00:45 INFO  : System reset is completed.
+11:00:48 INFO  : 'after 3000' command is executed.
+11:00:48 INFO  : 'targets -set -filter {jtag_cable_name =~ "Digilent Zybo 210279334932A" && level==0 && jtag_device_ctx=="jsn-Zybo-210279334932A-23727093-0"}' command is executed.
+11:00:50 INFO  : Device configured successfully with "/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/bitstream/PASS_MVDR_STAP.bit"
+11:00:50 INFO  : targets -set -nocase -filter {name =~"APU*"}
+11:00:50 INFO  : loadhw -hw /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/export/PASS_MVDR_STAP/hw/PASS_MVDR_STAP.xsa -mem-ranges [list {0x40000000 0xbfffffff}]
+11:00:50 INFO  : configparams force-mem-access 1
+11:00:50 INFO  : targets -set -nocase -filter {name =~"APU*"}
+11:00:50 INFO  : source /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/psinit/ps7_init.tcl
+11:00:50 INFO  : ps7_init
+11:00:50 INFO  : ps7_post_config
+11:00:50 INFO  : targets -set -nocase -filter {name =~ "*A9*#0"}
+11:00:50 INFO  : rst -processor
+11:00:51 INFO  : dow /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/build/PASS_MVDR_STAP_test.elf
+11:00:51 INFO  : con
+11:00:51 INFO  : configparams force-mem-access 0
+11:00:52 INFO  : Testing the connection for 127.0.0.1
+11:05:39 INFO  : The updated bitstream files are copied from platform to folder '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/bitstream' in project '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test'.
+11:05:39 INFO  : The updated ps init files are copied from platform to folder '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/psinit' in project '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test'.
+11:06:41 INFO  : The updated bitstream files are copied from platform to folder '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/bitstream' in project '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test'.
+11:06:41 INFO  : The updated ps init files are copied from platform to folder '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/psinit' in project '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test'.
+11:07:06 INFO  : disconnect
+10:47:53 INFO  : Found no platform with name 'STFAP1' in install repositories
+10:47:53 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && xsct /tools/Xilinx/Vitis/2023.2/vitisng-server/scripts/platformutil.tcl /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/LVDS_STFAP_v3/STFAP1.xsa /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/.rigel_lopper_temp_platform/STFAP1/hw/sdt && deactivate
+10:48:01 INFO  : INFO: [Hsi 55-2053] elapsed time for repository (/tools/Xilinx/Vitis/2023.2/data/embeddedsw) loading 0 seconds
+10:48:01 INFO  : WARNING: [Common 17-673] Cannot get value of property 'CONFIG.EDK_SPECIAL' because this property is not valid in conjunction with other property setting on this object.
+10:48:01 INFO  : WARNING: [Common 17-673] Cannot get value of property 'CONFIG.EDK_SPECIAL' because this property is not valid in conjunction with other property setting on this object.
+10:48:01 INFO  : WARNING: [Common 17-673] Cannot get value of property 'CONFIG.EDK_SPECIAL' because this property is not valid in conjunction with other property setting on this object.
+10:48:01 INFO  : WARNING: [Common 17-673] Cannot get value of property 'CONFIG.EDK_SPECIAL' because this property is not valid in conjunction with other property setting on this object.
+10:48:01 INFO  : WARNING: [Common 17-673] Cannot get value of property 'CONFIG.EDK_SPECIAL' because this property is not valid in conjunction with other property setting on this object.
+10:48:01 INFO  : WARNING: [Common 17-673] Cannot get value of property 'CONFIG.EDK_SPECIAL' because this property is not valid in conjunction with other property setting on this object.
+10:48:01 INFO  : WARNING: [Common 17-673] Cannot get value of property 'CONFIG.EDK_SPECIAL' because this property is not valid in conjunction with other property setting on this object.
+10:48:01 INFO  : WARNING: [Common 17-673] Cannot get value of property 'CONFIG.EDK_SPECIAL' because this property is not valid in conjunction with other property setting on this object.
+10:48:01 INFO  : WARNING: [Common 17-673] Cannot get value of property 'CONFIG.EDK_SPECIAL' because this property is not valid in conjunction with other property setting on this object.
+10:48:01 INFO  : WARNING: [Common 17-673] Cannot get value of property 'CONFIG.EDK_SPECIAL' because this property is not valid in conjunction with other property setting on this object.
+10:48:01 INFO  : WARNING: [Common 17-673] Cannot get value of property 'CONFIG.EDK_SPECIAL' because this property is not valid in conjunction with other property setting on this object.
+10:48:01 INFO  : WARNING: [Common 17-673] Cannot get value of property 'CONFIG.EDK_SPECIAL' because this property is not valid in conjunction with other property setting on this object.
+10:48:01 INFO  : WARNING: [Common 17-673] Cannot get value of property 'CONFIG.EDK_SPECIAL' because this property is not valid in conjunction with other property setting on this object.
+10:48:01 INFO  : WARNING: [Common 17-673] Cannot get value of property 'CONFIG.EDK_SPECIAL' because this property is not valid in conjunction with other property setting on this object.
+10:48:01 INFO  : WARNING: [Common 17-673] Cannot get value of property 'CONFIG.EDK_SPECIAL' because this property is not valid in conjunction with other property setting on this object.
+10:48:01 INFO  : WARNING: [Common 17-673] Cannot get value of property 'CONFIG.EDK_SPECIAL' because this property is not valid in conjunction with other property setting on this object.
+10:48:01 INFO  : WARNING: [Common 17-673] Cannot get value of property 'C_QSPI_MODE' because this property is not valid in conjunction with other property setting on this object.
+10:48:01 INFO  : WARNING: [Common 17-673] Cannot get value of property 'C_ETH_MODE' because this property is not valid in conjunction with other property setting on this object.
+10:48:01 INFO  : WARNING: [Common 17-673] Cannot get value of property 'C_CPU_1X_CLK_FREQ_HZ' because this property is not valid in conjunction with other property setting on this object.
+10:48:01 INFO  : WARNING: [Common 17-673] Cannot get value of property 'C_EMIO_GPIO_WIDTH' because this property is not valid in conjunction with other property setting on this object.
+10:48:01 INFO  : WARNING: [Common 17-673] Cannot get value of property 'C_MIO_GPIO_MASK' because this property is not valid in conjunction with other property setting on this object.
+10:48:01 INFO  : SDT generated successfully
+10:48:01 INFO  : Lopper command for cpu List generation: lopper -O /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/.rigel_lopper -f -i /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/lib/python3.8/site-packages/lopper/lops/lop-cpulist.dts /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/.rigel_lopper_temp_platform/STFAP1/hw/sdt/system-top.dts
+10:48:01 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && lopper -O /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/.rigel_lopper -f -i /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/lib/python3.8/site-packages/lopper/lops/lop-cpulist.dts /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/.rigel_lopper_temp_platform/STFAP1/hw/sdt/system-top.dts && deactivate
+10:48:02 INFO  : ps7_cortexa9_0
+10:48:02 INFO  : ps7_cortexa9_1
+10:48:02 INFO  : CPU List generated successfully
+10:48:07 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//get_template_data.py -d /tmp/rigel_lopper_nishant58268609369931764 -r /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/.repo.yaml && deactivate
+10:48:08 INFO  : created .gitignore file for the project /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/LVDS_STFAP_v3/STFAP_Vitis
+16:26:51 INFO  : updated workspace path: /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis
+16:26:51 INFO  : created .gitignore file for the project /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis
+16:26:51 INFO  : updated workspace path: /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis
+16:26:51 INFO  : Embedded Template List generated successfully
+16:26:51 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//get_template_data.py -d /tmp/rigel_lopper_nishant8494168808188990572 -r /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/.repo.yaml && deactivate
+16:26:52 INFO  : Embedded Template List generated successfully
+16:26:52 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//get_template_data.py -d /tmp/rigel_lopper_nishant5217957341148993849 -r /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/.repo.yaml && deactivate
+16:26:52 INFO  : Embedded Template List generated successfully
+16:30:10 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//build_app.py -s /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/src -b /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/build && deactivate
+16:30:14 INFO  : connect -url tcp:127.0.0.1:3121
+16:30:14 INFO  : bpremove -all
+16:30:14 INFO  : Context for 'APU' is selected.
+16:30:14 INFO  : System reset is completed.
+16:30:17 INFO  : 'after 3000' command is executed.
+16:30:17 INFO  : 'targets -set -filter {jtag_cable_name =~ "Digilent Zybo 210279334932A" && level==0 && jtag_device_ctx=="jsn-Zybo-210279334932A-23727093-0"}' command is executed.
+16:30:19 INFO  : Device configured successfully with "/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/bitstream/PASS_MVDR_STAP.bit"
+16:30:19 INFO  : targets -set -nocase -filter {name =~"APU*"}
+16:30:20 INFO  : loadhw -hw /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/export/PASS_MVDR_STAP/hw/PASS_MVDR_STAP.xsa -mem-ranges [list {0x40000000 0xbfffffff}]
+16:30:20 INFO  : configparams force-mem-access 1
+16:30:20 INFO  : targets -set -nocase -filter {name =~"APU*"}
+16:30:20 INFO  : source /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/psinit/ps7_init.tcl
+16:30:20 INFO  : ps7_init
+16:30:20 INFO  : ps7_post_config
+16:30:20 INFO  : targets -set -nocase -filter {name =~ "*A9*#0"}
+16:30:20 INFO  : rst -processor
+16:30:22 INFO  : dow /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/build/PASS_MVDR_STAP_test.elf
+16:30:22 INFO  : con
+16:30:22 INFO  : configparams force-mem-access 0
+16:30:23 INFO  : Testing the connection for 127.0.0.1
+16:45:10 INFO  : The updated bitstream files are copied from platform to folder '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/bitstream' in project '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test'.
+16:45:10 INFO  : The updated ps init files are copied from platform to folder '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/psinit' in project '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test'.
+16:45:21 INFO  : The updated bitstream files are copied from platform to folder '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/bitstream' in project '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test'.
+16:45:21 INFO  : The updated ps init files are copied from platform to folder '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/psinit' in project '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test'.
+16:45:29 INFO  : disconnect
+17:25:49 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//build_app.py -s /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/src -b /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/build && deactivate
+17:26:02 INFO  : connect -url tcp:127.0.0.1:3121
+17:26:02 INFO  : bpremove -all
+17:26:02 INFO  : Context for 'APU' is selected.
+17:26:02 INFO  : System reset is completed.
+17:26:05 INFO  : 'after 3000' command is executed.
+17:26:06 INFO  : 'targets -set -filter {jtag_cable_name =~ "Digilent Zybo 210279334932A" && level==0 && jtag_device_ctx=="jsn-Zybo-210279334932A-23727093-0"}' command is executed.
+17:26:07 INFO  : Device configured successfully with "/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/bitstream/PASS_MVDR_STAP.bit"
+17:26:07 INFO  : targets -set -nocase -filter {name =~"APU*"}
+17:26:08 INFO  : loadhw -hw /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/export/PASS_MVDR_STAP/hw/PASS_MVDR_STAP.xsa -mem-ranges [list {0x40000000 0xbfffffff}]
+17:26:08 INFO  : configparams force-mem-access 1
+17:26:08 INFO  : targets -set -nocase -filter {name =~"APU*"}
+17:26:08 INFO  : source /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/psinit/ps7_init.tcl
+17:26:08 INFO  : ps7_init
+17:26:08 INFO  : ps7_post_config
+17:26:08 INFO  : targets -set -nocase -filter {name =~ "*A9*#0"}
+17:26:08 INFO  : rst -processor
+17:26:10 INFO  : dow /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/build/PASS_MVDR_STAP_test.elf
+17:26:10 INFO  : con
+17:26:10 INFO  : configparams force-mem-access 0
+17:26:11 INFO  : Testing the connection for 127.0.0.1
+17:58:04 INFO  : disconnect
+18:25:51 INFO  : The updated bitstream files are copied from platform to folder '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/bitstream' in project '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test'.
+18:25:51 INFO  : The updated ps init files are copied from platform to folder '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/psinit' in project '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test'.
+18:26:03 INFO  : The updated bitstream files are copied from platform to folder '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/bitstream' in project '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test'.
+18:26:03 INFO  : The updated ps init files are copied from platform to folder '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/psinit' in project '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test'.
+11:25:12 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//build_app.py -s /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/src -b /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/build && deactivate
+11:25:18 INFO  : The updated bitstream files are copied from platform to folder '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/bitstream' in project '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test'.
+11:25:18 INFO  : The updated ps init files are copied from platform to folder '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/psinit' in project '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test'.
+11:28:23 INFO  : connect -url tcp:127.0.0.1:3121
+11:28:23 INFO  : bpremove -all
+11:28:23 INFO  : Context for 'APU' is selected.
+11:28:23 INFO  : System reset is completed.
+11:28:26 INFO  : 'after 3000' command is executed.
+11:28:26 INFO  : 'targets -set -filter {jtag_cable_name =~ "Digilent Zybo 210279334932A" && level==0 && jtag_device_ctx=="jsn-Zybo-210279334932A-23727093-0"}' command is executed.
+11:28:27 INFO  : Device configured successfully with "/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/bitstream/PASS_MVDR_STAP.bit"
+11:28:27 INFO  : targets -set -nocase -filter {name =~"APU*"}
+11:28:28 INFO  : loadhw -hw /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/export/PASS_MVDR_STAP/hw/PASS_MVDR_STAP.xsa -mem-ranges [list {0x40000000 0xbfffffff}]
+11:28:28 INFO  : configparams force-mem-access 1
+11:28:28 INFO  : targets -set -nocase -filter {name =~"APU*"}
+11:28:28 INFO  : source /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/psinit/ps7_init.tcl
+11:28:29 INFO  : ps7_init
+11:28:29 INFO  : ps7_post_config
+11:28:29 INFO  : targets -set -nocase -filter {name =~ "*A9*#0"}
+11:28:29 INFO  : rst -processor
+11:28:30 INFO  : dow /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/build/PASS_MVDR_STAP_test.elf
+11:28:30 INFO  : con
+11:28:30 INFO  : configparams force-mem-access 0
+11:28:31 INFO  : Testing the connection for 127.0.0.1
+11:50:56 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//get_template_data.py -d /tmp/rigel_lopper_nishant2262675283948893136 -r /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/.repo.yaml && deactivate
+11:50:56 INFO  : created .gitignore file for the project /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Passthrough_LVDS_SFAP/LVDS_SFAP_Vitis
+15:29:03 INFO  : updated workspace path: /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis
+15:29:03 INFO  : created .gitignore file for the project /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis
+15:29:03 INFO  : updated workspace path: /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis
+15:29:03 INFO  : Embedded Template List generated successfully
+15:29:03 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//get_template_data.py -d /tmp/rigel_lopper_nishant7960118640120163599 -r /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/.repo.yaml && deactivate
+15:29:03 INFO  : Embedded Template List generated successfully
+15:29:03 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//get_template_data.py -d /tmp/rigel_lopper_nishant4494371648942817264 -r /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/.repo.yaml && deactivate
+15:29:03 INFO  : Embedded Template List generated successfully
+15:29:11 INFO  : connect -url tcp:127.0.0.1:3121
+15:29:11 INFO  : bpremove -all
+15:29:11 INFO  : Context for 'APU' is selected.
+15:29:11 INFO  : System reset is completed.
+15:29:14 INFO  : 'after 3000' command is executed.
+15:29:14 INFO  : 'targets -set -filter {jtag_cable_name =~ "Digilent Zybo 210279334932A" && level==0 && jtag_device_ctx=="jsn-Zybo-210279334932A-23727093-0"}' command is executed.
+15:29:16 INFO  : Device configured successfully with "/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/bitstream/PASS_MVDR_STAP.bit"
+15:29:16 INFO  : targets -set -nocase -filter {name =~"APU*"}
+15:29:17 INFO  : loadhw -hw /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/export/PASS_MVDR_STAP/hw/PASS_MVDR_STAP.xsa -mem-ranges [list {0x40000000 0xbfffffff}]
+15:29:17 INFO  : configparams force-mem-access 1
+15:29:17 INFO  : targets -set -nocase -filter {name =~"APU*"}
+15:29:17 INFO  : source /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/psinit/ps7_init.tcl
+15:29:17 INFO  : ps7_init
+15:29:17 INFO  : ps7_post_config
+15:29:17 INFO  : targets -set -nocase -filter {name =~ "*A9*#0"}
+15:29:17 INFO  : rst -processor
+15:29:19 INFO  : dow /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/build/PASS_MVDR_STAP_test.elf
+15:29:19 INFO  : con
+15:29:19 INFO  : configparams force-mem-access 0
+15:29:20 INFO  : Testing the connection for 127.0.0.1
+15:36:57 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//build_app.py -s /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/src -b /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/build && deactivate
+15:36:59 INFO  : connect -url tcp:127.0.0.1:3121
+15:36:59 INFO  : bpremove -all
+15:36:59 INFO  : Context for 'APU' is selected.
+15:36:59 INFO  : System reset is completed.
+15:37:02 INFO  : 'after 3000' command is executed.
+15:37:02 INFO  : 'targets -set -filter {jtag_cable_name =~ "Digilent Zybo 210279334932A" && level==0 && jtag_device_ctx=="jsn-Zybo-210279334932A-23727093-0"}' command is executed.
+15:37:04 INFO  : Device configured successfully with "/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/bitstream/PASS_MVDR_STAP.bit"
+15:37:04 INFO  : targets -set -nocase -filter {name =~"APU*"}
+15:37:04 INFO  : loadhw -hw /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/export/PASS_MVDR_STAP/hw/PASS_MVDR_STAP.xsa -mem-ranges [list {0x40000000 0xbfffffff}]
+15:37:04 INFO  : configparams force-mem-access 1
+15:37:04 INFO  : targets -set -nocase -filter {name =~"APU*"}
+15:37:04 INFO  : source /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/psinit/ps7_init.tcl
+15:37:04 INFO  : ps7_init
+15:37:04 INFO  : ps7_post_config
+15:37:04 INFO  : targets -set -nocase -filter {name =~ "*A9*#0"}
+15:37:04 INFO  : rst -processor
+15:37:05 INFO  : dow /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/build/PASS_MVDR_STAP_test.elf
+15:37:05 INFO  : con
+15:37:05 INFO  : configparams force-mem-access 0
+15:37:06 INFO  : Testing the connection for 127.0.0.1
+15:42:02 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//build_app.py -s /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/src -b /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/build && deactivate
+15:42:04 INFO  : connect -url tcp:127.0.0.1:3121
+15:42:04 INFO  : bpremove -all
+15:42:04 INFO  : Context for 'APU' is selected.
+15:42:04 INFO  : System reset is completed.
+15:42:07 INFO  : 'after 3000' command is executed.
+15:42:07 INFO  : 'targets -set -filter {jtag_cable_name =~ "Digilent Zybo 210279334932A" && level==0 && jtag_device_ctx=="jsn-Zybo-210279334932A-23727093-0"}' command is executed.
+15:42:08 INFO  : Device configured successfully with "/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/bitstream/PASS_MVDR_STAP.bit"
+15:42:08 INFO  : targets -set -nocase -filter {name =~"APU*"}
+15:42:08 INFO  : loadhw -hw /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/export/PASS_MVDR_STAP/hw/PASS_MVDR_STAP.xsa -mem-ranges [list {0x40000000 0xbfffffff}]
+15:42:08 INFO  : configparams force-mem-access 1
+15:42:08 INFO  : targets -set -nocase -filter {name =~"APU*"}
+15:42:08 INFO  : source /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/psinit/ps7_init.tcl
+15:42:09 INFO  : ps7_init
+15:42:09 INFO  : ps7_post_config
+15:42:09 INFO  : targets -set -nocase -filter {name =~ "*A9*#0"}
+15:42:09 INFO  : rst -processor
+15:42:10 INFO  : dow /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/build/PASS_MVDR_STAP_test.elf
+15:42:10 INFO  : con
+15:42:10 INFO  : configparams force-mem-access 0
+15:42:11 INFO  : Testing the connection for 127.0.0.1
+15:42:59 INFO  : connect -url tcp:127.0.0.1:3121
+15:42:59 INFO  : bpremove -all
+15:42:59 INFO  : Context for 'APU' is selected.
+15:42:59 INFO  : System reset is completed.
+15:43:02 INFO  : 'after 3000' command is executed.
+15:43:02 INFO  : 'targets -set -filter {jtag_cable_name =~ "Digilent Zybo 210279334932A" && level==0 && jtag_device_ctx=="jsn-Zybo-210279334932A-23727093-0"}' command is executed.
+15:43:03 INFO  : Device configured successfully with "/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/bitstream/PASS_MVDR_STAP.bit"
+15:43:03 INFO  : targets -set -nocase -filter {name =~"APU*"}
+15:43:03 INFO  : loadhw -hw /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/export/PASS_MVDR_STAP/hw/PASS_MVDR_STAP.xsa -mem-ranges [list {0x40000000 0xbfffffff}]
+15:43:03 INFO  : configparams force-mem-access 1
+15:43:03 INFO  : targets -set -nocase -filter {name =~"APU*"}
+15:43:03 INFO  : source /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/psinit/ps7_init.tcl
+15:43:03 INFO  : ps7_init
+15:43:03 INFO  : ps7_post_config
+15:43:03 INFO  : targets -set -nocase -filter {name =~ "*A9*#0"}
+15:43:04 INFO  : rst -processor
+15:43:05 INFO  : dow /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/build/PASS_MVDR_STAP_test.elf
+15:43:05 INFO  : con
+15:43:05 INFO  : configparams force-mem-access 0
+15:43:06 INFO  : Testing the connection for 127.0.0.1
+15:44:04 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//build_app.py -s /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/src -b /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/build && deactivate
+15:44:06 INFO  : connect -url tcp:127.0.0.1:3121
+15:44:06 INFO  : bpremove -all
+15:44:06 INFO  : Context for 'APU' is selected.
+15:44:06 INFO  : System reset is completed.
+15:44:09 INFO  : 'after 3000' command is executed.
+15:44:09 INFO  : 'targets -set -filter {jtag_cable_name =~ "Digilent Zybo 210279334932A" && level==0 && jtag_device_ctx=="jsn-Zybo-210279334932A-23727093-0"}' command is executed.
+15:44:11 INFO  : Device configured successfully with "/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/bitstream/PASS_MVDR_STAP.bit"
+15:44:11 INFO  : targets -set -nocase -filter {name =~"APU*"}
+15:44:11 INFO  : loadhw -hw /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/export/PASS_MVDR_STAP/hw/PASS_MVDR_STAP.xsa -mem-ranges [list {0x40000000 0xbfffffff}]
+15:44:11 INFO  : configparams force-mem-access 1
+15:44:11 INFO  : targets -set -nocase -filter {name =~"APU*"}
+15:44:11 INFO  : source /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/psinit/ps7_init.tcl
+15:44:11 INFO  : ps7_init
+15:44:11 INFO  : ps7_post_config
+15:44:11 INFO  : targets -set -nocase -filter {name =~ "*A9*#0"}
+15:44:11 INFO  : rst -processor
+15:44:12 INFO  : dow /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/build/PASS_MVDR_STAP_test.elf
+15:44:12 INFO  : con
+15:44:12 INFO  : configparams force-mem-access 0
+15:44:13 INFO  : Testing the connection for 127.0.0.1
+15:49:22 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//build_app.py -s /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/src -b /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/build && deactivate
+15:49:24 INFO  : BSP build will be initiated for Domain zynq_fsbl
+15:49:24 INFO  : BSP build will be initiated for Domain standalone_ps7_cortexa9_0
+15:49:24 INFO  : Generating BSP for the domain /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/zynq_fsbl/zynq_fsbl_bsp
+15:49:24 INFO  : Generating BSP for the domain /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/ps7_cortexa9_0/standalone_ps7_cortexa9_0/bsp
+15:49:24 INFO  : lopper command to build BSP :python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//build_bsp.py -d /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/zynq_fsbl/zynq_fsbl_bsp
+15:49:24 INFO  : lopper command to build BSP :python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//build_bsp.py -d /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/ps7_cortexa9_0/standalone_ps7_cortexa9_0/bsp
+15:49:24 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//build_bsp.py -d /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/zynq_fsbl/zynq_fsbl_bsp && deactivate
+15:49:24 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//build_bsp.py -d /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/ps7_cortexa9_0/standalone_ps7_cortexa9_0/bsp && deactivate
+15:49:28 INFO  : Domain build successfully
+15:49:28 INFO  : Domain build successfully
+15:49:28 INFO  : Generating Boot ELFs
+15:49:28 INFO  : lopper command to build baremetal application :python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//build_app.py -s /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/zynq_fsbl -b /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/zynq_fsbl/build
+15:49:28 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//build_app.py -s /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/zynq_fsbl -b /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/zynq_fsbl/build && deactivate
+15:49:28 INFO  : Successfully building the baremetal application/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/zynq_fsbl/build
+15:49:28 INFO  : Generating Export directory
+15:49:28 INFO  : Platform Build Finished successfully.
+15:49:37 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//build_app.py -s /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/src -b /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/build && deactivate
+15:49:41 INFO  : connect -url tcp:127.0.0.1:3121
+15:49:41 INFO  : bpremove -all
+15:49:41 INFO  : Context for 'APU' is selected.
+15:49:41 INFO  : System reset is completed.
+15:49:44 INFO  : 'after 3000' command is executed.
+15:49:44 INFO  : 'targets -set -filter {jtag_cable_name =~ "Digilent Zybo 210279334932A" && level==0 && jtag_device_ctx=="jsn-Zybo-210279334932A-23727093-0"}' command is executed.
+15:49:45 INFO  : Device configured successfully with "/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/bitstream/PASS_MVDR_STAP.bit"
+15:49:45 INFO  : targets -set -nocase -filter {name =~"APU*"}
+15:49:45 INFO  : loadhw -hw /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/export/PASS_MVDR_STAP/hw/PASS_MVDR_STAP.xsa -mem-ranges [list {0x40000000 0xbfffffff}]
+15:49:45 INFO  : configparams force-mem-access 1
+15:49:45 INFO  : targets -set -nocase -filter {name =~"APU*"}
+15:49:45 INFO  : source /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/psinit/ps7_init.tcl
+15:49:46 INFO  : ps7_init
+15:49:46 INFO  : ps7_post_config
+15:49:46 INFO  : targets -set -nocase -filter {name =~ "*A9*#0"}
+15:49:46 INFO  : rst -processor
+15:49:47 INFO  : dow /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/build/PASS_MVDR_STAP_test.elf
+15:49:47 INFO  : con
+15:49:47 INFO  : configparams force-mem-access 0
+15:49:48 INFO  : Testing the connection for 127.0.0.1
+16:06:55 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//build_app.py -s /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/src -b /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/build && deactivate
+16:06:58 INFO  : connect -url tcp:127.0.0.1:3121
+16:06:58 INFO  : bpremove -all
+16:06:58 INFO  : Context for 'APU' is selected.
+16:06:58 INFO  : System reset is completed.
+16:07:01 INFO  : 'after 3000' command is executed.
+16:07:01 INFO  : 'targets -set -filter {jtag_cable_name =~ "Digilent Zybo 210279334932A" && level==0 && jtag_device_ctx=="jsn-Zybo-210279334932A-23727093-0"}' command is executed.
+16:07:02 INFO  : Device configured successfully with "/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/bitstream/PASS_MVDR_STAP.bit"
+16:07:02 INFO  : targets -set -nocase -filter {name =~"APU*"}
+16:07:02 INFO  : loadhw -hw /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/export/PASS_MVDR_STAP/hw/PASS_MVDR_STAP.xsa -mem-ranges [list {0x40000000 0xbfffffff}]
+16:07:02 INFO  : configparams force-mem-access 1
+16:07:02 INFO  : targets -set -nocase -filter {name =~"APU*"}
+16:07:02 INFO  : source /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/psinit/ps7_init.tcl
+16:07:03 INFO  : ps7_init
+16:07:03 INFO  : ps7_post_config
+16:07:03 INFO  : targets -set -nocase -filter {name =~ "*A9*#0"}
+16:07:03 INFO  : rst -processor
+16:07:04 INFO  : dow /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/build/PASS_MVDR_STAP_test.elf
+16:07:04 INFO  : con
+16:07:04 INFO  : configparams force-mem-access 0
+16:07:05 INFO  : Testing the connection for 127.0.0.1
+16:09:05 INFO  : connect -url tcp:127.0.0.1:3121
+16:09:05 INFO  : bpremove -all
+16:09:05 INFO  : Context for 'APU' is selected.
+16:09:05 INFO  : System reset is completed.
+16:09:08 INFO  : 'after 3000' command is executed.
+16:09:08 INFO  : 'targets -set -filter {jtag_cable_name =~ "Digilent Zybo 210279334932A" && level==0 && jtag_device_ctx=="jsn-Zybo-210279334932A-23727093-0"}' command is executed.
+16:09:10 INFO  : Device configured successfully with "/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/bitstream/PASS_MVDR_STAP.bit"
+16:09:10 INFO  : targets -set -nocase -filter {name =~"APU*"}
+16:09:10 INFO  : loadhw -hw /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/export/PASS_MVDR_STAP/hw/PASS_MVDR_STAP.xsa -mem-ranges [list {0x40000000 0xbfffffff}]
+16:09:10 INFO  : configparams force-mem-access 1
+16:09:10 INFO  : targets -set -nocase -filter {name =~"APU*"}
+16:09:10 INFO  : source /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/psinit/ps7_init.tcl
+16:09:10 INFO  : ps7_init
+16:09:10 INFO  : ps7_post_config
+16:09:10 INFO  : targets -set -nocase -filter {name =~ "*A9*#0"}
+16:09:10 INFO  : rst -processor
+16:09:11 INFO  : dow /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/build/PASS_MVDR_STAP_test.elf
+16:09:12 INFO  : bpadd main
+16:09:12 INFO  : con
+16:09:12 INFO  : configparams force-mem-access 0
+16:09:13 INFO  : Testing the connection for 127.0.0.1
+16:09:18 INFO  : connect -url tcp:127.0.0.1:3121
+16:09:18 INFO  : bpremove -all
+16:09:18 INFO  : Context for 'APU' is selected.
+16:09:18 INFO  : System reset is completed.
+16:09:21 INFO  : 'after 3000' command is executed.
+16:09:21 INFO  : 'targets -set -filter {jtag_cable_name =~ "Digilent Zybo 210279334932A" && level==0 && jtag_device_ctx=="jsn-Zybo-210279334932A-23727093-0"}' command is executed.
+16:09:23 INFO  : Device configured successfully with "/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/bitstream/PASS_MVDR_STAP.bit"
+16:09:23 INFO  : targets -set -nocase -filter {name =~"APU*"}
+16:09:23 INFO  : loadhw -hw /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/export/PASS_MVDR_STAP/hw/PASS_MVDR_STAP.xsa -mem-ranges [list {0x40000000 0xbfffffff}]
+16:09:23 INFO  : configparams force-mem-access 1
+16:09:23 INFO  : targets -set -nocase -filter {name =~"APU*"}
+16:09:23 INFO  : source /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/psinit/ps7_init.tcl
+16:09:23 INFO  : ps7_init
+16:09:23 INFO  : ps7_post_config
+16:09:23 INFO  : targets -set -nocase -filter {name =~ "*A9*#0"}
+16:09:23 INFO  : rst -processor
+16:09:24 INFO  : dow /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/build/PASS_MVDR_STAP_test.elf
+16:09:24 INFO  : con
+16:09:24 INFO  : configparams force-mem-access 0
+16:09:25 INFO  : Testing the connection for 127.0.0.1
+16:13:02 INFO  : The updated bitstream files are copied from platform to folder '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/bitstream' in project '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test'.
+16:13:02 INFO  : The updated ps init files are copied from platform to folder '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/psinit' in project '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test'.
+16:38:39 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//build_app.py -s /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/src -b /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/build && deactivate
+16:38:41 INFO  : connect -url tcp:127.0.0.1:3121
+16:38:41 INFO  : bpremove -all
+16:38:56 ERROR : Failed to initialize the hardware Could not find ARM device on the board for connection 'Local'.
+Check if the target is in:
+1. Split JTAG - No operations are possible with ARM DAP.
+2. Non JTAG bootmode - Bootrom may need time to enable DAP.
+Please try again.
+
+
+Troubleshooting hints:
+1. Check whether board is connected to system properly.
+2. In case of zynq board, check whether Digilent/Xilinx cable switch settings are correct.
+3. If you are using Xilinx Platform Cable USB, ensure that status LED is green.
+16:39:01 INFO  : connect -url tcp:127.0.0.1:3121
+16:39:01 INFO  : bpremove -all
+16:39:01 INFO  : Context for 'APU' is selected.
+16:39:01 INFO  : System reset is completed.
+16:39:04 INFO  : 'after 3000' command is executed.
+16:39:04 INFO  : 'targets -set -filter {jtag_cable_name =~ "Digilent Zybo 210279334932A" && level==0 && jtag_device_ctx=="jsn-Zybo-210279334932A-23727093-0"}' command is executed.
+16:39:06 INFO  : Device configured successfully with "/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/bitstream/PASS_MVDR_STAP.bit"
+16:39:06 INFO  : targets -set -nocase -filter {name =~"APU*"}
+16:39:06 INFO  : loadhw -hw /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/export/PASS_MVDR_STAP/hw/PASS_MVDR_STAP.xsa -mem-ranges [list {0x40000000 0xbfffffff}]
+16:39:06 INFO  : configparams force-mem-access 1
+16:39:06 INFO  : targets -set -nocase -filter {name =~"APU*"}
+16:39:06 INFO  : source /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/psinit/ps7_init.tcl
+16:39:06 INFO  : ps7_init
+16:39:06 INFO  : ps7_post_config
+16:39:06 INFO  : targets -set -nocase -filter {name =~ "*A9*#0"}
+16:39:06 INFO  : rst -processor
+16:39:07 INFO  : dow /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/build/PASS_MVDR_STAP_test.elf
+16:39:07 INFO  : con
+16:39:07 INFO  : configparams force-mem-access 0
+16:39:08 INFO  : Testing the connection for 127.0.0.1
+16:44:24 INFO  : bash, -c, source /tools/Xilinx/Vitis/2023.2/tps/lnx64/lopper-1.1.0/env/bin/activate && python /tools/Xilinx/Vitis/2023.2/data/embeddedsw/scripts/pyesw//build_app.py -s /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/src -b /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/build && deactivate
+16:44:26 INFO  : connect -url tcp:127.0.0.1:3121
+16:44:26 INFO  : bpremove -all
+16:44:26 INFO  : Context for 'APU' is selected.
+16:44:26 INFO  : System reset is completed.
+16:44:29 INFO  : 'after 3000' command is executed.
+16:44:29 INFO  : 'targets -set -filter {jtag_cable_name =~ "Digilent Zybo 210279334932A" && level==0 && jtag_device_ctx=="jsn-Zybo-210279334932A-23727093-0"}' command is executed.
+16:44:31 INFO  : Device configured successfully with "/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/bitstream/PASS_MVDR_STAP.bit"
+16:44:31 INFO  : targets -set -nocase -filter {name =~"APU*"}
+16:44:31 INFO  : loadhw -hw /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP/export/PASS_MVDR_STAP/hw/PASS_MVDR_STAP.xsa -mem-ranges [list {0x40000000 0xbfffffff}]
+16:44:31 INFO  : configparams force-mem-access 1
+16:44:31 INFO  : targets -set -nocase -filter {name =~"APU*"}
+16:44:31 INFO  : source /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/psinit/ps7_init.tcl
+16:44:31 INFO  : ps7_init
+16:44:31 INFO  : ps7_post_config
+16:44:31 INFO  : targets -set -nocase -filter {name =~ "*A9*#0"}
+16:44:31 INFO  : rst -processor
+16:44:32 INFO  : dow /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/build/PASS_MVDR_STAP_test.elf
+16:44:32 INFO  : con
+16:44:32 INFO  : configparams force-mem-access 0
+16:44:33 INFO  : Testing the connection for 127.0.0.1
+16:49:55 INFO  : The updated bitstream files are copied from platform to folder '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/bitstream' in project '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test'.
+16:49:55 INFO  : The updated ps init files are copied from platform to folder '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test/_ide/psinit' in project '/home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/PASS_MVDR_STAP_Vitis/PASS_MVDR_STAP_test'.
