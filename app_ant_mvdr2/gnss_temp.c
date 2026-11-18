@@ -29,6 +29,11 @@
 #include "gnss_smi.h"
 #include "gnss_autostart.h"
 #include "xparameters.h"
+#include "gnss_quiet.h"
+/* MOD13: same as gnss_report.c -- the report line must go through
+ * gnss_qprintf, so it lands in the automatic-print spool in order */
+#undef  printf
+#define printf        gnss_qprintf
 
 #ifndef GNSS_CFG_ZYNQ_TEMP
 #define GNSS_CFG_ZYNQ_TEMP 1          /* 0 = do not touch the XADC */

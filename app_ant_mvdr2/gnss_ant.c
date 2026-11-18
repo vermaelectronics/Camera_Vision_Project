@@ -247,7 +247,7 @@ void gnss_ant_menu(void)
 	gnss_autoprint_get(&ks, &rs);
 	snprintf(ag, sizeof(ag), "%dppm", gnss_agc_get_clip_ppm());
 
-	printf("\r\n========== E310 GNSS ANTI-JAM    SMI-STAP 2 x 16 taps    firmware MOD12 ========\r\n");
+	printf("\r\n========== E310 GNSS ANTI-JAM    SMI-STAP 2 x 16 taps    firmware MOD13 ========\r\n");
 	printf(" NOW\r\n");
 	printf("  STATE    %s   [gnss_tx=%d pass=%d stap=%d]\r\n", mode_name(&m), m.tx, m.pass, m.stap);
 	printf("  RADIO    LO %.2f MHz  BW %.0f MHz  %.2f MSPS  band %d%s\r\n",
@@ -1184,10 +1184,11 @@ void set_autoprint(double *param, char param_no)
 	if (param_no >= 2) ap_rep_s = (param[1] < 0) ? 0 : (int)param[1];
 	if (ap_kpi_s && ap_kpi_s < 2) ap_kpi_s = 2;
 	if (ap_rep_s && ap_rep_s < 5) ap_rep_s = 5;
-	printf("  automatic printing: gnss_kpi_full? every %s, gnss_report? every %s\r\n",
-	       ap_kpi_s ? "" : "-- (off)", ap_rep_s ? "" : "-- (off)");
-	if (ap_kpi_s) printf("    KPI line every %d s\r\n", ap_kpi_s);
-	if (ap_rep_s) printf("    full report every %d s\r\n", ap_rep_s);
+	printf("  automatic printing (MOD13): KPI line ");
+	if (ap_kpi_s) printf("every %d s", ap_kpi_s); else printf("off");
+	printf(", full report ");
+	if (ap_rep_s) printf("every %d s", ap_rep_s); else printf("off");
+	printf("\r\n  (shortest: KPI 2 s, report 5 s -- a report takes ~1 s to send at 115200 baud)\r\n");
 	printf("  (sent in the background at the UART's own speed: the null and AGC keep running)\r\n"
 	       "  gnss_autoprint=KPI_s,REPORT_s   0 = off, e.g. gnss_autoprint=10,0\r\n");
 }

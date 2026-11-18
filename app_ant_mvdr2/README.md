@@ -249,3 +249,12 @@ build change). Polled once a second with the event monitor.
 * No temperature compensation in the signal path is needed: the SMI weights
   re-learn RX1/RX2 gain + phase every ~1.5 ms, the AGC holds the noise level,
   RX/TX share the LO and the sample clock (reference drift cancels).
+
+## MOD13 (18 Nov 2026) -- firmware only: temperature line in the automatic report
+
+* gnss_temp.c printed with plain printf, so in the automatic (spooled)
+  report the TEMPERATURE text went straight to the UART ahead of the report
+  and the TEMPERATURE header stood empty. It now prints through gnss_qprintf
+  like gnss_report.c, so the line lands in place.
+* gnss_autoprint= reply cleaned up (it printed "every" with no number); it
+  says when a value is raised to the minimum (KPI 2 s, report 5 s).
