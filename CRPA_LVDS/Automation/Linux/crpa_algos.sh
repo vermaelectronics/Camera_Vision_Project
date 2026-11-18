@@ -11,6 +11,8 @@
 #    crpa29  stap_pi  14 + 14           7      weight prediction
 #    crpa30  stap_pi  16 + 16           8
 #    crpa31  stap_pi  18 + 18           9
+#    loopback  (none)  -                -    no anti-jam: RX1 -> TX1, RX2 -> TX2
+#                                             (./build_all.sh --algo loopback)
 #
 #  The algorithm sources are Source/CRPA/<algo>/{fpga,arm}, exactly as
 #  delivered; NT / REF here must match their ST_NT / SMI_NT and AJ_NT / AJ_REF
@@ -30,10 +32,14 @@ crpa_algo_params() {   # <algo> -> CRPA_NUM CRPA_CORE CRPA_NT CRPA_REF CRPA_NWTS
     crpa29) CRPA_NUM=29; CRPA_CORE=stap_pi; CRPA_NT=14; CRPA_REF=7 ;;
     crpa30) CRPA_NUM=30; CRPA_CORE=stap_pi; CRPA_NT=16; CRPA_REF=8 ;;
     crpa31) CRPA_NUM=31; CRPA_CORE=stap_pi; CRPA_NT=18; CRPA_REF=9 ;;
+    # plain RX -> TX loop-back: no filter core, no solver (gnss_passthrough only)
+    loopback) CRPA_NUM=0; CRPA_CORE=none; CRPA_NT=1; CRPA_REF=0 ;;
     *) return 1 ;;
   esac
   CRPA_NW_USED=$((2 * CRPA_NT))
-  if [[ "$CRPA_CORE" == smi_pi ]]; then
+  if [[ "$CRPA_CORE" == none ]]; then
+    CRPA_NWTS=1; CRPA_NW_USED=1; CRPA_NWCJ=1; CRPA_HAS_GAIN=0; CRPA_CORE_VER=0
+  elif [[ "$CRPA_CORE" == smi_pi ]]; then
     CRPA_NWTS=64; CRPA_NWCJ=2; CRPA_HAS_GAIN=0; CRPA_CORE_VER=4.9
   else
     CRPA_NWTS=$CRPA_NW_USED; CRPA_NWCJ=6; CRPA_HAS_GAIN=1; CRPA_CORE_VER=1.0

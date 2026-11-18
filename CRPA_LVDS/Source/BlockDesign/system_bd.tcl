@@ -34,7 +34,11 @@ foreach v {GNSS_CRPA_IP_REPO CRPA_ALGO CRPA_CORE CRPA_CORE_VER CRPA_HAS_GAIN} {
 set gnss_ip_repo [file normalize $::env(GNSS_CRPA_IP_REPO)]
 set crpa_algo    $::env(CRPA_ALGO)
 set crpa_core    $::env(CRPA_CORE)
-foreach gnss_ip [list gnss_passthrough $crpa_core] {
+# loop-back build (CRPA_CORE=none): gnss_passthrough only, no filter core
+set crpa_loopback [expr {$crpa_core eq "none"}]
+set gnss_ips [list gnss_passthrough]
+if {!$crpa_loopback} { lappend gnss_ips $crpa_core }
+foreach gnss_ip $gnss_ips {
   if {![file exists [file join $gnss_ip_repo $gnss_ip component.xml]]} {
     error "ERROR: custom IP $gnss_ip not found in $gnss_ip_repo\
            (run build_all.sh --from hls)."
@@ -49,7 +53,7 @@ set gnss_vlnv antsdr:gnss:gnss_passthrough:4.0
 set core_vlnv antsdr:gnss:${crpa_core}:$::env(CRPA_CORE_VER)
 set gnss_ipdef [get_ipdefs -all -quiet -filter "VLNV == $gnss_vlnv"]
 set core_ipdef [get_ipdefs -all -quiet -filter "VLNV == $core_vlnv"]
-if {[llength $gnss_ipdef] == 0 || [llength $core_ipdef] == 0} {
+if {[llength $gnss_ipdef] == 0 || (!$crpa_loopback && [llength $core_ipdef] == 0)} {
   error "ERROR: $gnss_vlnv ('$gnss_ipdef') or $core_vlnv ('$core_ipdef')\
          not in the IP catalog after registering $gnss_ip_repo\
          (run build_all.sh --algo $crpa_algo --from hls)."
@@ -352,6 +356,12 @@ ad_connect  gnss_passthrough/dac_data_q0 axi_ad9361/dac_data_q0
 ad_connect  gnss_passthrough/dac_data_i1 axi_ad9361/dac_data_i1
 ad_connect  gnss_passthrough/dac_data_q1 axi_ad9361/dac_data_q1
 
+if {$crpa_loopback} {
+  # LOOP-BACK: no filter. CONTROL[5] stays 0 (the firmware never sets it), so
+  # TX1 = RX1 and TX2 = RX2 through gnss_passthrough's elastic buffers. The
+  # unused s_axis_smi input is left unconnected (tied to 0 by Vivado).
+  puts "CRPA_LVDS: loop-back build, no filter core"
+} else {
 # CRPA filter (Vitis HLS smi_pi / stap_pi, II = 1, latency of the samples =
 # the reference delay REF) on sys_cpu_clk (100 MHz). l_clk is 245.76 MHz at
 # 61.44 MS/s, so the filter does not run on it; two async AXI-Stream FIFOs
@@ -394,6 +404,7 @@ ad_connect  axi_ad9361/l_clk            smi_fifo_out/m_axis_aclk
 ad_connect  sys_cpu_resetn              smi_fifo_out/s_axis_aresetn
 ad_connect  crpa_core_0/m_axis_y        smi_fifo_out/S_AXIS
 ad_connect  smi_fifo_out/M_AXIS         gnss_passthrough/s_axis_smi
+}
 
 # CRPA END
 # ---------------------------------------------------------------------------

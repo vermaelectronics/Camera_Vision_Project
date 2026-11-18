@@ -17,5 +17,11 @@ for a in "${list[@]}"; do
   vvp -n "$tmp/tb" | grep -E "HDL_TB|FAIL" || fail=1
   vvp -n "$tmp/tb" | grep -q "HDL_TB: PASS" || fail=1
 done
+# the RX -> TX datapath itself (loop-back): matched rates, and TX 4x too fast
+for dd in 4 1; do
+  iverilog -g2005 -DDAC_DIV=$dd -o "$tmp/dp" "$here/tb_loopback_datapath.v" "$here/../gnss_passthrough.v" || { fail=1; continue; }
+  vvp -n "$tmp/dp" | grep -E "^DATAPATH" || fail=1
+  vvp -n "$tmp/dp" | grep -q "DATAPATH_TB: PASS" || fail=1
+done
 rm -rf "$tmp"
 [[ $fail -eq 0 ]] && echo "HDL_TB: ALL PASS" || { echo "HDL_TB: FAIL"; exit 1; }

@@ -1087,7 +1087,11 @@ int main(void)
 	 * interlock in gnss_l1_enable_tx() to be satisfied deliberately
 	 * (requirements 54, 55).
 	 * --------------------------------------------------------------------- */
+#ifdef CRPA_LOOPBACK
+	printf("\n\r=== ANTSDR E310 - Passthrough_LVDS LOOP-BACK (no anti-jam) ===\n\r");
+#else
 	printf("\n\r=== ANTSDR E310 - Passthrough_LVDS + CRPA " CRPA_ALGO_STR " (" CRPA_CORE_STR "), engine " GNSS_AJ_VERSION_STR " ===\n\r");
+#endif
 	{
 		int32_t gnss_st = gnss_l1_selftest(ad9361_phy);
 		if (gnss_st != GNSS_L1_OK) {
@@ -1197,11 +1201,16 @@ int main(void)
 	 * crpa=0 switches it off. Both loops run while the console is idle. */
 	gnss_aj_init();
 	gnss_aj_enable(1);
+#ifdef CRPA_LOOPBACK
+	console_print("\nLOOP-BACK build: no anti-jam. TX1 = RX1, TX2 = RX2 through gnss_passthrough.\n"
+		      "  Start retransmitting with gnss_tx=1; gnss_fifo? checks the RX/TX rates.\n");
+#else
 	console_print("\nANTI-JAM (CRPA " CRPA_ALGO_STR ", engine " GNSS_AJ_VERSION_STR "): ON, bypassed until a jammer appears.\n"
 		      "  Jammer events are printed as [AJ] lines with a time stamp. crpa_aj? = state,\n"
 		      "  crpa_report? = everything (copy it into a report), crpa_csv=500 = CSV log,\n"
 		      "  Status line every 30 s (crpa_log=N, 0 = events only); it waits while you type.\n"
 		      "  Start retransmitting with gnss_tx=1 (goes straight to the working level).\n");
+#endif
 #ifdef GNSS_DEPLOY_AUTO_TX
 	if((gnss_pt_read(GNSS_PT_REG_STATUS) & GNSS_PT_ST_PASS_EN_SYNCED) &&
 	   (gnss_pt_read(GNSS_PT_REG_STATUS) & GNSS_PT_ST_DAC_EN_I0))
