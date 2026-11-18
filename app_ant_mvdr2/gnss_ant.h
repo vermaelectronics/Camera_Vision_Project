@@ -44,6 +44,7 @@ void get_taps(double *param, char param_no);
 void get_rxoff(double *param, char param_no);
 void set_rxoff(double *param, char param_no);
 void set_agcclip(double *param, char param_no);
+void set_ajbw(double *param, char param_no);
 void set_taps(double *param, char param_no);
 
 #endif

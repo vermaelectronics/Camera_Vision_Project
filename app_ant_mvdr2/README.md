@@ -45,6 +45,8 @@ MVDR2 versions keep working under a new name:
 | `band?` / `band=N` | radio presets (3 = all four systems) |
 | `tx1_att=mdB` `agc=1/0` `rxgain=dB` | settings |
 | `gnss_agcstep=dB,s` | AGC rise with a jammer (default 1 dB every 1 s) |
+| `gnss_ajbw=MHz` | wideband jammer for 2 s: narrow the AD9361 RX filter to MHz (0 = off; try 24); back 10 s after it goes |
+| `smiavg=N[,S]` | covariance averaging 1/2^N, steady 1/2^S 1 s after a power step (default 2,4) |
 | `gnss_agcclip=ppm` | barrage AGC: gain up to this ADC clip rate (default 100 ppm; 0 = old -2 dBFS peak rule) |
 | `gnss_rxoff=dB` / `rxoff?` | RX2 gain = RX1 gain - dB when one channel is hotter; `rxoff?` measures and suggests it |
 | `taps=N` / `taps?` | STAP taps per antenna in use, 1..16, live (others set to 0) |
@@ -68,3 +70,14 @@ window can measure (3/sqrt(K)). See the project doc suppression_jn_theory_12nov2
   move the MVDR weights, so the null holds while the gain rises
 - without a jammer: back to the noise target at up to 10 dB per 0.3 s
 - MOD-31 anti-hunt lock (10..80 s) and covariance averaging kept
+
+## Scheduler and solver timing (14 Nov 2026)
+- The main loop now runs on time (global timer): SMI solve whenever a window is
+  published (no 1 ms delay after a solve), AGC tick every 10 ms, events every
+  0.5 s. Before, the AGC tick was counted in loops: with a ~5 ms solve its
+  "10 ms" was ~60 ms, so the AGC fast loop, slow loop and rise ran ~6x slower
+  than designed.
+- gnss_smi.c is built -O2 by a pragma (also in a Debug configuration).
+- `stap?` shows the solver timing (read, average, solve, write, figures) and the
+  weight-update interval; `gnss_kpi?` adds tsolve=, tupd=, steady=, ajbw=.
+- `gnss_status?` shows the AD9361 temperature and the tracking calibrations.

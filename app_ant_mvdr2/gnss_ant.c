@@ -232,7 +232,7 @@ void gnss_ant_menu(void)
 	printf("  CHECK    gnss_tx?   gnss_status?   gnss_jam?   gnss_mvdr?   gnss_spec?\r\n");
 	printf("           status?   rx?   stap?   selftest?\r\n");
 	printf("  SETTINGS band=N (band? lists)   tx1_att=mdB   agc=1|0   rxgain=dB\r\n");
-	printf("           gnss_agcstep=dB,s   gnss_agcclip=ppm   gnss_rxoff=dB (rxoff?)\r\n");
+	printf("           gnss_agcstep=dB,s   gnss_agcclip=ppm   gnss_rxoff=dB (rxoff?)   gnss_ajbw=MHz\r\n");
 	printf("           taps=N (1..16)   smi=K,A   smiavg=N\r\n");
 	printf("  Enter = this menu   help? = these commands   commands? = ALL commands\r\n");
 	printf("  (AD9361 vendor commands rx_lo_freq=, tx1_attenuation=, rx1_rf_gain=, dds_* ...\r\n");
@@ -267,6 +267,8 @@ void get_ant_help(double *param, char param_no)
 	item("rxgain=dB", "manual RX gain, same on RX1 and RX2 (sets agc=0)");
 	item("gnss_agcstep=dB,s", "AGC rise with a jammer (def 1 dB every 1 s; e.g. 3,2)");
 	item("taps=N / taps?", "STAP taps per antenna in use, 1..16, live (16 = all)");
+	item("smiavg=N[,S]", "covariance averaging 1/2^N, steady 1/2^S after 1 s (def 2,4)");
+	item("gnss_ajbw=MHz", "wideband jammer: narrow the RX filter to MHz (0 off; try 24)");
 	item("gnss_agcclip=ppm", "barrage AGC: allowed ADC clip rate (def 100 ppm; 0 = peak rule)");
 	item("gnss_rxoff=dB / rxoff?", "RX2 gain = RX1 gain - dB (one channel hotter); rxoff? measures it");
 	printf("  ADVANCED\r\n");
@@ -397,8 +399,17 @@ void get_stap(double *param, char param_no)
 			printf("            weights in the FPGA now: %d taps on RX1, %d on RX2 (the rest 0)\r\n", w1, w2);
 		else
 			printf("            weights in the FPGA now: -- (no solve yet: stap=1)\r\n");
-		printf("            averaging beta 1/%d (%.0f snapshots per solve)\r\n",
-		       m.ss.avg_sh ? (1 << m.ss.avg_sh) : 1, m.ss.keff);
+		printf("            averaging beta 1/%d, steady 1/%d (%s), %.0f snapshots in R\r\n",
+		       m.ss.avg_sh ? (1 << m.ss.avg_sh) : 1,
+		       m.ss.avg_sh_st ? (1 << m.ss.avg_sh_st) : (m.ss.avg_sh ? (1 << m.ss.avg_sh) : 1),
+		       m.ss.avg_steady ? "STEADY now: low jitter" : "fast: after a power step",
+		       m.ss.keff);
+		printf("  timing    read %.0f + average %.0f + solve %.0f + write %.0f + figures %.0f = %.0f us\r\n",
+		       m.ss.t_read_us, m.ss.t_avg_us, m.ss.t_solve_us, m.ss.t_write_us, m.ss.t_post_us,
+		       m.ss.t_total_us);
+		printf("            weights updated every %.2f ms (%.0f per s), longest pass %.0f us\r\n",
+		       m.ss.t_int_us / 1000.0, m.ss.t_int_us > 0.0 ? 1e6 / m.ss.t_int_us : 0.0, m.ss.t_max_us);
+		printf("            new weights load at a window boundary (double-buffered: no glitch)\r\n");
 		printf("            solved %lu  failed %lu  skipped %lu  overruns %lu\r\n",
 		       (unsigned long)m.ss.updates, (unsigned long)m.ss.fails,
 		       (unsigned long)m.ss.skipped, (unsigned long)m.ss.novr);
@@ -477,6 +488,18 @@ void get_ant_gnss_status(double *param, char param_no)
 	       (unsigned long)a1, a1 >= GNSS_L1_TX_MAX_ATTEN_MDB ? " = silent" : "",
 	       (unsigned long)a2, (unsigned long)m.att_op);
 	printf("  preset      band %d: %s\r\n", m.band, m.bname);
+	{
+		static int32_t t_boot = -1000000;
+		int32_t tc = 0;
+		if (ad9361_get_temperature(ad9361_phy, &tc) == 0) {
+			if (t_boot == -1000000) t_boot = tc;
+			printf("  AD9361 temp %.0f C (uncalibrated, +-5 C), %+.0f C since first read%s\r\n",
+			       tc / 1000.0, (tc - t_boot) / 1000.0,
+			       (tc - t_boot > 20000 || t_boot - tc > 20000) ?
+			       "  -> drift: the weights follow it; gnss_auto=1 re-runs the radio calibrations" : "");
+		}
+		printf("  tracking    RX quadrature (IQ), BB DC and RF DC tracking ON (AD9361, continuous)\r\n");
+	}
 	printf("--- state ------------------------------------------------------------------\r\n");
 	printf("  STATE    %s   [gnss_tx=%d pass=%d stap=%d]\r\n", mode_name(&m), m.tx, m.pass, m.stap);
 	printf("  RX       ADC peak RX1 "); pv(m.pk1, 1); printf(" / RX2 "); pv(m.pk2, 1);
@@ -714,6 +737,9 @@ void get_selftest(double *param, char param_no)
 }
 
 /* ======================================================= one-line KPI */
+static int      ajbw_mhz = 0;
+static int      ajbw_on = 0;             /* narrowed now                     */
+
 void get_ant_kpi(double *param, char param_no)
 {
 	gm_t m;
@@ -734,6 +760,8 @@ void get_ant_kpi(double *param, char param_no)
 	       (unsigned long)m.clip1, (unsigned long)m.clip2);
 	if (m.out_ok) printf(" out=%.1f", m.out); else printf(" out=na");
 	printf(" taps=%d alpha=%.1f", m.ss.La, m.ss.alpha);
+	printf(" tsolve=%.0f tupd=%.2f steady=%d ajbw=%d", m.ss.t_total_us, m.ss.t_int_us / 1000.0,
+	       m.ss.avg_steady, ajbw_on ? ajbw_mhz : 0);
 	{
 		double r = 0.0;
 		int bar = gnss_agc_barrage_rule(&r);
@@ -745,17 +773,77 @@ void get_ant_kpi(double *param, char param_no)
 }
 
 /* ======================================================= live events */
+/* ---------------------------------------------------- anti-jam bandwidth
+ * gnss_ajbw=MHz (0 = off, default): while a WIDEBAND jammer is detected for
+ * 2 s, the AD9361 RX analog filter is narrowed to MHz (LO and sample rate
+ * unchanged, no restart). A barrage then puts less power into the ADC, so the
+ * AGC keeps more gain (less AD9361 noise at low gain). Signals outside the
+ * narrow band (GLONASS, BeiDou B1I with band 3) are lost while it is on; GPS
+ * L1 / Galileo E1 / BeiDou B1C stay. 10 s after the jammer goes the band's
+ * own bandwidth comes back. Each change re-tunes the filter (~ms glitch). */
+static uint32_t ajbw_saved = 0;          /* bandwidth to restore, Hz         */
+static int      ajbw_jam_t = 0, ajbw_clr_t = 0;   /* half-seconds            */
+
+static void ajbw_tick(void)
+{
+	gm_t m;
+	uint32_t bw = 0;
+	int wide;
+
+	if (!ajbw_mhz && !ajbw_on) return;
+	gm_read(&m);
+	if (!ad9361_phy || ad9361_get_rx_rf_bandwidth(ad9361_phy, &bw) != 0) return;
+	if (ajbw_on && bw != (uint32_t)ajbw_mhz * 1000000U) {   /* band / auto re-applied */
+		ajbw_on = 0;
+		ajbw_jam_t = ajbw_clr_t = 0;
+	}
+	wide = m.stap && m.aj.valid && m.aj.jammed && m.smi_ok && m.ss.jbw_class >= 1;
+	if (wide) { ajbw_jam_t++; ajbw_clr_t = 0; } else { ajbw_clr_t++; ajbw_jam_t = 0; }
+	if (!ajbw_on && ajbw_mhz && ajbw_jam_t >= 4 && bw > (uint32_t)ajbw_mhz * 1000000U) {
+		ajbw_saved = bw;
+		if (ad9361_set_rx_rf_bandwidth(ad9361_phy, (uint32_t)ajbw_mhz * 1000000U) == 0) {
+			ajbw_on = 1;
+			gnss_rep_event("AJ BAND     RX filter %d MHz (was %.0f): wideband jammer", ajbw_mhz,
+				       ajbw_saved / 1e6);
+		}
+	} else if (ajbw_on && (ajbw_clr_t >= 20 || !ajbw_mhz)) {
+		if (ad9361_set_rx_rf_bandwidth(ad9361_phy, ajbw_saved) == 0) {
+			ajbw_on = 0;
+			gnss_rep_event("AJ BAND     RX filter back to %.0f MHz", ajbw_saved / 1e6);
+		}
+	}
+}
+
+void set_ajbw(double *param, char param_no)
+{
+	int v = (param_no >= 1) ? (int)param[0] : -1;
+	if (v != 0 && (v < 4 || v > 56)) {
+		printf("  gnss_ajbw=MHz, 4..56 (0 = off), now %d%s\r\n", ajbw_mhz,
+		       ajbw_on ? " (narrowed now)" : "");
+		return;
+	}
+	ajbw_mhz = v;
+	if (v)
+		printf("  wideband jammer for 2 s -> RX filter %d MHz; back 10 s after it goes\r\n", v);
+	else
+		printf("  anti-jam bandwidth OFF%s\r\n", ajbw_on ? " (restoring the band's filter)" : "");
+	if (!v && ajbw_on) ajbw_tick();
+}
+
 int gnss_ant_poll_events(void)
 {
 	static uint32_t seen = 0;
-	uint32_t n = gnss_rep_event_total();
+	uint32_t n;
 	int printed = 0;
+
+	ajbw_tick();
+	n = gnss_rep_event_total();
 
 	while (seen < n) {
 		double t; const char *txt;
 		if (gnss_rep_event_get(seen, &t, &txt) == 0 &&
 		    ((!strncmp(txt, "JAMMER", 6) && strncmp(txt, "JAMMER DET", 10)) || !strncmp(txt, "NULLED", 6) ||
-		     !strncmp(txt, "RESIDUAL", 8) || !strncmp(txt, "ADC CLIP", 8))) {
+		     !strncmp(txt, "RESIDUAL", 8) || !strncmp(txt, "ADC CLIP", 8) || !strncmp(txt, "AJ BAND", 7))) {
 			printf("%s[%7.1f s] %s\r\n", printed ? "" : "\r\n", t, txt);
 			printed = 1;
 		}
@@ -1052,6 +1140,14 @@ void set_taps(double *param, char param_no)
 void set_smiavg(double *param, char param_no)
 {
 	set_gnss_smiavg(param, param_no);
+	if (param_no >= 2 && gnss_smi_set_avg_steady((int)param[1]) != 0)
+		printf("  steady shift 0..6 (0 = no steady averaging)\r\n");
+	{
+		gnss_smi_state_t ss;
+		gnss_smi_get_state(&ss);
+		printf("  steady (1 s after a power step): beta 1/%d%s\r\n",
+		       ss.avg_sh_st ? (1 << ss.avg_sh_st) : 1, ss.avg_sh_st ? "" : " (off)");
+	}
 	printf("  SMI averaging %d (beta 1/%d)\r\n", gnss_smi_get_avg(),
 	       gnss_smi_get_avg() ? (1 << gnss_smi_get_avg()) : 1);
 }

@@ -107,6 +107,7 @@ static uint8_t out_buff[MAX_SIZE_BASE_ADDR];
 #include "gnss_smi.h"
 #include "gnss_report.h"
 #include "gnss_ant.h"
+#include "gnss_time.h"
 #include "gnss_quiet.h"
 #include <xil_io.h>
 #ifdef CONSOLE_COMMANDS
@@ -1212,20 +1213,34 @@ int main(void)
 			if (!gnss_console_poll_line(received_cmd)) {
 				/* MVDR2 MOD-25: solve the SMI window published since the
 				 * last pass (returns at once when there is none / SMI off) */
-				gnss_smi_poll();
-				no_os_mdelay(1);
-				if (++idle_ms >= 10) {		/* every ~10 ms */
-					idle_ms = 0;
+				/* LVDS: the scheduler runs on TIME (global timer), not on
+				 * loop counts. Before, a solve (~5 ms) + mdelay(1) made one
+				 * "10 ms" tick last ~60 ms: the AGC fast loop ran every
+				 * ~60 ms, its slow loop every ~0.6 s and its "1 dB per s"
+				 * rise was ~1 dB per 6 s. Now: solve whenever a window is
+				 * published (no delay after a solve), AGC every 10 ms,
+				 * events every 0.5 s. */
+				static gnss_time_t t_bg = 0, t_ev = 0;
+				const gnss_time_t T10 = GNSS_COUNTS_PER_SECOND / 100U;
+				const gnss_time_t T500 = GNSS_COUNTS_PER_SECOND / 2U;
+				gnss_time_t now;
+				int solved = gnss_smi_poll();
+				now = gnss_time_now();
+				if (t_bg == 0) { t_bg = now; t_ev = now; }
+				if (now - t_bg >= T10) {
+					t_bg += T10;
+					if (now - t_bg > 3U * T10)	/* fell behind: no burst */
+						t_bg = now;
 					(void)gnss_background_tick();	/* AGC, events (captured) */
 				}
-				{
-					static int ev_ms = 0;
-					if (++ev_ms >= 500) {		/* new jammer / null events */
-						ev_ms = 0;
-						if (gnss_ant_poll_events())
-							gnss_console_prompt(received_cmd);
-					}
+				if (now - t_ev >= T500) {
+					t_ev = now;
+					if (gnss_ant_poll_events())
+						gnss_console_prompt(received_cmd);
 				}
+				if (!solved)
+					no_os_udelay(200);	/* idle: no new window yet */
+				(void)idle_ms;
 				continue;
 			}
 			need_prompt = 1;

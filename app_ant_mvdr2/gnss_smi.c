@@ -39,6 +39,9 @@
  *     level drops by 6 dB per step and AOLC takes it back.
  *   - the published window is LOCKed while it is read, so it is consistent.
  ******************************************************************************/
+/* LVDS: the solver runs ~170 times a second; build it optimised even in a
+ * Debug (-O0) Vitis configuration. Pure arithmetic, same results. */
+#pragma GCC optimize ("O2")
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
@@ -47,6 +50,7 @@
 #ifndef GNSS_SMI_HOST
 #include "gnss_passthrough.h"
 #include "no_os_delay.h"
+#include "gnss_time.h"
 #define RD(a)       gnss_pt_read(a)
 #define WR(a, v)    gnss_pt_write((a), (v))
 #define UDELAY(n)   no_os_udelay(n)
@@ -57,6 +61,15 @@ void     gnss_smi_host_wr(uint32_t a, uint32_t v);
 #define RD(a)       gnss_smi_host_rd(a)
 #define WR(a, v)    gnss_smi_host_wr((a), (v))
 #define UDELAY(n)   ((void)0)
+typedef unsigned long long gnss_time_t;              /* host: a monotonic clock */
+#include <time.h>
+#define GNSS_COUNTS_PER_SECOND 1000000000ULL
+static gnss_time_t gnss_time_now(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (gnss_time_t)ts.tv_sec * 1000000000ULL + (gnss_time_t)ts.tv_nsec;
+}
 #define GNSS_PT_REG_MVDR_ID          0x100U
 #define GNSS_PT_REG_MVDR_VERSION     0x104U
 #define GNSS_PT_MVDR_EXPECTED_ID     0x4D564452U
@@ -86,8 +99,22 @@ static uint32_t cur_page = 0xFFFFFFFFU;
 static gnss_smi_state_t sm = {
     .layout = 2, .L = 8, .N = 18, .ref = 3,
     .kexp = GNSS_SMI_KEXP_DEFAULT, .alpha = GNSS_SMI_ALPHA_DEFAULT, .steer_theta = 999.0,
-    .avg_sh = GNSS_SMI_AVG_DEFAULT, .keff = 0.0,
+    .avg_sh = GNSS_SMI_AVG_DEFAULT, .keff = 0.0, .avg_sh_st = GNSS_SMI_AVG_DEFAULT + 2,
 };
+#define GNSS_SMI_AVG_HOLD_US   1000000.0      /* fast beta for 1 s after a power step */
+static gnss_time_t t_avg_reset = 0;
+static gnss_time_t t_last_solve = 0;
+static double tus(gnss_time_t a, gnss_time_t b)
+{
+    return (double)(b - a) * 1e6 / (double)GNSS_COUNTS_PER_SECOND;
+}
+void gnss_smi_time_clear(void) { sm.t_max_us = 0.0; }
+int gnss_smi_set_avg_steady(int sh)
+{
+    if (sh < 0 || sh > 6) { return -1; }
+    sm.avg_sh_st = sh;
+    return 0;
+}
 static int     probed = 0;
 static int     have_v = 0;
 static void    window_figures(void);
@@ -518,8 +545,14 @@ static void smi_average(double k)
         if (have_avg) { sm.avg_resets++; }
         have_avg = 1;
         avg_s2 = 1.0;
+        t_avg_reset = gnss_time_now();
+        sm.avg_steady = 0;
     } else {
-        b = 1.0 / (double)(1 << sm.avg_sh);
+        int sh = sm.avg_sh;
+        sm.avg_steady = (sm.avg_sh_st > sm.avg_sh &&
+                         tus(t_avg_reset, gnss_time_now()) >= GNSS_SMI_AVG_HOLD_US) ? 1 : 0;
+        if (sm.avg_steady) { sh = sm.avg_sh_st; }
+        b = 1.0 / (double)(1 << sh);
         for (i = 0; i < N; i++) {
             for (j = 0; j < N; j++) {
                 Er[i][j] += b * (Rr[i][j] - Er[i][j]);
@@ -539,6 +572,7 @@ int gnss_smi_set_avg(int sh)
 {
     if (sh < 0 || sh > 4) { return -1; }
     sm.avg_sh = sh;
+    sm.avg_sh_st = sh ? ((sh + 2 > 6) ? 6 : sh + 2) : 0;   /* steady: 4x slower */
     have_avg  = 0;
     return 0;
 }
@@ -565,16 +599,18 @@ static int64_t s48(uint32_t lo, uint32_t hi16)
     return (int64_t)v;
 }
 
-void gnss_smi_poll(void)
+int gnss_smi_poll(void)
 {
     uint32_t st, seq, cnt, w0, w1, w2;
     int i, j, e, t;
+    gnss_time_t t0, t1, t2, t3, t4, t5;
 
-    if (!sm.enabled || !sm.present) { return; }
+    if (!sm.enabled || !sm.present) { return 0; }
     st  = RD(GNSS_SMI_REG_STAT);
     sm.hw_active = (st & GNSS_SMI_ST_ACTIVE) ? 1 : 0;
     seq = st >> 16;
-    if (seq == sm.seq) { return; }
+    if (seq == sm.seq) { return 0; }
+    t0 = gnss_time_now();
 
     /* lock the published window while reading it */
     WR(GNSS_SMI_REG_CTRL, ctrl_word(1));
@@ -584,7 +620,7 @@ void gnss_smi_poll(void)
     cnt = RD(GNSS_SMI_REG_COUNT) & 0xFFFFU;
     if (!(st & GNSS_SMI_ST_LOCK_ACK) || cnt == 0U) {
         WR(GNSS_SMI_REG_CTRL, ctrl_word(0));
-        return;
+        return 0;
     }
     e = 0;
     cur_page = 0xFFFFFFFFU;                    /* (re)write PAGE before the first entry */
@@ -601,7 +637,9 @@ void gnss_smi_poll(void)
         }
     }
     WR(GNSS_SMI_REG_CTRL, ctrl_word(0));
+    t1 = gnss_time_now();
     smi_average((double)cnt);                  /* MOD-31 */
+    t2 = gnss_time_now();
     have_win = 1;                              /* MOD-29: gnss_spec? / gnss_bist? */
     if (seq != ((sm.seq + 1U) & 0xFFFFU)) { sm.skipped++; }
     sm.seq   = seq;
@@ -610,9 +648,11 @@ void gnss_smi_poll(void)
     set_a();
     if (mvdr_solve() != 0) {
         sm.fails++;
-        return;
+        return 1;
     }
+    t3 = gnss_time_now();
     write_weights();
+    t4 = gnss_time_now();
     sm.updates++;
     {
         double tr = 0.0, por = 0.0, poi = 0.0;
@@ -636,6 +676,20 @@ void gnss_smi_poll(void)
     }
     window_figures();
     gnss_rep_on_solve();
+    t5 = gnss_time_now();
+    sm.t_read_us  = tus(t0, t1);
+    sm.t_avg_us   = tus(t1, t2);
+    sm.t_solve_us = tus(t2, t3);
+    sm.t_write_us = tus(t3, t4);
+    sm.t_post_us  = tus(t4, t5);
+    sm.t_total_us = tus(t0, t5);
+    if (sm.t_total_us > sm.t_max_us) { sm.t_max_us = sm.t_total_us; }
+    if (t_last_solve) {
+        double d = tus(t_last_solve, t4);
+        sm.t_int_us = (sm.t_int_us > 0.0 && d < 1e6) ? sm.t_int_us + (d - sm.t_int_us) / 16.0 : d;
+    }
+    t_last_solve = t4;
+    return 1;
 }
 
 /* MOD-26: what the window says about the strongest signal (the jammer when

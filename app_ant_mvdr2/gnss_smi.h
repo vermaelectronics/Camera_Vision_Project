@@ -108,12 +108,23 @@ typedef struct {
     int      avg_sh;        /* MOD-31: covariance averaged over windows, beta 2^-avg_sh (0 off) */
     uint32_t avg_resets;    /* MOD-31: restarts of the average on a power step  */
     double   keff;          /* MOD-31: effective snapshots in the solved R      */
+    /* LVDS: steady averaging -- after avg_hold_ms with no power step the
+     * average slows to beta 2^-avg_sh_st (default avg_sh + 2): 4x more
+     * snapshots, half the weight jitter; any power step goes back to fast */
+    int      avg_sh_st;     /* steady shift (0 = same as avg_sh)                */
+    int      avg_steady;    /* 1 = the slow (steady) beta is in use now          */
+    /* LVDS: solver timing, microseconds (last / max since smitime=0) */
+    double   t_read_us, t_avg_us, t_solve_us, t_write_us, t_post_us, t_total_us;
+    double   t_max_us;      /* longest total                                    */
+    double   t_int_us;      /* mean time between weight updates                 */
 } gnss_smi_state_t;
 
 int    gnss_smi_available(void);          /* reads the hardware              */
 int    gnss_smi_enable(int on);           /* 0 ok, -1 not present            */
 int    gnss_smi_is_enabled(void);
-void   gnss_smi_poll(void);               /* main loop, ~1 ms                */
+int    gnss_smi_poll(void);               /* main loop: 1 = a window was solved */
+void   gnss_smi_time_clear(void);
+int    gnss_smi_set_avg_steady(int sh);   /* 0 = off, 1..6 */
 void   gnss_smi_get_state(gnss_smi_state_t *s);
 int    gnss_smi_set_kexp(uint32_t k);     /* 6..12                           */
 int    gnss_smi_set_taps(int la);         /* taps per antenna in use, 1..L   */
