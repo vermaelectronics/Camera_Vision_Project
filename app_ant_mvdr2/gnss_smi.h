@@ -67,6 +67,7 @@ typedef struct {
     int      present;       /* stap_smi in the bitstream (MVDR >= 1.14, INFO ok) */
     int      layout;        /* 2 = flat (L 8), 3 = paged                         */
     int      L, N, ref;     /* taps per antenna, N = 2L + 2, reference tap       */
+    int      La, Na;        /* taps in use per antenna (taps=), solved vector    */
     uint32_t info;          /* INFO as read                                      */
     int      enabled;       /* CTRL.EN written by this driver                   */
     int      hw_active;     /* STAT.ACTIVE (EN reached the datapath)            */
@@ -115,6 +116,9 @@ int    gnss_smi_is_enabled(void);
 void   gnss_smi_poll(void);               /* main loop, ~1 ms                */
 void   gnss_smi_get_state(gnss_smi_state_t *s);
 int    gnss_smi_set_kexp(uint32_t k);     /* 6..12                           */
+int    gnss_smi_set_taps(int la);         /* taps per antenna in use, 1..L   */
+int    gnss_smi_get_taps(void);
+int    gnss_smi_weight_taps(int *n1, int *n2); /* non-zero taps, last weights */
 uint32_t gnss_smi_get_kexp(void);
 int    gnss_smi_set_alpha(double a);      /* 0.5..1000                       */
 void   gnss_smi_set_dc(int on);           /* FPGA DC removal (default on)    */

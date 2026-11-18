@@ -418,8 +418,8 @@ void gnss_rep_print(void)
     printf("firmware MOD-31, MVDR core %lu.%lu, uptime %s s\n",
            (unsigned long)(s.version >> 16), (unsigned long)(s.version & 0xFFFFU), f1(b1, t));
     if (have_smi) {
-        printf("%sSMI layout v%d: 2 antennas x %d taps + 2 image taps = %d (INFO 0x%08lX)\n",
-               pad, ss.layout, ss.L, ss.N, (unsigned long)ss.info);
+        printf("%sSMI layout v%d: 2 antennas x %d taps IN USE (of %d) + 2 image taps = %d solved (INFO 0x%08lX)\n",
+               pad, ss.layout, ss.La, ss.L, ss.Na, (unsigned long)ss.info);
     }
 
     hdr("SUMMARY");

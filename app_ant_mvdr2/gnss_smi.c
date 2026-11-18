@@ -125,6 +125,8 @@ static void set_layout(int v, int l, int r)
 {
     lay = v;  nL = l;  N = 2 * l + GNSS_SMI_NI;  REF = r;
     sm.layout = v;  sm.L = l;  sm.N = N;  sm.ref = r;
+    if (sm.La <= 0 || sm.La > l) { sm.La = l; }
+    sm.Na = 2 * sm.La + GNSS_SMI_NI;
     have_avg = 0;                              /* MOD-31 */
     if (!kexp_user) { sm.kexp = (l > 8) ? GNSS_SMI_KEXP_DEFAULT_16 : GNSS_SMI_KEXP_DEFAULT; }
 }
@@ -178,7 +180,7 @@ static void solve(const double *br, const double *bi, double *xr, double *xi)
 
 /* MVDR weights for the covariance in Rr/Ri (any scale) and the vector a.
  * Fills wr_/wi_, sm.lam_min/load (same scale as R). 0 = ok. */
-static int mvdr_solve(void)
+static int mvdr_solve_n(void)
 {
     double tr = 0.0, eps, nrm, lam, gr, gi, g2;
     int i, it, tries;
@@ -227,6 +229,106 @@ static int mvdr_solve(void)
     }
     return 0;
 }
+
+
+/* taps= : solve on the taps in use only (La per antenna, centred on REF like
+ * the full layout: La/2 newer + the rest older, image taps kept). The other
+ * taps get weight 0, so the FPGA filter is exactly an La-tap STAP. */
+static double  Sr_[NM][NM], Si_[NM][NM];
+static int     act_idx[NM];
+
+static int act_list(void)
+{
+    int k0, k1, k, n = 0, i;
+    if (sm.La >= nL) { for (i = 0; i < N; i++) { act_idx[i] = i; } return N; }
+    k0 = REF - sm.La / 2;
+    if (k0 < 0) { k0 = 0; }
+    k1 = k0 + sm.La - 1;
+    if (k1 > nL - 1) { k1 = nL - 1; k0 = k1 - sm.La + 1; }
+    for (k = k0; k <= k1; k++) { act_idx[n++] = k; }
+    for (k = k0; k <= k1; k++) { act_idx[n++] = nL + k; }
+    for (i = 2 * nL; i < N; i++) { act_idx[n++] = i; }
+    return n;
+}
+
+static int mvdr_solve(void)
+{
+    int na, n0, i, j, rc;
+    double tar[NM], tai[NM];
+
+    na = act_list();
+    sm.Na = na;
+    if (na == N) { return mvdr_solve_n(); }
+    n0 = N;
+    for (i = 0; i < N; i++) {
+        tar[i] = ar[i]; tai[i] = ai[i];
+        for (j = 0; j < N; j++) { Sr_[i][j] = Rr[i][j]; Si_[i][j] = Ri[i][j]; }
+    }
+    for (i = 0; i < na; i++) {
+        ar[i] = tar[act_idx[i]]; ai[i] = tai[act_idx[i]];
+        for (j = 0; j < na; j++) { Rr[i][j] = Sr_[act_idx[i]][act_idx[j]]; Ri[i][j] = Si_[act_idx[i]][act_idx[j]]; }
+    }
+    N = na;
+    rc = mvdr_solve_n();
+    N = n0;
+    {
+        double xr[NM], xi[NM];
+        for (i = 0; i < na; i++) { xr[i] = wr_[i]; xi[i] = wi_[i]; }
+        for (i = 0; i < N; i++) { wr_[i] = 0.0; wi_[i] = 0.0; }
+        if (rc == 0) { for (i = 0; i < na; i++) { wr_[act_idx[i]] = xr[i]; wi_[act_idx[i]] = xi[i]; } }
+    }
+    for (i = 0; i < N; i++) {
+        ar[i] = tar[i]; ai[i] = tai[i];
+        for (j = 0; j < N; j++) { Rr[i][j] = Sr_[i][j]; Ri[i][j] = Si_[i][j]; }
+    }
+    return rc;
+}
+
+/* lambda_min of the full R (all taps), for the noise estimate when fewer taps
+ * are solved: the reduced R can hide jammer energy in its smallest eigenvalue */
+static double lam_min_full(void)
+{
+    double tr = 0.0, eps, nrm = 0.0, xr[NM], xi[NM], yr[NM], yi[NM];
+    int i, it;
+    for (i = 0; i < N; i++) { tr += Rr[i][i]; }
+    if (!(tr > 0.0)) { return 0.0; }
+    eps = 1e-9 * tr / N + 1e-6;
+    if (chol(eps) != 0) { return 0.0; }
+    for (i = 0; i < N; i++) { xr[i] = 1.0 / (1.0 + i); xi[i] = 0.0; }
+    for (it = 0; it < 12; it++) {
+        solve(xr, xi, yr, yi);
+        nrm = 0.0;
+        for (i = 0; i < N; i++) { nrm += yr[i] * yr[i] + yi[i] * yi[i]; }
+        nrm = sqrt(nrm);
+        if (!(nrm > 0.0)) { return 0.0; }
+        for (i = 0; i < N; i++) { xr[i] = yr[i] / nrm; xi[i] = yi[i] / nrm; }
+    }
+    return 1.0 / nrm;
+}
+
+int gnss_smi_set_taps(int la)
+{
+    (void)gnss_smi_available();
+    if (la < 1 || la > nL) { return -1; }
+    sm.La = la;
+    sm.Na = 2 * la + GNSS_SMI_NI;
+    have_v = 0;                                /* new vector length: cold start */
+    return 0;
+}
+/* taps that really carry a weight in the last set written to the FPGA */
+int gnss_smi_weight_taps(int *n1, int *n2)
+{
+    int k, a = 0, b = 0;
+    if (!sm.updates) { if (n1) { *n1 = 0; } if (n2) { *n2 = 0; } return -1; }
+    for (k = 0; k < nL; k++) {
+        if (wr_[k] != 0.0 || wi_[k] != 0.0) { a++; }
+        if (wr_[nL + k] != 0.0 || wi_[nL + k] != 0.0) { b++; }
+    }
+    if (n1) { *n1 = a; }
+    if (n2) { *n2 = b; }
+    return 0;
+}
+int gnss_smi_get_taps(void) { return sm.La > 0 ? sm.La : nL; }
 
 /* -------------------------------------------------------------- hardware */
 int gnss_smi_available(void)
@@ -769,6 +871,8 @@ double gnss_smi_response_db(double f_off_hz, double fs_hz)
 int gnss_smi_null_analysis(gnss_null_t *o)
 {
     double keff = (sm.keff > (double)N) ? sm.keff : (double)(1UL << (sm.kexp ? sm.kexp : 8));
+    int    na   = (sm.Na > 0 && sm.Na <= N) ? sm.Na : N;
+    double lmin = sm.lam_min;
     double bias = 1.0 - sqrt((double)N / keff);       /* lambda_min of the solved R sits low */
     double sn2, jin, jout = 0.0, wn = 0.0, flo, rho, rp, beta;
     int i, j;
@@ -776,7 +880,14 @@ int gnss_smi_null_analysis(gnss_null_t *o)
     memset(o, 0, sizeof(*o));
     if (!have_win || !sm.updates || !(sm.lam_min > 0.0) || N <= 0) { return -1; }
     if (bias < 0.05) { bias = 0.05; }
-    sn2 = sm.lam_min / (bias * bias);                 /* noise per element */
+    if (na < N) {                                     /* taps < L: noise from all taps */
+        double lf = lam_min_full();
+        if (lf > 0.0) { lmin = lf; }
+    } else {
+        bias = 1.0 - sqrt((double)na / keff);
+        if (bias < 0.05) { bias = 0.05; }
+    }
+    sn2 = lmin / (bias * bias);                       /* noise per element */
     for (i = 0; i < N; i++) {
         double tr = 0.0, ti = 0.0;
         wn += wr_[i] * wr_[i] + wi_[i] * wi_[i];
@@ -798,18 +909,19 @@ int gnss_smi_null_analysis(gnss_null_t *o)
     if (o->supp_db < 0.0) { o->supp_db = 0.0; }
     o->cn0_loss_db = o->supp_lo ? 0.0 : 10.0 * log10(1.0 + jout);
     rho = jin > 0.0 ? jin : 0.0;                         /* closed form, M = 2 */
+    (void)na;
     rp = rho / (1.0 + sm.alpha);
     beta = rp / (1.0 + 2.0 * rp);
     o->sth2_db = 10.0 * log10((1.0 + 2.0 * rp) * (1.0 + 2.0 * rp) *
                               ((1.0 - beta) * (1.0 - beta) + beta * beta));
-    o->smi_loss_db = (keff > N) ? -10.0 * log10((keff - N + 2.0) / (keff + 1.0)) : 99.0;
+    o->smi_loss_db = (keff > na) ? -10.0 * log10((keff - na + 2.0) / (keff + 1.0)) : 99.0;
     {
         double xr = Rr[REF][nL + REF], xi = Ri[REF][nL + REF];
         double d = Rr[REF][REF] - sn2, p2 = Rr[nL + REF][nL + REF] - sn2;
         o->amp_db = (d > 0.0 && p2 > 0.0) ? 10.0 * log10(p2 / d) : 0.0;
         o->ph_deg = atan2(-xi, xr) * 180.0 / PI_D;
     }
-    o->valid = (o->jn_in_db > 3.0);
+    o->valid = (o->jn_in_db > 1.0);
     return 0;
 }
 
@@ -849,7 +961,8 @@ void gnss_smi_print(void)
         return;
     }
     gnss_smi_get_state(&s);
-    printf("SMI-STAP (2 antennas x %d taps + 2 image taps = %d, sample-matrix inversion on the ARM)\n", s.L, s.N);
+    printf("SMI-STAP (2 antennas x %d taps in use of %d + 2 image taps = %d, sample-matrix inversion on the ARM)\n",
+           s.La, s.L, s.Na);
     printf("  layout      : INFO 0x%08lX  v%d, reference RX1 tap %d (%d newer + %d older taps)\n",
            (unsigned long)s.info, s.layout, s.ref, s.ref, s.L - 1 - s.ref);
     printf("  output      : %s\n", s.hw_active ? "SMI drives the output" :

@@ -132,6 +132,13 @@ static void gm_read(gm_t *m)
 	/* one J/N: from the null analysis while stap is on (same R, same noise
 	 * as the suppression), from the anti-jam report otherwise */
 	m->jn = m->nl_ok ? m->nl.jn_in_db : (m->aj.valid ? m->aj.jnr_db : NA);
+	if (!m->nl_ok && m->jn <= -50.0 && (m->pass || m->stap)) {
+		/* report says "nothing above the noise": use the FPGA estimator */
+		gnss_pt_jam_state_t j;
+		gnss_pt_jam_get_state(&j);
+		if (j.available && j.jnr_db_q8 != (int16_t)GNSS_PT_JAM_Q8_NONE)
+			m->jn = (double)j.jnr_db_q8 / 256.0;
+	}
 }
 
 static void print_mode(void);
@@ -167,8 +174,13 @@ static void line_jammer(const gm_t *m)
 		return;
 	}
 	if (!m->aj.jammed) {
+		if (m->jn >= 1.0) {
+			printf("  JAMMER   WEAK    J/N %.1f dB at the ADC (under the 6 dB alarm; %s)\r\n",
+			       m->jn, m->stap ? "the null works on it" : "stap=1 nulls it");
+			return;
+		}
 		printf("  JAMMER   CLEAR   (J/N "); pv(m->jn > -50 ? m->jn : NA, 1);
-		printf(" dB, threshold 6 dB)\r\n");
+		printf(" dB, alarm at 6 dB)\r\n");
 		return;
 	}
 	printf("  JAMMER   JAMMED  J/N %.1f dB at the ADC, %s ~%.0f MHz wide, RF %.2f MHz\r\n",
@@ -182,7 +194,7 @@ static void line_null(const gm_t *m)
 		printf("  NULL     off (stap=1 to null the jammer)\r\n");
 		return;
 	}
-	if (!m->aj.valid || !m->aj.jammed || !m->nl_ok) {
+	if (!m->nl_ok) {
 		printf("  NULL     ready, no jammer to null\r\n");
 		return;
 	}
@@ -220,7 +232,7 @@ void gnss_ant_menu(void)
 	printf("  CHECK    gnss_tx?   gnss_status?   gnss_jam?   gnss_mvdr?   gnss_spec?\r\n");
 	printf("           status?   rx?   stap?   selftest?\r\n");
 	printf("  SETTINGS band=N (band? lists)   tx1_att=mdB   agc=1|0   rxgain=dB\r\n");
-	printf("           gnss_agcstep=dB,s   smi=K,A   smiavg=N\r\n");
+	printf("           gnss_agcstep=dB,s   taps=N (1..16)   smi=K,A   smiavg=N\r\n");
 	printf("  Enter = this menu   help? = these commands   commands? = ALL commands\r\n");
 	printf("  (AD9361 vendor commands rx_lo_freq=, tx1_attenuation=, rx1_rf_gain=, dds_* ...\r\n");
 	printf("   and every MVDR2 gnss_ command are all still there: commands? lists them)\r\n");
@@ -253,6 +265,7 @@ void get_ant_help(double *param, char param_no)
 	item("agc=1 / =0", "RX gain AUTO (default, fast + anti-hunt) / MANUAL");
 	item("rxgain=dB", "manual RX gain, same on RX1 and RX2 (sets agc=0)");
 	item("gnss_agcstep=dB,s", "AGC rise with a jammer (def 1 dB every 1 s; e.g. 3,2)");
+	item("taps=N / taps?", "STAP taps per antenna in use, 1..16, live (16 = all)");
 	printf("  ADVANCED\r\n");
 	item("smi=K,A", "SMI window 2^K snapshots (6..12, def 8), loading A x lambda_min (def 3)");
 	item("smiavg=N", "covariance averaging 0..4 (def 2 = beta 1/4, steadier satellites)");
@@ -343,23 +356,29 @@ void get_stap(double *param, char param_no)
 	printf("  state     %s\r\n", m.stap ? "ON (null on TX1)" : "OFF (stap=1 to start)");
 	line_jammer(&m);
 	line_null(&m);
-	if (m.stap && m.aj.jammed && m.nl_ok) {
+	if (m.stap && m.nl_ok) {
 		printf("            J/N in  %6.1f dB   jammer/noise at RX1 (reference element)\r\n", m.nl.jn_in_db);
 		printf("            J/N out %s%5.1f dB   at the array output (noise = sn2 x |w|^2)\r\n",
 		       m.nl.supp_lo ? "<" : " ", m.nl.jn_out_db);
 		printf("            S = J/N in - J/N out = %s%.1f dB\r\n", m.nl.supp_lo ? ">" : "", m.nl.supp_db);
 		printf("  theory    1 weight/antenna, 1 narrowband jammer: S = (1+r)^2 + r^2 ~ 2 JNR + 3 dB\r\n");
 		printf("            with the loading (r = JNR/(1+%.0f)):  %.1f dB here\r\n", m.ss.alpha, m.nl.sth2_db);
-		printf("            CW + 16 taps: up to M(M-1) r^2 (M = 32). A barrage fills the taps:\r\n");
+		printf("            CW + %d taps: up to M(M-1) r^2 (M = %d). A barrage fills the taps:\r\n",
+		       m.ss.La, 2 * m.ss.La);
 		printf("            ~ JNR + 10..17 dB, 1 dB per dB of JNR (noise-limited).\r\n");
-		printf("  cost      C/N0 lost to the jammer left %.2f dB   SMI estimation loss %.2f dB (K %.0f, N 34)\r\n",
-		       m.nl.cn0_loss_db, m.nl.smi_loss_db, m.ss.keff);
+		printf("  cost      C/N0 lost to the jammer left %.2f dB   SMI estimation loss %.2f dB (K %.0f, N %d)\r\n",
+		       m.nl.cn0_loss_db, m.nl.smi_loss_db, m.ss.keff, m.ss.Na);
 		printf("  noise     %.1f dBFS per element   jammer RX2/RX1 %.1f dB, %.0f deg   null in %.0f ms\r\n",
 		       m.nl.sn2_dbfs, m.nl.amp_db, m.nl.ph_deg, m.aj.t_null_ms);
 	}
 	if (m.smi_ok) {
-		printf("  solver    %d antennas x %d taps + 2 image taps, window 2^%lu, loading %.1f x lambda_min\r\n",
-		       2, m.ss.L, (unsigned long)m.ss.kexp, m.ss.alpha);
+		int w1 = 0, w2 = 0;
+		printf("  solver    2 antennas x %d taps in use (of %d) + 2 image taps, window 2^%lu, loading %.1f x lambda_min\r\n",
+		       m.ss.La, m.ss.L, (unsigned long)m.ss.kexp, m.ss.alpha);
+		if (gnss_smi_weight_taps(&w1, &w2) == 0)
+			printf("            weights in the FPGA now: %d taps on RX1, %d on RX2 (the rest 0)\r\n", w1, w2);
+		else
+			printf("            weights in the FPGA now: -- (no solve yet: stap=1)\r\n");
 		printf("            averaging beta 1/%d (%.0f snapshots per solve)\r\n",
 		       m.ss.avg_sh ? (1 << m.ss.avg_sh) : 1, m.ss.keff);
 		printf("            solved %lu  failed %lu  skipped %lu  overruns %lu\r\n",
@@ -498,7 +517,7 @@ void get_ant_jam(double *param, char param_no)
 	} else if (j.available) {
 		printf("  DIRECTION -- (no jammer)\r\n");
 	}
-	if (m.stap && m.aj.valid && m.aj.jammed && m.nl_ok) {
+	if (m.stap && m.nl_ok) {
 		printf("  RX2/RX1  jammer amplitude %+.1f dB, phase %.1f deg (SMI covariance)\r\n",
 		       m.nl.amp_db, m.nl.ph_deg);
 		printf("  NULL     J/N in  %6.1f dB   at RX1 (reference element)\r\n", m.nl.jn_in_db);
@@ -507,9 +526,10 @@ void get_ant_jam(double *param, char param_no)
 		printf("           SUPPRESSION S = J/N in - J/N out = %s%.1f dB\r\n",
 		       m.nl.supp_lo ? ">" : "", m.nl.supp_db);
 		printf("  theory   2 antennas, 1 weight each: S = (1+r)^2 + r^2 ~ 2 JNR + 3 dB;\r\n");
-		printf("           with loading %.0f x lambda_min: %.1f dB. CW + 16 taps: up to M(M-1)r^2,\r\n",
-		       m.ss.alpha, m.nl.sth2_db);
-		printf("           M = 32. Barrage: ~ JNR + 10..17 dB (1 dB per dB of JNR).\r\n");
+		printf("           with loading %.0f x lambda_min: %.1f dB. CW + %d taps: up to M(M-1)r^2,\r\n",
+		       m.ss.alpha, m.nl.sth2_db, m.ss.La);
+		printf("           M = %d. Barrage: ~ JNR + 10..17 dB (1 dB per dB of JNR) with 8-16 taps.\r\n",
+		       2 * m.ss.La);
 		printf("  COST     C/N0 lost %.2f dB   SMI estimation loss %.2f dB (K %.0f)   null in %.0f ms\r\n",
 		       m.nl.cn0_loss_db, m.nl.smi_loss_db, m.ss.keff, m.aj.t_null_ms);
 		printf("           noise %.1f dBFS per element\r\n", m.nl.sn2_dbfs);
@@ -617,7 +637,7 @@ void get_selftest(double *param, char param_no)
 	printf(" 6 Anti-jam\r\n");
 	if (!m.stap) {
 		verdict(1, "stap is off: the null was not checked", "stap=1 with the jammer on, then selftest?");
-	} else if (!(m.aj.valid && m.aj.jammed) || !m.nl_ok) {
+	} else if (!m.nl_ok) {
 		verdict(0, "stap on, no jammer: switch a jammer on to check the null", NULL);
 	} else {
 		snprintf(t, sizeof(t), "J/N in %.1f dB, J/N out %s%.1f dB, SUPPRESSION %s%.1f dB, C/N0 cost %.2f dB",
@@ -626,14 +646,20 @@ void get_selftest(double *param, char param_no)
 		if (m.nl.supp_lo || m.nl.jn_out_db <= -10.0) {
 			verdict(0, t, NULL);
 			printf("          jammer under the output noise: more J/N in (RX gain) = more S\r\n");
+		} else if (m.nl.jn_in_db < 15.0 && m.clip1 <= 8 && m.clip2 <= 8) {
+			char a[200];
+			snprintf(a, sizeof(a), "weak jammer: with loading %.0f x lambda_min the null takes only"
+				 " ~JNR + 1..6 dB here (theory %.1f dB). smi=%d,1 lowers the C/N0 cost",
+				 m.ss.alpha, m.nl.sth2_db, m.ss.kexp ? (int)m.ss.kexp : 8);
+			verdict(1, t, a);
 		} else {
 			verdict(m.nl.jn_out_db > 0.0 ? 2 : 1, t,
 				"jammer left near/above the noise: clipping, RX1/RX2 response differs across the"
 				" band, uncorrelated jammer energy (LNA overload), or 2+ jammer directions");
 		}
 		if (m.nl.smi_loss_db > 1.0) {
-			snprintf(t, sizeof(t), "SMI estimation loss %.1f dB (K %.0f snapshots for N 34)",
-				 m.nl.smi_loss_db, m.ss.keff);
+			snprintf(t, sizeof(t), "SMI estimation loss %.1f dB (K %.0f snapshots for N %d)",
+				 m.nl.smi_loss_db, m.ss.keff, m.ss.Na);
 			verdict(1, t, "few snapshots: smiavg=2 or a larger window (smi=9,3)");
 		}
 	}
@@ -677,7 +703,7 @@ void get_ant_kpi(double *param, char param_no)
 	printf("KPI mode=%s state=%s", !m.tx ? "TXOFF" : (m.stap ? "SMI" : (m.pass ? "BYPASS" : "MUTED")),
 	       (m.aj.valid && m.aj.jammed) ? "JAMMED" : "CLEAR");
 	if (m.jn > NA + 1) printf(" jn=%.1f", m.jn); else printf(" jn=na");
-	if (m.nl_ok && m.aj.jammed)
+	if (m.nl_ok)
 		printf(" supp=%.1f supp_lo=%d jnout=%.1f cn0loss=%.2f", m.nl.supp_db, m.nl.supp_lo,
 		       m.nl.jn_out_db, m.nl.cn0_loss_db);
 	else printf(" supp=na supp_lo=0 jnout=na cn0loss=na");
@@ -687,6 +713,7 @@ void get_ant_kpi(double *param, char param_no)
 	printf(" pk1=%.1f pk2=%.1f clip1=%lu clip2=%lu", m.pk1, m.pk2,
 	       (unsigned long)m.clip1, (unsigned long)m.clip2);
 	if (m.out_ok) printf(" out=%.1f", m.out); else printf(" out=na");
+	printf(" taps=%d alpha=%.1f", m.ss.La, m.ss.alpha);
 	printf(" wn=%.2f dacclip=%lu hunts=%lu keff=%.0f tx1=%lu\r\n",
 	       m.ss.wnorm_u, (unsigned long)m.dacclip, (unsigned long)m.hunts, m.ss.keff,
 	       (unsigned long)m.att1);
@@ -702,7 +729,7 @@ int gnss_ant_poll_events(void)
 	while (seen < n) {
 		double t; const char *txt;
 		if (gnss_rep_event_get(seen, &t, &txt) == 0 &&
-		    (!strncmp(txt, "JAMMER", 6) || !strncmp(txt, "NULLED", 6) ||
+		    ((!strncmp(txt, "JAMMER", 6) && strncmp(txt, "JAMMER DET", 10)) || !strncmp(txt, "NULLED", 6) ||
 		     !strncmp(txt, "RESIDUAL", 8) || !strncmp(txt, "ADC CLIP", 8))) {
 			printf("%s[%7.1f s] %s\r\n", printed ? "" : "\r\n", t, txt);
 			printed = 1;
@@ -903,6 +930,46 @@ void set_smi(double *param, char param_no)
 	set_gnss_smi(param, param_no);
 	gnss_smi_get_state(&s);
 	printf("  SMI window 2^%lu, loading %.1f x lambda_min\r\n", (unsigned long)s.kexp, s.alpha);
+}
+
+/* taps= : STAP taps per antenna in use (1 .. what the bitstream has) */
+void get_taps(double *param, char param_no)
+{
+	gnss_smi_state_t ss;
+	(void)param; (void)param_no;
+	(void)gnss_smi_available();
+	gnss_smi_get_state(&ss);
+	printf("  STAP taps %d per antenna in use (bitstream has %d): %d weights + 2 image taps\r\n",
+	       ss.La, ss.L, 2 * ss.La);
+	{
+		int w1 = 0, w2 = 0;
+		if (gnss_smi_weight_taps(&w1, &w2) == 0)
+			printf("  weights in the FPGA now: %d taps on RX1, %d on RX2 non-zero (solve %lu)\r\n",
+			       w1, w2, (unsigned long)ss.updates);
+		else
+			printf("  weights in the FPGA now: -- (no solve yet: the setting applies once stap=1)\r\n");
+	}
+	printf("  taps=N, N = 1..%d. 1 = space only (one weight per antenna). Wide jammers\r\n", ss.L);
+	printf("  need taps: 8..16 for a barrage over 56 MHz; CW is nulled with any N.\r\n");
+}
+
+void set_taps(double *param, char param_no)
+{
+	gnss_smi_state_t ss;
+	(void)gnss_smi_available();
+	gnss_smi_get_state(&ss);
+	if (param_no < 1 || gnss_smi_set_taps((int)param[0]) != 0) {
+		printf("  taps=N with N = 1..%d (now %d)\r\n", ss.L, ss.La);
+		return;
+	}
+	gnss_smi_get_state(&ss);
+	printf("  STAP taps %d per antenna (%d of %d, centred on the reference tap; others 0)\r\n",
+	       ss.La, ss.La, ss.L);
+	if (gnss_ant_stap_state())
+		printf("  applied from the next window (~6 ms), no restart. taps? shows the weights.\r\n");
+	else
+		printf("  stored: used when stap=1 starts the null (stap is off now)\r\n");
+	gnss_rep_event("TAPS        %d per antenna", ss.La);
 }
 
 void set_smiavg(double *param, char param_no)

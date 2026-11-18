@@ -45,6 +45,7 @@ MVDR2 versions keep working under a new name:
 | `band?` / `band=N` | radio presets (3 = all four systems) |
 | `tx1_att=mdB` `agc=1/0` `rxgain=dB` | settings |
 | `gnss_agcstep=dB,s` | AGC rise with a jammer (default 1 dB every 1 s) |
+| `taps=N` / `taps?` | STAP taps per antenna in use, 1..16, live (others set to 0) |
 | `smi=K,A` `smiavg=N` `gnss_kpi?` | advanced / logger |
 | `help?` / `commands?` | main commands / ALL commands |
 

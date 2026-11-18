@@ -525,7 +525,7 @@ static void chk_stap(uint32_t ms)
                 return;
             }
             res(LV_PASS, "null core: SMI-MVDR STAP (2 x %d + 2 image taps), %lu windows solved, lambda_min ",
-                ss.L, (unsigned long)ss.updates);
+                ss.La, (unsigned long)ss.updates);
             pdb(ss.lam_dbfs);
             printf(" dBFS, |w|^2 ");
             pdb(ss.wnorm);

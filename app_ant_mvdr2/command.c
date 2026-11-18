@@ -100,8 +100,10 @@ command cmd_list[] = {
 	{"rxgain=", "Manual RX gain, dB (both channels).", "rxgain=50", set_rxgain},
 	{"smi=", "SMI window 2^K, loading A.", "smi=8,3", set_smi},
 	{"smiavg=", "Covariance averaging 0..4.", "smiavg=2", set_smiavg},
+	{"taps?", "STAP taps per antenna in use.", "", get_taps},
+	{"taps=", "STAP taps per antenna, 1..16 (live, no restart).", "taps=8", set_taps},
 	{"gnss_kpi?", "All figures on one line (logger).", "", get_ant_kpi},
-#define CMD_ANT_END 22
+#define CMD_ANT_END 24
 	/* ---- MVDR2 console: AD9361 vendor commands and every gnss_ command,
 	 * unchanged. gnss_status_full?, gnss_jam_est?, gnss_kpi_full? and
 	 * commands? are the MVDR2 gnss_status?, gnss_jam?, gnss_kpi?, help?. ---- */
@@ -1506,7 +1508,7 @@ static void gnss_null_print(void)
 			gnss_smi_get_state(&ss);
 			console_print("  SMI %s, 2 x %d taps + 2 image (N %d), window 2^%d, %d weight sets solved. gnss_smi? for its state.\n",
 				      ss.hw_active ? "ACTIVE (drives the output)" : "NOT active yet",
-				      (long)ss.L, (long)ss.N, (long)ss.kexp, (long)ss.updates);
+				      (long)ss.La, (long)ss.Na, (long)ss.kexp, (long)ss.updates);
 		} else {
 			console_print("  This bitstream has no SMI-STAP (MVDR window < 1.14): running as %d.\n"
 				      "  Program the 1.14 bitstream for SMI.\n", (long)gnss_pt_profile_effective());

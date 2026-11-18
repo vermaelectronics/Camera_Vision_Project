@@ -13,7 +13,10 @@
 #ifndef GNSS_QUIET_H_
 #define GNSS_QUIET_H_
 
+#include <stdarg.h>
 int  gnss_qprintf(const char *fmt, ...);
+int  gnss_qvprintf(const char *fmt, va_list ap);
+int  gnss_qputchar(int c);
 void gnss_quiet_set(int on);         /* 1 = quiet (default), 0 = print       */
 int  gnss_quiet_get(void);
 void gnss_quiet_clear(void);         /* forget the captured text            */
@@ -28,6 +31,10 @@ void gnss_quiet_dump(int last_lines);/* print the last N captured lines      */
 #define printf        gnss_qprintf
 #undef  console_print
 #define console_print gnss_qprintf
+#undef  vprintf
+#define vprintf       gnss_qvprintf
+#undef  putchar
+#define putchar       gnss_qputchar
 #endif
 
 #endif

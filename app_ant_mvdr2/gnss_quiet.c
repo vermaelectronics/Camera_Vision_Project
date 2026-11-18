@@ -16,15 +16,23 @@ void gnss_quiet_set(int on) { quiet = on ? 1 : 0; }
 int  gnss_quiet_get(void)   { return quiet; }
 void gnss_quiet_clear(void) { qhead = 0; qlen = 0; }
 
-int gnss_qprintf(const char *fmt, ...)
+static void qput(const char *line, int n)
+{
+	int i;
+	for (i = 0; i < n; i++) {
+		qbuf[(qhead + qlen) % QBUF] = line[i];
+		if (qlen < QBUF)
+			qlen++;
+		else
+			qhead = (qhead + 1) % QBUF;
+	}
+}
+
+int gnss_qvprintf(const char *fmt, va_list ap)
 {
 	char line[512];
-	va_list ap;
-	int n, i;
+	int n = vsnprintf(line, sizeof(line), fmt, ap);
 
-	va_start(ap, fmt);
-	n = vsnprintf(line, sizeof(line), fmt, ap);
-	va_end(ap);
 	if (n < 0)
 		return n;
 	if (n >= (int)sizeof(line))
@@ -33,14 +41,28 @@ int gnss_qprintf(const char *fmt, ...)
 		fputs(line, stdout);
 		return n;
 	}
-	for (i = 0; i < n; i++) {
-		qbuf[(qhead + qlen) % QBUF] = line[i];
-		if (qlen < QBUF)
-			qlen++;
-		else
-			qhead = (qhead + 1) % QBUF;
-	}
+	qput(line, n);
 	return n;
+}
+
+int gnss_qprintf(const char *fmt, ...)
+{
+	va_list ap;
+	int n;
+
+	va_start(ap, fmt);
+	n = gnss_qvprintf(fmt, ap);
+	va_end(ap);
+	return n;
+}
+
+int gnss_qputchar(int c)
+{
+	char ch = (char)c;
+	if (!quiet)
+		return fputc(c, stdout);
+	qput(&ch, 1);
+	return c;
 }
 
 void gnss_quiet_dump(int last_lines)

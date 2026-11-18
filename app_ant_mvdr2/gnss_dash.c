@@ -185,8 +185,19 @@ void gnss_dash_check(void)
     /* ---------------- 2 SMI features ---------------- */
     if (have_smi) {
         section("2", "SMI FEATURES");
-        row(ST_INFO, "space-time taps", "2 antennas x %d taps (+2 image = %d)", ss.L, ss.N);
-        note("reference RX1 tap %d: %d newer + %d older taps (layout v%d)", ss.ref, ss.ref, ss.L - 1 - ss.ref, ss.layout);
+        {
+            int w1 = 0, w2 = 0, k0 = ss.ref - ss.La / 2;
+            if (k0 < 0) { k0 = 0; }
+            if (k0 + ss.La > ss.L) { k0 = ss.L - ss.La; }
+            row(ss.La < ss.L ? ST_INFO : ST_OK, "space-time taps",
+                "%s2 antennas x %d taps IN USE%s (of %d; +2 image = %d solved)", ss.La < ss.L ? Y : G,
+                ss.La, X, ss.L, ss.Na);
+            note("taps %d..%d of each antenna, reference RX1 tap %d (layout v%d); taps=N changes it",
+                 k0, k0 + ss.La - 1, ss.ref, ss.layout);
+            if (gnss_smi_weight_taps(&w1, &w2) == 0) {
+                note("weights in the FPGA now: %d taps on RX1, %d on RX2 non-zero", w1, w2);
+            }
+        }
         if (ss.updates == 0U) {
             row(ST_INFO, "image taps", "%sON%s (2 taps), no weights yet", G, X);
         } else {
