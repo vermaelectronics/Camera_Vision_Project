@@ -1,0 +1,246 @@
+[2026-11-12 13:50:27.289] 
+[2026-11-12 13:50:27.290] 
+[2026-11-12 13:50:27.290] ================ E310 GNSS ANTI-JAM  (LVDS 61.44 MSPS, SMI-STAP) ================
+[2026-11-12 13:50:27.290]   STATE    ANTI-JAM ON (SMI-STAP null on TX1)   [gnss_tx=1 pass=1 stap=1]
+[2026-11-12 13:50:27.290]   RADIO    LO 1568.50 MHz  BW 20 MHz  30.72 MSPS  (band -1: custom (gnss_plan=))
+[2026-11-12 13:50:27.321]   RX       gain 67/67 dB AUTO   noise -34.3 dBFS   ADC peak -26 dBFS
+[2026-11-12 13:50:27.321]   JAMMER   WEAK    J/N 3.9 dB at the ADC (under the 6 dB alarm; the null works on it)
+[2026-11-12 13:50:27.322]   NULL     SUPPRESSION 2.3 dB   J/N out 1.6 dB  (jammer above the noise: selftest?)
+[2026-11-12 13:50:27.323] --------------------------------------------------------------------------------
+[2026-11-12 13:50:27.323]   CONTROL  gnss_tx=1|0   pass=1|0   stap=1|0
+[2026-11-12 13:50:27.323]            (pass=1 sets gnss_tx=1; stap=1 sets gnss_tx=1 and pass=1)
+[2026-11-12 13:50:27.323]   CHECK    gnss_tx?   gnss_status?   gnss_jam?   gnss_mvdr?   gnss_spec?
+[2026-11-12 13:50:27.385]            status?   rx?   stap?   selftest?
+[2026-11-12 13:50:27.385]   SETTINGS band=N (band? lists)   tx1_att=mdB   agc=1|0   rxgain=dB
+[2026-11-12 13:50:27.385]            gnss_agcstep=dB,s   taps=N (1..16)   smi=K,A   smiavg=N
+[2026-11-12 13:50:27.385]   Enter = this menu   help? = these commands   commands? = ALL commands
+[2026-11-12 13:50:27.385]   (AD9361 vendor commands rx_lo_freq=, tx1_attenuation=, rx1_rf_gain=, dds_* ...
+[2026-11-12 13:50:27.385]    and every MVDR2 gnss_ command are all still there: commands? lists them)
+[2026-11-12 13:50:27.385] ================================================================================
+[2026-11-12 13:50:34.922] E310> 
+[2026-11-12 13:50:34.922] [ 1449.5 s] JAMMER ON   J/N +32.7 dB, NARROWBAND / CW (< 0.3 MHz), RF 1575.42 MHz (LO +6.9 MHz)
+[2026-11-12 13:50:34.922] [ 1449.5 s] NULLED      after 3.3 ms (stap? shows the suppression)
+[2026-11-12 13:50:36.550] E310> JAMMER DETECTED -- nulling itOUTPUT CLIPPING: 205173 samples during a jammer onset / RX gain step (transient, no back-off).
+[2026-11-12 13:50:37.289] gnss_kpi?
+[2026-11-12 13:50:37.353] KPI mode=SMI state=JAMMED jn=39.8 supp=46.5 supp_lo=0 jnout=-6.7 cn0loss=0.84 gain=52 gain2=52 agc=AUTO nf=-41.0 floor=-48.9 pk1=-6.8 pk2=-2.3 clip1=0 clip2=0 out=-24.3 taps=8 alpha=3.0 wn=1.14 dacclip=205468 hunts=1 keff=1792 tx1=34000
+[2026-11-12 13:50:47.305] E310> gnss_kpi?
+[2026-11-12 13:50:47.373] KPI mode=SMI state=JAMMED jn=38.5 supp=46.6 supp_lo=0 jnout=-8.1 cn0loss=0.63 gain=52 gain2=52 agc=AUTO nf=-40.9 floor=-48.9 pk1=-7.0 pk2=-2.4 clip1=0 clip2=0 out=-23.9 taps=8 alpha=3.0 wn=1.06 dacclip=205468 hunts=1 keff=1792 tx1=34000
+[2026-11-12 13:50:57.319] E310> gnss_kpi?
+[2026-11-12 13:50:57.384] KPI mode=SMI state=JAMMED jn=39.3 supp=45.7 supp_lo=0 jnout=-6.4 cn0loss=0.89 gain=52 gain2=52 agc=AUTO nf=-41.0 floor=-48.9 pk1=-6.7 pk2=-2.5 clip1=0 clip2=0 out=-24.1 taps=8 alpha=3.0 wn=1.09 dacclip=205468 hunts=1 keff=1792 tx1=34000
+[2026-11-12 13:51:00.297] >>> 
+[2026-11-12 13:51:00.360] E310> 
+[2026-11-12 13:51:00.361] 
+[2026-11-12 13:51:00.361] ================ E310 GNSS ANTI-JAM  (LVDS 61.44 MSPS, SMI-STAP) ================
+[2026-11-12 13:51:00.361]   STATE    ANTI-JAM ON (SMI-STAP null on TX1)   [gnss_tx=1 pass=1 stap=1]
+[2026-11-12 13:51:00.361]   RADIO    LO 1568.50 MHz  BW 20 MHz  30.72 MSPS  (band -1: custom (gnss_plan=))
+[2026-11-12 13:51:00.361]   RX       gain 52/52 dB AUTO   noise -41.0 dBFS   ADC peak -2 dBFS
+[2026-11-12 13:51:00.361]   JAMMER   JAMMED  J/N 39.5 dB at the ADC, CW/narrowband ~0 MHz wide, RF 1575.41 MHz
+[2026-11-12 13:51:00.361]   NULL     SUPPRESSION 45.8 dB   J/N out -6.3 dB
+[2026-11-12 13:51:00.410] --------------------------------------------------------------------------------
+[2026-11-12 13:51:00.410]   CONTROL  gnss_tx=1|0   pass=1|0   stap=1|0
+[2026-11-12 13:51:00.410]            (pass=1 sets gnss_tx=1; stap=1 sets gnss_tx=1 and pass=1)
+[2026-11-12 13:51:00.410]   CHECK    gnss_tx?   gnss_status?   gnss_jam?   gnss_mvdr?   gnss_spec?
+[2026-11-12 13:51:00.410]            status?   rx?   stap?   selftest?
+[2026-11-12 13:51:00.411]   SETTINGS band=N (band? lists)   tx1_att=mdB   agc=1|0   rxgain=dB
+[2026-11-12 13:51:00.411]            gnss_agcstep=dB,s   taps=N (1..16)   smi=K,A   smiavg=N
+[2026-11-12 13:51:00.411]   Enter = this menu   help? = these commands   commands? = ALL commands
+[2026-11-12 13:51:00.472]   (AD9361 vendor commands rx_lo_freq=, tx1_attenuation=, rx1_rf_gain=, dds_* ...
+[2026-11-12 13:51:00.472]    and every MVDR2 gnss_ command are all still there: commands? lists them)
+[2026-11-12 13:51:00.472] ================================================================================
+[2026-11-12 13:51:07.383] E310> gnss_kpi?
+[2026-11-12 13:51:07.384] KPI mode=SMI state=JAMMED jn=38.5 supp=43.7 supp_lo=0 jnout=-5.3 cn0loss=1.13 gain=52 gain2=52 agc=AUTO nf=-40.9 floor=-48.9 pk1=-7.4 pk2=-2.0 clip1=0 clip2=0 out=-23.9 taps=8 alpha=3.0 wn=1.06 dacclip=205468 hunts=1 keff=1792 tx1=34000
+[2026-11-12 13:51:17.372] E310> gnss_kpi?
+[2026-11-12 13:51:17.372] KPI mode=SMI state=JAMMED jn=37.7 supp=43.5 supp_lo=0 jnout=-5.8 cn0loss=1.01 gain=52 gain2=52 agc=AUTO nf=-40.7 floor=-48.9 pk1=-8.0 pk2=-2.1 clip1=0 clip2=0 out=-24.3 taps=8 alpha=3.0 wn=1.08 dacclip=205468 hunts=1 keff=1792 tx1=34000
+[2026-11-12 13:51:27.370] E310> gnss_kpi?
+[2026-11-12 13:51:27.371] KPI mode=SMI state=JAMMED jn=38.7 supp=45.5 supp_lo=0 jnout=-6.8 cn0loss=0.83 gain=52 gain2=52 agc=AUTO nf=-40.8 floor=-48.9 pk1=-6.9 pk2=-2.1 clip1=0 clip2=0 out=-24.6 taps=8 alpha=3.0 wn=1.07 dacclip=205477 hunts=1 keff=1792 tx1=34000
+[2026-11-12 13:51:37.400] E310> gnss_kpi?
+[2026-11-12 13:51:37.400] KPI mode=SMI state=JAMMED jn=38.5 supp=45.7 supp_lo=0 jnout=-7.2 cn0loss=0.75 gain=52 gain2=52 agc=AUTO nf=-40.9 floor=-48.9 pk1=-7.1 pk2=-1.9 clip1=0 clip2=0 out=-24.5 taps=8 alpha=3.0 wn=1.05 dacclip=205477 hunts=1 keff=1792 tx1=34000
+[2026-11-12 13:51:47.375] E310> gnss_kpi?
+[2026-11-12 13:51:47.436] KPI mode=SMI state=JAMMED jn=39.3 supp=44.5 supp_lo=0 jnout=-5.2 cn0loss=1.15 gain=52 gain2=52 agc=AUTO nf=-40.9 floor=-48.9 pk1=-6.5 pk2=-2.4 clip1=0 clip2=0 out=-24.3 taps=8 alpha=3.0 wn=1.07 dacclip=205477 hunts=1 keff=1792 tx1=34000
+[2026-11-12 13:51:57.396] E310> gnss_kpi?
+[2026-11-12 13:51:57.397] KPI mode=SMI state=JAMMED jn=38.6 supp=44.5 supp_lo=0 jnout=-5.9 cn0loss=0.99 gain=52 gain2=52 agc=AUTO nf=-40.8 floor=-48.9 pk1=-6.9 pk2=-2.2 clip1=0 clip2=0 out=-24.5 taps=8 alpha=3.0 wn=1.06 dacclip=205477 hunts=1 keff=1792 tx1=34000
+[2026-11-12 13:52:07.397] E310> gnss_kpi?
+[2026-11-12 13:52:07.397] KPI mode=SMI state=JAMMED jn=38.7 supp=45.3 supp_lo=0 jnout=-6.6 cn0loss=0.85 gain=52 gain2=52 agc=AUTO nf=-40.7 floor=-48.9 pk1=-7.0 pk2=-2.5 clip1=0 clip2=0 out=-24.5 taps=8 alpha=3.0 wn=1.06 dacclip=205477 hunts=1 keff=1792 tx1=34000
+[2026-11-12 13:52:08.688] >>> gnss_report?
+[2026-11-12 13:52:08.730] E310> gnss_report?
+[2026-11-12 13:52:08.730] 
+[2026-11-12 13:52:08.730] ===================== GNSS ANTI-JAM REPORT (copy from here) =====================
+[2026-11-12 13:52:08.730]   SYSTEM      firmware MOD-31, MVDR core 1.15, uptime 1544.5 s
+[2026-11-12 13:52:08.773]               SMI layout v3: 2 antennas x 8 taps IN USE (of 16) + 2 image taps = 18 solved (INFO 0x03081053)
+[2026-11-12 13:52:08.773]   SUMMARY     JAMMED - J/N +31.8 dB, suppression >41.6 dB, residual < -10 dB vs noise
+[2026-11-12 13:52:08.773]               RX gain cut 15 dB costs the satellites ~8.6 dB C/N0 (noise floor rise)
+[2026-11-12 13:52:08.773]               LIMIT: receiver dynamic range, not the null. The jammer is 40.5 dB over
+[2026-11-12 13:52:08.773]               the antenna noise; this receiver holds ~31.9 dB before the AD9361 floor
+[2026-11-12 13:52:08.773]               (-48.9 dBFS where the satellites are) costs C/N0. Less jammer at the antenna, or a lower floor, helps.
+[2026-11-12 13:52:08.821]   RADIO       LO 1568.500 MHz, 30.72 MS/s, RF bandwidth 20.0 MHz
+[2026-11-12 13:52:08.821]               TX1 TRANSMITTING, attenuation 34.00 dB (operating 34.00 dB)
+[2026-11-12 13:52:08.821]               TX2 attenuation 89.00 dB (held at 89.00 dB: TX2 unused)
+[2026-11-12 13:52:08.821]   SIGNALS     receiver must have each constellation switched ON
+[2026-11-12 13:52:08.821]               signal                   RF MHz    from LO   received?  SMI gain
+[2026-11-12 13:52:08.821]               GPS L1 C/A, QZSS, SBAS   1575.420      +6.9   OK         -2.9 dB  <- jammer on it
+[2026-11-12 13:52:08.821]               Galileo E1, BeiDou B1C   1575.420      +6.9   OK         -2.9 dB  <- jammer on it
+[2026-11-12 13:52:08.869]               BeiDou B1I               1561.098      -7.4   OK         +1.3 dB
+[2026-11-12 13:52:08.869]               GLONASS G1 k=-7          1598.063     +29.6   OUTSIDE  
+[2026-11-12 13:52:08.869]               GLONASS G1 k=0           1602.000     +33.5   OUTSIDE  
+[2026-11-12 13:52:08.869]               GLONASS G1 k=+6          1605.375     +36.9   OUTSIDE  
+[2026-11-12 13:52:08.869]   RX GAIN     52 dB both channels (AUTO), clean reference 67 dB (cut 15 dB)
+[2026-11-12 13:52:08.869]               held 7 dB under the target: jammer peak -2 dBFS at the ADC limit
+[2026-11-12 13:52:08.916]               ADC peak -8.8 / -1.8 dBFS, clipping 0 / 0 (RX1 / RX2, last window)
+[2026-11-12 13:52:08.917]   NOISE       floor -40.8 dBFS per element now (SMI lambda_min + learned offset)
+[2026-11-12 13:52:08.917]               RX1 -9.1 / RX2 -2.0 dBFS at the reference tap (SMI window)
+[2026-11-12 13:52:08.917]               target -33.8 dBFS, AD9361 internal floor -48.9 dBFS
+[2026-11-12 13:52:08.917]               floor is 8.6 dB above the antenna noise at this gain -> satellites lose
+[2026-11-12 13:52:08.917]               ~8.6 dB C/N0 (the jammer forced the gain down; weakest signals go first)
+[2026-11-12 13:52:08.917]   ANTI-JAM    SMI-MVDR STAP ON, drives TX1, power inversion (every satellite passes)
+[2026-11-12 13:52:08.948]               window 2^8 = 256 snapshots, loading 3.0 x lambda_min, DC removal ON
+[2026-11-12 13:52:08.949]               360628 windows solved, 0 failed, 360628 skipped; sample overruns 0 since start
+[2026-11-12 13:52:08.949]   JAMMER      JAMMED for 95.0 s (since t = 1449.5 s)
+[2026-11-12 13:52:08.949]               J/N +31.8 dB at the ADC (peak +36.3), jammer -9.1 dBFS
+[2026-11-12 13:52:08.949]               J/N +40.5 dB vs the antenna noise (RX gain cut 15 dB included)
+[2026-11-12 13:52:08.949]               NARROWBAND / CW (< 0.1 MHz)
+[2026-11-12 13:52:08.949]               centre RF 1575.40 MHz (+6.9 MHz from the LO)
+[2026-11-12 13:52:08.997]               RX1/RX2 coherence 1.000, RX2-RX1 phase +56.0 deg, angle +18.2 deg
+[2026-11-12 13:52:08.997]   SUPPRESSION >41.6 dB  = jammer in / jammer out (null depth)
+[2026-11-12 13:52:08.997]               residual > 10 dB UNDER the output noise: jammer fully nulled
+[2026-11-12 13:52:08.998]               J/N +31.8 dB in -> < -10 dB out, time to null 3.3 ms
+[2026-11-12 13:52:08.998]               vs the antenna noise: jammer +40.5 dB in, < -1.2 dB out
+[2026-11-12 13:52:08.998]               (the SMI-PI log's 'suppression' is the J/N in, when its residual reads 0)
+[2026-11-12 13:52:08.998]   WEIGHTS     sum|w|^2 1.047 (noise cost +0.2 dB), |w_ref|^2 1.000, scale 2^-0
+[2026-11-12 13:52:09.044]               largest RX2 tap at delay 11 (|w| 0.056), image taps |w|^2 0.001
+[2026-11-12 13:52:09.045]   OUTPUT      AOLC target -24 dBFS, measured -24.3 dBFS, clip back-off 0 dB
+[2026-11-12 13:52:09.045]               DAC clipped samples 205477 since the counter clear
+[2026-11-12 13:52:09.045]   EVENTS      58 in total, the last ones:
+[2026-11-12 13:52:09.045]                   972.0 s  RX GAIN     48 -> 43 dB (AUTO, jammer)
+[2026-11-12 13:52:09.045]                  1034.8 s  RX GAIN     43 -> 44 dB (AUTO, jammer)
+[2026-11-12 13:52:09.045]                  1176.9 s  TAPS        8 per antenna
+[2026-11-12 13:52:09.045]                  1212.4 s  RX GAIN     44 -> 45 dB (AUTO, jammer)
+[2026-11-12 13:52:09.092]                  1314.8 s  JAMMER OFF  after 347.7 s, peak J/N +32.1 dB
+[2026-11-12 13:52:09.093]                  1315.5 s  jammer gone.
+[2026-11-12 13:52:09.093]                  1318.8 s  JAMMER DETECTED -- nulling it
+[2026-11-12 13:52:09.093]                  1318.8 s  OUTPUT CLIPPING: 7105 samples during a jammer onset / RX gain step (transient, no back-off).
+[2026-11-12 13:52:09.093]                  1319.9 s  RX GAIN     45 -> 67 dB (AUTO)
+[2026-11-12 13:52:09.093]                  1332.0 s  jammer gone: null held, then gliding back.
+[2026-11-12 13:52:09.093]                  1335.3 s  JAMMER DETECTED -- nulling it
+[2026-11-12 13:52:09.125]                  1338.6 s  jammer gone: null held, then gliding back.
+[2026-11-12 13:52:09.125]                  1341.9 s  JAMMER DETECTED -- nulling it
+[2026-11-12 13:52:09.125]                  1348.3 s  AUTO-START  gnss_band=-1, custom (gnss_plan=)
+[2026-11-12 13:52:09.125]                  1349.8 s  TX1 ON      attenuation 34000 mdB, anti-jam output
+[2026-11-12 13:52:09.125]                  1354.3 s  AUTO-START  gnss_band=-1, custom (gnss_plan=)
+[2026-11-12 13:52:09.125]                  1355.6 s  TX1 ON      attenuation 34000 mdB, anti-jam output
+[2026-11-12 13:52:09.126]                  1360.3 s  jammer gone.
+[2026-11-12 13:52:09.126]                  1360.4 s  RX GAIN     65 -> 67 dB (AUTO)
+[2026-11-12 13:52:09.189]                  1449.5 s  JAMMER ON   J/N +32.7 dB, NARROWBAND / CW (< 0.3 MHz), RF 1575.42 MHz (LO +6.9 MHz)
+[2026-11-12 13:52:09.189]                  1449.5 s  NULLED      after 3.3 ms (stap? shows the suppression)
+[2026-11-12 13:52:09.189]                  1452.3 s  JAMMER DETECTED -- nulling it
+[2026-11-12 13:52:09.189]                  1452.3 s  OUTPUT CLIPPING: 205173 samples during a jammer onset / RX gain step (transient, no back-off).
+[2026-11-12 13:52:09.189]                  1452.7 s  RX GAIN     67 -> 52 dB (AUTO, jammer)
+[2026-11-12 13:52:09.189] =================================== END REPORT ==================================
+[2026-11-12 13:52:12.698] >>> gnss_status?
+[2026-11-12 13:52:12.757] E310> gnss_status?
+[2026-11-12 13:52:12.757] 
+[2026-11-12 13:52:12.757] --- GNSS STATUS: radio set-up (read back from the AD9361) -------------------
+[2026-11-12 13:52:12.758]               RX (RX1 + RX2)         TX (TX1)              
+[2026-11-12 13:52:12.758]   LO          1568.5000      MHz     1568.5000      MHz
+[2026-11-12 13:52:12.758]   RF BW       20.000         MHz     20.000         MHz
+[2026-11-12 13:52:12.758]   sample rate 30.7200        MSPS    30.7200        MSPS
+[2026-11-12 13:52:12.758]   FIR         bypassed               bypassed              
+[2026-11-12 13:52:12.758]   ADC / DAC   245.76 MHz (8 x fs)     245.76 MHz (8 x fs)
+[2026-11-12 13:52:12.805]   gain mode   RX1 MANUAL (0), RX2 MANUAL (0)   anti-jam AGC: AUTO
+[2026-11-12 13:52:12.805]   RX gain     RX1 52 dB, RX2 52 dB
+[2026-11-12 13:52:12.805]   TX atten    TX1 34000 mdB, TX2 89000 mdB   (operating TX1 34000 mdB)
+[2026-11-12 13:52:12.805]   preset      band -1: custom (gnss_plan=)
+[2026-11-12 13:52:12.805] --- state ------------------------------------------------------------------
+[2026-11-12 13:52:12.805]   STATE    ANTI-JAM ON (SMI-STAP null on TX1)   [gnss_tx=1 pass=1 stap=1]
+[2026-11-12 13:52:12.806]   RX       ADC peak RX1 -7.4 / RX2 -2.4 dBFS, clipped 0 / 0 per window
+[2026-11-12 13:52:12.806]   NOISE    floor -40.8 dBFS   AD9361 internal -48.9 dBFS   target -33.8 dBFS
+[2026-11-12 13:52:12.869]   JAMMER   JAMMED  J/N 38.2 dB at the ADC, CW/narrowband ~0 MHz wide, RF 1575.41 MHz
+[2026-11-12 13:52:12.869]   NULL     SUPPRESSION 45.7 dB   J/N out -7.5 dB
+[2026-11-12 13:52:12.869]   OUTPUT   -23.3 dBFS (target -24), DAC clips 205477
+[2026-11-12 13:52:17.428] E310> gnss_kpi?
+[2026-11-12 13:52:17.428] KPI mode=SMI state=JAMMED jn=35.9 supp=42.1 supp_lo=0 jnout=-6.2 cn0loss=0.93 gain=52 gain2=52 agc=AUTO nf=-40.8 floor=-48.9 pk1=-9.6 pk2=-1.3 clip1=0 clip2=0 out=-24.3 taps=8 alpha=3.0 wn=1.04 dacclip=205477 hunts=1 keff=1792 tx1=34000
+[2026-11-12 13:52:17.997] >>> gnss_check?
+[2026-11-12 13:52:18.004] E310> gnss_check?
+[2026-11-12 13:52:18.004] 
+[2026-11-12 13:52:18.053] ==============================================================================
+[2026-11-12 13:52:18.053]   GNSS ANTI-JAM CHECK      MVDR core v1.15   firmware MOD-31
+[2026-11-12 13:52:18.053] ==============================================================================
+[2026-11-12 13:52:18.053] 
+[2026-11-12 13:52:18.053]  1 NULL CORE  (what drives TX1) 
+[2026-11-12 13:52:18.053]  -----------------------------------------------------------------------------
+[2026-11-12 13:52:18.053]   [ OK ] core .................. SMI-MVDR STAP  (gnss_null=3)
+[2026-11-12 13:52:18.101]   [ OK ] SMI in bitstream ...... YES  (2 x 16 taps + 2 image, MVDR 1.14b)
+[2026-11-12 13:52:18.101]   [ OK ] SMI drives output ..... YES
+[2026-11-12 13:52:18.101]   [ OK ] solver ................ 363290 solved, 0 failed, 363290 skipped
+[2026-11-12 13:52:18.101]   [ OK ] sample overruns ....... 0 since start
+[2026-11-12 13:52:18.101]                                  15307 in total, incl. the radio set-up at boot
+[2026-11-12 13:52:18.101] 
+[2026-11-12 13:52:18.101]  2 SMI FEATURES 
+[2026-11-12 13:52:18.101]  -----------------------------------------------------------------------------
+[2026-11-12 13:52:18.148]   [INFO] space-time taps ....... 2 antennas x 8 taps IN USE (of 16; +2 image = 18 solved)
+[2026-11-12 13:52:18.148]                                  taps 4..11 of each antenna, reference RX1 tap 8 (layout v3); taps=N changes it
+[2026-11-12 13:52:18.148]                                  weights in the FPGA now: 8 taps on RX1, 8 on RX2 non-zero
+[2026-11-12 13:52:18.148]   [ OK ] image taps ............ ON   |w|^2 0.000
+[2026-11-12 13:52:18.148]                                  -> no IQ image seen (nothing to cancel)
+[2026-11-12 13:52:18.196]   [ OK ] DC removal ............ ON   (FPGA, SMI input)
+[2026-11-12 13:52:18.197]   [ OK ] diagonal loading ...... ON   3.0 x lambda_min  (+4.8 dB)
+[2026-11-12 13:52:18.197]                                  on all 34 taps: spatial + temporal + image
+[2026-11-12 13:52:18.197]   [INFO] temporal taper ........ NOT used (by design: costs depth)
+[2026-11-12 13:52:18.197]   [INFO] window ................ 2^8 = 256 snapshots
+[2026-11-12 13:52:18.197]   [INFO] constraint ............ power inversion (all sats pass)
+[2026-11-12 13:52:18.228]   [ OK ] weights ............... sum|w|^2 1.045  noise cost 0.2 dB
+[2026-11-12 13:52:18.228]                                  |w_ref|^2 1.000   scale 2^-0
+[2026-11-12 13:52:18.228]   [INFO] noise per tap ......... -49.7 dBFS  (lambda_min)
+[2026-11-12 13:52:18.228] 
+[2026-11-12 13:52:18.228]  3 JAMMER AND SUPPRESSION  (thermal-floor figures) 
+[2026-11-12 13:52:18.228]  -----------------------------------------------------------------------------
+[2026-11-12 13:52:18.228]   [INFO] jammer ................ PRESENT  J/N 30.4 dB at the ADC
+[2026-11-12 13:52:18.276]                                  39.1 dB vs the antenna noise (gain cut included)
+[2026-11-12 13:52:18.276]                                  angle 14.0 deg from broadside
+[2026-11-12 13:52:18.276]   [INFO] SUPPRESSION ........... >40.2 dB  jammer in / jammer out
+[2026-11-12 13:52:18.276]                                  |#############>..........|  0..72 dB
+[2026-11-12 13:52:18.277]   [ OK ] residual .............. >10 dB under the noise: null complete
+[2026-11-12 13:52:18.277]                                  nulled 3.3 ms after it appeared
+[2026-11-12 13:52:18.324]   [INFO] noise floor ........... -40.9 dBFS  (SMI-measured)
+[2026-11-12 13:52:18.324]   [WARN] C/N0 cost of gain cut .. ~8.6 dB  (floor above the antenna noise)
+[2026-11-12 13:52:18.324] 
+[2026-11-12 13:52:18.324]  4 RECEIVER / ADC 
+[2026-11-12 13:52:18.324]  -----------------------------------------------------------------------------
+[2026-11-12 13:52:18.324]   [INFO] RX gain ............... 52 dB  (AUTO)
+[2026-11-12 13:52:18.324]   [ OK ] ADC clipping .......... 0 / 0  (RX1 / RX2, last window)
+[2026-11-12 13:52:18.324]   [ OK ] 2x2 covariance ........ valid  RX1 -10.4 / RX2 -1.5 dBFS
+[2026-11-12 13:52:18.324] 
+[2026-11-12 13:52:18.373]  5 OUTPUT TO TX1 
+[2026-11-12 13:52:18.373]  -----------------------------------------------------------------------------
+[2026-11-12 13:52:18.373]   [ OK ] AOLC .................. ON  target -24, measured -24.5 dBFS
+[2026-11-12 13:52:18.373]   [ OK ] clip back-off ......... 0 dB  (no output clipping)
+[2026-11-12 13:52:18.374]   [INFO] DAC clipped samples ... 205477 since the counter clear
+[2026-11-12 13:52:18.374] 
+[2026-11-12 13:52:18.374] ==============================================================================
+[2026-11-12 13:52:18.437]   VERDICT: OK, 1 WARN   (14 ok / 1 warn / 0 fail)
+[2026-11-12 13:52:18.437]   details: gnss_report?  gnss_smi?  gnss_health?   commands: gnss_cmds?
+[2026-11-12 13:52:18.437] ==============================================================================
+[2026-11-12 13:52:21.746] >>> gnss_jam?
+[2026-11-12 13:52:21.809] E310> gnss_jam?
+[2026-11-12 13:52:21.809] 
+[2026-11-12 13:52:21.809] --- JAMMER -----------------------------------------------------------------
+[2026-11-12 13:52:21.809]   JAMMER   JAMMED  J/N 35.3 dB at the ADC, CW/narrowband ~0 MHz wide, RF 1575.41 MHz
+[2026-11-12 13:52:21.809]            type CW/narrowband, ~0.0 MHz wide, centre RF 1575.405 MHz
+[2026-11-12 13:52:21.809]   POWER    (RX gain 52 / 52 dB, dBm after gnss_jpcal=)
+[2026-11-12 13:52:21.809]            total   RX1 -10.6 dBFS   RX2 -1.4 dBFS
+[2026-11-12 13:52:21.809]            jammer  RX1 -10.5 dBFS   RX2 -1.4 dBFS
+[2026-11-12 13:52:21.809]            noise   RX1 -47.6 dBFS   RX2 -38.5 dBFS
+[2026-11-12 13:52:21.844]            ADC peak RX1 -10.2 / RX2 -1.2 dBFS
+[2026-11-12 13:52:21.844]   DIRECTION RX2 - RX1 phase 54.0 deg (raw 54.0), angle 17.5 deg from broadside
+[2026-11-12 13:52:21.844]            (+ = towards RX2)  NOT calibrated: gnss_jcal=1 with a source at broadside
+[2026-11-12 13:52:21.844]   RX2/RX1  jammer amplitude +9.2 dB, phase 53.6 deg (SMI covariance)
+[2026-11-12 13:52:21.844]   NULL     J/N in    35.3 dB   at RX1 (reference element)
+[2026-11-12 13:52:21.844]            J/N out   -7.6 dB   at the array output (noise = sn2 x |w|^2)
+[2026-11-12 13:52:21.844]            SUPPRESSION S = J/N in - J/N out = 42.9 dB
+[2026-11-12 13:52:21.909]   theory   2 antennas, 1 weight each: S = (1+r)^2 + r^2 ~ 2 JNR + 3 dB;
+[2026-11-12 13:52:21.909]            with loading 3 x lambda_min: 61.5 dB. CW + 8 taps: up to M(M-1)r^2,
+[2026-11-12 13:52:21.909]            M = 16. Barrage: ~ JNR + 10..17 dB (1 dB per dB of JNR) with 8-16 taps.
+[2026-11-12 13:52:21.909]   COST     C/N0 lost 0.69 dB   SMI estimation loss 0.04 dB (K 1792)   null in 3 ms
+[2026-11-12 13:52:21.909]            noise -45.8 dBFS per element
+[2026-11-12 13:52:21.909]   more     gnss_jam_est? = FPGA estimator detail, gnss_jmon=N, gnss_jcal=1, gnss_jpcal=dBm
+[2026-11-12 13:52:27.412] E310> gnss_kpi?
+[2026-11-12 13:52:27.412] KPI mode=SMI state=JAMMED jn=37.0 supp=42.3 supp_lo=0 jnout=-5.4 cn0loss=1.11 gain=52 gain2=52 agc=AUTO nf=-40.9 floor=-48.9 pk1=-8.6 pk2=-1.5 clip1=0 clip2=0 out=-23.9 taps=8 alpha=3.0 wn=1.08 dacclip=205485 hunts=1 keff=1792 tx1=34000

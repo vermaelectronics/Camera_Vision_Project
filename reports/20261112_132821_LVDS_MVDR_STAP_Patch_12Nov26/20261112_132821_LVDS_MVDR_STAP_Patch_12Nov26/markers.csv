@@ -1,0 +1,138 @@
+time,t_s,type,text
+2026-11-12 13:28:22.112,0.4,note,logging started
+2026-11-12 13:28:26.226,4.5,cmd,
+2026-11-12 13:28:29.733,8.0,cmd,stap=1
+2026-11-12 13:28:30.083,8.4,e310,AD9361 internal floor Too high for the -60 dBFS target: levelling to above the whole-band floor). gnss_floor=0/1/2 picks the band protected:
+2026-11-12 13:28:30.147,8.5,e310,"RX gain 37 dB (manual, both): noise input: no ADC clipping"
+2026-11-12 13:28:30.148,8.5,e310,but the null is shallower. Check the weaker channel.
+2026-11-12 13:28:31.167,9.5,e310,"output: AOLC holding jammer: DETECTED and being nullednull core: SMI-MVDR STAP (2 x 16 + 2 image taps), 50 windows solved, lambda_min SMI: 25747 overruns during the radio set-up (rate change), none since"
+2026-11-12 13:28:31.174,9.5,e310,CW and wideband / barrage jammers are nulled; gnss_supp? for the depth.
+2026-11-12 13:28:33.055,11.4,e310,PRESENT  J/N 24.7 dB at the ADCangle 12.3 deg from broadside22.9 dB  jammer in / jammer out########................-0.7 dB vs noisenulled 6.0 ms after it appeared-47.8 dBFS  (SMI estimate)
+2026-11-12 13:28:33.103,11.4,e310,"ON  target -24, measured -24.1 dBFS0 dB  (no output clipping)27 since the counter clear  stap: ON   RX gain 37 dB, noise -47.8 dBFS, TX1 34000 mdB"
+2026-11-12 13:28:34.239,12.5,e310,"[  126.5 s] JAMMER ON   J/N +23.3 dB, WIDEBAND / barrage, ~37.5 MHz wide, RF 1583.67 MHz (LO +1.2 MHz)"
+2026-11-12 13:28:34.239,12.5,e310,[  126.5 s] NULLED      after 6.0 ms (stap? shows the suppression)
+2026-11-12 13:28:46.293,24.6,cmd,gnss!
+2026-11-12 13:29:01.700,40.0,cmd,
+2026-11-12 13:29:02.077,40.4,cmd,
+2026-11-12 13:29:05.172,43.5,cmd,gnss!
+2026-11-12 13:29:43.701,82.0,cmd,gnss!
+2026-11-12 13:30:53.643,151.9,cmd,
+2026-11-12 13:30:57.354,155.7,cmd,status?
+2026-11-12 13:31:32.330,190.6,cmd,taps?
+2026-11-12 13:31:32.421,190.7,e310,need taps: 8..16 for a barrage over 56 MHz; CW is nulled with any N.
+2026-11-12 13:31:39.519,197.8,cmd,taps=5
+2026-11-12 13:31:45.037,203.3,cmd,gnss_report?
+2026-11-12 13:31:45.093,203.4,e310,"SYSTEM      firmware MOD-31, MVDR core 1.15, uptime 320.8 s"
+2026-11-12 13:31:45.125,203.4,e310,"GPS L1 C/A, QZSS, SBAS   1575.420      -7.1   OK         +1.7 dB  <- jammer on it"
+2026-11-12 13:31:45.173,203.5,e310,"Galileo E1, BeiDou B1C   1575.420      -7.1   OK         +1.7 dB  <- jammer on it"
+2026-11-12 13:31:45.173,203.5,e310,GLONASS G1 k=-7          1598.063     +15.6   OK         +0.5 dB  <- jammer on it
+2026-11-12 13:31:45.173,203.5,e310,GLONASS G1 k=0           1602.000     +19.5   OK         +0.5 dB  <- jammer on it
+2026-11-12 13:31:45.301,203.6,e310,residual > 10 dB UNDER the output noise: jammer fully nulled
+2026-11-12 13:31:45.349,203.7,e310,"125.5 s  AUTO-START  gnss_band=3, ALL systems 1582.5 / 56 MHz (default)"
+2026-11-12 13:31:45.349,203.7,e310,"126.5 s  JAMMER ON   J/N +23.3 dB, WIDEBAND / barrage, ~37.5 MHz wide, RF 1583.67 MHz (LO +1.2 MHz)"
+2026-11-12 13:31:45.349,203.7,e310,126.5 s  NULLED      after 6.0 ms (stap? shows the suppression)
+2026-11-12 13:32:16.542,234.8,cmd,gnss!
+2026-11-12 13:33:08.139,286.4,cmd,gnss_check?
+2026-11-12 13:33:08.193,286.5,e310,GNSS ANTI-JAM CHECK      MVDR core v1.15   firmware MOD-31
+2026-11-12 13:33:08.417,286.7,e310,nulled 6.0 ms after it appeared
+2026-11-12 13:33:08.524,286.8,e310,[ OK ] clip back-off ......... 0 dB  (no output clipping)
+2026-11-12 13:34:06.326,344.6,cmd,gnss_band=4
+2026-11-12 13:34:06.399,344.7,e310,MVDR AUTO-START
+2026-11-12 13:34:07.325,345.6,e310,Too high for the -60 dBFS target: levelling to -33.7 dBFS (antenna noise 15 dB
+2026-11-12 13:34:07.390,345.7,e310,"[PASS] RX gain 48 dB (manual, both): noise -33.8 dBFS on target, peak -4.1 dBFS"
+2026-11-12 13:34:07.455,345.8,e310,but the null is shallower. Check the weaker channel.
+2026-11-12 13:34:08.095,346.4,e310,"[INFO] jammer: DETECTED and being nulled, JNR 15.9 dB, angle 13.0 deg"
+2026-11-12 13:34:08.319,346.6,e310,CW and wideband / barrage jammers are nulled; gnss_supp? for the depth.
+2026-11-12 13:34:08.382,346.7,e310,"MVDR AUTO-START: 24 PASS, 2 WARN, 0 FAIL"
+2026-11-12 13:34:08.382,346.7,e310,GNSS_TX: ON - the MVDR output (jammer nulled) is transmitting on TX1
+2026-11-12 13:34:08.382,346.7,e310,"RESULT: MVDR RUNNING on TX1, 2 WARNING(s) above -- it works,"
+2026-11-12 13:34:09.247,347.6,e310,GNSS ANTI-JAM CHECK      MVDR core v1.15   firmware MOD-31
+2026-11-12 13:34:09.471,347.8,e310,nulled 6.0 ms after it appeared
+2026-11-12 13:34:09.551,347.9,e310,[ OK ] clip back-off ......... 0 dB  (no output clipping)
+2026-11-12 13:34:09.598,347.9,e310,"SYSTEM      firmware MOD-31, MVDR core 1.15, uptime 465.3 s"
+2026-11-12 13:34:09.646,348.0,e310,"GPS L1 C/A, QZSS, SBAS   1575.420      +6.9   OK         +5.1 dB  <- jammer on it"
+2026-11-12 13:34:09.646,348.0,e310,"Galileo E1, BeiDou B1C   1575.420      +6.9   OK         +5.1 dB  <- jammer on it"
+2026-11-12 13:34:09.694,348.0,e310,BeiDou B1I               1561.098      -7.4   OK         -0.6 dB  <- jammer on it
+2026-11-12 13:34:09.822,348.1,e310,"125.5 s  AUTO-START  gnss_band=3, ALL systems 1582.5 / 56 MHz (default)"
+2026-11-12 13:34:09.822,348.1,e310,"126.5 s  JAMMER ON   J/N +23.3 dB, WIDEBAND / barrage, ~37.5 MHz wide, RF 1583.67 MHz (LO +1.2 MHz)"
+2026-11-12 13:34:09.870,348.2,e310,126.5 s  NULLED      after 6.0 ms (stap? shows the suppression)
+2026-11-12 13:34:09.940,348.2,e310,"462.2 s  AUTO-START  gnss_band=4, barrage: B1I+L1/E1 20 MHz"
+2026-11-12 13:34:17.430,355.7,cmd,gnss_status?
+2026-11-12 13:34:26.800,365.1,cmd,
+2026-11-12 13:34:41.968,380.3,e310,"[  496.9 s] JAMMER OFF  after 369.9 s, peak J/N +27.8 dB"
+2026-11-12 13:34:43.367,381.7,e310,"OUTPUT CLIPPING: 3751 samples during a jammer onset / RX gain step (transient, no back-off)."
+2026-11-12 13:35:59.306,457.6,e310,"E310> JAMMER DETECTED -- nulling itOUTPUT CLIPPING: 122823 samples during a jammer onset / RX gain step (transient, no back-off)."
+2026-11-12 13:35:59.306,457.6,e310,"[  573.8 s] JAMMER ON   J/N +16.0 dB, NARROWBAND / CW (< 0.5 MHz), RF 1561.15 MHz (LO -7.4 MHz)"
+2026-11-12 13:35:59.306,457.6,e310,[  573.8 s] NULLED      after 2.6 ms (stap? shows the suppression)
+2026-11-12 13:36:23.505,481.8,cmd,gnss_report?
+2026-11-12 13:36:23.559,481.9,e310,"SYSTEM      firmware MOD-31, MVDR core 1.15, uptime 599.3 s"
+2026-11-12 13:36:23.656,482.0,e310,"GPS L1 C/A, QZSS, SBAS   1575.420      +6.9   OK         +3.8 dB  <- jammer on it"
+2026-11-12 13:36:23.657,482.0,e310,"Galileo E1, BeiDou B1C   1575.420      +6.9   OK         +3.8 dB  <- jammer on it"
+2026-11-12 13:36:23.658,482.0,e310,BeiDou B1I               1561.098      -7.4   OK         -2.5 dB  <- jammer on it
+2026-11-12 13:36:23.735,482.0,e310,~14.5 dB C/N0 (the jammer forced the gain down; weakest signals go first)
+2026-11-12 13:36:23.784,482.1,e310,residual > 10 dB UNDER the output noise: jammer fully nulled
+2026-11-12 13:36:23.879,482.2,e310,"126.5 s  JAMMER ON   J/N +23.3 dB, WIDEBAND / barrage, ~37.5 MHz wide, RF 1583.67 MHz (LO +1.2 MHz)"
+2026-11-12 13:36:23.879,482.2,e310,126.5 s  NULLED      after 6.0 ms (stap? shows the suppression)
+2026-11-12 13:36:23.911,482.2,e310,"462.2 s  AUTO-START  gnss_band=4, barrage: B1I+L1/E1 20 MHz"
+2026-11-12 13:36:23.959,482.3,e310,"496.9 s  JAMMER OFF  after 369.9 s, peak J/N +27.8 dB"
+2026-11-12 13:36:23.959,482.3,e310,"499.1 s  OUTPUT CLIPPING: 3751 samples during a jammer onset / RX gain step (transient, no back-off)."
+2026-11-12 13:36:23.959,482.3,e310,"573.8 s  JAMMER ON   J/N +16.0 dB, NARROWBAND / CW (< 0.5 MHz), RF 1561.15 MHz (LO -7.4 MHz)"
+2026-11-12 13:36:24.021,482.3,e310,573.8 s  NULLED      after 2.6 ms (stap? shows the suppression)
+2026-11-12 13:36:24.021,482.3,e310,"575.0 s  OUTPUT CLIPPING: 122823 samples during a jammer onset / RX gain step (transient, no back-off)."
+2026-11-12 13:36:45.819,504.1,cold,SkyTraq cold start
+2026-11-12 13:36:45.831,504.1,gnss,restart ACK
+2026-11-12 13:37:22.451,540.8,cmd,taps?
+2026-11-12 13:37:22.531,540.8,e310,need taps: 8..16 for a barrage over 56 MHz; CW is nulled with any N.
+2026-11-12 13:37:30.040,548.3,cmd,taps=8
+2026-11-12 13:37:44.013,562.3,cmd,taps?
+2026-11-12 13:37:44.068,562.4,e310,need taps: 8..16 for a barrage over 56 MHz; CW is nulled with any N.
+2026-11-12 13:38:17.513,595.8,ttff,txt
+2026-11-12 13:38:34.759,613.1,cmd,taps?
+2026-11-12 13:38:34.850,613.2,e310,need taps: 8..16 for a barrage over 56 MHz; CW is nulled with any N.
+2026-11-12 13:38:39.939,618.2,cmd,taps=16
+2026-11-12 13:42:30.242,848.5,e310,"OUTPUT CLIPPING: 3027 samples during a jammer onset / RX gain step (transient, no back-off)."
+2026-11-12 13:42:30.243,848.5,e310,"[  963.0 s] JAMMER OFF  after 388.6 s, peak J/N +27.2 dB"
+2026-11-12 13:42:33.189,851.5,e310,"[  966.6 s] JAMMER ON   J/N +18.1 dB, NARROWBAND / CW (< 0.5 MHz), RF 1560.21 MHz (LO -8.3 MHz)"
+2026-11-12 13:42:33.252,851.6,e310,[  966.6 s] NULLED      after 35.4 ms (stap? shows the suppression)
+2026-11-12 13:42:36.164,854.5,e310,"E310> JAMMER DETECTED -- nulling itOUTPUT CLIPPING: 218385 samples during a jammer onset / RX gain step (transient, no back-off)."
+2026-11-12 13:42:52.454,870.8,cmd,stap?
+2026-11-12 13:43:23.836,902.1,cmd,gnss_status?
+2026-11-12 13:43:41.212,919.5,cmd,gnss_taps?
+2026-11-12 13:44:24.211,962.5,note,barrage 10 dB
+2026-11-12 13:45:13.105,1011.4,cmd,gnss_jam?
+2026-11-12 13:45:25.734,1024.0,cmd,
+2026-11-12 13:45:39.605,1037.9,cmd,stap?
+2026-11-12 13:46:01.150,1059.5,cmd,taps=8
+2026-11-12 13:46:09.507,1067.8,note,taps 8
+2026-11-12 13:46:18.069,1076.4,cmd,gnss_status?
+2026-11-12 13:46:30.706,1089.0,cmd,selftest?
+2026-11-12 13:46:30.891,1089.2,e310,5 ADC headroom (a clipped jammer cannot be nulled)
+2026-11-12 13:46:49.410,1107.7,cmd,gnss_band?
+2026-11-12 13:46:49.515,1107.8,e310,"GPS L1 C/A, QZSS, SBAS   1575.420      +6.9   OK         +1.8 dB  <- jammer on it"
+2026-11-12 13:46:49.515,1107.8,e310,"Galileo E1, BeiDou B1C   1575.420      +6.9   OK         +1.8 dB  <- jammer on it"
+2026-11-12 13:46:49.577,1107.9,e310,BeiDou B1I               1561.098      -7.4   OK         +0.2 dB  <- jammer on it
+2026-11-12 13:46:54.860,1113.2,cmd,
+2026-11-12 13:47:24.190,1142.5,cmd,rx?
+2026-11-12 13:47:42.186,1160.5,cmd,rx_samp_rate-30720000
+2026-11-12 13:47:50.867,1169.2,cmd,rx_samp_rate=30720000
+2026-11-12 13:47:59.789,1178.1,cmd,command?
+2026-11-12 13:48:02.912,1181.2,cmd,help?
+2026-11-12 13:48:17.590,1195.9,cmd,commands?
+2026-11-12 13:48:18.104,1196.4,e310,"gnss_ogain?  - MVDR output gain, output clipping, DAC level."
+2026-11-12 13:48:19.831,1198.1,e310,"[ 1314.8 s] JAMMER OFF  after 347.7 s, peak J/N +32.1 dB"
+2026-11-12 13:48:23.127,1201.4,e310,"E310> JAMMER DETECTED -- nulling itOUTPUT CLIPPING: 7105 samples during a jammer onset / RX gain step (transient, no back-off)."
+2026-11-12 13:48:43.116,1221.4,cmd,tx_samp_freq
+2026-11-12 13:48:49.195,1227.5,cmd,tx_samp_freq=30720000
+2026-11-12 13:48:53.056,1231.4,e310,AD9361 internal floor Too high for the -60 dBFS target: levelling to above the whole-band floor). gnss_floor=0/1/2 picks the band protected:
+2026-11-12 13:48:53.184,1231.5,e310,"RX gain 66 dB (manual, both): noise input: no ADC clipping"
+2026-11-12 13:48:53.592,1231.9,cmd,rx_samp_freq=30720000
+2026-11-12 13:48:54.101,1232.4,e310,"output: AOLC holding jammer: DETECTED and being nullednull core: SMI-MVDR STAP (2 x 8 + 2 image taps), 301879 windows solved, lambda_min SMI: 61235 overruns during the radio set-up (rate change), none since"
+2026-11-12 13:48:54.101,1232.4,e310,CW and wideband / barrage jammers are nulled; gnss_supp? for the depth.
+2026-11-12 13:48:55.253,1233.6,e310,"ON  target -24, measured -24.1 dBFS0 dB  (no output clipping)220 since the counter cleargnss_kpi?"
+2026-11-12 13:48:58.871,1237.2,e310,AD9361 internal floor Too high for the -60 dBFS target: levelling to above the whole-band floor). gnss_floor=0/1/2 picks the band protected:
+2026-11-12 13:48:58.998,1237.3,e310,"RX gain 65 dB (manual, both): noise input: no ADC clipping"
+2026-11-12 13:48:59.828,1238.1,e310,"output: AOLC holding jammer: DETECTED and being nullednull core: SMI-MVDR STAP (2 x 8 + 2 image taps), 303229 windows solved, lambda_min SMI: 15307 overruns during the radio set-up (rate change), none since"
+2026-11-12 13:48:59.886,1238.2,e310,CW and wideband / barrage jammers are nulled; gnss_supp? for the depth.
+2026-11-12 13:49:02.594,1240.9,cmd,gnss_status?
+2026-11-12 13:49:02.645,1241.0,e310,"ON  target -24, measured -23.9 dBFS0 dB  (no output clipping)270 since the counter cleargnss_status?"
+2026-11-12 13:49:02.741,1241.0,e310,JAMMER   WEAK    J/N 4.3 dB at the ADC (under the 6 dB alarm; the null works on it)

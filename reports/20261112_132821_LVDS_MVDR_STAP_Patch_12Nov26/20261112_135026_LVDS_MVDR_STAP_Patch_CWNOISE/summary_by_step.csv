@@ -1,0 +1,8 @@
+start,t_s,duration_s,type,step,fix_%,sats_used_mean,sats_used_last60s,GPS_used_last60s,GPS_cn0_used_mean,GPS_cn0_used_last60s,GPS_cn0_top4_last60s,GLO_used_last60s,GLO_cn0_used_mean,GLO_cn0_used_last60s,GLO_cn0_top4_last60s,GAL_used_last60s,GAL_cn0_used_mean,GAL_cn0_used_last60s,GAL_cn0_top4_last60s,BDS_used_last60s,BDS_cn0_used_mean,BDS_cn0_used_last60s,BDS_cn0_top4_last60s,QZSS_used_last60s,QZSS_cn0_used_mean,QZSS_cn0_used_last60s,QZSS_cn0_top4_last60s
+2026-11-12 13:50:27.237,1,33,note,logging started,100,19.8,19.8,5.8,30.3,30.3,33.8,,,,,6.0,32.3,32.3,33.4,8.0,39.2,39.2,41.2,,,,
+2026-11-12 13:51:00.297,34,4,cmd,,100,21.0,21.0,7.0,28.3,28.3,33.6,,,,,6.0,30.6,30.6,32.2,8.0,38.8,38.8,40.7,,,,
+2026-11-12 13:51:04.338,38,64,cold,SkyTraq cold start,39,3.0,3.2,1.0,38.6,39.7,37.8,,,,,,31.3,,34.0,7.0,39.4,39.4,40.9,,,,
+2026-11-12 13:52:08.688,102,4,cmd,gnss_report?,100,8.0,8.0,1.0,39.2,39.2,35.4,,,,,,,,31.1,7.0,37.1,37.1,39.6,,,,
+2026-11-12 13:52:12.698,106,5,cmd,gnss_status?,100,8.0,8.0,1.0,38.8,38.8,39.5,,,,,,,,32.2,7.0,39.4,39.4,40.8,,,,
+2026-11-12 13:52:17.997,111,4,cmd,gnss_check?,100,8.0,8.0,1.0,39.2,39.2,38.5,,,,,,,,32.9,7.0,39.6,39.6,40.9,,,,
+2026-11-12 13:52:21.746,115,11,cmd,gnss_jam?,100,8.0,8.0,1.0,39.2,39.2,35.8,,,,,,,,32.8,7.0,39.2,39.2,40.6,,,,

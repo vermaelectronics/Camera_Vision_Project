@@ -1,0 +1,28 @@
+time,t_s,type,text
+2026-11-12 13:50:27.237,0.7,note,logging started
+2026-11-12 13:50:27.321,0.8,e310,JAMMER   WEAK    J/N 3.9 dB at the ADC (under the 6 dB alarm; the null works on it)
+2026-11-12 13:50:34.922,8.4,e310,"[ 1449.5 s] JAMMER ON   J/N +32.7 dB, NARROWBAND / CW (< 0.3 MHz), RF 1575.42 MHz (LO +6.9 MHz)"
+2026-11-12 13:50:34.922,8.4,e310,[ 1449.5 s] NULLED      after 3.3 ms (stap? shows the suppression)
+2026-11-12 13:50:36.550,10.0,e310,"E310> JAMMER DETECTED -- nulling itOUTPUT CLIPPING: 205173 samples during a jammer onset / RX gain step (transient, no back-off)."
+2026-11-12 13:51:00.297,33.8,cmd,
+2026-11-12 13:51:04.338,37.8,cold,SkyTraq cold start
+2026-11-12 13:51:04.349,37.8,gnss,restart ACK
+2026-11-12 13:52:08.688,102.2,cmd,gnss_report?
+2026-11-12 13:52:08.730,102.2,e310,"SYSTEM      firmware MOD-31, MVDR core 1.15, uptime 1544.5 s"
+2026-11-12 13:52:08.821,102.3,e310,"GPS L1 C/A, QZSS, SBAS   1575.420      +6.9   OK         -2.9 dB  <- jammer on it"
+2026-11-12 13:52:08.821,102.3,e310,"Galileo E1, BeiDou B1C   1575.420      +6.9   OK         -2.9 dB  <- jammer on it"
+2026-11-12 13:52:08.917,102.4,e310,~8.6 dB C/N0 (the jammer forced the gain down; weakest signals go first)
+2026-11-12 13:52:08.997,102.5,e310,residual > 10 dB UNDER the output noise: jammer fully nulled
+2026-11-12 13:52:09.092,102.6,e310,"1314.8 s  JAMMER OFF  after 347.7 s, peak J/N +32.1 dB"
+2026-11-12 13:52:09.093,102.6,e310,"1318.8 s  OUTPUT CLIPPING: 7105 samples during a jammer onset / RX gain step (transient, no back-off)."
+2026-11-12 13:52:09.125,102.6,e310,"1348.3 s  AUTO-START  gnss_band=-1, custom (gnss_plan=)"
+2026-11-12 13:52:09.125,102.6,e310,"1354.3 s  AUTO-START  gnss_band=-1, custom (gnss_plan=)"
+2026-11-12 13:52:09.189,102.7,e310,"1449.5 s  JAMMER ON   J/N +32.7 dB, NARROWBAND / CW (< 0.3 MHz), RF 1575.42 MHz (LO +6.9 MHz)"
+2026-11-12 13:52:09.189,102.7,e310,1449.5 s  NULLED      after 3.3 ms (stap? shows the suppression)
+2026-11-12 13:52:09.189,102.7,e310,"1452.3 s  OUTPUT CLIPPING: 205173 samples during a jammer onset / RX gain step (transient, no back-off)."
+2026-11-12 13:52:12.698,106.2,cmd,gnss_status?
+2026-11-12 13:52:17.997,111.5,cmd,gnss_check?
+2026-11-12 13:52:18.053,111.5,e310,GNSS ANTI-JAM CHECK      MVDR core v1.15   firmware MOD-31
+2026-11-12 13:52:18.277,111.8,e310,nulled 3.3 ms after it appeared
+2026-11-12 13:52:18.373,111.9,e310,[ OK ] clip back-off ......... 0 dB  (no output clipping)
+2026-11-12 13:52:21.746,115.2,cmd,gnss_jam?

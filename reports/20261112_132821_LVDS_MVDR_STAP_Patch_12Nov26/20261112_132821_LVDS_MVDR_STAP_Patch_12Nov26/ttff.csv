@@ -1,0 +1,3 @@
+start,t_s,type,text,ttff_s,to_4_sats_s,to_8_sats_s,to_12_sats_s,first_GPS_s,first_GLO_s,first_GAL_s,first_BDS_s,first_QZSS_s
+2026-11-12 13:36:45.819,504,cold,SkyTraq cold start,no fix,-,-,-,-,-,-,-,-
+2026-11-12 13:38:17.513,596,ttff,txt,166,166,194,628,166,-,166,166,-

@@ -1,0 +1,62 @@
+time,t_s,type,text
+2026-11-12 13:57:00.228,0.3,note,logging started
+2026-11-12 13:57:12.824,12.9,cmd,gnss_status?
+2026-11-12 13:57:18.062,18.2,cmd,gnss_report?
+2026-11-12 13:57:18.102,18.2,e310,"SYSTEM      firmware MOD-31, MVDR core 1.15, uptime 1853.8 s"
+2026-11-12 13:57:18.197,18.3,e310,"GPS L1 C/A, QZSS, SBAS   1575.420      +6.9   OK         -1.9 dB  <- jammer on it"
+2026-11-12 13:57:18.197,18.3,e310,"Galileo E1, BeiDou B1C   1575.420      +6.9   OK         -1.9 dB  <- jammer on it"
+2026-11-12 13:57:18.293,18.4,e310,~9.7 dB C/N0 (the jammer forced the gain down; weakest signals go first)
+2026-11-12 13:57:18.372,18.5,e310,residual > 10 dB UNDER the output noise: jammer fully nulled
+2026-11-12 13:57:18.421,18.5,e310,"1449.5 s  JAMMER ON   J/N +32.7 dB, NARROWBAND / CW (< 0.3 MHz), RF 1575.42 MHz (LO +6.9 MHz)"
+2026-11-12 13:57:18.422,18.5,e310,1449.5 s  NULLED      after 3.3 ms (stap? shows the suppression)
+2026-11-12 13:57:18.422,18.5,e310,"1452.3 s  OUTPUT CLIPPING: 205173 samples during a jammer onset / RX gain step (transient, no back-off)."
+2026-11-12 13:57:18.469,18.6,e310,"1667.1 s  JAMMER OFF  after 217.1 s, peak J/N +37.1 dB"
+2026-11-12 13:57:18.469,18.6,e310,"1669.9 s  OUTPUT CLIPPING: 4765 samples during a jammer onset / RX gain step (transient, no back-off)."
+2026-11-12 13:57:18.500,18.6,e310,"1673.0 s  JAMMER ON   J/N +28.9 dB, NARROWBAND / CW (< 0.3 MHz), RF 1575.42 MHz (LO +6.9 MHz)"
+2026-11-12 13:57:18.501,18.6,e310,1673.0 s  NULLED      after 3.3 ms (stap? shows the suppression)
+2026-11-12 13:57:18.501,18.6,e310,"1673.2 s  OUTPUT CLIPPING: 121600 samples during a jammer onset / RX gain step (transient, no back-off)."
+2026-11-12 13:57:22.308,22.4,cmd,gnss_check?
+2026-11-12 13:57:22.372,22.5,e310,GNSS ANTI-JAM CHECK      MVDR core v1.15   firmware MOD-31
+2026-11-12 13:57:22.597,22.7,e310,nulled 3.3 ms after it appeared
+2026-11-12 13:57:22.693,22.8,e310,[ OK ] clip back-off ......... 0 dB  (no output clipping)
+2026-11-12 13:57:25.280,25.4,cmd,gnss_jam?
+2026-11-12 13:57:45.059,45.2,e310,"[ 1880.1 s] JAMMER OFF  after 206.6 s, peak J/N +39.5 dB"
+2026-11-12 13:57:54.915,55.0,e310,"E310> OUTPUT CLIPPING: 128815 samples during a jammer onset / RX gain step (transient, no back-off)."
+2026-11-12 13:57:54.916,55.0,e310,"[ 1890.0 s] JAMMER ON   J/N +31.0 dB, NARROWBAND / CW (< 0.3 MHz), RF 1575.42 MHz (LO +6.9 MHz)"
+2026-11-12 13:57:54.916,55.0,e310,[ 1890.0 s] NULLED      after 4.0 ms (stap? shows the suppression)
+2026-11-12 13:59:09.830,129.9,cold,SkyTraq cold start
+2026-11-12 13:59:09.841,129.9,gnss,restart ACK
+2026-11-12 13:59:12.615,132.7,cold,SkyTraq cold start
+2026-11-12 13:59:12.627,132.7,gnss,restart ACK
+2026-11-12 13:59:53.126,173.2,cmd,gnss_status?
+2026-11-12 13:59:56.444,176.6,cmd,gnss_check?
+2026-11-12 13:59:56.508,176.6,e310,GNSS ANTI-JAM CHECK      MVDR core v1.15   firmware MOD-31
+2026-11-12 13:59:56.717,176.8,e310,nulled 4.0 ms after it appeared
+2026-11-12 13:59:56.815,176.9,e310,[ OK ] clip back-off ......... 0 dB  (no output clipping)
+2026-11-12 13:59:59.401,179.5,cmd,gnss_jam?
+2026-11-12 14:00:03.685,183.8,cmd,gnss_health?
+2026-11-12 14:00:03.996,184.1,e310,but the null is shallower. Check the weaker channel.
+2026-11-12 14:00:04.174,184.3,e310,"[INFO] jammer: DETECTED and being nulled, JNR 35.4 dB, angle 13.0 deg"
+2026-11-12 14:00:04.461,184.6,e310,CW and wideband / barrage jammers are nulled; gnss_supp? for the depth.
+2026-11-12 14:00:04.523,184.6,e310,"RESULT: working, with warnings"
+2026-11-12 14:00:11.995,192.1,cmd,taps?
+2026-11-12 14:00:12.058,192.2,e310,need taps: 8..16 for a barrage over 56 MHz; CW is nulled with any N.
+2026-11-12 14:00:20.560,200.7,cmd,taps=16
+2026-11-12 14:00:27.264,207.4,cmd,stap?
+2026-11-12 14:00:35.025,215.1,cmd,taps=8
+2026-11-12 14:00:36.968,217.1,cmd,stap?
+2026-11-12 14:00:38.152,218.3,cmd,stap?
+2026-11-12 14:00:38.908,219.0,cmd,stap?
+2026-11-12 14:00:39.630,219.7,cmd,stap?
+2026-11-12 14:00:42.970,223.1,cmd,taps=5
+2026-11-12 14:00:44.203,224.3,cmd,stap?
+2026-11-12 14:00:45.388,225.5,cmd,stap?
+2026-11-12 14:00:46.078,226.2,cmd,stap?
+2026-11-12 14:00:46.858,227.0,cmd,stap?
+2026-11-12 14:00:50.309,230.4,cmd,taps=16
+2026-11-12 14:00:51.600,231.7,cmd,stap?
+2026-11-12 14:00:52.723,232.8,cmd,stap?
+2026-11-12 14:00:53.514,233.6,cmd,stap?
+2026-11-12 14:00:54.305,234.4,cmd,stap?
+2026-11-12 14:00:55.125,235.2,cmd,stap?
+2026-11-12 14:00:55.889,236.0,cmd,stap?
