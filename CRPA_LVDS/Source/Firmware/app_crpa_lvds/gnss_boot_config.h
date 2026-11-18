@@ -1,6 +1,9 @@
 /******************************************************************************
  *  gnss_boot_config.h  --  what the board does by itself after power-up.
  *
+ *  At power-up the radio is set to RF profile 1 (gnss_band=1): LO, sample rate
+ *  and RF bandwidth below, RX and TX the same; the radio guard puts them back
+ *  within 1 s if anything else changes them.
  *  With GNSS_BOOT_AUTOSTART = 1 the firmware, once the radio is up, without
  *  any console command:
  *    1. locks BOTH RX gains to GNSS_BOOT_RX_GAIN_DB (manual mode: no AGC, and
@@ -35,6 +38,21 @@
 #endif
 #ifndef GNSS_BOOT_RX_GAIN_DB
 #define GNSS_BOOT_RX_GAIN_DB       40       /* RX1 and RX2: 40 dB, manual      */
+#endif
+
+/* RF profile 1 (gnss_band=1, applied at power-up and kept by the 1 s radio
+ * guard): RX and TX LO, sample rate and RF bandwidth, the same on both sides.
+ * 1568.5 MHz puts GPS L1 / Galileo E1 at +6.92 MHz and BeiDou B1I at -7.40 MHz
+ * from the LO, inside the flat part of 30.72 MS/s / 20 MHz, and keeps the
+ * AD9361's LO leakage off the L1 centre. GLONASS G1 is outside this profile. */
+#ifndef GNSS_BOOT_LO_HZ
+#define GNSS_BOOT_LO_HZ            1568500000ULL   /* 1568.5 MHz, RX and TX   */
+#endif
+#ifndef GNSS_BOOT_FS_HZ
+#define GNSS_BOOT_FS_HZ            30720000U       /* 30.72 MS/s, RX and TX   */
+#endif
+#ifndef GNSS_BOOT_BW_HZ
+#define GNSS_BOOT_BW_HZ            20000000U       /* 20 MHz, RX and TX       */
 #endif
 
 /* gnss_tx=1 (at boot and later) goes to this TX1 attenuation */

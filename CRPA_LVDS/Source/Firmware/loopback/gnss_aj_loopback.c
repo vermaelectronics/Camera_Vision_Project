@@ -11,6 +11,7 @@
 #include "gnss_aj_math.h"
 #include "crpa_build.h"
 #include "gnss_smi_agc.h"
+#include "gnss_boot_config.h"
 #include "gnss_passthrough.h"
 #include "gnss_txdma.h"
 #include "ad9361_api.h"
@@ -167,7 +168,7 @@ void gnss_aj_note_tx(int on)
 struct band_cfg { uint64_t lo; uint32_t fs, bw; const char *name; };
 static struct band_cfg bands[GNSS_BAND_COUNT] = {      /* [6] is written by gnss_band_custom= */
 	{1575420000ULL, 30720000U, 18000000U, "GPS, Galileo, QZSS, SBAS, BeiDou B1C: L1 only (narrow)"},
-	{1582500000ULL, 61440000U, 56000000U, "ALL: GPS, Galileo, QZSS, SBAS, BeiDou B1I + B1C, GLONASS G1"},
+	{GNSS_BOOT_LO_HZ, GNSS_BOOT_FS_HZ, GNSS_BOOT_BW_HZ, "BOOT PROFILE (gnss_boot_config.h): 1568.5 MHz, 30.72 MS/s, 20 MHz: GPS L1, Galileo E1, QZSS, SBAS, BeiDou B1I + B1C"},
 	{1589500000ULL, 50000000U, 40000000U, "GPS, Galileo, GLONASS G1 at 50 MS/s (no BeiDou B1I)"},
 	{1568250000ULL, 50000000U, 40000000U, "GPS, Galileo, BeiDou B1I + B1C at 50 MS/s (no GLONASS)"},
 	/* v6.1: anti-jam profile. 8 MHz analog bandwidth keeps GPS C/A, Galileo

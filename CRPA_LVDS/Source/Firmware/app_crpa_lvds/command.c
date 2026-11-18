@@ -154,7 +154,7 @@ command cmd_list[] = {
 	{"crpa_predict=", "crpa27..31: 1 = commit weights predicted ahead for a moving jammer (default), 0 = off.", "crpa_predict=1", set_gnss_aj_predict},
 	{"crpa_passes=", "crpa27..31: NLMS passes over each capture, 1..8 (default 2).", "crpa_passes=2", set_gnss_aj_passes},
 	{"gnss_band?", "RF profile and which GNSS signals it carries (GPS, Galileo, BeiDou, GLONASS).", "", get_gnss_band},
-	{"gnss_band=", "1 = ALL incl. BeiDou + GLONASS 1582.5 MHz/61.44 MS/s (default), 0 = L1 only, 2 = no BeiDou B1I, 3 = no GLONASS (2, 3: 50 MS/s), 4 = L1 anti-jam narrow 8 MHz, 5 = L1 anti-jam multipath 15.36 MS/s, 6 = the last gnss_band_custom=.", "gnss_band=1", set_gnss_band},
+	{"gnss_band=", "1 = boot profile 1568.5 MHz / 30.72 MS/s / 20 MHz (default, gnss_boot_config.h), 0 = L1 only, 2 = no BeiDou B1I, 3 = no GLONASS (2, 3: 50 MS/s), 4 = L1 anti-jam narrow 8 MHz, 5 = L1 anti-jam multipath 15.36 MS/s, 6 = the last gnss_band_custom=.", "gnss_band=1", set_gnss_band},
 	{"gnss_band_custom=", "Any RF profile: LO [MHz] rate [MS/s] RF bandwidth [MHz], RX and TX together, e.g. 1575.42 30.72 18.", "gnss_band_custom=1575.42 30.72 18", set_gnss_band_custom},
 	{"gnss_rx_gain?", "Gets RX1/RX2 gain mode and gain [dB].", "", get_gnss_rx_gain},
 	{"gnss_rx_gain=", "Sets RX1 AND RX2 to the same gain [dB] (also the auto reference).", "gnss_rx_gain=40", set_gnss_rx_gain},
@@ -298,6 +298,19 @@ void gnss_boot_autostart(void)
 	ad9361_get_rx_rf_gain(ad9361_phy, 1, &g2);
 	console_print("gnss_boot: read back: TX1 %d mdB, TX2 %d mdB, RX1 %d dB, RX2 %d dB, TX %s\n",
 		      (long)a1, (long)a2, (long)g1, (long)g2, (char*)(gnss_tx_on ? "ON" : "OFF (see above)"));
+	{
+		uint64_t rlo = 0, tlo = 0;
+		uint32_t rfs = 0, tfs = 0, rbw = 0, tbw = 0;
+		ad9361_get_rx_lo_freq(ad9361_phy, &rlo);
+		ad9361_get_tx_lo_freq(ad9361_phy, &tlo);
+		ad9361_get_rx_sampling_freq(ad9361_phy, &rfs);
+		ad9361_get_tx_sampling_freq(ad9361_phy, &tfs);
+		ad9361_get_rx_rf_bandwidth(ad9361_phy, &rbw);
+		ad9361_get_tx_rf_bandwidth(ad9361_phy, &tbw);
+		console_print("gnss_boot: radio: gnss_band=%d, LO RX %d kHz / TX %d kHz, fs RX %d / TX %d Hz, BW RX %d / TX %d Hz\n",
+			      (long)gnss_band_get(), (long)(rlo / 1000ULL), (long)(tlo / 1000ULL),
+			      (long)rfs, (long)tfs, (long)rbw, (long)tbw);
+	}
 }
 
 /**************************************************************************//***

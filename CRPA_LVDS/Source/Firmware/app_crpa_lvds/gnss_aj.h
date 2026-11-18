@@ -51,7 +51,7 @@
  * retransmitted signal comes out on the frequency it came in on and the
  * board's clock error cancels between down- and up-conversion. */
 #define GNSS_BAND_L1          0   /* 1575.42 MHz, 30.72 MS/s, 18 MHz: L1 only      */
-#define GNSS_BAND_ALL         1   /* 1582.5 MHz, 61.44 MS/s, 56 MHz: GPS, Galileo, */
+#define GNSS_BAND_ALL         1   /* boot profile: gnss_boot_config.h (1568.5 MHz, 30.72 MS/s, 20 MHz); was 1582.5 MHz, 61.44 MS/s, 56 MHz: GPS, Galileo, */
                                   /*   QZSS, SBAS, BeiDou B1I+B1C, GLONASS G1      */
 #define GNSS_BAND_NO_BDS      2   /* 1589.5 MHz, 50 MS/s: GPS, Galileo, GLONASS    */
 #define GNSS_BAND_NO_GLO      3   /* 1568.25 MHz, 50 MS/s: GPS, Galileo, BeiDou    */
