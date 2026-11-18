@@ -188,3 +188,10 @@ Package: app_ant_mvdr2_vitis_MOD8.zip. selftest? / gnss_report? print "firmware 
    The text is captured into a 16 KB spool and sent from the main loop at the
    UART's own speed (<= 64 bytes per pass, ~11.5 bytes/ms): a ~6 KB report takes
    ~0.5 s on the wire but never stops the SMI solves or the AGC.
+
+## MOD9 (18 Nov 2026) -- main menu (Enter) rewritten, firmware only
+Package: app_ant_mvdr2_vitis_MOD9.zip. Every line fits an 80-column PuTTY window.
+Sections: NOW (state, radio, RX, jammer + detected TYPE, null) / JAMMER TYPES
+(how each type is detected and its automatic averaging, AGC rule and RX filter,
+'*' on the type seen now) / AUTOMATIC FEATURES (clean hold, pulse mode, tracking,
+RX filter, printing: state + switch command) / CONTROL / CHECK / SETTINGS / HELP.

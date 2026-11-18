@@ -183,7 +183,7 @@ static void line_jammer(const gm_t *m)
 		printf(" dB, alarm at 6 dB)\r\n");
 		return;
 	}
-	printf("  JAMMER   JAMMED  J/N %.1f dB at the ADC, %s ~%.0f MHz wide, RF %.2f MHz\r\n",
+	printf("  JAMMER   JAMMED  J/N %.1f dB, %s ~%.0f MHz wide, RF %.2f MHz\r\n",
 	       m->jn, jam_type(m), m->ss.jbw_hz / 1e6,
 	       ((double)m->lo + m->ss.jf_hz) / 1e6);
 	if (m->ss.jtype)                                 /* MOD7: the type over ~0.3 s */
@@ -214,33 +214,87 @@ static void item(const char *cmd, const char *what)
 }
 
 /* ======================================================= main menu */
+/* MOD9: tentative definitions (set further down) used by the menu */
+static int ajbw_mhz;
+static int ajbw_on;
+static int ajbw_cur;
+
+/* one row of the jammer-type table; '*' marks the type detected now */
+static void jt_row(const gm_t *m, int jt, const char *name, const char *how,
+		   const char *avg, const char *agc, const char *flt)
+{
+	int now = m->stap && m->ss.jtype == jt;
+	printf(" %c %-11s %-30s %-13s %-8s %s\r\n", now ? '*' : ' ', name, how, avg, agc, flt);
+}
+
 void gnss_ant_menu(void)
 {
 	gm_t m;
+	int cen, chold, ks, rs;
+	char ag[24];
 
 	gm_read(&m);
-	printf("\r\n================ E310 GNSS ANTI-JAM  (LVDS 61.44 MSPS, SMI-STAP) ================\r\n");
+	gnss_smi_get_clean(&cen, NULL, NULL, &chold, NULL);
+	gnss_autoprint_get(&ks, &rs);
+	snprintf(ag, sizeof(ag), "%dppm", gnss_agc_get_clip_ppm());
+
+	printf("\r\n========== E310 GNSS ANTI-JAM    SMI-STAP 2 x 16 taps    firmware MOD9 =========\r\n");
+	printf(" NOW\r\n");
 	printf("  STATE    %s   [gnss_tx=%d pass=%d stap=%d]\r\n", mode_name(&m), m.tx, m.pass, m.stap);
-	printf("  RADIO    LO %.2f MHz  BW %.0f MHz  %.2f MSPS  (band %d: %s)\r\n",
-	       (double)m.lo / 1e6, m.bw / 1e6, m.fs / 1e6, m.band, m.bname);
+	printf("  RADIO    LO %.2f MHz  BW %.0f MHz  %.2f MSPS  band %d%s\r\n",
+	       (double)m.lo / 1e6, m.bw / 1e6, m.fs / 1e6, m.band,
+	       ajbw_on ? "  (RX filter narrowed: jammer)" : "  (band? lists the presets)");
 	printf("  RX       gain %ld/%ld dB %s   noise ", (long)m.g1, (long)m.g2,
 	       m.agc_auto ? "AUTO" : "MANUAL");
 	pv(m.nf, 1); printf(" dBFS   ADC peak "); pv(m.pk1 > m.pk2 ? m.pk1 : m.pk2, 0);
 	printf(" dBFS%s\r\n", (m.clip1 > 8 || m.clip2 > 8) ? "  CLIPPING" : "");
 	line_jammer(&m);
 	line_null(&m);
+
 	printf("--------------------------------------------------------------------------------\r\n");
-	printf("  CONTROL  gnss_tx=1|0   pass=1|0   stap=1|0\r\n");
-	printf("           (pass=1 sets gnss_tx=1; stap=1 sets gnss_tx=1 and pass=1)\r\n");
-	printf("  CHECK    gnss_tx?   gnss_status?   gnss_jam?   gnss_mvdr?   gnss_spec?\r\n");
-	printf("           status?   rx?   stap?   selftest?\r\n");
-	printf("  SETTINGS band=N (band? lists)   tx1_att=mdB   agc=1|0   rxgain=dB\r\n");
-	printf("           gnss_agcstep=dB,s   gnss_agcclip=ppm   gnss_rxoff=dB (rxoff?)   gnss_ajbw=1|0\r\n");
-	printf("           taps=N (1..16)   smi=K,A   smiavg=N   gnss_clean=1|0\r\n");
-	printf("           gnss_track=1|0   gnss_pulse=1|0   gnss_autoprint=10,11\r\n");
-	printf("  Enter = this menu   help? = these commands   commands? = ALL commands\r\n");
-	printf("  (AD9361 vendor commands rx_lo_freq=, tx1_attenuation=, rx1_rf_gain=, dds_* ...\r\n");
-	printf("   and every MVDR2 gnss_ command are all still there: commands? lists them)\r\n");
+	printf(" JAMMER TYPES  detected automatically every ~0.3 s from the SMI covariance;\r\n");
+	printf("               the type picks these settings (* = the type seen now)\r\n");
+	printf("   %-11s %-30s %-13s %-8s %s\r\n", "TYPE", "DETECTED WHEN", "AVERAGING", "AGC", "RX FILTER");
+	jt_row(&m, GNSS_JT_CW,       "CW",         "lags stay correlated (1 line)",  "steady,tracks", "peak -4",  "kept");
+	jt_row(&m, GNSS_JT_MULTI,    "MULTI-TONE", "correlation dips, comes back",   "steady,tracks", "peak -4",  "kept");
+	jt_row(&m, GNSS_JT_WIDE,     "WIDEBAND",   "correlation gone after 1 lag",   "steady,tracks", ag,         "narrowed*");
+	jt_row(&m, GNSS_JT_CHIRP,    "CHIRP",      "centre moves >2 MHz in 0.3 s",   "whole sweep",   "peak -4",  "narrowed*");
+	jt_row(&m, GNSS_JT_SAWTOOTH, "SAWTOOTH",   "ramps one way, jumps back",      "whole sweep",   "peak -4",  "narrowed*");
+	printf(" %c %-11s %-30s %s\r\n", (m.stap && m.ss.pulse_mode) ? '*' : ' ', "+ PULSED",
+	       "power on/off, 4 starts in 2 s", "null held, AGC +1 dB per 5 s");
+	printf("   %-11s %-30s %s\r\n", "none", "J/N under -3 dB for 2 s", "fixed RX1 path (fast lock)");
+	printf("   peak -4: jammer peak kept 4 dB under ADC full scale.  narrowed*: only if\r\n");
+	printf("   the jammer reaches outside: band 3 -> 20 MHz, band 2 -> 24 MHz (L1 inside)\r\n");
+
+	printf("--------------------------------------------------------------------------------\r\n");
+	printf(" AUTOMATIC FEATURES (all ON by default)                          switch\r\n");
+	printf("  %-12s %-4s %-42s %s\r\n", "clean hold", cen ? "ON" : "OFF",
+	       chold ? "holding now: no jammer, fixed RX1 path" : "no jammer -> fixed RX1 path (fast lock)", "gnss_clean=");
+	printf("  %-12s %-4s %-42s %s\r\n", "pulse mode", gnss_smi_get_pulse() ? "ON" : "OFF",
+	       m.ss.pulse_mode ? "active now: null kept between pulses" : "pulsed jammer -> null kept between pulses", "gnss_pulse=");
+	printf("  %-12s %-4s %-42s %s\r\n", "tracking", gnss_smi_get_track() ? "ON" : "OFF",
+	       "moving jammer / platform -> fast averaging", "gnss_track=");
+	{
+		char t[48];
+		if (ajbw_on) snprintf(t, sizeof(t), "narrowed now to %d MHz", ajbw_cur);
+		else snprintf(t, sizeof(t), "wideband / swept jammer -> narrower filter");
+		printf("  %-12s %-4s %-42s %s\r\n", "RX filter", ajbw_mhz == 1 ? "AUTO" : (ajbw_mhz ? "FIX" : "OFF"),
+		       t, "gnss_ajbw=");
+	}
+	{
+		char t[48];
+		snprintf(t, sizeof(t), "KPI every %d s, report every %d s", ks, rs);
+		printf("  %-12s %-4s %-42s %s\r\n", "printing", (ks || rs) ? "ON" : "OFF", t, "gnss_autoprint=");
+	}
+
+	printf("--------------------------------------------------------------------------------\r\n");
+	printf(" CONTROL   stap=1 anti-jam (also gnss_tx=1 pass=1; on at power-up)\r\n");
+	printf("           stap=0 plain pass (RX1 on TX1)   pass=0 mute   gnss_tx=0 TX1 silent\r\n");
+	printf(" CHECK     status?  stap?  rx?  gnss_jam?  selftest?  gnss_report?  gnss_kpi?\r\n");
+	printf(" SETTINGS  band=N (band?)  tx1_att=mdB  agc=1|0  rxgain=dB  taps=N (1..16)\r\n");
+	printf("           gnss_agcclip=ppm  gnss_agcstep=dB,s  gnss_rxoff=dB  (more: help?)\r\n");
+	printf(" HELP      Enter = this menu   help? = what each command does\r\n");
+	printf("           commands? = ALL commands (AD9361 vendor + every MVDR2 gnss_ command)\r\n");
 	printf("================================================================================\r\n");
 }
 
