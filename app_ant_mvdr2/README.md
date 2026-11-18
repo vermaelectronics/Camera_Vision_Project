@@ -176,3 +176,15 @@ Every setting below is AUTOMATIC by default; the jammer type decides it.
 Host tests (gnss_smi.c, simulated windows, J/N 30 dB): CW, 3 tones, barrage, triangle
 chirp 20 ms, sawtooth 10 ms, pulsed barrage, pulsed CW -> correct type (fast sawtooth
 may read CHIRP: same handling); jammer left on a fresh window -0.4..+0.5 dB for all.
+
+## MOD8 (18 Nov 2026) -- firmware only
+Package: app_ant_mvdr2_vitis_MOD8.zip. selftest? / gnss_report? print "firmware MOD8".
+1. Power-up: after the boot check and the radio plan, stap=1 runs by itself
+   (gnss_tx=1, pass=1, RX gain level, output level, SMI-STAP null on TX1).
+   GNSS_CFG_BOOT_STAP 0 (main.c) = TX1 silent at power-up as before.
+2. stap=0 leaves plain pass running (RX1 on TX1, unmuted, no nulling).
+3. Automatic printing: gnss_kpi_full? every 10 s and gnss_report? every 11 s.
+   gnss_autoprint=K,R changes it (0 = off), e.g. gnss_autoprint=10,0.
+   The text is captured into a 16 KB spool and sent from the main loop at the
+   UART's own speed (<= 64 bytes per pass, ~11.5 bytes/ms): a ~6 KB report takes
+   ~0.5 s on the wire but never stops the SMI solves or the AGC.

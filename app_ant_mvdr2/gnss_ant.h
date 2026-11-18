@@ -42,6 +42,8 @@ void set_smi(double *param, char param_no);
 void set_smiavg(double *param, char param_no);
 void set_clean(double *param, char param_no);
 void set_track(double *param, char param_no);
+void set_autoprint(double *param, char param_no);
+void gnss_autoprint_get(int *kpi_s, int *rep_s);
 void set_pulse(double *param, char param_no);
 void get_taps(double *param, char param_no);
 void get_rxoff(double *param, char param_no);

@@ -21,6 +21,11 @@ void gnss_quiet_set(int on);         /* 1 = quiet (default), 0 = print       */
 int  gnss_quiet_get(void);
 void gnss_quiet_clear(void);         /* forget the captured text            */
 void gnss_quiet_dump(int last_lines);/* print the last N captured lines      */
+/* MOD8: spool (periodic KPI / report, sent paced from the main loop) */
+void gnss_spool_begin(void);
+void gnss_spool_end(void);
+int  gnss_spool_busy(void);
+int  gnss_spool_drain(unsigned max_bytes);   /* 0 empty, 1 sent some, 2 just finished */
 
 /* In an engine .c file, AFTER its #includes:
  *     #include "gnss_quiet.h"

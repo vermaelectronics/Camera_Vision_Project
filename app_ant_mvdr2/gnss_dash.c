@@ -154,7 +154,7 @@ void gnss_dash_check(void)
 
     printf("\n");
     rule();
-    printf("%s  GNSS ANTI-JAM CHECK%s      MVDR core v%lu.%lu   firmware MOD7\n", B, X,
+    printf("%s  GNSS ANTI-JAM CHECK%s      MVDR core v%lu.%lu   firmware MOD8\n", B, X,
            (unsigned long)(s.version >> 16), (unsigned long)(s.version & 0xFFFFU));
     rule();
     if (s.id != GNSS_PT_MVDR_EXPECTED_ID) {

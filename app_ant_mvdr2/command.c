@@ -114,7 +114,8 @@ command cmd_list[] = {
 	{"gnss_clean=", "No jammer: fixed RX1 path for faster lock. 1 = on (default), 0 = off; =1,in,out sets the J/N dB.", "gnss_clean=1", set_clean},
 	{"gnss_track=", "Moving jammer / platform: fast averaging when the null leaks. 1 = on (default), 0 = off.", "gnss_track=1", set_track},
 	{"gnss_pulse=", "Pulsed jammer mode: keep the null between pulses. 1 = on (default), 0 = off.", "gnss_pulse=1", set_pulse},
-#define CMD_ANT_END 31
+	{"gnss_autoprint=", "Print gnss_kpi_full? every K s and gnss_report? every R s: =K,R (default 10,11; 0 = off).", "gnss_autoprint=10,11", set_autoprint},
+#define CMD_ANT_END 32
 	/* ---- MVDR2 console: AD9361 vendor commands and every gnss_ command,
 	 * unchanged. gnss_status_full?, gnss_jam_est?, gnss_kpi_full? and
 	 * commands? are the MVDR2 gnss_status?, gnss_jam?, gnss_kpi?, help?. ---- */

@@ -237,7 +237,7 @@ void gnss_ant_menu(void)
 	printf("  SETTINGS band=N (band? lists)   tx1_att=mdB   agc=1|0   rxgain=dB\r\n");
 	printf("           gnss_agcstep=dB,s   gnss_agcclip=ppm   gnss_rxoff=dB (rxoff?)   gnss_ajbw=1|0\r\n");
 	printf("           taps=N (1..16)   smi=K,A   smiavg=N   gnss_clean=1|0\r\n");
-	printf("           gnss_track=1|0   gnss_pulse=1|0\r\n");
+	printf("           gnss_track=1|0   gnss_pulse=1|0   gnss_autoprint=10,11\r\n");
 	printf("  Enter = this menu   help? = these commands   commands? = ALL commands\r\n");
 	printf("  (AD9361 vendor commands rx_lo_freq=, tx1_attenuation=, rx1_rf_gain=, dds_* ...\r\n");
 	printf("   and every MVDR2 gnss_ command are all still there: commands? lists them)\r\n");
@@ -280,6 +280,7 @@ void get_ant_help(double *param, char param_no)
 	item("smiavg=N", "covariance averaging 0..4 (def 2 = beta 1/4, steadier satellites)");
 	item("gnss_clean=1|0", "no jammer: fixed RX1 path on TX1 (faster lock); 0 = always solved weights");
 	item("gnss_track=1|0", "moving jammer / platform: fast averaging when the null leaks (default 1)");
+	item("gnss_autoprint=K,R", "print gnss_kpi_full? every K s and gnss_report? every R s (def 10,11; 0 off)");
 	item("gnss_pulse=1|0", "pulsed jammer: keep the null between pulses (default 1)");
 	item("gnss_kpi?", "all figures on one key=value line (for the e310lab logger)");
 	item("commands?", "ALL commands: AD9361 vendor + every MVDR2 gnss_ command");
@@ -1055,8 +1056,30 @@ void set_stap(double *param, char param_no)
 		}
 	} else {
 		mvdr_off();
+		/* MOD8: stap=0 = plain pass: RX1 keeps going out on TX1 */
+		if (gnss_ant_tx_state()) {
+			gnss_pt_set_passthrough(1);
+			gnss_pt_set_mute(0);
+		}
 	}
 	print_mode();
+}
+
+/* ======================================================= MOD8: automatic printing */
+static int ap_kpi_s = 10, ap_rep_s = 11;          /* 0 = off */
+void gnss_autoprint_get(int *kpi_s, int *rep_s) { *kpi_s = ap_kpi_s; *rep_s = ap_rep_s; }
+void set_autoprint(double *param, char param_no)
+{
+	if (param_no >= 1) ap_kpi_s = (param[0] < 0) ? 0 : (int)param[0];
+	if (param_no >= 2) ap_rep_s = (param[1] < 0) ? 0 : (int)param[1];
+	if (ap_kpi_s && ap_kpi_s < 2) ap_kpi_s = 2;
+	if (ap_rep_s && ap_rep_s < 5) ap_rep_s = 5;
+	printf("  automatic printing: gnss_kpi_full? every %s, gnss_report? every %s\r\n",
+	       ap_kpi_s ? "" : "-- (off)", ap_rep_s ? "" : "-- (off)");
+	if (ap_kpi_s) printf("    KPI line every %d s\r\n", ap_kpi_s);
+	if (ap_rep_s) printf("    full report every %d s\r\n", ap_rep_s);
+	printf("  (sent in the background at the UART's own speed: the null and AGC keep running)\r\n"
+	       "  gnss_autoprint=KPI_s,REPORT_s   0 = off, e.g. gnss_autoprint=10,0\r\n");
 }
 
 /* ======================================================= settings */
