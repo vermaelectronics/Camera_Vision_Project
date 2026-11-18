@@ -30,7 +30,7 @@ pkg="$stage/$name"
 
 # ---- the tree, with only this algorithm --------------------------------------------
 mkdir -p "$pkg"
-( cd "$root" && tar --exclude=./Build --exclude=./test --exclude=./Source/CRPA \
+( cd "$root" && tar --exclude=./Build --exclude=./test --exclude=./Source/CRPA --exclude=./Source/SFAP \
       --exclude=README_CRPA.md --exclude=BUILD_COMMANDS.md -cf - . ) | ( cd "$pkg" && tar -xf - )
 mkdir -p "$pkg/Source/CRPA" "$pkg/test"
 cp -r "$root/Source/CRPA/$algo" "$pkg/Source/CRPA/"

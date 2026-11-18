@@ -23,7 +23,7 @@ pkg="$stage/$name"
 
 # ---- the tree without anything anti-jam -----------------------------------------------
 mkdir -p "$pkg"
-( cd "$root" && tar --exclude=./Build --exclude=./test --exclude=./Source/CRPA --exclude=./Source/HLS \
+( cd "$root" && tar --exclude=./Build --exclude=./test --exclude=./Source/CRPA --exclude=./Source/SFAP --exclude=./Source/HLS \
       --exclude=./Source/Firmware/host_test --exclude=./Vendor/hls_headers \
       --exclude=README_CRPA.md --exclude=BUILD_COMMANDS.md -cf - . ) | ( cd "$pkg" && tar -xf - )
 rm -f "$pkg/Automation/Linux/make_algo_zip.sh" "$pkg/Automation/Linux/make_loopback_zip.sh" \
