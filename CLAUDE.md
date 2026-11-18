@@ -259,4 +259,13 @@ All results below are with a **wideband** jammer (user, 2026-11-12); the
   ch1 31, coherence peak at lag -1.
   Advice: gnss_rx_agc=2 or gain cut so RX1 power stays < ~250000 LSB^2,
   never change the band with the jammer on, then 8 + 8 for the residual.
+- 2026-11-17, `crpa31` (STAP_NLMS_PI 18 + 18), user's test sheets (tester Sandeep, jammer manager Yaseer),
+  jammer at 1582.49 MHz, 56 MHz, 6-7 m; results from GNSS Viewer only (user: "only focus on gnss view"; the
+  MVDR / "Jammer estimator" panel in the photos is another team's GUI, ignore it; user drives crpa31 by PuTTY).
+  Jammer OFF baselines: TTFF 37 / 36 / 40 s, 27-28 sats, HDOP 0.4-0.6. Wideband 5 dB (att 15): lock held 18 sats
+  HDOP 1.9; cold start **155 s**, 13 sats, HDOP 2.6. Wideband 10 dB (att 10): held 13 sats HDOP 2.0; cold start
+  **450 s** (screen showed 5 s after a re-lock caused by people moving), 6 sats, HDOP 2.6. CW 30 dB (att 10): held
+  18 sats HDOP 1.4; cold start **181 s** (sheet; a photo at 15:40 shows 220 s), 12 sats, HDOP 2.0. User: crpa31 is
+  the best STAP so far. Slower than theory (35-70 s); J/N, residual, clip counters, anti-jam OFF vs ON not recorded.
+  Field report PDF + deck with field section built 2026-11-18 (scratchpad field/make_report.py, deck/build_deck.js).
 
