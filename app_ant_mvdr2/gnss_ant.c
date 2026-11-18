@@ -36,6 +36,7 @@
 #include "gnss_report.h"
 #include "gnss_quiet.h"
 #include "gnss_time.h"
+#include "gnss_temp.h"
 #include "no_os_delay.h"
 
 extern struct ad9361_rf_phy *ad9361_phy;
@@ -246,12 +247,22 @@ void gnss_ant_menu(void)
 	gnss_autoprint_get(&ks, &rs);
 	snprintf(ag, sizeof(ag), "%dppm", gnss_agc_get_clip_ppm());
 
-	printf("\r\n========== E310 GNSS ANTI-JAM    SMI-STAP 2 x 16 taps    firmware MOD11 ========\r\n");
+	printf("\r\n========== E310 GNSS ANTI-JAM    SMI-STAP 2 x 16 taps    firmware MOD12 ========\r\n");
 	printf(" NOW\r\n");
 	printf("  STATE    %s   [gnss_tx=%d pass=%d stap=%d]\r\n", mode_name(&m), m.tx, m.pass, m.stap);
 	printf("  RADIO    LO %.2f MHz  BW %.0f MHz  %.2f MSPS  band %d%s\r\n",
 	       (double)m.lo / 1e6, m.bw / 1e6, m.fs / 1e6, m.band,
 	       ajbw_on ? "  (RX filter narrowed: jammer)" : "  (band? lists the presets)");
+	{                                                        /* MOD12 */
+		gnss_temp_t tp;
+		gnss_temp_get(&tp);
+		printf("  BOARD    AD9361 ");
+		if (tp.have_rf) printf("%.1f C (boot %.1f)", tp.rf_c, tp.rf_boot_c); else printf("n/a");
+		printf("   Zynq ");
+		if (tp.have_pl) printf("%.1f C", tp.pl_c); else printf("n/a");
+		printf("   LO lock %s\r\n", (tp.rx_lock == 1 && tp.tx_lock == 1) ? "OK" :
+		       ((tp.rx_lock < 0 || tp.tx_lock < 0) ? "n/a" : "LOST"));
+	}
 	printf("  RX       gain %ld/%ld dB %s   noise ", (long)m.g1, (long)m.g2,
 	       m.agc_auto ? "AUTO" : "MANUAL");
 	pv(m.nf, 1); printf(" dBFS   ADC peak "); pv(m.pk1 > m.pk2 ? m.pk1 : m.pk2, 0);

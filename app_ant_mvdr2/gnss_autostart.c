@@ -26,6 +26,7 @@
 #include "gnss_mvdr_auto.h"    /* MOD-26: operator auto steering (gnss_beam=) */
 #include "gnss_config.h"
 #include "gnss_autostart.h"
+#include "gnss_temp.h"
 #include "command.h"
 #include "gnss_quiet.h"     /* LVDS console: engine output captured, see gnss_quiet.h */
 static int32_t rx2_off_v(void);   /* LVDS: RX2 = RX1 - gnss_rxoff */
@@ -1390,6 +1391,7 @@ int gnss_autostart_run(void)
     mon_reset_req = 1;       /* MOD-19: fresh baseline, no events from our own restart */
     smi_mon_init  = 0;       /* MOD-25: SMI overrun / fail baseline from now */
     gnss_smi_mark_novr();    /* MOD-25: overruns counted from here (set-up done) */
+    gnss_temp_poll();        /* MOD12: boot temperature (calibrations just ran) */
     gnss_monitor_poll(0);    /* baseline for the event monitor */
     settle_smi(150);         /* MOD-26: a few SMI windows for the figures */
     gnss_monitor_poll(0);    /* MOD-25: learns the no-jammer floor for gnss_check? */
@@ -2417,6 +2419,7 @@ int gnss_background_tick(void)
     }
     if (++n100 >= 100) {                   /* events once a second */
         n100 = 0;
+        gnss_temp_poll();                  /* MOD12: temperatures, LO lock */
         gnss_monitor_poll(0);
     }
     p = bg_printed;

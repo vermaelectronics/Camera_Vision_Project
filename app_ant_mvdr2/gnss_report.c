@@ -11,6 +11,7 @@
 #include <stdarg.h>
 #include <math.h>
 #include "gnss_report.h"
+#include "gnss_temp.h"
 #include "gnss_smi.h"
 #include "gnss_passthrough.h"
 #include "gnss_autostart.h"
@@ -421,12 +422,14 @@ void gnss_rep_print(void)
 
     printf("\n===================== GNSS ANTI-JAM REPORT (copy from here) =====================\n");
     hdr("SYSTEM");
-    printf("firmware MOD11, MVDR core %lu.%lu, uptime %s s\n",
+    printf("firmware MOD12, MVDR core %lu.%lu, uptime %s s\n",
            (unsigned long)(s.version >> 16), (unsigned long)(s.version & 0xFFFFU), f1(b1, t));
     if (have_smi) {
         printf("%sSMI layout v%d: 2 antennas x %d taps IN USE (of %d) + 2 image taps = %d solved (INFO 0x%08lX)\n",
                pad, ss.layout, ss.La, ss.L, ss.Na, (unsigned long)ss.info);
     }
+    hdr("TEMPERATURE");                             /* MOD12 */
+    gnss_temp_print_line(pad);
 
     hdr("SUMMARY");
     if (!a.valid) {
@@ -668,5 +671,12 @@ void gnss_rep_print_kpi(void)
     printf(" tx=%d", gnss_tx_is_on());
     kv1("tx1", ad9361_phy != NULL, a1 / 1000.0);
     kv1("tx2", ad9361_phy != NULL, a2 / 1000.0);
+    {                                               /* MOD12 */
+        gnss_temp_t tp;
+        gnss_temp_get(&tp);
+        kv1("temp", tp.have_rf, tp.rf_c);
+        kv1("ztemp", tp.have_pl, tp.pl_c);
+        printf(" lolock=%d", (tp.rx_lock == 1 && tp.tx_lock == 1) ? 1 : 0);
+    }
     printf(" ev=%lu\n", (unsigned long)ev_total);
 }

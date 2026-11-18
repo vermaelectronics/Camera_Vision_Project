@@ -231,3 +231,21 @@ only 0.09..0.14 (mutual coupling), i.e. not one source seen by both antennas.
   is reported once as expected, not as a rate fault.
 * Host test (host5/m11.c): bench coloured noise -> incoh, clean hold, type
   none; CW 3 / 6 / 30 dB, 3 tones, barrage, chirp, sawtooth, pulsed: as MOD10.
+
+## MOD12 (18 Nov 2026) -- firmware only: board temperature + LO lock watch
+
+New files gnss_temp.c / gnss_temp.h (add to the Vitis src folder; no other
+build change). Polled once a second with the event monitor.
+
+* AD9361 die temperature (on-chip sensor) and Zynq die temperature (PS XADC,
+  only if the BSP has the xadcps driver; else "n/a"; GNSS_CFG_ZYNQ_TEMP=0
+  turns it off). Shown in the menu (BOARD line), gnss_report? (TEMPERATURE:
+  now / boot / min / max) and the KPI (temp=, ztemp=, lolock=).
+* Events: every 10 C of change; once when 25 C away from the boot
+  calibration (TX LO leakage / quadrature were calibrated at boot); AD9361
+  or Zynq >= 85 C.
+* RX / TX RF PLL lock checked every second; a lost lock is re-tuned at once
+  (VCO recalibration), the null is rebuilt, the event is logged.
+* No temperature compensation in the signal path is needed: the SMI weights
+  re-learn RX1/RX2 gain + phase every ~1.5 ms, the AGC holds the noise level,
+  RX/TX share the LO and the sample clock (reference drift cancels).
