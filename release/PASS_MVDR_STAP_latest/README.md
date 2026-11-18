@@ -8,7 +8,7 @@ This package holds the latest firmware and hardware for the AntSDR E310 LVDS MVD
 | Firmware | `sw/src/`: **app_ant_mvdr2 MOD13** (18 Nov 2026) | Byte-for-byte the same as the last version built in Vitis. |
 | Project settings | `sw/config/lscript.ld`, `sw/config/UserConfig.cmake` | Same as the Vitis project: -O0, -g3, -Wall -Wextra, links `libm`. |
 | Reference output | `prebuilt/BOOT.bin`, `prebuilt/PASS_MVDR_STAP_test.elf`, `prebuilt/fsbl.elf` | Made by the Vitis IDE on 18 Nov 2026 from the same XSA and MOD13. |
-| HDL source | `hdl/Passthrough_MVDR/` | Only needed to rebuild the XSA (see the optional section at the end). |
+| Vivado project | `hdl/Passthrough_MVDR/passthrough_mvdr.xpr` | The full project: block design, RTL, generated IP and reports. See "Open the hardware in Vivado" below. |
 
 Nothing in the firmware or hardware was changed for this package.
 
@@ -135,6 +135,35 @@ bootgen -arch zynq -image output\boot.bif -o output\BOOT.bin -w on
 To compare with the known-good build, `prebuilt/BOOT.bin` is the image Vitis produced on 18 Nov from the same sources.
 
 ---
+
+## Open the hardware in Vivado
+
+The Vivado project is at `hdl/Passthrough_MVDR/passthrough_mvdr.xpr`.
+
+```bash
+./open_vivado.sh /tools/Xilinx/Vivado/2023.2
+```
+
+Or open it by hand:
+
+```bash
+source /tools/Xilinx/Vivado/2023.2/settings64.sh
+```
+
+```bash
+cd hdl/Passthrough_MVDR
+```
+
+```bash
+vivado passthrough_mvdr.xpr &
+```
+
+On Windows, run `open_vivado.bat C:\Xilinx\Vivado\2023.2`.
+
+- To see the block design, go to **Flow Navigator → IP Integrator → Open Block Design** (`system.bd`).
+- The RTL is under **Sources → Design Sources** (`system_top.v`, `rtl/*.v`).
+
+Vivado will warn that the IP repository `../../library` is missing, and the Analog Devices IP blocks (axi_ad9361, axi_dmac, util_cpack2/upack2, axi_vcxo_ctrl) will show as **locked**. That is expected. You can view and edit the block design and RTL. To regenerate those blocks or rebuild the bitstream, you need the antsdr HDL `library` folder (see the next section).
 
 ## Optional: rebuild the hardware (XSA) from HDL
 
