@@ -34,20 +34,17 @@ if {[llength $crpa_clk_rx] && [llength $crpa_clk_cpu]} {
   # constraint files (ADI axi_dmac / axi_ad9361 clock crossings, and
   # gnss_passthrough's status / control crossings). Intended: these crossings
   # are protected by handshakes / synchronisers and only need a bounded delay.
+  # METHODOLOGY waivers take the violation's objects (-objects), not -from/-to
+  # (those are only for -type CDC). The objects of these two checks are the
+  # two clocks named in the message.
+  set crpa_clks [concat $crpa_clk_cpu $crpa_clk_rx]
   crpa_try "waiver TIMING-54 (scoped max-delay CDC constraints, rx_clk <-> clk_fpga_0)" {
-    create_waiver -type METHODOLOGY -id TIMING-54 -from $crpa_clk_cpu -to $crpa_clk_rx \
-      -description "Reviewed: ADI IP and gnss_passthrough CDC constraints, crossings protected by handshake/synchronisers"
-    create_waiver -type METHODOLOGY -id TIMING-54 -from $crpa_clk_rx -to $crpa_clk_cpu \
+    create_waiver -type METHODOLOGY -id TIMING-54 -objects $crpa_clks \
       -description "Reviewed: ADI IP and gnss_passthrough CDC constraints, crossings protected by handshake/synchronisers"
   }
-  # TIMING-9: gnss_passthrough status snapshot (cap_* -> h_*): the bus is held
-  # stable for 256 rx_clk cycles and copied on a two-flop synchronised toggle,
-  # so it needs no per-bit double register.
   crpa_try "waiver TIMING-9 (gnss_passthrough status snapshot, toggle handshake)" {
-    create_waiver -type METHODOLOGY -id TIMING-9 -from $crpa_clk_rx -to $crpa_clk_cpu \
-      -description "Reviewed: gnss_passthrough cap_* -> h_* bus held 256 cycles, copied on a synchronised toggle"
-    create_waiver -type METHODOLOGY -id TIMING-9 -from $crpa_clk_cpu -to $crpa_clk_rx \
-      -description "Reviewed: quasi-static control bits through two-flop synchronisers"
+    create_waiver -type METHODOLOGY -id TIMING-9 -objects $crpa_clks \
+      -description "Reviewed: gnss_passthrough cap_* -> h_* bus held 256 cycles and copied on a synchronised toggle; control bits through two-flop synchronisers"
   }
 } else {
   puts "CRPA_LVDS: clocks rx_clk / clk_fpga_0 not found, TIMING-54 / TIMING-9 waivers skipped"
