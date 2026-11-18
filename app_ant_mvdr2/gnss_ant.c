@@ -186,6 +186,9 @@ static void line_jammer(const gm_t *m)
 	printf("  JAMMER   JAMMED  J/N %.1f dB at the ADC, %s ~%.0f MHz wide, RF %.2f MHz\r\n",
 	       m->jn, jam_type(m), m->ss.jbw_hz / 1e6,
 	       ((double)m->lo + m->ss.jf_hz) / 1e6);
+	if (m->ss.jtype)                                 /* MOD7: the type over ~0.3 s */
+		printf("           TYPE %s%s%s\r\n", m->ss.pulse_mode ? "PULSED " : "",
+		       gnss_smi_jtype_name(m->ss.jtype), m->ss.sweep_mode ? " (swept: averaged over the sweep)" : "");
 }
 
 static void line_null(const gm_t *m)
@@ -232,7 +235,7 @@ void gnss_ant_menu(void)
 	printf("  CHECK    gnss_tx?   gnss_status?   gnss_jam?   gnss_mvdr?   gnss_spec?\r\n");
 	printf("           status?   rx?   stap?   selftest?\r\n");
 	printf("  SETTINGS band=N (band? lists)   tx1_att=mdB   agc=1|0   rxgain=dB\r\n");
-	printf("           gnss_agcstep=dB,s   gnss_agcclip=ppm   gnss_rxoff=dB (rxoff?)   gnss_ajbw=MHz\r\n");
+	printf("           gnss_agcstep=dB,s   gnss_agcclip=ppm   gnss_rxoff=dB (rxoff?)   gnss_ajbw=1|0\r\n");
 	printf("           taps=N (1..16)   smi=K,A   smiavg=N   gnss_clean=1|0\r\n");
 	printf("           gnss_track=1|0   gnss_pulse=1|0\r\n");
 	printf("  Enter = this menu   help? = these commands   commands? = ALL commands\r\n");
@@ -269,7 +272,7 @@ void get_ant_help(double *param, char param_no)
 	item("gnss_agcstep=dB,s", "AGC rise with a jammer (def 1 dB every 1 s; e.g. 3,2)");
 	item("taps=N / taps?", "STAP taps per antenna in use, 1..16, live (16 = all)");
 	item("smiavg=N[,S]", "covariance averaging 1/2^N, steady 1/2^S after 1 s (def 2,4)");
-	item("gnss_ajbw=MHz", "wideband jammer: narrow the RX filter to MHz (0 off; try 24)");
+	item("gnss_ajbw=1|0|MHz", "wideband/chirp jammer: narrow the RX filter (1 AUTO default, 0 off, or MHz)");
 	item("gnss_agcclip=ppm", "barrage AGC: allowed ADC clip rate (def 100 ppm; 0 = peak rule)");
 	item("gnss_rxoff=dB / rxoff?", "RX2 gain = RX1 gain - dB (one channel hotter); rxoff? measures it");
 	printf("  ADVANCED\r\n");
@@ -412,8 +415,17 @@ void get_stap(double *param, char param_no)
 			double cin, cout;
 			uint32_t cn;
 			gnss_smi_get_clean(&cen, &cin, &cout, &chold, &cn);
-			printf("  jammer    %s%s\r\n", m.ss.pulse_mode ? "PULSED (null kept between pulses)" :
-			       "steady", m.ss.jbw_wide ? ", wideband (AGC barrage rule)" : "");
+			printf("  jammer    %s%s%s", m.ss.pulse_mode ? "PULSED " : "", gnss_smi_jtype_name(m.ss.jtype),
+			       m.ss.pulse_mode ? " (null kept between pulses)" : "");
+			if (m.ss.jtype == GNSS_JT_MULTI) printf(", ~%d tones", m.ss.ntones);
+			if (m.ss.sweep_mode) {
+				printf(", swept %.1f..%.1f MHz from the LO", m.ss.sweep_lo_hz / 1e6, m.ss.sweep_hi_hz / 1e6);
+				if (m.ss.sweep_period_ms > 0.0) printf(", period %.1f ms", m.ss.sweep_period_ms);
+				printf("\r\n            sweep averaging beta 1/%d over the whole sweep (no restarts)",
+				       1 << m.ss.sweep_sh);
+			}
+			printf("%s\r\n", m.ss.jtype == GNSS_JT_WIDE ? "\r\n            AGC barrage rule (noise)" :
+			       (m.ss.jtype ? "\r\n            AGC peak rule -4 dBFS (steady envelope)" : ""));
 			if (m.ss.leak_db > -90.0) {
 				printf("  tracking  leak %.1f dB (usual %.1f), fast %lu, restarts %lu\r\n",
 				       m.ss.leak_db, m.ss.leak_ref_db, (unsigned long)m.ss.leak_fast,
@@ -693,7 +705,7 @@ void get_selftest(double *param, char param_no)
 		verdict(1, "RX gain is MANUAL", "agc=1: AUTO keeps the best C/N0 and avoids clipping");
 
 	printf(" 4 RX1 / RX2 match (limits the null depth)\r\n");
-	if (m.p1 > NA + 1 && m.p2 > NA + 1 && !(m.aj.valid && m.aj.jammed)) {
+	if (m.p1 > NA + 1 && m.p2 > NA + 1 && !(m.aj.valid && m.aj.jammed) && !(m.jn > NA + 1 && m.jn > 0.0)) {
 		double d  = m.p2 - m.p1;                         /* at the ADC, offset applied */
 		double de = d + (double)(m.g1 - m.g2);           /* at equal gain: the hardware */
 		snprintf(t, sizeof(t), "RX2 - RX1 noise %+.1f dB at the ADC (%+.1f dB at equal gain, no jammer)", d, de);
@@ -770,7 +782,8 @@ void get_selftest(double *param, char param_no)
 }
 
 /* ======================================================= one-line KPI */
-static int      ajbw_mhz = 0;
+static int      ajbw_mhz = 1;            /* MOD7: 1 = AUTO (default), 0 = off, 4..56 = fixed MHz */
+static int      ajbw_cur = 0;            /* MHz in use while narrowed          */
 static int      ajbw_on = 0;             /* narrowed now                     */
 
 void get_ant_kpi(double *param, char param_no)
@@ -794,12 +807,13 @@ void get_ant_kpi(double *param, char param_no)
 	if (m.out_ok) printf(" out=%.1f", m.out); else printf(" out=na");
 	printf(" taps=%d alpha=%.1f", m.ss.La, m.ss.alpha);
 	printf(" tsolve=%.0f tupd=%.2f steady=%d ajbw=%d", m.ss.t_total_us, m.ss.t_int_us / 1000.0,
-	       m.ss.avg_steady, ajbw_on ? ajbw_mhz : 0);
+	       m.ss.avg_steady, ajbw_on ? ajbw_cur : 0);
 	{
 		int cen, chold;
 		gnss_smi_get_clean(&cen, NULL, NULL, &chold, NULL);
-		printf(" clean=%d pulse=%d wide=%d leakfast=%lu", cen ? (chold ? 2 : 1) : 0, m.ss.pulse_mode,
-		       m.ss.jbw_wide, (unsigned long)m.ss.leak_fast);
+		printf(" clean=%d pulse=%d wide=%d leakfast=%lu jtype=%s%s sweep=%d", cen ? (chold ? 2 : 1) : 0,
+		       m.ss.pulse_mode, m.ss.jbw_wide, (unsigned long)m.ss.leak_fast,
+		       m.ss.pulse_mode ? "PULSED_" : "", gnss_smi_jtype_name(m.ss.jtype), m.ss.sweep_mode);
 	}
 	{
 		double r = 0.0;
@@ -823,31 +837,68 @@ void get_ant_kpi(double *param, char param_no)
 static uint32_t ajbw_saved = 0;          /* bandwidth to restore, Hz         */
 static int      ajbw_jam_t = 0, ajbw_clr_t = 0;   /* half-seconds            */
 
+/* MOD7: automatic. Narrows for WIDEBAND / CHIRP / SAWTOOTH jammers (steady or
+ * pulsed) whose energy reaches outside the narrowed filter; never for CW or
+ * multi-tone (the null removes them, narrowing would only cost GLONASS/B1I).
+ * Width: L1/E1/B1C (1575.42 MHz) kept >= 2.5 MHz inside the edge, at least
+ * 20 MHz, rounded up to an even MHz: band 3 -> 20, band 2 -> 24. Back to the
+ * band's own filter 10 s after the jammer is gone or no longer wide/swept.
+ * The covariance restarts (or rescales, swept) at each change. */
+static int ajbw_auto_mhz(uint32_t bw)
+{
+	uint64_t lo = 0;
+	double half, w;
+	int mhz;
+	if (!ad9361_phy || ad9361_get_rx_lo_freq(ad9361_phy, &lo) != 0 || !lo) return 0;
+	half = fabs((double)lo - 1575.42e6) + 2.5e6;
+	w = 2.0 * half;
+	if (w < 20e6) w = 20e6;
+	mhz = (int)ceil(w / 1e6);
+	if (mhz & 1) mhz++;
+	if ((uint32_t)(mhz + 4) * 1000000U > bw) return 0;   /* gains under ~1 dB: not worth it */
+	return mhz;
+}
+
 static void ajbw_tick(void)
 {
 	gm_t m;
 	uint32_t bw = 0;
-	int wide;
+	int want = 0, type_ok, outside = 0, mhz;
 
 	if (!ajbw_mhz && !ajbw_on) return;
 	gm_read(&m);
 	if (!ad9361_phy || ad9361_get_rx_rf_bandwidth(ad9361_phy, &bw) != 0) return;
-	if (ajbw_on && bw != (uint32_t)ajbw_mhz * 1000000U) {   /* band / auto re-applied */
+	if (ajbw_on && bw != (uint32_t)ajbw_cur * 1000000U) {   /* band / auto re-applied */
 		ajbw_on = 0;
 		ajbw_jam_t = ajbw_clr_t = 0;
 	}
-	wide = m.stap && m.aj.valid && m.aj.jammed && m.smi_ok && m.ss.jbw_class >= 1;
-	if (wide) { ajbw_jam_t++; ajbw_clr_t = 0; } else { ajbw_clr_t++; ajbw_jam_t = 0; }
-	if (!ajbw_on && ajbw_mhz && ajbw_jam_t >= 4 && bw > (uint32_t)ajbw_mhz * 1000000U) {
+	mhz = (ajbw_mhz == 1) ? ajbw_auto_mhz(ajbw_on ? ajbw_saved : bw) : ajbw_mhz;
+	type_ok = m.stap && m.smi_ok && (m.ss.jtype == GNSS_JT_WIDE || m.ss.jtype == GNSS_JT_CHIRP ||
+					 m.ss.jtype == GNSS_JT_SAWTOOTH) &&
+		  ((m.aj.valid && m.aj.jammed) || m.ss.pulse_mode);
+	if (type_ok && mhz > 0) {
+		double edge = (double)mhz * 0.5e6 + 1.0e6;          /* jammer reaching past it */
+		if (m.ss.sweep_mode)
+			outside = (m.ss.sweep_lo_hz < -edge || m.ss.sweep_hi_hz > edge);
+		else
+			outside = (fabs(m.ss.jf_hz) + 0.5 * m.ss.jbw_hz > edge) || m.ss.jbw_class == 2;
+		if (ajbw_mhz != 1) outside = 1;                      /* fixed MHz: as before */
+	}
+	want = type_ok && (outside || ajbw_on);   /* once narrowed the jammer looks narrower: keep it */
+	if (want) { ajbw_jam_t++; ajbw_clr_t = 0; } else { ajbw_clr_t++; ajbw_jam_t = 0; }
+	if (!ajbw_on && ajbw_mhz && mhz > 0 && ajbw_jam_t >= 4 && bw > (uint32_t)mhz * 1000000U) {
 		ajbw_saved = bw;
-		if (ad9361_set_rx_rf_bandwidth(ad9361_phy, (uint32_t)ajbw_mhz * 1000000U) == 0) {
+		if (ad9361_set_rx_rf_bandwidth(ad9361_phy, (uint32_t)mhz * 1000000U) == 0) {
 			ajbw_on = 1;
-			gnss_rep_event("AJ BAND     RX filter %d MHz (was %.0f): wideband jammer", ajbw_mhz,
-				       ajbw_saved / 1e6);
+			ajbw_cur = mhz;
+			gnss_smi_gain_changed_db(0.0);
+			gnss_rep_event("AJ BAND     RX filter %d MHz (was %.0f): %s jammer%s", mhz, ajbw_saved / 1e6,
+				       gnss_smi_jtype_name(m.ss.jtype), ajbw_mhz == 1 ? " (auto)" : "");
 		}
 	} else if (ajbw_on && (ajbw_clr_t >= 20 || !ajbw_mhz)) {
 		if (ad9361_set_rx_rf_bandwidth(ad9361_phy, ajbw_saved) == 0) {
 			ajbw_on = 0;
+			gnss_smi_gain_changed_db(0.0);
 			gnss_rep_event("AJ BAND     RX filter back to %.0f MHz", ajbw_saved / 1e6);
 		}
 	}
@@ -856,13 +907,19 @@ static void ajbw_tick(void)
 void set_ajbw(double *param, char param_no)
 {
 	int v = (param_no >= 1) ? (int)param[0] : -1;
-	if (v != 0 && (v < 4 || v > 56)) {
-		printf("  gnss_ajbw=MHz, 4..56 (0 = off), now %d%s\r\n", ajbw_mhz,
-		       ajbw_on ? " (narrowed now)" : "");
+	if (v != 0 && v != 1 && (v < 4 || v > 56)) {
+		printf("  gnss_ajbw=1 AUTO (default) | 0 off | 4..56 fixed MHz; now %s%s\r\n",
+		       ajbw_mhz == 1 ? "AUTO" : (ajbw_mhz ? "fixed" : "off"), ajbw_on ? " (narrowed now)" : "");
+		if (ajbw_mhz > 1) printf("  fixed %d MHz\r\n", ajbw_mhz);
+		if (ajbw_on) printf("  RX filter %d MHz now (band's own %.0f MHz)\r\n", ajbw_cur, ajbw_saved / 1e6);
 		return;
 	}
 	ajbw_mhz = v;
-	if (v)
+	if (v == 1)
+		printf("  AUTO: wideband / chirp / sawtooth jammer reaching outside for 2 s -> RX filter narrowed\r\n"
+		       "  (L1 kept 2.5 MHz inside: band 3 -> 20 MHz, band 2 -> 24 MHz); never for CW / multi-tone;\r\n"
+		       "  back 10 s after it goes\r\n");
+	else if (v)
 		printf("  wideband jammer for 2 s -> RX filter %d MHz; back 10 s after it goes\r\n", v);
 	else
 		printf("  anti-jam bandwidth OFF%s\r\n", ajbw_on ? " (restoring the band's filter)" : "");

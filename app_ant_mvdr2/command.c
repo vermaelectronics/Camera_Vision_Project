@@ -109,7 +109,7 @@ command cmd_list[] = {
 	{"gnss_agcclip=", "Barrage AGC: allowed ADC clip rate in ppm (0 = peak rule).", "gnss_agcclip=100", set_agcclip},
 	{"gnss_rxoff=", "RX2 gain = RX1 gain - dB (one channel hotter).", "gnss_rxoff=6", set_rxoff},
 	{"rxoff?", "RX1/RX2 level difference and the suggested gnss_rxoff.", "", get_rxoff},
-	{"gnss_ajbw=", "Wideband jammer: narrow the RX filter to MHz (0 = off).", "gnss_ajbw=24", set_ajbw},
+	{"gnss_ajbw=", "Wideband/chirp jammer: narrow the RX filter. 1 = AUTO (default), 0 = off, 4..56 = fixed MHz.", "gnss_ajbw=1", set_ajbw},
 	{"gnss_kpi?", "All figures on one line (logger).", "", get_ant_kpi},
 	{"gnss_clean=", "No jammer: fixed RX1 path for faster lock. 1 = on (default), 0 = off; =1,in,out sets the J/N dB.", "gnss_clean=1", set_clean},
 	{"gnss_track=", "Moving jammer / platform: fast averaging when the null leaks. 1 = on (default), 0 = off.", "gnss_track=1", set_track},

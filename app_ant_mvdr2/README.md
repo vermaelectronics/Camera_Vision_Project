@@ -145,3 +145,34 @@ Host tests (gnss_smi.c on simulated windows): static jammer 0 false triggers; pu
 (4 on / 16 off windows) 0 weight loads between pulses, first window of the next pulse
 already nulled (leak -0.5 dB); fast-moving jammer: 3-6 dB left with tracking vs
 13-23 dB without; CW classed narrow, barrage wide; clean hold unchanged.
+
+## MOD7 (18 Nov 2026) -- firmware only, same bitstream
+Package: app_ant_mvdr2_vitis_MOD7.zip. selftest? / gnss_report? print "firmware MOD7".
+Every setting below is AUTOMATIC by default; the jammer type decides it.
+1. Jammer type from ~0.3 s of raw windows (lag correlations + centre frequency):
+   CW, MULTI-TONE, WIDEBAND (noise), CHIRP, SAWTOOTH, each also PULSED.
+   status?/stap?: "TYPE PULSED SAWTOOTH" etc.; gnss_kpi?: jtype=, sweep=.
+2. Per type:
+   | type            | averaging                         | AGC rule            | gnss_ajbw (auto) |
+   | CW / MULTI-TONE | steady + tracking (moving)        | peak -4 dBFS        | never            |
+   | WIDEBAND        | steady + tracking                 | barrage (clip rate) | if it reaches out|
+   | CHIRP / SAWTOOTH| whole-sweep (beta 1/64..1/128),   | peak -4 dBFS        | if it reaches out|
+   |                 | no restarts, no tracking, no clean|                     |                  |
+   | any PULSED      | + MOD6 pulse mode (null kept between pulses, AGC 1 dB / 5 s)  |
+   A sweep (18 Nov: suppression 0.5 dB, J/N out +36 dB) is nulled when the average
+   holds the whole sweep: then it is one direction at every frequency = a spatial null.
+   AGC steps rescale the sweep average instead of restarting it.
+3. Tracking fix: the noise reference = antenna part (moves with gain) + the AD9361
+   floor (does not; from the auto-start floor measurement). MOD6 lowered all of it
+   with the gain: after a deep cut it saw a 10-35 dB "leak" (52k restarts, 65k fast
+   on 18 Nov). Host test, 30 dB cut: MOD6 15 dB false leak, 28 restarts/s; MOD7 0 dB, 0.
+   Restarts at most 1 per 30 ms.
+4. gnss_ajbw=1 AUTO is the default (0 off, 4..56 fixed MHz). Width keeps L1/E1/B1C
+   2.5 MHz inside the filter: band 3 -> 20 MHz, band 2 -> 24 MHz (fixed 20 cut L1 on
+   band 2). Only for WIDEBAND/CHIRP/SAWTOOTH reaching past the narrowed filter; the
+   covariance restarts (rescales, swept) at each change. Back 10 s after the jammer.
+5. Self-test / auto-start: no RX1/RX2 mismatch or COHERENT warning while a jammer is
+   present or just left (18 Nov: false warnings, the jammer reached RX2 4.5 dB stronger).
+Host tests (gnss_smi.c, simulated windows, J/N 30 dB): CW, 3 tones, barrage, triangle
+chirp 20 ms, sawtooth 10 ms, pulsed barrage, pulsed CW -> correct type (fast sawtooth
+may read CHIRP: same handling); jammer left on a fresh window -0.4..+0.5 dB for all.

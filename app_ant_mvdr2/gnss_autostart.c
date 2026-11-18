@@ -489,7 +489,8 @@ static void chk_level(int verdict)
             res(LV_WARN, "input: noise floor RX1 "); pdb(n1); printf(" / RX2 "); pdb(n2);
             printf(" dBFS, target "); pdb(rx_target_eff); printf(". Run gnss_rxauto=1.\n");
         }
-        if (fabs(n1 - n2) > 3.0) {
+        if (fabs(n1 - n2) > 3.0 && !(j.available && j.valid && (j.present || j.jnr_db_q8 > 0))) {
+            /* MOD7: not with a jammer present (it reaches the two antennas unequally) */
             res(LV_WARN, "input: RX1 and RX2 noise differ by "); pdb(fabs(n1 - n2));
             printf(" dB at equal gain.\n");
             more("Antenna, LNA power or cable difference. MVDR still works,\n");
@@ -644,7 +645,7 @@ static void chk_mvdr_features(uint32_t ms)
                 printf(" dB, angle "); pdb((double)j.theta_cdeg / 100.0); printf(" deg");
             }
             printf("\n");
-        } else if (s.coh_l2 < 6U) {          /* MOD-19: satellites alone read 7..9 */
+        } else if (s.coh_l2 < 6U && !s.st_hold && !s.st_glide) {   /* MOD-19; MOD7: not while a jammer just left */
             res(LV_WARN, "jammer: none detected, but RX1/RX2 are COHERENT (COH_L2 %lu).\n",
                 (unsigned long)s.coh_l2);
             more("Splitter / shared-LNA bench? The null would take the satellites.\n");
@@ -1134,6 +1135,7 @@ int gnss_rx_autolevel(int standalone)
     }
     rx_target_eff = tgt;
     rx_floor_meas = floor_db;            /* MOD-26: gnss_report? */
+    gnss_smi_set_floor_dbfs(floor_db);   /* MOD7: the tracking's noise reference */
     gnss_pt_set_rx_target_dbfs(tgt);     /* gnss_rxgain? uses it too */
     if (rx_meas_one) {
         res(LV_WARN, "input: RX%d per-channel noise is implausible (%s): levelling on RX%d only\n",
@@ -2173,7 +2175,10 @@ static void agc_slow(void)
              * to -2 dBFS (a few clipped samples per window are tolerated by
              * the fast loop): ~2.5 dB more RX gain = ~2.5 dB less C/N0 lost
              * to the AD9361 floor. CW keeps the -4 dBFS margin. */
-            if (jam && sa.jbw_wide) { peak_lim = -2.0; }   /* MOD6: stable class */
+            /* MOD7: the barrage rule (peak -2 dBFS + clip rate) only for NOISE
+             * (wideband / band-limited). CW, multi-tone, chirp and sawtooth have a
+             * steady envelope: clipping them gains nothing, so -4 dBFS. */
+            if (jam && sa.jtype == GNSS_JT_WIDE) { peak_lim = -2.0; }
         }
     }
     /* Hysteresis, so the gain does not hunt (each step costs the receiver a

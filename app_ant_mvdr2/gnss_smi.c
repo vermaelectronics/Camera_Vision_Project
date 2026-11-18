@@ -136,6 +136,7 @@ static double  wr_[NM], wi_[NM];
 #define GNSS_SMI_AVG_STEP      1.41           /* reset when the trace moves > 1.5 dB */
 static double  Er[NM][NM], Ei[NM][NM];
 static int     have_avg = 0;
+static double  avg_tr = 0.0;                   /* trace of E */
 /* RX gain changed (AGC, gnss_rxoff): the two channels never step by exactly the
  * same gain and phase, so the averaged R (old gain + new gain) no longer fits
  * the data and the null leaks until the old windows decay (~30 updates in the
@@ -199,6 +200,45 @@ static double   wide_score = 0.0;
 static double   tr_clean = 0.0;                   /* window trace while in clean hold */
 static double   tr_win = 0.0;                     /* trace of the newest raw window   */
 static double   tr_noise = 0.0;                   /* window trace with no jammer (J/N < -3 dB) */
+/* MOD7: the noise per element = antenna part (moves with the gain) + the
+ * AD9361's own floor (does not). MOD6 scaled all of it with the gain, so
+ * after a deep cut the reference fell 10-35 dB under the real noise and the
+ * tracking saw a "leak" that was not there (52k restarts on 18 Nov). */
+static double   floor_sn2 = 0.0;                  /* AD9361 internal noise per element */
+static double   ant_sn2 = 0.0;                    /* antenna noise per element, now    */
+static gnss_time_t t_restart;                     /* last tracking restart             */
+static int      have_t_restart = 0;
+static double noise_ref(void) { return (ant_sn2 > 0.0) ? ant_sn2 + floor_sn2 : 0.0; }
+void gnss_smi_set_floor_dbfs(double dbfs)
+{
+    floor_sn2 = (dbfs > -150.0) ? pow(10.0, dbfs / 10.0) * X_PER_LSB2 * FS2_12 : 0.0;
+    ant_sn2 = 0.0;        /* new radio plan (auto-start): relearn the antenna noise */
+    tr_noise = 0.0;
+}
+/* MOD7: jammer type from the raw windows */
+#define JH 128
+static gnss_time_t jh_t[JH];
+static float    jh_f[JH];                          /* centre frequency, Hz (NaN-free: valid flag) */
+static int8_t   jh_c[JH];                          /* instantaneous class, -1 = no jammer */
+static int8_t   jh_v[JH];                          /* frequency valid */
+static int      jh_i = 0, jh_n = 0;
+static int      jt_cand = 0, jt_cnt = 0;
+static gnss_time_t jt_t_seen;                     /* last window with a jammer */
+static int      have_jt_seen = 0;
+static gnss_time_t sw_wrap[6];
+static int      sw_nw = 0, sw_wi = 0;
+static int      sw_last_dir = 0;
+const char *gnss_smi_jtype_name(int jt)
+{
+    switch (jt) {
+    case GNSS_JT_CW:       return "CW";
+    case GNSS_JT_MULTI:    return "MULTI-TONE";
+    case GNSS_JT_WIDE:     return "WIDEBAND";
+    case GNSS_JT_CHIRP:    return "CHIRP";
+    case GNSS_JT_SAWTOOTH: return "SAWTOOTH";
+    default:               return "none";
+    }
+}
 void gnss_smi_set_track(int en) { track_en = en ? 1 : 0; }
 int  gnss_smi_get_track(void)  { return track_en; }
 void gnss_smi_set_pulse(int en) { pulse_en = en ? 1 : 0; if (!pulse_en) { sm.pulse_mode = 0; } }
@@ -208,7 +248,158 @@ void gnss_smi_gain_changed_db(double d_db)
     if (tr_q > 0.0) { tr_q *= pow(10.0, d_db / 10.0); }
     if (tr_clean > 0.0) { tr_clean *= pow(10.0, d_db / 10.0); }
     if (tr_noise > 0.0) { tr_noise *= pow(10.0, d_db / 10.0); }
+    if (ant_sn2 > 0.0) { ant_sn2 *= pow(10.0, d_db / 10.0); }
+    if (sm.sweep_mode && have_avg) {
+        /* MOD7: a sweep needs the whole sweep in the average; a restart costs
+         * the null until it is rebuilt (up to ~100 ms). Scale it instead (the
+         * straddling window is still skipped). */
+        double g = pow(10.0, d_db / 10.0);
+        int i, j;
+        for (i = 0; i < N; i++) { for (j = 0; j < N; j++) { Er[i][j] *= g; Ei[i][j] *= g; } }
+        avg_tr *= g;
+        if (sm.present) { gain_seq = RD(GNSS_SMI_REG_STAT) >> 16; gain_skip = 1; }
+        return;
+    }
     gnss_smi_gain_changed();
+}
+
+
+/* MOD7: per raw window: instantaneous class + centre frequency; every window:
+ * the jammer type over the last 0.3 s (hysteresis 16 windows).
+ * Classes from the lag correlations |r(k)| / (P - noise), k = 0..L-1:
+ *   CW        flat (>= 0.8 at the last lag)
+ *   MULTI     falls under 0.4 and comes back over 0.7 (tones beating)
+ *   WIDE      gone after one lag (< 0.5 at lag 1)
+ *   BAND      decays in between (band-limited noise, or a sweep segment)
+ * Swept (CHIRP / SAWTOOTH): the centre frequency of narrow windows moves
+ * over > 2 MHz within 0.3 s; one-way ramps with jumps back = SAWTOOTH. */
+static void mod7_classify(gnss_time_t now, double trw)
+{
+    double nz = noise_ref(), fs = (double)gnss_pt_get_fs(), p0 = trw / (double)N;
+    double rr[GNSS_SMI_LMAX], r1r = 0.0, r1i = 0.0;
+    int k, i, ant, cls = -1, fv = 0, c;
+    float f = 0.0f;
+
+    if (!(nz > 0.0)) { nz = sn2_last; }
+    if (nz > 0.0 && p0 > 2.0 * nz && nL >= 4) {        /* J/N over 0 dB */
+        double pj = p0 - nz, mn = 1.0;
+        int dips = 0, below = 0, revive = 0;
+        for (k = 0; k < nL; k++) {
+            double sr = 0.0, si = 0.0;
+            int n = 0;
+            for (ant = 0; ant < 2; ant++) {
+                for (i = 0; i + k < nL; i++, n++) {
+                    sr += Rr[ant * nL + i][ant * nL + i + k];
+                    si += Ri[ant * nL + i][ant * nL + i + k];
+                }
+            }
+            sr /= (double)n; si /= (double)n;
+            if (k == 1) { r1r = sr; r1i = si; }
+            rr[k] = sqrt(sr * sr + si * si) / pj;
+            if (rr[k] > 1.0) { rr[k] = 1.0; }
+        }
+        /* tones beat: |r(k)| falls under 0.4 and comes back over 0.7 (noise
+         * of any bandwidth: sinc side lobes stay under ~0.25) */
+        for (k = 1; k < nL; k++) {
+            if (rr[k] < mn) { mn = rr[k]; }
+            if (!below && rr[k] < 0.4) { below = 1; dips++; }
+            else if (below && rr[k] > 0.7) { below = 0; revive++; }
+        }
+        if (rr[nL - 1] >= 0.8 && mn >= 0.6)      { cls = 0; }
+        else if (revive >= 1)                    { cls = 1; sm.ntones = dips + 1; }
+        else if (rr[1] < 0.5)                    { cls = 3; }
+        else                                     { cls = 2; }
+        if (rr[1] > 0.5 && fs > 0.0) { fv = 1; f = (float)(atan2(r1i, r1r) / (2.0 * PI_D) * fs); }
+        jt_t_seen = now;
+        have_jt_seen = 1;
+    }
+    jh_t[jh_i] = now; jh_f[jh_i] = f; jh_c[jh_i] = (int8_t)cls; jh_v[jh_i] = (int8_t)fv;
+    jh_i = (jh_i + 1) % JH;
+    if (jh_n < JH) { jh_n++; }
+
+    /* ---- the last 0.3 s */
+    {
+        int n_on = 0, cnt[4] = {0, 0, 0, 0}, nfv = 0, pos = 0, neg = 0, big = 0, start, m, idx, havep = 0;
+        double fmin = 1e12, fmax = -1e12, span, small_sum = 0.0, fprev = 0.0;
+        int cand;
+        start = (jh_i - jh_n + JH) % JH;
+        for (m = 0; m < jh_n; m++) {                      /* span of valid frequencies */
+            idx = (start + m) % JH;
+            if (tus(jh_t[idx], now) > 3.0e5 || jh_c[idx] < 0) { continue; }
+            n_on++;
+            cnt[jh_c[idx]]++;
+            if (jh_v[idx]) {
+                nfv++;
+                if (jh_f[idx] < fmin) { fmin = jh_f[idx]; }
+                if (jh_f[idx] > fmax) { fmax = jh_f[idx]; }
+            }
+        }
+        span = (nfv >= 2) ? fmax - fmin : 0.0;
+        for (m = 0; m < jh_n; m++) {                      /* steps between narrow windows */
+            idx = (start + m) % JH;
+            if (tus(jh_t[idx], now) > 3.0e5 || jh_c[idx] < 0 || !jh_v[idx]) { continue; }
+            if (havep) {
+                double d = (double)jh_f[idx] - fprev;
+                if (span > 0.0 && fabs(d) >= 0.4 * span) { big++; }
+                else if (d > 0.0) { pos++; small_sum += d; }
+                else if (d < 0.0) { neg++; small_sum -= d; }
+            }
+            fprev = jh_f[idx];
+            havep = 1;
+        }
+        /* sawtooth period: the newest step being a jump back */
+        if (fv && span > 2.0e6) {
+            int pi_ = (jh_i - 2 + JH) % JH;
+            if (jh_c[pi_] >= 0 && jh_v[pi_]) {
+                double d = (double)f - (double)jh_f[pi_];
+                int dir = (pos > neg) ? 1 : -1;
+                if (fabs(d) >= 0.4 * span && ((d > 0.0) ? 1 : -1) == -dir) {
+                    sw_wrap[sw_wi] = now; sw_wi = (sw_wi + 1) % 6;
+                    if (sw_nw < 6) { sw_nw++; }
+                }
+                sw_last_dir = dir;
+            }
+        }
+        if (!have_jt_seen || tus(jt_t_seen, now) > 1.0e6 || n_on < 4) {
+            cand = GNSS_JT_NONE;
+        } else if (n_on >= 12 && nfv >= (6 * n_on) / 10 && span > 2.0e6 && small_sum > 1.0e6) {
+            cand = (big >= 1 && pos + neg >= 6 && (pos >= 3 * neg || neg >= 3 * pos)) ?
+                   GNSS_JT_SAWTOOTH : GNSS_JT_CHIRP;
+            sm.sweep_lo_hz = fmin;
+            sm.sweep_hi_hz = fmax;
+        } else if (cnt[0] * 10 >= n_on * 6) {
+            cand = GNSS_JT_CW;
+        } else if (cnt[1] * 10 >= n_on * 3) {
+            cand = GNSS_JT_MULTI;
+        } else if ((cnt[2] + cnt[3]) * 2 >= n_on) {
+            cand = GNSS_JT_WIDE;
+        } else {
+            cand = GNSS_JT_CW;
+        }
+        if (cand == jt_cand) { if (jt_cnt < 1000) { jt_cnt++; } }
+        else { jt_cand = cand; jt_cnt = 1; }
+        c = (cand == GNSS_JT_NONE) ? 64 : 16;           /* leave a type slower than enter it */
+        if (jt_cnt >= c && sm.jtype != cand) {
+            int was_sweep = sm.sweep_mode;
+            sm.jtype = cand;
+            sm.sweep_mode = (cand == GNSS_JT_CHIRP || cand == GNSS_JT_SAWTOOTH) ? 1 : 0;
+            if (sm.sweep_mode && !was_sweep) {
+                sw_nw = 0;
+                sm.sweep_period_ms = 0.0;
+            }
+            if (was_sweep && !sm.sweep_mode) { have_avg = 0; }
+        }
+        if (sm.sweep_mode) {
+            double per = 0.0, tu = (sm.t_int_us > 100.0) ? sm.t_int_us : 1500.0;
+            if (sw_nw >= 3) {
+                gnss_time_t a = sw_wrap[(sw_wi - sw_nw + 6) % 6], b = sw_wrap[(sw_wi + 5) % 6];
+                per = tus(a, b) / 1000.0 / (double)(sw_nw - 1);
+            }
+            sm.sweep_period_ms = per;
+            /* memory >= 2 sweeps: 2^6 updates ~ 100 ms, 2^7 ~ 200 ms */
+            sm.sweep_sh = (per > 0.0 && 2.0 * per * 1000.0 > 64.0 * tu) ? 7 : 6;
+        }
+    }
 }
 
 /* returns 1 = pulse mode and the pulse is off: do not average or solve */
@@ -219,6 +410,7 @@ static int mod6_window(gnss_time_t now)
     for (i = 0; i < N; i++) { trw += Rr[i][i]; }
     tr_win = trw;
     if (!(trw > 0.0)) { return 0; }
+    mod7_classify(now, trw);
     /* quiet reference: follows the minimum, creeps up ~2 dB/s */
     if (!(tr_q > 0.0) || trw < tr_q) { tr_q = trw; }
     else { tr_q *= 1.0007; if (tr_q > trw) { tr_q = trw; } }
@@ -252,7 +444,7 @@ static int mod6_window(gnss_time_t now)
     /* jammer present: by J/N, or by power over the no-jammer trace (a fast
      * moving jammer smears the average, which makes J/N read low) */
     if (have_avg && sm.updates > 0U && sn2_last > 0.0 &&
-        (jn_last_db > 6.0 || (tr_noise > 0.0 && trw > 4.0 * tr_noise))) {
+        (jn_last_db > 6.0 || (noise_ref() > 0.0 && trw > 4.0 * (double)N * noise_ref()))) {
         double por = 0.0, wn = 0.0, lk;
         int j;
         for (i = 0; i < N; i++) {
@@ -266,21 +458,25 @@ static int mod6_window(gnss_time_t now)
         }
         if (wn > 0.0 && por > 0.0) {
             /* noise per element: the no-jammer reference if known (not inflated by a smeared R) */
-            double sn2 = (tr_noise > 0.0) ? tr_noise / (double)N : sn2_last;
+            double sn2 = (noise_ref() > 0.0) ? noise_ref() : sn2_last;   /* MOD7: + AD9361 floor */
             lk = 10.0 * log10(por / (wn * sn2));
             sm.leak_db = lk;
             if (sm.leak_ref_db < -90.0) { sm.leak_ref_db = (lk < 1.0) ? lk : 1.0; }
-            if (!track_en) {
-                /* measured only (gnss_track=0) */
-            } else if (lk > sm.leak_ref_db + 6.0) {
-                have_avg = 0;                         /* solve from this window */
+            if (!track_en || sm.sweep_mode) {
+                /* measured only (gnss_track=0; a sweep leaks by design between
+                 * its frequencies: the long average is the cure, not a restart) */
+            } else if (lk > sm.leak_ref_db + 6.0 &&
+                       (!have_t_restart || tus(t_restart, now) > 3.0e4)) {
+                have_avg = 0;                         /* solve from this window (<= 1 per 30 ms) */
                 sm.leak_reset++;
+                t_restart = now;
+                have_t_restart = 1;
             } else if (lk > sm.leak_ref_db + 3.0) {
                 t_avg_reset = now;                    /* fast beta for 1 s */
                 sm.avg_steady = 0;
                 sm.leak_fast++;
             }
-            if (!track_en || lk <= sm.leak_ref_db + 3.0) {
+            if (!track_en || sm.sweep_mode || lk <= sm.leak_ref_db + 3.0) {
                 sm.leak_ref_db += (lk - sm.leak_ref_db) / 64.0;
                 if (sm.leak_ref_db > 1.0) { sm.leak_ref_db = 1.0; }   /* a slow drift still triggers */
             }
@@ -306,7 +502,7 @@ void gnss_smi_gain_changed(void)
         gain_skip = 1;
     }
 }
-static double  avg_tr = 0.0, avg_s2 = 1.0;    /* trace of E; sum of squared EMA weights */
+static double  avg_s2 = 1.0;                   /* sum of squared EMA weights (avg_tr: above) */
 
 /* register addresses of the active layout */
 static uint32_t w_re(int k) { return (lay == 3 ? GNSS_SMI_W_BASE_V3 : GNSS_SMI_W_BASE_V2) + 8U * (uint32_t)k; }
@@ -636,6 +832,7 @@ int gnss_smi_enable(int on)
 {
     if (!gnss_smi_available()) { return -1; }
     if (on && !sm.enabled) {
+        ant_sn2 = 0.0; tr_noise = 0.0; jh_n = 0; sm.jtype = GNSS_JT_NONE; sm.sweep_mode = 0;   /* MOD7 */
         write_conventional();
         sm.seq = RD(GNSS_SMI_REG_STAT) >> 16;  /* solve the next full window */
         have_v = 0;
@@ -721,8 +918,9 @@ static void smi_average(double k)
 
     for (i = 0; i < N; i++) { tr += Rr[i][i]; }
     if (sm.avg_sh <= 0) { have_avg = 0; sm.keff = k; return; }
-    if (!have_avg || !(avg_tr > 0.0) || tr > GNSS_SMI_AVG_STEP * avg_tr ||
-        (!sm.pulse_mode && tr * GNSS_SMI_AVG_STEP < avg_tr)) {      /* MOD6: pulse end is no step */
+    if (!have_avg || !(avg_tr > 0.0) ||
+        (!sm.sweep_mode && (tr > GNSS_SMI_AVG_STEP * avg_tr ||        /* MOD7: a sweep in/out of */
+         (!sm.pulse_mode && tr * GNSS_SMI_AVG_STEP < avg_tr)))) {     /* band is no step; MOD6: pulse end */
         for (i = 0; i < N; i++) {
             for (j = 0; j < N; j++) { Er[i][j] = Rr[i][j]; Ei[i][j] = Ri[i][j]; }
         }
@@ -736,6 +934,7 @@ static void smi_average(double k)
         sm.avg_steady = (sm.avg_sh_st > sm.avg_sh &&
                          tus(t_avg_reset, gnss_time_now()) >= GNSS_SMI_AVG_HOLD_US) ? 1 : 0;
         if (sm.avg_steady) { sh = sm.avg_sh_st; }
+        if (sm.sweep_mode && sm.sweep_sh > sh) { sh = sm.sweep_sh; sm.avg_steady = 1; }   /* MOD7 */
         b = 1.0 / (double)(1 << sh);
         for (i = 0; i < N; i++) {
             for (j = 0; j < N; j++) {
@@ -860,11 +1059,16 @@ int gnss_smi_poll(void)
             }
             jn_last_db = jn;
             if (jn < -3.0 && tr_win > 0.0) {
+                double a = tr_win / (double)N - floor_sn2;          /* MOD7: antenna part */
+                if (a < 0.1 * tr_win / (double)N) { a = 0.1 * tr_win / (double)N; }
                 tr_noise = (tr_noise > 0.0) ? tr_noise + (tr_win - tr_noise) / 64.0 : tr_win;
+                ant_sn2 = (ant_sn2 > 0.0) ? ant_sn2 + (a - ant_sn2) / 64.0 : a;
             }
-            if (jn < 3.0 && !(tr_noise > 0.0 && tr_win > 4.0 * tr_noise)) { sm.leak_ref_db = -99.0; }
+            if (jn < 3.0 && !(noise_ref() > 0.0 && tr_win > 4.0 * (double)N * noise_ref())) {
+                sm.leak_ref_db = -99.0;
+            }
         }
-        if (clean_en && sm.updates > 0 && !sm.pulse_mode) {
+        if (clean_en && sm.updates > 0 && !sm.pulse_mode && !sm.sweep_mode) {
             if (!clean_hold) {
                 if (jn < clean_in_db) {
                     if (clean_cnt_ok++ == 0) { clean_t0 = t3; }

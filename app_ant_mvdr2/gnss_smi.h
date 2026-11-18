@@ -127,7 +127,23 @@ typedef struct {
     double   leak_ref_db;   /* its usual (steady) value                          */
     uint32_t leak_fast;     /* null leaking (moving jammer / platform): fast averaging */
     uint32_t leak_reset;    /* null leaking a lot: solved from the newest window alone */
+    /* MOD7: jammer type, decided from ~0.3 s of raw windows */
+    int      jtype;         /* GNSS_JT_* (stable, hysteresis)                    */
+    int      sweep_mode;    /* chirp / sawtooth: long averaging over the whole sweep */
+    int      sweep_sh;      /* its averaging shift (beta 2^-sh)                   */
+    double   sweep_lo_hz, sweep_hi_hz;   /* swept range, offset from the LO      */
+    double   sweep_period_ms;            /* sawtooth period (0 = unknown)        */
+    int      ntones;        /* multi-tone: tones seen (lag-correlation revivals)  */
 } gnss_smi_state_t;
+
+/* MOD7 jammer types */
+#define GNSS_JT_NONE      0
+#define GNSS_JT_CW        1
+#define GNSS_JT_MULTI     2   /* multi-tone */
+#define GNSS_JT_WIDE      3   /* noise barrage / band-limited noise */
+#define GNSS_JT_CHIRP     4   /* swept, up/down or irregular */
+#define GNSS_JT_SAWTOOTH  5   /* swept one way, jumps back */
+const char *gnss_smi_jtype_name(int jt);
 
 int    gnss_smi_available(void);          /* reads the hardware              */
 int    gnss_smi_enable(int on);           /* 0 ok, -1 not present            */
@@ -138,6 +154,7 @@ void   gnss_smi_gain_changed(void);   /* RX gain stepped: restart the average */
 uint32_t gnss_smi_gain_skipped(void); /* MOD-33: windows skipped after gain steps */
 void   gnss_smi_set_clean(int en, double in_db, double out_db);   /* MOD-33c clean hold */
 void   gnss_smi_gain_changed_db(double d_db);   /* MOD6: + the step, keeps the pulse noise reference */
+void   gnss_smi_set_floor_dbfs(double dbfs);    /* MOD7: AD9361 internal floor, per element */
 void   gnss_smi_set_track(int en);  /* MOD6: residual-driven averaging (moving jammer), 1 = on */
 int    gnss_smi_get_track(void);
 void   gnss_smi_set_pulse(int en);  /* MOD6: pulsed-jammer mode allowed, 1 = on */
