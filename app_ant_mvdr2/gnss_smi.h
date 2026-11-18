@@ -117,6 +117,16 @@ typedef struct {
     double   t_read_us, t_avg_us, t_solve_us, t_write_us, t_post_us, t_total_us;
     double   t_max_us;      /* longest total                                    */
     double   t_int_us;      /* mean time between weight updates                 */
+    /* MOD6 */
+    int      jbw_wide;      /* stable class: 1 = wideband jammer (~0.2 s of windows, hysteresis) */
+    int      pulse_mode;    /* 1 = pulsed jammer: solve only jammer-on windows, keep the null between */
+    int      pulse_on;      /* the last window had the pulse on                  */
+    uint32_t pulse_modes;   /* times pulse mode was entered                      */
+    uint32_t pulse_skipped; /* jammer-off windows not solved (null kept)         */
+    double   leak_db;       /* current weights on the newest raw window: (J+N)/N out, dB */
+    double   leak_ref_db;   /* its usual (steady) value                          */
+    uint32_t leak_fast;     /* null leaking (moving jammer / platform): fast averaging */
+    uint32_t leak_reset;    /* null leaking a lot: solved from the newest window alone */
 } gnss_smi_state_t;
 
 int    gnss_smi_available(void);          /* reads the hardware              */
@@ -127,6 +137,11 @@ void   gnss_smi_time_clear(void);
 void   gnss_smi_gain_changed(void);   /* RX gain stepped: restart the average */
 uint32_t gnss_smi_gain_skipped(void); /* MOD-33: windows skipped after gain steps */
 void   gnss_smi_set_clean(int en, double in_db, double out_db);   /* MOD-33c clean hold */
+void   gnss_smi_gain_changed_db(double d_db);   /* MOD6: + the step, keeps the pulse noise reference */
+void   gnss_smi_set_track(int en);  /* MOD6: residual-driven averaging (moving jammer), 1 = on */
+int    gnss_smi_get_track(void);
+void   gnss_smi_set_pulse(int en);  /* MOD6: pulsed-jammer mode allowed, 1 = on */
+int    gnss_smi_get_pulse(void);
 void   gnss_smi_get_clean(int *en, double *in_db, double *out_db, int *hold, uint32_t *enters);
 int    gnss_smi_set_avg_steady(int sh);   /* 0 = off, 1..6 */
 void   gnss_smi_get_state(gnss_smi_state_t *s);

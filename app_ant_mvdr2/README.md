@@ -119,3 +119,29 @@ window can measure (3/sqrt(K)). See the project doc suppression_jn_theory_12nov2
 - stap? shows "clean HOLDING ..."; gnss_kpi? has clean=0 off / 1 on / 2 holding.
 - Host test (gnss_smi.c with simulated windows): hold after 2 s, 0 weight loads
   while holding, 20 dB jammer -> nulling weights on the first window, 30 dB S.
+
+## MOD6 (18 Nov 2026) -- firmware only, same bitstream
+Package: app_ant_mvdr2_vitis_MOD6.zip. selftest? / gnss_report? print "firmware MOD6".
+1. Pulsed jammers (gnss_pulse=1, default on): 4 pulse starts within 2 s -> pulse mode.
+   Only jammer-on windows are averaged and solved; the average does not restart
+   when a pulse ends; the null stays loaded between pulses (no leak at each pulse
+   edge); clean hold is off; the AGC treats the jammer as present and rises at most
+   1 dB per 5 s. Ends 3 s after the last pulse. Short pulses (many per 0.31 ms
+   window) look like a steady jammer and need nothing.
+2. Moving jammer / platform (gnss_track=1, default on): each new window is checked
+   with the current weights; leak 3 dB over usual -> fast averaging for 1 s, 6 dB
+   -> solve from that window alone. "Jammer present" also from window power over
+   the learned no-jammer power, so a fast-moving jammer (smeared average, low J/N
+   reading) cannot switch tracking off.
+3. AGC: stable jammer class (about 0.2 s, hysteresis) for the barrage rule, so a CW
+   no longer gets the 5-s barrage rise. After a deep cut a CW/narrow jammer rises
+   up to 3 dB a step while >= 7 dB under the ADC limit (was 1 dB). The jammer counts
+   as present for 3 s after it was last seen. Barrage dead band wider (cut at 6x the
+   clip limit, rise under 0.15x): fewer gain steps.
+4. Clean hold also ends if the window power rises 3 dB over its value at entry.
+5. stap?: jammer type (pulsed / steady / wideband) and tracking (leak, usual, fast,
+   restarts). gnss_kpi?: pulse=, wide=, leakfast=. New: gnss_track=, gnss_pulse=.
+Host tests (gnss_smi.c on simulated windows): static jammer 0 false triggers; pulsed
+(4 on / 16 off windows) 0 weight loads between pulses, first window of the next pulse
+already nulled (leak -0.5 dB); fast-moving jammer: 3-6 dB left with tracking vs
+13-23 dB without; CW classed narrow, barrage wide; clean hold unchanged.

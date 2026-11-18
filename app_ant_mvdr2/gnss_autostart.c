@@ -719,11 +719,13 @@ static void set_rx_gain_both(int32_t g)
     int32_t g2 = g - rx2_off_v();
     if (g2 < GNSS_CFG_RX_GAIN_MIN_DB) { g2 = GNSS_CFG_RX_GAIN_MIN_DB; }
     if (g2 > GNSS_CFG_RX_GAIN_MAX_DB) { g2 = GNSS_CFG_RX_GAIN_MAX_DB; }
+    int32_t g_old = g;
+    (void)ad9361_get_rx_rf_gain(ad9361_phy, 0, &g_old);
     ad9361_set_rx_gain_control_mode(ad9361_phy, 0, 0);
     ad9361_set_rx_gain_control_mode(ad9361_phy, 1, 0);
     ad9361_set_rx_rf_gain(ad9361_phy, 0, g);
     ad9361_set_rx_rf_gain(ad9361_phy, 1, g2);
-    gnss_smi_gain_changed();                 /* fresh covariance after the step */
+    gnss_smi_gain_changed_db((double)(g - g_old));   /* fresh covariance after the step (MOD6: + dB) */
 }
 /* re-apply the RX2 offset at the current RX1 gain (gnss_rxoff=) */
 void gnss_rx2_off_apply(void)
@@ -1953,6 +1955,8 @@ static int agc_fast_blank = 0;
 static int      agc_clip_ppm = 100;
 static int      agc_bar = 0;              /* barrage rule active (slow loop)   */
 static int      agc_bar_slow = 0;         /* slow ticks: rise every 5 s after a cut */
+static int      agc_jam_hold = 0;         /* MOD6: slow ticks the jammer still counts as present */
+static int      agc_pulse = 0;            /* MOD6: SMI pulse mode                     */
 static uint32_t agc_cs = 0, agc_cw = 0;   /* clipped samples / windows, 100 ms */
 static uint32_t agc_rs[20], agc_rw[20];   /* last 2 s, per 100 ms              */
 static int      agc_ri = 0;
@@ -2108,6 +2112,17 @@ static void agc_slow(void)
 
     gnss_rep_get(&ra);
     jam = ra.valid ? ra.jammed : ((st & (GNSS_PT_MVDR_ST_JAM | GNSS_PT_MVDR_ST_HOLD)) ? 1 : 0);
+    {
+        /* MOD6: a pulsed jammer is "gone" between pulses; rising then (0.3 s,
+         * up to 10 dB) and cutting at the next pulse made the gain hunt. The
+         * jammer counts as present for 3 s after it was last seen, and all
+         * through SMI pulse mode. */
+        gnss_smi_state_t sp;
+        gnss_smi_get_state(&sp);
+        agc_pulse = sp.pulse_mode;
+        if (jam || agc_pulse) { agc_jam_hold = 30; jam = 1; }
+        else if (agc_jam_hold > 0) { agc_jam_hold--; jam = 1; }
+    }
     /* without a jammer the current 0.5-s peak bucket is enough (the last
      * jammer peak must not hold the gain down for another second) */
     pk_now = (!jam && agc_pk_age >= 10) ? peak_dbfs((uint32_t)agc_pk_hold) : pk;
@@ -2158,7 +2173,7 @@ static void agc_slow(void)
              * to -2 dBFS (a few clipped samples per window are tolerated by
              * the fast loop): ~2.5 dB more RX gain = ~2.5 dB less C/N0 lost
              * to the AD9361 floor. CW keeps the -4 dBFS margin. */
-            if (ra.jammed && sa.jbw_class >= 1) { peak_lim = -2.0; }
+            if (jam && sa.jbw_wide) { peak_lim = -2.0; }   /* MOD6: stable class */
         }
     }
     /* Hysteresis, so the gain does not hunt (each step costs the receiver a
@@ -2192,7 +2207,7 @@ static void agc_slow(void)
             agc_bar_slow = 600;
             agc_apply(g, g - 2, 0);
             sprintf(agc_why, "barrage: clipping %.0f ppm (limit %d): -2 dB", agc_rate01, agc_clip_ppm);
-        } else if (agc_rate1 > 5.0 * t && agc_since_change >= 5) {
+        } else if (agc_rate1 > 6.0 * t && agc_since_change >= 5) {      /* MOD6: was 5x */
             agc_bar_slow = 600;
             agc_apply(g, g - 1, 0);
             sprintf(agc_why, "barrage: clipping %.0f ppm (limit %d): -1 dB", agc_rate1, agc_clip_ppm);
@@ -2201,9 +2216,9 @@ static void agc_slow(void)
         } else if (agc_up_lock > 0) {
             sprintf(agc_why, "barrage: held %ld dB under the target: anti-hunt lock, %d s left",
                     want_b, (agc_up_lock + 9) / 10);
-        } else if (agc_rate2 < 0.25 * t &&
-                   agc_since_change >= (agc_bar_slow ? 50 : 10 * agc_jstep_s) &&
-                   agc_up_age >= (agc_bar_slow ? 50 : 10 * agc_jstep_s)) {
+        } else if (agc_rate2 < 0.15 * t &&                              /* MOD6: was 0.25x */
+                   agc_since_change >= ((agc_bar_slow || agc_pulse) ? 50 : 10 * agc_jstep_s) &&
+                   agc_up_age >= ((agc_bar_slow || agc_pulse) ? 50 : 10 * agc_jstep_s)) {
             /* after a cut the gain sits near the jammer's limit: creep up
              * every 5 s for 60 s instead of every second (fewer steps, each
              * step briefly costs null depth) */
@@ -2220,7 +2235,7 @@ static void agc_slow(void)
             agc_apply(g, g - ((clip_hits >= 8) ? 2 : 1), 0);
             sprintf(agc_why, "lowering: light ADC clipping");
         }
-    } else if (agc_since_change >= (jam ? 10 : 3)) {   /* MOD-26: 1 s with a jammer, else 0.3 s */
+    } else if (agc_since_change >= (jam ? (agc_pulse ? 50 : 10) : 3)) {   /* MOD-26: 1 s with a jammer (MOD6: pulsed 5 s), else 0.3 s */
         room = (long)floor(peak_lim - pk_now); /* MOD-20/27: peak may sit at -4 (barrage -2)..0 dBFS */
         step = 0;
         if (agc_auto) {
@@ -2238,9 +2253,17 @@ static void agc_slow(void)
                      * A 1-dB step is under the 1.5-dB trace step that restarts
                      * the covariance averaging, and a uniform gain change does
                      * not move the MVDR weights, so the null holds through it. */
+                    long lim = agc_jstep_db;
+                    /* MOD6: far under the ADC limit (after a deep cut) rise up
+                     * to 3 dB a step: every step now restarts the covariance
+                     * and skips the straddling window, so a bigger step costs
+                     * the null nothing more, and the satellites get their
+                     * C/N0 back in seconds instead of minutes */
+                    if (room >= 7 && !agc_pulse && lim < 3) { lim = 3; }
+                    if (agc_pulse) { lim = 1; }
                     if (step > room - 1) { step = room - 1; }
-                    if (step > agc_jstep_db) { step = agc_jstep_db; }
-                    if (agc_up_age < 10 * agc_jstep_s) { step = 0; }
+                    if (step > lim) { step = lim; }
+                    if (agc_up_age < (agc_pulse ? 50 : 10 * agc_jstep_s)) { step = 0; }
                 } else {
                     if (step > room) { step = room; }
                     if (step > 10) { step = 10; }               /* AOLC fast absorbs it */

@@ -100,6 +100,7 @@ static gnss_smi_state_t sm = {
     .layout = 2, .L = 8, .N = 18, .ref = 3,
     .kexp = GNSS_SMI_KEXP_DEFAULT, .alpha = GNSS_SMI_ALPHA_DEFAULT, .steer_theta = 999.0,
     .avg_sh = GNSS_SMI_AVG_DEFAULT, .keff = 0.0, .avg_sh_st = GNSS_SMI_AVG_DEFAULT + 2,
+    .leak_db = -99.0, .leak_ref_db = -99.0,
 };
 #define GNSS_SMI_AVG_HOLD_US   1000000.0      /* fast beta for 1 s after a power step */
 static gnss_time_t t_avg_reset = 0;
@@ -174,6 +175,120 @@ void gnss_smi_set_clean(int en, double in_db, double out_db)
     clean_out_db = out_db;
     if (!clean_en) { clean_hold = 0; clean_cnt_ok = 0; }
 }
+/* ---------------------------------------------------------------- MOD6
+ * 1. Residual-driven averaging: before each window is averaged in, the
+ *    current weights are applied to it alone. If the jammer left rises 3 dB
+ *    over its usual value (jammer or platform moving / turning), the average
+ *    runs fast (beta 2^-avg_sh) for 1 s; 6 dB over, it restarts from this
+ *    window. Static jammer: steady averaging as before.
+ * 2. Pulsed jammer: window trace against a quiet (noise-only) reference. Four
+ *    or more pulse starts within 2 s = pulse mode: only jammer-on windows are
+ *    averaged and solved, the average does not restart when the pulse ends,
+ *    and the null stays loaded between pulses (no leak at every pulse edge).
+ *    Ends 3 s after the last pulse start. Short pulses (many per window) look
+ *    like a steady jammer and need nothing.
+ * 3. Stable jammer class for the AGC (jbw_wide): the per-window class flips
+ *    at gain steps / clipping; the AGC barrage rule followed it (a CW got the
+ *    slow 5-s barrage rise on 16 Nov). */
+static int      track_en = 1, pulse_en = 1;
+static double   sn2_last = 0.0, jn_last_db = -99.0;
+static double   tr_q = 0.0;                       /* quiet window trace */
+static gnss_time_t p_edge[4];                     /* last pulse starts  */
+static int      p_ne = 0, p_ei = 0;
+static double   wide_score = 0.0;
+static double   tr_clean = 0.0;                   /* window trace while in clean hold */
+static double   tr_win = 0.0;                     /* trace of the newest raw window   */
+static double   tr_noise = 0.0;                   /* window trace with no jammer (J/N < -3 dB) */
+void gnss_smi_set_track(int en) { track_en = en ? 1 : 0; }
+int  gnss_smi_get_track(void)  { return track_en; }
+void gnss_smi_set_pulse(int en) { pulse_en = en ? 1 : 0; if (!pulse_en) { sm.pulse_mode = 0; } }
+int  gnss_smi_get_pulse(void)  { return pulse_en; }
+void gnss_smi_gain_changed_db(double d_db)
+{
+    if (tr_q > 0.0) { tr_q *= pow(10.0, d_db / 10.0); }
+    if (tr_clean > 0.0) { tr_clean *= pow(10.0, d_db / 10.0); }
+    if (tr_noise > 0.0) { tr_noise *= pow(10.0, d_db / 10.0); }
+    gnss_smi_gain_changed();
+}
+
+/* returns 1 = pulse mode and the pulse is off: do not average or solve */
+static int mod6_window(gnss_time_t now)
+{
+    double trw = 0.0;
+    int i;
+    for (i = 0; i < N; i++) { trw += Rr[i][i]; }
+    tr_win = trw;
+    if (!(trw > 0.0)) { return 0; }
+    /* quiet reference: follows the minimum, creeps up ~2 dB/s */
+    if (!(tr_q > 0.0) || trw < tr_q) { tr_q = trw; }
+    else { tr_q *= 1.0007; if (tr_q > trw) { tr_q = trw; } }
+    if (!sm.pulse_on && trw > 4.0 * tr_q) {          /* +6 dB: a pulse starts */
+        sm.pulse_on = 1;
+        p_edge[p_ei] = now;
+        p_ei = (p_ei + 1) & 3;
+        if (p_ne < 4) { p_ne++; }
+    } else if (sm.pulse_on && trw < 2.0 * tr_q) {    /* back under +3 dB */
+        sm.pulse_on = 0;
+    }
+    if (pulse_en && p_ne == 4) {
+        gnss_time_t newest = p_edge[(p_ei + 3) & 3], oldest = p_edge[p_ei];
+        if (!sm.pulse_mode && tus(oldest, newest) <= 2.0e6) {
+            sm.pulse_mode = 1;
+            sm.pulse_modes++;
+        }
+        if (sm.pulse_mode && tus(newest, now) > 3.0e6) {
+            sm.pulse_mode = 0;
+            p_ne = 0;
+        }
+    } else if (!pulse_en) {
+        sm.pulse_mode = 0;
+    }
+    if (sm.pulse_mode && !sm.pulse_on) {
+        sm.pulse_skipped++;
+        return 1;
+    }
+    /* residual-driven averaging (on the raw window, before averaging) */
+    sm.leak_db = -99.0;
+    /* jammer present: by J/N, or by power over the no-jammer trace (a fast
+     * moving jammer smears the average, which makes J/N read low) */
+    if (have_avg && sm.updates > 0U && sn2_last > 0.0 &&
+        (jn_last_db > 6.0 || (tr_noise > 0.0 && trw > 4.0 * tr_noise))) {
+        double por = 0.0, wn = 0.0, lk;
+        int j;
+        for (i = 0; i < N; i++) {
+            double ar = 0.0, ai = 0.0;
+            wn += wr_[i] * wr_[i] + wi_[i] * wi_[i];
+            for (j = 0; j < N; j++) {
+                ar += Rr[i][j] * wr_[j] - Ri[i][j] * wi_[j];
+                ai += Rr[i][j] * wi_[j] + Ri[i][j] * wr_[j];
+            }
+            por += wr_[i] * ar + wi_[i] * ai;
+        }
+        if (wn > 0.0 && por > 0.0) {
+            /* noise per element: the no-jammer reference if known (not inflated by a smeared R) */
+            double sn2 = (tr_noise > 0.0) ? tr_noise / (double)N : sn2_last;
+            lk = 10.0 * log10(por / (wn * sn2));
+            sm.leak_db = lk;
+            if (sm.leak_ref_db < -90.0) { sm.leak_ref_db = (lk < 1.0) ? lk : 1.0; }
+            if (!track_en) {
+                /* measured only (gnss_track=0) */
+            } else if (lk > sm.leak_ref_db + 6.0) {
+                have_avg = 0;                         /* solve from this window */
+                sm.leak_reset++;
+            } else if (lk > sm.leak_ref_db + 3.0) {
+                t_avg_reset = now;                    /* fast beta for 1 s */
+                sm.avg_steady = 0;
+                sm.leak_fast++;
+            }
+            if (!track_en || lk <= sm.leak_ref_db + 3.0) {
+                sm.leak_ref_db += (lk - sm.leak_ref_db) / 64.0;
+                if (sm.leak_ref_db > 1.0) { sm.leak_ref_db = 1.0; }   /* a slow drift still triggers */
+            }
+        }
+    }
+    return 0;
+}
+
 void gnss_smi_get_clean(int *en, double *in_db, double *out_db, int *hold, uint32_t *enters)
 {
     if (en) { *en = clean_en; }
@@ -606,7 +721,8 @@ static void smi_average(double k)
 
     for (i = 0; i < N; i++) { tr += Rr[i][i]; }
     if (sm.avg_sh <= 0) { have_avg = 0; sm.keff = k; return; }
-    if (!have_avg || !(avg_tr > 0.0) || tr > GNSS_SMI_AVG_STEP * avg_tr || tr * GNSS_SMI_AVG_STEP < avg_tr) {
+    if (!have_avg || !(avg_tr > 0.0) || tr > GNSS_SMI_AVG_STEP * avg_tr ||
+        (!sm.pulse_mode && tr * GNSS_SMI_AVG_STEP < avg_tr)) {      /* MOD6: pulse end is no step */
         for (i = 0; i < N; i++) {
             for (j = 0; j < N; j++) { Er[i][j] = Rr[i][j]; Ei[i][j] = Ri[i][j]; }
         }
@@ -715,6 +831,11 @@ int gnss_smi_poll(void)
     }
     WR(GNSS_SMI_REG_CTRL, ctrl_word(0));
     t1 = gnss_time_now();
+    if (mod6_window(t1)) {                     /* MOD6: pulse off -- keep the null */
+        sm.seq = seq;
+        sm.count = cnt;
+        return 0;
+    }
     smi_average((double)cnt);                  /* MOD-31 */
     t2 = gnss_time_now();
     have_win = 1;                              /* MOD-29: gnss_spec? / gnss_bist? */
@@ -730,26 +851,39 @@ int gnss_smi_poll(void)
     t3 = gnss_time_now();
     {
         int write_solved = 1;
-        if (clean_en && sm.updates > 0) {
+        double jn = 99.0;
+        if (sm.updates > 0) {                  /* MOD6: J/N + noise of this solve */
             gnss_null_t o;
-            double jn = (gnss_smi_null_analysis(&o) == 0) ? o.jn_in_db : 99.0;
+            if (gnss_smi_null_analysis(&o) == 0) {
+                jn = o.jn_in_db;
+                sn2_last = pow(10.0, o.sn2_dbfs / 10.0) * X_PER_LSB2 * FS2_12;
+            }
+            jn_last_db = jn;
+            if (jn < -3.0 && tr_win > 0.0) {
+                tr_noise = (tr_noise > 0.0) ? tr_noise + (tr_win - tr_noise) / 64.0 : tr_win;
+            }
+            if (jn < 3.0 && !(tr_noise > 0.0 && tr_win > 4.0 * tr_noise)) { sm.leak_ref_db = -99.0; }
+        }
+        if (clean_en && sm.updates > 0 && !sm.pulse_mode) {
             if (!clean_hold) {
                 if (jn < clean_in_db) {
                     if (clean_cnt_ok++ == 0) { clean_t0 = t3; }
                     if (tus(clean_t0, t3) >= 2.0e6) {
                         clean_hold = 1;
                         clean_enters++;
+                        tr_clean = tr_win;
                         write_identity();
                         write_solved = 0;
                     }
                 } else {
                     clean_cnt_ok = 0;
                 }
-            } else if (jn > clean_out_db) {
-                clean_hold = 0;               /* jammer: null from this window on */
+            } else if (jn > clean_out_db || (tr_clean > 0.0 && tr_win > 2.0 * tr_clean)) {
+                clean_hold = 0;               /* jammer (or +3 dB of power): null from this window on */
                 clean_cnt_ok = 0;
             } else {
                 write_solved = 0;             /* hold the fixed reference tap */
+                if (tr_win > 0.0) { tr_clean += (tr_win - tr_clean) / 64.0; }
             }
         } else {
             clean_hold = 0;
@@ -779,6 +913,14 @@ int gnss_smi_poll(void)
         sm.pout_dbfs    = 10.0 * log10((por > 1e-30 ? por : 1e-30) / X_PER_LSB2 / FS2_12);
     }
     window_figures();
+    if (jn_last_db > 6.0) {                    /* MOD6: stable class for the AGC */
+        wide_score += (((sm.jbw_class >= 1) ? 1.0 : 0.0) - wide_score) / 128.0;
+        if (!sm.jbw_wide && wide_score > 0.7) { sm.jbw_wide = 1; }
+        else if (sm.jbw_wide && wide_score < 0.3) { sm.jbw_wide = 0; }
+    } else if (jn_last_db < 3.0) {
+        wide_score = 0.5;
+        sm.jbw_wide = 0;
+    }
     gnss_rep_on_solve();
     t5 = gnss_time_now();
     sm.t_read_us  = tus(t0, t1);

@@ -234,6 +234,7 @@ void gnss_ant_menu(void)
 	printf("  SETTINGS band=N (band? lists)   tx1_att=mdB   agc=1|0   rxgain=dB\r\n");
 	printf("           gnss_agcstep=dB,s   gnss_agcclip=ppm   gnss_rxoff=dB (rxoff?)   gnss_ajbw=MHz\r\n");
 	printf("           taps=N (1..16)   smi=K,A   smiavg=N   gnss_clean=1|0\r\n");
+	printf("           gnss_track=1|0   gnss_pulse=1|0\r\n");
 	printf("  Enter = this menu   help? = these commands   commands? = ALL commands\r\n");
 	printf("  (AD9361 vendor commands rx_lo_freq=, tx1_attenuation=, rx1_rf_gain=, dds_* ...\r\n");
 	printf("   and every MVDR2 gnss_ command are all still there: commands? lists them)\r\n");
@@ -275,6 +276,8 @@ void get_ant_help(double *param, char param_no)
 	item("smi=K,A", "SMI window 2^K snapshots (6..12, def 8), loading A x lambda_min (def 3)");
 	item("smiavg=N", "covariance averaging 0..4 (def 2 = beta 1/4, steadier satellites)");
 	item("gnss_clean=1|0", "no jammer: fixed RX1 path on TX1 (faster lock); 0 = always solved weights");
+	item("gnss_track=1|0", "moving jammer / platform: fast averaging when the null leaks (default 1)");
+	item("gnss_pulse=1|0", "pulsed jammer: keep the null between pulses (default 1)");
 	item("gnss_kpi?", "all figures on one key=value line (for the e310lab logger)");
 	item("commands?", "ALL commands: AD9361 vendor + every MVDR2 gnss_ command");
 	printf("--------------------------------------------------------------------------------\r\n");
@@ -409,6 +412,13 @@ void get_stap(double *param, char param_no)
 			double cin, cout;
 			uint32_t cn;
 			gnss_smi_get_clean(&cen, &cin, &cout, &chold, &cn);
+			printf("  jammer    %s%s\r\n", m.ss.pulse_mode ? "PULSED (null kept between pulses)" :
+			       "steady", m.ss.jbw_wide ? ", wideband (AGC barrage rule)" : "");
+			if (m.ss.leak_db > -90.0) {
+				printf("  tracking  leak %.1f dB (usual %.1f), fast %lu, restarts %lu\r\n",
+				       m.ss.leak_db, m.ss.leak_ref_db, (unsigned long)m.ss.leak_fast,
+				       (unsigned long)m.ss.leak_reset);
+			}
 			printf("  clean     %s\r\n", !cen ? "OFF (solved weights always on TX1)" :
 			       chold ? "HOLDING: no jammer, TX1 = fixed RX1 path (fast satellite lock)" :
 			       "on: solved weights on TX1 (jammer, or not yet 2 s clear)");
@@ -788,7 +798,8 @@ void get_ant_kpi(double *param, char param_no)
 	{
 		int cen, chold;
 		gnss_smi_get_clean(&cen, NULL, NULL, &chold, NULL);
-		printf(" clean=%d", cen ? (chold ? 2 : 1) : 0);
+		printf(" clean=%d pulse=%d wide=%d leakfast=%lu", cen ? (chold ? 2 : 1) : 0, m.ss.pulse_mode,
+		       m.ss.jbw_wide, (unsigned long)m.ss.leak_fast);
 	}
 	{
 		double r = 0.0;
@@ -1163,6 +1174,35 @@ void set_taps(double *param, char param_no)
 	else
 		printf("  stored: used when stap=1 starts the null (stap is off now)\r\n");
 	gnss_rep_event("TAPS        %d per antenna", ss.La);
+}
+
+void set_track(double *param, char param_no)
+{
+	gnss_smi_state_t ss;
+	if (param_no >= 1) {
+		gnss_smi_set_track(param[0] != 0.0);
+		gnss_rep_event("TRACK       %s (moving-jammer averaging)", gnss_smi_get_track() ? "on" : "off");
+	}
+	gnss_smi_get_state(&ss);
+	printf("  null tracking %s: when the current weights leak 3 dB more than usual on a\r\n"
+	       "  new window (jammer or platform moving), averaging runs fast for 1 s; 6 dB more:\r\n"
+	       "  solved from that window alone.  fast %lu times, restarted %lu times\r\n",
+	       gnss_smi_get_track() ? "ON" : "OFF", (unsigned long)ss.leak_fast, (unsigned long)ss.leak_reset);
+}
+
+void set_pulse(double *param, char param_no)
+{
+	gnss_smi_state_t ss;
+	if (param_no >= 1) {
+		gnss_smi_set_pulse(param[0] != 0.0);
+		gnss_rep_event("PULSE MODE  %s allowed", gnss_smi_get_pulse() ? "" : "NOT");
+	}
+	gnss_smi_get_state(&ss);
+	printf("  pulse mode %s: 4 pulse starts within 2 s -> only jammer-on windows are solved,\r\n"
+	       "  the null stays loaded between pulses, AGC rises at most 1 dB / 5 s.\r\n"
+	       "  now: %s, entered %lu times, %lu jammer-off windows kept\r\n",
+	       gnss_smi_get_pulse() ? "ALLOWED" : "OFF", ss.pulse_mode ? "PULSED JAMMER" : "not pulsed",
+	       (unsigned long)ss.pulse_modes, (unsigned long)ss.pulse_skipped);
 }
 
 void set_clean(double *param, char param_no)
