@@ -251,7 +251,8 @@ ad_ip_parameter axi_ad9361 CONFIG.CMOS_OR_LVDS_N 0
 ad_ip_parameter axi_ad9361 CONFIG.MODE_1R1T 0
 ad_ip_parameter axi_ad9361 CONFIG.ADC_INIT_DELAY 29
 
-# ---- LOOP-BACK ONLY: lower power (about 50-53 C instead of 57.5 C, Vivado estimate)
+# ---- lower-power options (CRPA_PWR_C / CRPA_PWR_B from crpa_algos.sh:
+#      loop-back: C + B, stap7x7: C, the other builds: neither)
 #  C. axi_ad9361 features the loop-back never uses: the DAC DDS tone generator
 #     (TX takes our samples, DAC source = DMA), the IQ correction (the driver
 #     runs it with coefficients 1.0 / 0.0 = no change) and the ADC DC filter
@@ -260,21 +261,25 @@ ad_ip_parameter axi_ad9361 CONFIG.ADC_INIT_DELAY 29
 #  B. ARM 333 MHz (was the default 667) and DDR3 400 MHz (was 533): the RX -> TX
 #     path is all in the FPGA, on its own clocks (FCLK 100 / 200 MHz from the IO
 #     PLL, unchanged); the ARM only runs the console and the gain loop.
-#  The CRPA builds are not changed (their solver needs the full ARM speed).
-if {$crpa_loopback} {
+#  B is only for the loop-back: a CRPA solver needs the full ARM speed.
+set crpa_pwr_c [expr {[info exists ::env(CRPA_PWR_C)] && $::env(CRPA_PWR_C) eq "1"}]
+set crpa_pwr_b [expr {[info exists ::env(CRPA_PWR_B)] && $::env(CRPA_PWR_B) eq "1"}]
+if {$crpa_pwr_c} {
   set ad_cell [get_bd_cells axi_ad9361]
   set ad_props [list_property $ad_cell]
   foreach {pn pv} {DAC_DDS_DISABLE 1 DAC_IQCORRECTION_DISABLE 1 ADC_IQCORRECTION_DISABLE 1 ADC_DCFILTER_DISABLE 1} {
     if {[lsearch -exact $ad_props CONFIG.$pn] >= 0} {
       set_property CONFIG.$pn $pv $ad_cell
-      puts "CRPA_LVDS: loop-back power: axi_ad9361 $pn = $pv"
+      puts "CRPA_LVDS: low power (C): axi_ad9361 $pn = $pv"
     } else {
-      puts "CRPA_LVDS: loop-back power: axi_ad9361 has no $pn (left as it is)"
+      puts "CRPA_LVDS: low power (C): axi_ad9361 has no $pn (left as it is)"
     }
   }
+}
+if {$crpa_pwr_b} {
   ad_ip_parameter sys_ps7 CONFIG.PCW_APU_PERIPHERAL_FREQMHZ 333.333333
   ad_ip_parameter sys_ps7 CONFIG.PCW_UIPARAM_DDR_FREQ_MHZ 400
-  puts "CRPA_LVDS: loop-back power: ARM [get_property CONFIG.PCW_APU_PERIPHERAL_FREQMHZ [get_bd_cells sys_ps7]] MHz,\
+  puts "CRPA_LVDS: low power (B): ARM [get_property CONFIG.PCW_APU_PERIPHERAL_FREQMHZ [get_bd_cells sys_ps7]] MHz,\
         DDR [get_property CONFIG.PCW_UIPARAM_DDR_FREQ_MHZ [get_bd_cells sys_ps7]] MHz,\
         FCLK0 [get_property CONFIG.PCW_FPGA0_PERIPHERAL_FREQMHZ [get_bd_cells sys_ps7]] MHz,\
         FCLK1 [get_property CONFIG.PCW_FPGA1_PERIPHERAL_FREQMHZ [get_bd_cells sys_ps7]] MHz"
