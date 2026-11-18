@@ -1,0 +1,22 @@
+{
+  "name": "barrage_56MHz_0dB",
+  "description": "No jammer -> barrage 56 MHz 0 dB in bypass -> stap=1 -> cold start under the barrage -> jammer off. Times are for a rooftop test; shorten for a quick check.",
+  "steps": [
+    {"prompt": "Jammer OFF. GNSS receiver connected to TX1 (conducted, attenuated)."},
+    {"cmd": "gnss_tx=0", "wait": 2},
+    {"cmd": "pass=1", "wait": 30},
+    {"measure": 120, "label": "clean, pass (no anti-jam)", "expect": {"fix_pct_min": 95, "used_min": 8}},
+    {"cmd": "stap=1", "timeout": 60, "wait": 20},
+    {"measure": 120, "label": "clean, stap=1", "expect": {"fix_pct_min": 95, "used_min": 8}},
+    {"cmd": "stap=0", "wait": 2},
+    {"prompt": "Jammer ON: noise barrage 56 MHz at 1582.5 MHz, 0 dB"},
+    {"measure": 90, "label": "barrage 0 dB, pass (threat)"},
+    {"cmd": "stap=1", "timeout": 60, "wait": 10},
+    {"measure": 180, "label": "barrage 0 dB, stap=1", "expect": {"fix_pct_min": 90, "used_min": 6}},
+    {"restart": "cold", "ttff_timeout": 240},
+    {"measure": 120, "label": "barrage 0 dB, stap=1, after cold start", "expect": {"fix_pct_min": 80, "used_min": 4}},
+    {"cmd": "gnss_report?", "timeout": 30},
+    {"prompt": "Jammer OFF"},
+    {"measure": 120, "label": "recovery, stap=1", "expect": {"fix_pct_min": 95, "used_min": 8}}
+  ]
+}

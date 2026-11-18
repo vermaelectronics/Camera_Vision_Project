@@ -1,0 +1,11 @@
+{
+  "name": "quick_check",
+  "description": "5-minute sanity check: pass vs stap, no jammer.",
+  "steps": [
+    {"cmd": "pass=1", "wait": 20},
+    {"measure": 60, "label": "pass=1"},
+    {"cmd": "stap=1", "timeout": 60, "wait": 15},
+    {"measure": 60, "label": "stap=1", "expect": {"fix_pct_min": 95}},
+    {"cmd": "gnss_kpi?"}
+  ]
+}
