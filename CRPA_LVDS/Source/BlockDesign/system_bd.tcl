@@ -450,7 +450,12 @@ ad_connect  cpack/fifo_wr_overflow axi_ad9361/adc_dovf
 # External TDD
 set TDD_CHANNEL_CNT 3
 set TDD_DEFAULT_POL 0b010
-set TDD_REG_WIDTH 32
+# 24 (was 32): the firmware never enables axi_tdd (its outputs stay at their
+# default levels), but its 32-bit startup-delay comparator was the one path
+# that missed rx_clk (250 MHz) timing by 0.047 ns in the stap7x7 build. 24
+# bits shorten the carry chains by 2 CARRY4 (~0.2 ns) and still count to
+# 2^24 l_clk cycles (~68 ms at 245.76 MHz).
+set TDD_REG_WIDTH 24
 set TDD_BURST_WIDTH 32
 set TDD_SYNC_WIDTH 0
 set TDD_SYNC_INT 0
