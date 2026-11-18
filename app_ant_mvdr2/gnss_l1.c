@@ -15,6 +15,10 @@
 #define printf        gnss_qprintf
 #undef  console_print
 #define console_print gnss_qprintf
+#undef  vprintf
+#define vprintf       gnss_qvprintf   /* res()/more() tails were printed */
+#undef  putchar
+#define putchar       gnss_qputchar
 
 /* ant board: the band-switch polarity is known (zynq-ant.dtsi: <3 GHz
  * H = 0, L = 1, proven with the LVDS passthrough), so the probe that flips

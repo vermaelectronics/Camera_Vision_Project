@@ -38,6 +38,10 @@
 #define printf        gnss_qprintf
 #undef  console_print
 #define console_print gnss_qprintf
+#undef  vprintf
+#define vprintf       gnss_qvprintf   /* res()/more() tails were printed */
+#undef  putchar
+#define putchar       gnss_qputchar
 
 #define A_ONE_Q14           16384
 #define AUTO_NSNAP          16      /* covariance windows averaged per update */

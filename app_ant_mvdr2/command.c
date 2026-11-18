@@ -71,6 +71,10 @@
 #define printf        gnss_qprintf
 #undef  console_print
 #define console_print gnss_qprintf
+#undef  vprintf
+#define vprintf       gnss_qvprintf   /* res()/more() tails were printed */
+#undef  putchar
+#define putchar       gnss_qputchar
 
 /******************************************************************************/
 /************************ Constants Definitions *******************************/
@@ -193,7 +197,7 @@ command cmd_list[] = {
 	{"gnss_lo?", "LO in use (Hz) and the AD9361 read-back.", "", get_gnss_lo},
 	{"gnss_lo=", "LO in MHz, e.g. 1575.42 or 1584.5: re-applies everything (gnss_auto=1).", "gnss_lo=1584.5", set_gnss_lo},
 	{"gnss_band?", "List the radio presets (LO, bandwidth, sample rate) and the one in use.", "", get_gnss_band},
-	{"gnss_band=", "Select preset 0..5 and restart MVDR with it (4/5 = for barrage jammers).", "gnss_band=4", set_gnss_band},
+	{"gnss_band=", "Select preset 0..6 and restart MVDR with it (4/5/6 = for barrage jammers, 6 = best for strong wideband).", "gnss_band=4", set_gnss_band},
 	{"gnss_plan=", "Custom plan: LO MHz, BW MHz, rate MSPS[, RX gain dB[, TX1 atten mdB]].", "gnss_plan=1575.42,40,45", set_gnss_plan},
 	{"gnss_agc?", "RX gain mode: AUTO (MVDR-safe) / MANUAL, gain, target, headroom.", "", get_gnss_agc},
 	{"gnss_agc=", "1 = AUTO RX gain (best C/N0, jammer-safe), 0 = MANUAL (keep the gain).", "gnss_agc=1", set_gnss_agc},
@@ -299,6 +303,12 @@ static const gnss_band_t gnss_bands[] = {
 	 * sits where there is no satellite signal (no DC / LO-leakage on GNSS). */
 	/* 4: B1I + L1/E1, 20 MHz */ { "barrage: B1I+L1/E1 20 MHz", 1568500000ULL, 20000000U, 22500000U, 50, 34000U },
 	/* 5: L1/E1 only, 8 MHz   */ { "barrage: L1/E1 8 MHz",      1577920000ULL,  8000000U, 10000000U, 50, 34000U },
+	/* MOD-33: 6: oversampled narrow band for strong WIDEBAND barrage. The
+	 * AD9361 floor (~-48 dBFS) is spread over fs, so a narrow analog BW at a
+	 * high fs keeps that floor ~8 dB lower inside the GNSS band and lets far
+	 * less barrage power reach the ADC (higher RX gain, smaller C/N0 cost).
+	 * Covers GPS L1 C/A, Galileo E1, BeiDou B1C (no GLONASS / B1I). */
+	/* 6: L1/E1/B1C 10 MHz @ 61.44 */ { "anti-jam: L1/E1/B1C 10 MHz @61.44", 1577920000ULL, 10000000U, 61440000U, 50, 34000U },
 };
 #define GNSS_NUM_BANDS ((int)(sizeof(gnss_bands) / sizeof(gnss_bands[0])))
 

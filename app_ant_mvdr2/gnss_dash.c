@@ -70,6 +70,10 @@ static void section(const char *num, const char *title)
 #define printf        gnss_qprintf
 #undef  console_print
 #define console_print gnss_qprintf
+#undef  vprintf
+#define vprintf       gnss_qvprintf   /* res()/more() tails were printed */
+#undef  putchar
+#define putchar       gnss_qputchar
 static void row(int st, const char *l, const char *fmt, ...)
 {
     char dots[32];

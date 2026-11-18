@@ -21,6 +21,10 @@
 #define printf        gnss_qprintf
 #undef  console_print
 #define console_print gnss_qprintf
+#undef  vprintf
+#define vprintf       gnss_qvprintf   /* res()/more() tails were printed */
+#undef  putchar
+#define putchar       gnss_qputchar
 
 static int      txdma_running = 0;
 static uint32_t txdma_samples = 0;

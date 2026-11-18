@@ -81,3 +81,29 @@ window can measure (3/sqrt(K)). See the project doc suppression_jn_theory_12nov2
 - `stap?` shows the solver timing (read, average, solve, write, figures) and the
   weight-update interval; `gnss_kpi?` adds tsolve=, tupd=, steady=, ajbw=.
 - `gnss_status?` shows the AD9361 temperature and the tracking calibrations.
+
+## Wideband fixes (16 Nov 2026)
+- Covariance average is reset on every RX gain change (gnss_smi_gain_changed()
+  from set_rx_gain_both). Before, the steady average mixed covariance from
+  before and after a gain step, so the null leaked for ~1 s after each step
+  (the DAC clipping seen after gain steps in the 14 Nov log).
+- Barrage AGC: after any barrage cut (fast cut, -2 dB or -1 dB rate cut) the
+  gain may rise only once per 5 s for 60 s (agc_bar_slow). Stops the 10-22 x
+  hunting seen with WB 15 dB.
+- Console garbling after stap=1 fixed: vprintf/putchar now also go through
+  the quiet capture in every engine file.
+- rx? and selftest show "gain cut N dB by the jammer = C/N0 cost", the
+  dominant wideband loss (dynamic range), next to the residual J/N out.
+- New preset band=6 "anti-jam: L1/E1/B1C 10 MHz @61.44": LO 1577.92 MHz,
+  RF BW 10 MHz, 61.44 MSPS. Oversampled narrow band: the AD9361 floor stays
+  spread over 61 MHz, and the barrage outside 10 MHz is filtered before the
+  ADC, so the AGC can keep ~6-8 dB more gain. No GLONASS / B1I in this band.
+
+## 17 Nov 2026 (MOD-33 b)
+- SMI skips the covariance windows that straddle an RX gain step (the one being
+  accumulated at the step and the next): ~0.6 ms at 61.44 MSPS with the old
+  weights kept. Before, the first solve after each AGC step mixed two gains and
+  leaked the jammer to the DAC rails (DAC clip counts of 100k-1.6M in the
+  16/17 Nov logs). stap? shows "after gain steps N".
+- stap?: "skipped" renamed "windows passed over" (normal: a window every
+  0.31 ms, a solve every 1.5 ms).

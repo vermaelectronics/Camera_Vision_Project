@@ -349,7 +349,11 @@ void get_rx_info(double *param, char param_no)
 	printf(" dBFS (reference tap, signal + noise)\r\n");
 	printf("  noise     floor "); pv(m.nf, 1); printf(" dBFS   target %.1f dBFS   AD9361 internal ", m.target);
 	pv(m.floor_int, 1); printf(" dBFS\r\n");
-	if (m.nf > NA + 1 && m.floor_int > NA + 1)
+	if (m.aj.valid && m.aj.jammed && m.aj.have_clean && m.aj.clean_gain_db > m.g1)
+		printf("            gain cut %ld dB by the jammer: floor %.1f dB over the antenna noise\r\n"
+		       "            at this gain = the satellites' C/N0 cost from the gain cut\r\n",
+		       (long)(m.aj.clean_gain_db - m.g1), m.aj.rise_db);
+	else if (m.nf > NA + 1 && m.floor_int > NA + 1)
 		printf("            antenna noise %.1f dB above the internal noise %s\r\n",
 		       m.nf - m.floor_int,
 		       (m.nf - m.floor_int >= 10.0) ? "(good: internal adds < 0.5 dB)" :
@@ -410,9 +414,10 @@ void get_stap(double *param, char param_no)
 		printf("            weights updated every %.2f ms (%.0f per s), longest pass %.0f us\r\n",
 		       m.ss.t_int_us / 1000.0, m.ss.t_int_us > 0.0 ? 1e6 / m.ss.t_int_us : 0.0, m.ss.t_max_us);
 		printf("            new weights load at a window boundary (double-buffered: no glitch)\r\n");
-		printf("            solved %lu  failed %lu  skipped %lu  overruns %lu\r\n",
-		       (unsigned long)m.ss.updates, (unsigned long)m.ss.fails,
-		       (unsigned long)m.ss.skipped, (unsigned long)m.ss.novr);
+		printf("            solved %lu  failed %lu  overruns %lu\r\n",
+		       (unsigned long)m.ss.updates, (unsigned long)m.ss.fails, (unsigned long)m.ss.novr);
+		printf("            windows passed over %lu (newer one ready: normal), after gain steps %lu\r\n",
+		       (unsigned long)m.ss.skipped, (unsigned long)gnss_smi_gain_skipped());
 	} else {
 		printf("  solver    SMI core not found in the bitstream\r\n");
 	}
@@ -647,7 +652,15 @@ void get_selftest(double *param, char param_no)
 	}
 
 	printf(" 3 Internal noise vs antenna noise (sets the satellite C/N0)\r\n");
-	if (m.nf > NA + 1 && m.floor_int > NA + 1) {
+	if (m.aj.valid && m.aj.jammed && m.aj.have_clean && m.aj.clean_gain_db > m.g1) {
+		/* with a jammer the floor is not antenna noise: compare it with the
+		 * antenna noise expected at this gain (clean noise - gain cut) */
+		snprintf(t, sizeof(t), "gain cut %ld dB by the jammer: floor %.1f dB over the antenna noise = C/N0 cost",
+			 (long)(m.aj.clean_gain_db - m.g1), m.aj.rise_db);
+		verdict(m.aj.rise_db <= 3.0 ? 0 : (m.aj.rise_db <= 8.0 ? 1 : 2), t,
+			"dynamic range: the jammer is too strong for the ADC at full gain; less jammer per channel "
+			"(gnss_rxoff, gnss_ajbw, band with a narrower RF filter) or a front end with more range");
+	} else if (m.nf > NA + 1 && m.floor_int > NA + 1) {
 		double d = m.nf - m.floor_int;
 		snprintf(t, sizeof(t), "antenna noise %.1f dB above the AD9361 internal noise (gain %ld dB)",
 			 d, (long)m.g1);

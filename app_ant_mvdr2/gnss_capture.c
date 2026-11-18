@@ -18,6 +18,10 @@
 #define printf        gnss_qprintf
 #undef  console_print
 #define console_print gnss_qprintf
+#undef  vprintf
+#define vprintf       gnss_qvprintf   /* res()/more() tails were printed */
+#undef  putchar
+#define putchar       gnss_qputchar
 
 /* A value the DMA will never plausibly leave everywhere. Written across the
  * buffer before the transfer so "the DMA silently did nothing" cannot be

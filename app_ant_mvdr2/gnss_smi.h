@@ -124,6 +124,8 @@ int    gnss_smi_enable(int on);           /* 0 ok, -1 not present            */
 int    gnss_smi_is_enabled(void);
 int    gnss_smi_poll(void);               /* main loop: 1 = a window was solved */
 void   gnss_smi_time_clear(void);
+void   gnss_smi_gain_changed(void);   /* RX gain stepped: restart the average */
+uint32_t gnss_smi_gain_skipped(void); /* MOD-33: windows skipped after gain steps */
 int    gnss_smi_set_avg_steady(int sh);   /* 0 = off, 1..6 */
 void   gnss_smi_get_state(gnss_smi_state_t *s);
 int    gnss_smi_set_kexp(uint32_t k);     /* 6..12                           */

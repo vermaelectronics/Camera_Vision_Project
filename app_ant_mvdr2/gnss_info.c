@@ -27,6 +27,10 @@
 #define printf        gnss_qprintf
 #undef  console_print
 #define console_print gnss_qprintf
+#undef  vprintf
+#define vprintf       gnss_qvprintf   /* res()/more() tails were printed */
+#undef  putchar
+#define putchar       gnss_qputchar
 
 /* ---- Zynq-7000 PS registers, from UG585 -------------------------------- */
 #define SLCR_PSS_IDCODE     0xF8000530U

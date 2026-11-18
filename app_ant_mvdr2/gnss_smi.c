@@ -135,6 +135,29 @@ static double  wr_[NM], wi_[NM];
 #define GNSS_SMI_AVG_STEP      1.41           /* reset when the trace moves > 1.5 dB */
 static double  Er[NM][NM], Ei[NM][NM];
 static int     have_avg = 0;
+/* RX gain changed (AGC, gnss_rxoff): the two channels never step by exactly the
+ * same gain and phase, so the averaged R (old gain + new gain) no longer fits
+ * the data and the null leaks until the old windows decay (~30 updates in the
+ * steady average). Start the average again: the next solve (~1.5 ms) uses
+ * only windows taken after the step. */
+/* MOD-33: the window being accumulated when the gain steps holds samples from
+ * both gains (a step in level AND in RX1/RX2 phase): solving it leaks the
+ * null for one update (~1.5 ms) and the jammer reaches the DAC rails. Skip
+ * every window whose sequence number is not at least 2 past the one current
+ * at the step (~0.6 ms at 61.44 MSPS); the old weights stay loaded meanwhile. */
+static int      gain_skip = 0;
+static uint32_t gain_seq  = 0;
+static uint32_t gain_skipped = 0;
+uint32_t gnss_smi_gain_skipped(void) { return gain_skipped; }
+void gnss_smi_gain_changed(void)
+{
+    if (have_avg) { sm.avg_resets++; }
+    have_avg = 0;
+    if (sm.present) {
+        gain_seq  = RD(GNSS_SMI_REG_STAT) >> 16;
+        gain_skip = 1;
+    }
+}
 static double  avg_tr = 0.0, avg_s2 = 1.0;    /* trace of E; sum of squared EMA weights */
 
 /* register addresses of the active layout */
@@ -621,6 +644,15 @@ int gnss_smi_poll(void)
     if (!(st & GNSS_SMI_ST_LOCK_ACK) || cnt == 0U) {
         WR(GNSS_SMI_REG_CTRL, ctrl_word(0));
         return 0;
+    }
+    if (gain_skip) {                           /* MOD-33: window straddles a gain step */
+        if (((seq - gain_seq) & 0xFFFFU) < 2U) {
+            WR(GNSS_SMI_REG_CTRL, ctrl_word(0));
+            sm.seq = seq;
+            gain_skipped++;
+            return 0;
+        }
+        gain_skip = 0;
     }
     e = 0;
     cur_page = 0xFFFFFFFFU;                    /* (re)write PAGE before the first entry */

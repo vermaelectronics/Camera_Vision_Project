@@ -34,6 +34,10 @@ static int32_t rx2_off_v(void);   /* LVDS: RX2 = RX1 - gnss_rxoff */
 #define printf        gnss_qprintf
 #undef  console_print
 #define console_print gnss_qprintf
+#undef  vprintf
+#define vprintf       gnss_qvprintf   /* res()/more() tails were printed */
+#undef  putchar
+#define putchar       gnss_qputchar
 
 extern struct ad9361_rf_phy *ad9361_phy;
 
@@ -719,6 +723,7 @@ static void set_rx_gain_both(int32_t g)
     ad9361_set_rx_gain_control_mode(ad9361_phy, 1, 0);
     ad9361_set_rx_rf_gain(ad9361_phy, 0, g);
     ad9361_set_rx_rf_gain(ad9361_phy, 1, g2);
+    gnss_smi_gain_changed();                 /* fresh covariance after the step */
 }
 /* re-apply the RX2 offset at the current RX1 gain (gnss_rxoff=) */
 void gnss_rx2_off_apply(void)
@@ -1947,6 +1952,7 @@ static int agc_fast_blank = 0;
  * agc_clip_ppm = allowed clip rate (gnss_agcclip=ppm, 0 = old peak rule). */
 static int      agc_clip_ppm = 100;
 static int      agc_bar = 0;              /* barrage rule active (slow loop)   */
+static int      agc_bar_slow = 0;         /* slow ticks: rise every 5 s after a cut */
 static uint32_t agc_cs = 0, agc_cw = 0;   /* clipped samples / windows, 100 ms */
 static uint32_t agc_rs[20], agc_rw[20];   /* last 2 s, per 100 ms              */
 static int      agc_ri = 0;
@@ -2074,6 +2080,7 @@ static void agc_fast(void)
     /* clipped share of the 8192-sample window says how far over it is */
     if (agc_bar) {
         step = (cm > 410U) ? 10 : 4;        /* barrage: rate rule fine-tunes after */
+        agc_bar_slow = 600;                 /* 60 s of slow rises after a cut      */
     }
     else if (cm > 410U) { step = 15; }      /* > 5 %   */
     else if (cm > 41U)  { step = 10; }      /* > 0.5 % */
@@ -2180,10 +2187,13 @@ static void agc_slow(void)
     if (agc_bar) {
         double t = (double)agc_clip_ppm;
         long   want_b = have_nf ? (long)floor(rx_target_eff - nf + 0.5) : 0;
+        if (agc_bar_slow > 0) { agc_bar_slow--; }
         if (agc_rate01 > 20.0 * t && agc_since_change >= 2) {
+            agc_bar_slow = 600;
             agc_apply(g, g - 2, 0);
             sprintf(agc_why, "barrage: clipping %.0f ppm (limit %d): -2 dB", agc_rate01, agc_clip_ppm);
         } else if (agc_rate1 > 5.0 * t && agc_since_change >= 5) {
+            agc_bar_slow = 600;
             agc_apply(g, g - 1, 0);
             sprintf(agc_why, "barrage: clipping %.0f ppm (limit %d): -1 dB", agc_rate1, agc_clip_ppm);
         } else if (want_b < 2) {
@@ -2191,8 +2201,12 @@ static void agc_slow(void)
         } else if (agc_up_lock > 0) {
             sprintf(agc_why, "barrage: held %ld dB under the target: anti-hunt lock, %d s left",
                     want_b, (agc_up_lock + 9) / 10);
-        } else if (agc_rate2 < 0.25 * t && agc_since_change >= 10 * agc_jstep_s &&
-                   agc_up_age >= 10 * agc_jstep_s) {
+        } else if (agc_rate2 < 0.25 * t &&
+                   agc_since_change >= (agc_bar_slow ? 50 : 10 * agc_jstep_s) &&
+                   agc_up_age >= (agc_bar_slow ? 50 : 10 * agc_jstep_s)) {
+            /* after a cut the gain sits near the jammer's limit: creep up
+             * every 5 s for 60 s instead of every second (fewer steps, each
+             * step briefly costs null depth) */
             step = (want_b < agc_jstep_db) ? want_b : agc_jstep_db;
             if (step > 2) { step = 2; }          /* tails: never more than 2 dB at once */
             agc_apply(g, g + (int32_t)step, 1);
