@@ -161,10 +161,14 @@ add_axis_if $core s_axis_smi slave  {TDATA TVALID TREADY}
 set sclk_if [ensure_bus_if $core clk xilinx.com:signal:clock_rtl:1.0]
 set srst_if [ensure_bus_if $core rst xilinx.com:signal:reset_rtl:1.0]
 set_bus_param $srst_if POLARITY         ACTIVE_HIGH
-set_bus_param $sclk_if ASSOCIATED_RESET rst
+# smi_rst_n is a flop clocked by clk (smi_rst_n_r in gnss_passthrough.v), so it
+# belongs to clk too. Without this the block design takes it as an asynchronous
+# source and reports [BD 41-1348] on smi_fifo_in/s_axis_aresetn.
+set_bus_param $sclk_if ASSOCIATED_RESET rst:smi_rst_n
 set_bus_param $sclk_if ASSOCIATED_BUSIF [join $smi_axis ":"]
 
-# smi_rst_n drives smi_pi_0/ap_rst_n: an active-low reset output.
+# smi_rst_n drives the core's input FIFO (smi_fifo_in/s_axis_aresetn): an
+# active-low reset output, synchronous to clk (see ASSOCIATED_RESET above).
 set prst_if [ensure_bus_if $core smi_rst_n xilinx.com:signal:reset_rtl:1.0]
 set_bus_param $prst_if POLARITY ACTIVE_LOW
 
