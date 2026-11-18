@@ -110,3 +110,10 @@ set_false_path -from [get_pins {i_system_wrapper/system_i/axi_ad9361/inst/i_tx/i
 ## CRPA: gnss_passthrough CDC (l_clk <-> sys_cpu_clk) is constrained in
 ## gnss_passthrough_cdc.xdc; the two axis_data_fifo (IS_ACLK_ASYNC) carry
 ## their own XPM CDC constraints. The CRPA core itself runs on clk_fpga_0.
+
+## PS DDR3 pins (ddr_ck_p/n, ddr_dqs_p/n[3:0]): the ADI system_top.v declares them
+## as single-ended inout ports while the Zynq PS fixes them as differential
+## (DIFF_SSTL15 / DIFF_SSTL15_T_DCI), so the DRC reports 10 x IOSTDTYPE-1 critical
+## warnings. They are hard-wired to the PS DDR controller and set up by FSBL /
+## ps7_init, not by the bitstream: harmless. Reported as warnings instead.
+set_property SEVERITY {Warning} [get_drc_checks IOSTDTYPE-1]
