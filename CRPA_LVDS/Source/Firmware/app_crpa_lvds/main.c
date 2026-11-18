@@ -1211,6 +1211,10 @@ int main(void)
 		      "  Status line every 30 s (crpa_log=N, 0 = events only); it waits while you type.\n"
 		      "  Start retransmitting with gnss_tx=1 (goes straight to the working level).\n");
 #endif
+#if GNSS_BOOT_AUTOSTART && !defined(GNSS_DEPLOY_AUTO_TX)
+	/* gnss_boot_config.h: RX gains, TX2 attenuation, gnss_tx=1 at power-up */
+	gnss_boot_autostart();
+#endif
 #ifdef GNSS_DEPLOY_AUTO_TX
 	if((gnss_pt_read(GNSS_PT_REG_STATUS) & GNSS_PT_ST_PASS_EN_SYNCED) &&
 	   (gnss_pt_read(GNSS_PT_REG_STATUS) & GNSS_PT_ST_DAC_EN_I0))

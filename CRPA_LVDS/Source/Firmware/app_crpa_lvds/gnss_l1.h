@@ -15,6 +15,7 @@
 #include <stdint.h>
 #include "ad9361_api.h"
 #include "axi_dac_core.h"   /* enum axi_dac_data_sel */
+#include "gnss_boot_config.h" /* boot TX/RX levels, GNSS_TX_START_ATTEN_MDB */
 
 /* --------------------------------------------------------------------------
  *  Fixed by the project requirements.

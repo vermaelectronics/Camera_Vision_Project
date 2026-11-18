@@ -268,6 +268,39 @@ void set_gnss_tx(double* param, char param_no)
 }
 
 /**************************************************************************//***
+ * @brief Power-up start (gnss_boot_config.h): both RX gains locked to
+ * GNSS_BOOT_RX_GAIN_DB, TX2 attenuation GNSS_BOOT_TX2_ATTEN_MDB, then
+ * gnss_tx=1 (TX1 at GNSS_TX_START_ATTEN_MDB). Called once from main().
+*******************************************************************************/
+void gnss_boot_autostart(void)
+{
+	double one = 1.0;
+	uint32_t a1 = 0, a2 = 0;
+	int32_t g1 = 0, g2 = 0;
+
+	if(!ad9361_phy) {
+		console_print("gnss_boot: ad9361_phy is NULL; autostart skipped\n");
+		return;
+	}
+	console_print("\ngnss_boot: AUTOSTART - RX gain %d dB (manual, both), TX2 %d mdB, gnss_tx=1 with TX1 %d mdB\n",
+		      (long)GNSS_BOOT_RX_GAIN_DB, (long)GNSS_BOOT_TX2_ATTEN_MDB, (long)GNSS_TX_START_ATTEN_MDB);
+	/* 1. RX: manual (locked) gain, the same on both channels */
+	gnss_rxg_set_mode(GNSS_RXG_MANUAL);
+	gnss_rxg_set_gain(GNSS_BOOT_RX_GAIN_DB);
+	/* 2. TX2 attenuation */
+	ad9361_set_tx_attenuation(ad9361_phy, 1, GNSS_BOOT_TX2_ATTEN_MDB);
+	/* 3. gnss_tx=1: maximum attenuation, interlock, then the start level */
+	set_gnss_tx(&one, 1);
+
+	ad9361_get_tx_attenuation(ad9361_phy, 0, &a1);
+	ad9361_get_tx_attenuation(ad9361_phy, 1, &a2);
+	ad9361_get_rx_rf_gain(ad9361_phy, 0, &g1);
+	ad9361_get_rx_rf_gain(ad9361_phy, 1, &g2);
+	console_print("gnss_boot: read back: TX1 %d mdB, TX2 %d mdB, RX1 %d dB, RX2 %d dB, TX %s\n",
+		      (long)a1, (long)a2, (long)g1, (long)g2, (char*)(gnss_tx_on ? "ON" : "OFF (see above)"));
+}
+
+/**************************************************************************//***
  * @brief GNSS-CRPA MOD-6. Report the retransmit state, read back from hardware.
 *******************************************************************************/
 void get_gnss_tx(double* param, char param_no)
