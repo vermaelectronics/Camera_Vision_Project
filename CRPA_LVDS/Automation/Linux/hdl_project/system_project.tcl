@@ -18,5 +18,10 @@ adi_project_files $p_name [list \
   "$ad_hdl_dir/library/common/ad_iobuf.v"]
 
 set_property is_enabled false [get_files  *system_sys_ps7_0.xdc]
+# PS DDR pins: report DRC IOSTDTYPE-1 as a warning (see drc_severity.tcl). A
+# constraint file can't do this (get_drc_checks is not an XDC command), so
+# the implementation run sources the script before opt_design, in the same
+# process that later runs the DRCs.
+set_property STEPS.OPT_DESIGN.TCL.PRE [file normalize [file join [pwd] drc_severity.tcl]] [get_runs impl_1]
 adi_project_run $p_name
 source $ad_hdl_dir/library/axi_ad9361/axi_ad9361_delay.tcl

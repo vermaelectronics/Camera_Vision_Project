@@ -211,7 +211,7 @@ if want hdl; then
   case "$(basename "$CRPA_HDL_PRJ_DIR")" in passthrough_lvds|passthrough_lvds_sfap|passthrough_lvds_sfap256) die hdl "refusing to overwrite projects/$(basename "$CRPA_HDL_PRJ_DIR") (another build)" ;; esac
   rm -rf "$CRPA_HDL_PRJ_DIR"
   mkdir -p "$CRPA_HDL_PRJ_DIR"
-  cp "$here/hdl_project/system_project.tcl" "$here/hdl_project/Makefile" "$CRPA_HDL_PRJ_DIR/"
+  cp "$here/hdl_project/system_project.tcl" "$here/hdl_project/Makefile" "$here/hdl_project/drc_severity.tcl" "$CRPA_HDL_PRJ_DIR/"
   cp "$SRC/BlockDesign/system_bd.tcl" "$SRC/HDL/system_top.v" \
      "$SRC/XDC/system_constr.xdc" "$SRC/XDC/gnss_passthrough_cdc.xdc" "$CRPA_HDL_PRJ_DIR/"
   sed -i "s/^PROJECT_NAME := .*/PROJECT_NAME := $CRPA_HDL_PRJ_NAME/" "$CRPA_HDL_PRJ_DIR/Makefile"
