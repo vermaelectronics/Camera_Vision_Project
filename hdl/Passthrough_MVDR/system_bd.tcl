@@ -320,7 +320,24 @@ ad_cpu_interconnect 0x7C420000 axi_ad9361_dac_dma
 ad_cpu_interconnect 0x43C00000 axi_vcxo_ctrl
 # 0x43C00000 is the ant VCXO controller, so gnss_passthrough moves to 0x43C10000
 # (the MVDR2 design had it at 0x43C00000; the firmware base is set to match)
-ad_cpu_interconnect 0x43C10000 gnss_passthrough
+# Connected by hand, not with ad_cpu_interconnect: for this module-reference
+# cell Vivado associates BOTH clocks (clk and s_axi_aclk) with s_axi, and
+# ad_cpu_interconnect then fails on the two-name reset list
+# ("syntax error ... 'NAME == rst s_axi_aresetn'"). Same steps it would do:
+# one more master on axi_gp0_interconnect, sys_cpu_clk/resetn, address map.
+set gp_ic [get_bd_cells axi_gp0_interconnect]
+set gp_n  [get_property CONFIG.NUM_MI $gp_ic]
+set gp_m  [format "M%02d" $gp_n]
+set_property CONFIG.NUM_MI [expr {$gp_n + 1}] $gp_ic
+ad_connect sys_cpu_clk    axi_gp0_interconnect/${gp_m}_ACLK
+ad_connect sys_cpu_resetn axi_gp0_interconnect/${gp_m}_ARESETN
+ad_connect sys_cpu_clk    gnss_passthrough/s_axi_aclk
+ad_connect sys_cpu_resetn gnss_passthrough/s_axi_aresetn
+ad_connect axi_gp0_interconnect/${gp_m}_AXI gnss_passthrough/s_axi
+create_bd_addr_seg -range 0x00010000 -offset 0x43C10000 \
+                    [get_bd_addr_spaces sys_ps7/Data] \
+                    [lindex [get_bd_addr_segs gnss_passthrough/s_axi/*] 0] \
+                    SEG_data_gnss_passthrough
 
 ad_ip_parameter sys_ps7 CONFIG.PCW_USE_S_AXI_HP1 {1}
 ad_connect sys_cpu_clk sys_ps7/S_AXI_HP1_ACLK

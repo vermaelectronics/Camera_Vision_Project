@@ -3,9 +3,9 @@
 //
 //  gnss_passthrough.v is the proven top of the working MVDR/STAP design
 //  (MVDR2 project, rooftop barrage tests) and is used here UNCHANGED.
-//  This wrapper only adds the interface attributes Vivado needs for a
-//  module-reference cell (clock/reset association and polarity), so the
-//  block design can be built from Tcl. No logic.
+//  This wrapper only adds interface attributes for the module-reference cell:
+//  s_axi with its own clock/reset, and NO inferred interfaces on clk, rst and
+//  the ADC/DAC ports (they are connected net by net in system_bd.tcl). No logic.
 // ============================================================================
 `timescale 1ns/100ps
 
@@ -13,44 +13,43 @@ module gnss_passthrough_bd #(
   parameter FIFO_ADDR_WIDTH = 5,
   parameter STAP_LMS        = 0
 ) (
-  (* X_INTERFACE_INFO = "xilinx.com:signal:clock:1.0 clk CLK" *)
-  (* X_INTERFACE_PARAMETER = "ASSOCIATED_RESET rst" *)
-  input               clk,
-  (* X_INTERFACE_INFO = "xilinx.com:signal:reset:1.0 rst RST" *)
-  (* X_INTERFACE_PARAMETER = "POLARITY ACTIVE_HIGH" *)
-  input               rst,
+  // clk / rst: plain wires (no inferred clock interface). As a clock
+  // interface Vivado associated clk with s_axi as well, and the block design
+  // script failed on the two clocks of one AXI port.
+  (* X_INTERFACE_IGNORE = "true" *) input clk,
+  (* X_INTERFACE_IGNORE = "true" *) input rst,
 
-  input               adc_enable_i0,
-  input               adc_valid_i0,
-  input      [15:0]   adc_data_i0,
-  input               adc_enable_q0,
-  input               adc_valid_q0,
-  input      [15:0]   adc_data_q0,
-  input               adc_enable_i1,
-  input               adc_valid_i1,
-  input      [15:0]   adc_data_i1,
-  input               adc_enable_q1,
-  input               adc_valid_q1,
-  input      [15:0]   adc_data_q1,
+  (* X_INTERFACE_IGNORE = "true" *) input               adc_enable_i0,
+  (* X_INTERFACE_IGNORE = "true" *) input               adc_valid_i0,
+  (* X_INTERFACE_IGNORE = "true" *) input      [15:0]   adc_data_i0,
+  (* X_INTERFACE_IGNORE = "true" *) input               adc_enable_q0,
+  (* X_INTERFACE_IGNORE = "true" *) input               adc_valid_q0,
+  (* X_INTERFACE_IGNORE = "true" *) input      [15:0]   adc_data_q0,
+  (* X_INTERFACE_IGNORE = "true" *) input               adc_enable_i1,
+  (* X_INTERFACE_IGNORE = "true" *) input               adc_valid_i1,
+  (* X_INTERFACE_IGNORE = "true" *) input      [15:0]   adc_data_i1,
+  (* X_INTERFACE_IGNORE = "true" *) input               adc_enable_q1,
+  (* X_INTERFACE_IGNORE = "true" *) input               adc_valid_q1,
+  (* X_INTERFACE_IGNORE = "true" *) input      [15:0]   adc_data_q1,
 
-  input               dac_enable_i0,
-  input               dac_valid_i0,
-  input               dac_enable_q0,
-  input               dac_valid_q0,
-  input               dac_enable_i1,
-  input               dac_valid_i1,
-  input               dac_enable_q1,
-  input               dac_valid_q1,
+  (* X_INTERFACE_IGNORE = "true" *) input               dac_enable_i0,
+  (* X_INTERFACE_IGNORE = "true" *) input               dac_valid_i0,
+  (* X_INTERFACE_IGNORE = "true" *) input               dac_enable_q0,
+  (* X_INTERFACE_IGNORE = "true" *) input               dac_valid_q0,
+  (* X_INTERFACE_IGNORE = "true" *) input               dac_enable_i1,
+  (* X_INTERFACE_IGNORE = "true" *) input               dac_valid_i1,
+  (* X_INTERFACE_IGNORE = "true" *) input               dac_enable_q1,
+  (* X_INTERFACE_IGNORE = "true" *) input               dac_valid_q1,
 
-  input      [15:0]   dma_dac_data_i0,
-  input      [15:0]   dma_dac_data_q0,
-  input      [15:0]   dma_dac_data_i1,
-  input      [15:0]   dma_dac_data_q1,
+  (* X_INTERFACE_IGNORE = "true" *) input      [15:0]   dma_dac_data_i0,
+  (* X_INTERFACE_IGNORE = "true" *) input      [15:0]   dma_dac_data_q0,
+  (* X_INTERFACE_IGNORE = "true" *) input      [15:0]   dma_dac_data_i1,
+  (* X_INTERFACE_IGNORE = "true" *) input      [15:0]   dma_dac_data_q1,
 
-  output     [15:0]   dac_data_i0,
-  output     [15:0]   dac_data_q0,
-  output     [15:0]   dac_data_i1,
-  output     [15:0]   dac_data_q1,
+  (* X_INTERFACE_IGNORE = "true" *) output     [15:0]   dac_data_i0,
+  (* X_INTERFACE_IGNORE = "true" *) output     [15:0]   dac_data_q0,
+  (* X_INTERFACE_IGNORE = "true" *) output     [15:0]   dac_data_i1,
+  (* X_INTERFACE_IGNORE = "true" *) output     [15:0]   dac_data_q1,
 
   (* X_INTERFACE_INFO = "xilinx.com:signal:clock:1.0 s_axi_aclk CLK" *)
   (* X_INTERFACE_PARAMETER = "ASSOCIATED_BUSIF s_axi, ASSOCIATED_RESET s_axi_aresetn" *)
