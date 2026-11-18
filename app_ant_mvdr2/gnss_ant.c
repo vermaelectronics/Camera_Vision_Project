@@ -35,6 +35,7 @@
 #include "gnss_smi.h"
 #include "gnss_report.h"
 #include "gnss_quiet.h"
+#include "gnss_time.h"
 #include "no_os_delay.h"
 
 extern struct ad9361_rf_phy *ad9361_phy;
@@ -215,6 +216,8 @@ static void item(const char *cmd, const char *what)
 
 /* ======================================================= main menu */
 /* MOD9: tentative definitions (set further down) used by the menu */
+static int ap_kpi_s;
+static int ap_rep_s;
 static int ajbw_mhz;
 static int ajbw_on;
 static int ajbw_cur;
@@ -238,7 +241,7 @@ void gnss_ant_menu(void)
 	gnss_autoprint_get(&ks, &rs);
 	snprintf(ag, sizeof(ag), "%dppm", gnss_agc_get_clip_ppm());
 
-	printf("\r\n========== E310 GNSS ANTI-JAM    SMI-STAP 2 x 16 taps    firmware MOD9 =========\r\n");
+	printf("\r\n========== E310 GNSS ANTI-JAM    SMI-STAP 2 x 16 taps    firmware MOD10 ========\r\n");
 	printf(" NOW\r\n");
 	printf("  STATE    %s   [gnss_tx=%d pass=%d stap=%d]\r\n", mode_name(&m), m.tx, m.pass, m.stap);
 	printf("  RADIO    LO %.2f MHz  BW %.0f MHz  %.2f MSPS  band %d%s\r\n",
@@ -988,6 +991,26 @@ int gnss_ant_poll_events(void)
 	int printed = 0;
 
 	ajbw_tick();
+	{
+		/* MOD10 (was in main.c in MOD8): gnss_kpi_full? every K s and
+		 * gnss_report? every R s, into the spool; gnss_background_tick()
+		 * sends it (<= 64 bytes per 10 ms) so the null / AGC never wait */
+		static gnss_time_t t_k = 0, t_r = 0;
+		gnss_time_t now = gnss_time_now();
+		if (t_k == 0) { t_k = now; t_r = now; }
+		if (ap_kpi_s && now - t_k >= (gnss_time_t)ap_kpi_s * GNSS_COUNTS_PER_SECOND) {
+			t_k = now;
+			gnss_spool_begin();
+			gnss_rep_print_kpi();
+			gnss_spool_end();
+		}
+		if (ap_rep_s && now - t_r >= (gnss_time_t)ap_rep_s * GNSS_COUNTS_PER_SECOND) {
+			t_r = now;
+			gnss_spool_begin();
+			gnss_rep_print();
+			gnss_spool_end();
+		}
+	}
 	n = gnss_rep_event_total();
 
 	while (seen < n) {
@@ -1004,11 +1027,25 @@ int gnss_ant_poll_events(void)
 }
 
 /* ======================================================= boot */
+#ifndef GNSS_CFG_BOOT_STAP
+#define GNSS_CFG_BOOT_STAP 1	/* MOD10: anti-jam on at power-up (0 = TX1 silent as before) */
+#endif
 void gnss_ant_boot(void)
 {
 	gnss_tx_silence_quiet();
 	gnss_radio_apply_defaults();
 	gnss_tx_silence_quiet();
+#if GNSS_CFG_BOOT_STAP
+	{
+		/* MOD10 (was in main.c in MOD8): start the anti-jam by itself:
+		 * stap=1 = gnss_tx=1 + pass=1 + RX gain level + output level +
+		 * SMI-STAP null on TX1. Here, so any main.c that calls
+		 * gnss_ant_boot() gets it. */
+		double p1[1] = { 1 };
+		printf("boot: starting the anti-jam automatically (stap=1 -> gnss_tx=1, pass=1) ...\r\n");
+		set_stap(p1, 1);
+	}
+#endif
 }
 
 /* ======================================================= switches */

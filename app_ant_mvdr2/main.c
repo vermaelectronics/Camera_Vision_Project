@@ -1177,9 +1177,9 @@ int main(void)
 	/* -----------------------------------------------------------------------
 	 * MVDR2 boot (MOD-3 self-test), then the radio plan of the boot preset
 	 * (GNSS_CFG_BOOT_BAND 3: LO 1582.5 MHz, 56 MHz, 61.44 MSPS = GPS, Galileo,
-	 * GLONASS, BeiDou). MOD8: then stap=1 by itself (GNSS_CFG_BOOT_STAP 1):
-	 * the full MVDR2 automatic start (gain level, AOLC, SMI-STAP, TX1 open),
-	 * gnss_tx=1 pass=1 stap=1. stap=0 leaves plain pass (RX1 on TX1).
+	 * GLONASS, BeiDou). TX1 stays SILENT: gnss_tx=0 pass=0 stap=0.
+	 * stap=1 runs the full MVDR2 automatic start (gain level, AOLC, SMI-STAP,
+	 * TX1 open) exactly as the MVDR2 board did at power-up.
 	 * --------------------------------------------------------------------- */
 	printf("\r\n=== ANTSDR E310 - GNSS anti-jam (LVDS 61.44 MSPS, SMI-STAP) ===\r\n");
 	{
@@ -1196,19 +1196,6 @@ int main(void)
 	gnss_rep_init();
 	(void)gnss_select_band(GNSS_CFG_BOOT_BAND);
 	gnss_ant_boot();		/* radio plan, TX1 silent, gnss_tx=0 pass=0 stap=0 */
-#ifndef GNSS_CFG_BOOT_STAP
-#define GNSS_CFG_BOOT_STAP 1		/* MOD8: anti-jam on at power-up (0 = TX1 silent as before) */
-#endif
-#if GNSS_CFG_BOOT_STAP
-	{
-		/* MOD8: start the anti-jam by itself: stap=1 = gnss_tx=1 + pass=1 +
-		 * RX gain level + output level + SMI-STAP null on TX1. stap=0 later
-		 * leaves plain pass (RX1 on TX1) running. */
-		double p1[1] = { 1 };
-		printf("boot: starting the anti-jam automatically (stap=1 -> gnss_tx=1, pass=1) ...\r\n");
-		set_stap(p1, 1);
-	}
-#endif
 
 #ifdef CONSOLE_COMMANDS
 	gnss_console_drain();
@@ -1250,40 +1237,6 @@ int main(void)
 					t_ev = now;
 					if (gnss_ant_poll_events())
 						gnss_console_prompt(received_cmd);
-				}
-				{
-					/* MOD8: gnss_kpi_full? every K s and gnss_report? every
-					 * R s (gnss_autoprint=K,R; default 10,11). Captured
-					 * into the spool, sent at the UART's speed (115200 baud
-					 * ~ 11.5 bytes/ms, <= 64 bytes = one FIFO per pass). */
-					static gnss_time_t t_k = 0, t_r = 0, t_dr = 0;
-					int ks, rs;
-					gnss_autoprint_get(&ks, &rs);
-					if (t_k == 0) { t_k = now; t_r = now; t_dr = now; }
-					if (ks && now - t_k >= (gnss_time_t)ks * GNSS_COUNTS_PER_SECOND) {
-						t_k = now;
-						gnss_spool_begin();
-						gnss_rep_print_kpi();
-						gnss_spool_end();
-					}
-					if (rs && now - t_r >= (gnss_time_t)rs * GNSS_COUNTS_PER_SECOND) {
-						t_r = now;
-						gnss_spool_begin();
-						gnss_rep_print();
-						gnss_spool_end();
-					}
-					if (gnss_spool_busy()) {
-						double us = (double)(now - t_dr) * 1.0e6 / (double)GNSS_COUNTS_PER_SECOND;
-						unsigned budget = (unsigned)(us * 0.0115);
-						if (budget > 64U) budget = 64U;
-						if (budget >= 16U) {
-							t_dr = now;
-							if (gnss_spool_drain(budget) == 2)
-								gnss_console_prompt(received_cmd);
-						}
-					} else {
-						t_dr = now;
-					}
 				}
 				if (!solved)
 					no_os_udelay(200);	/* idle: no new window yet */

@@ -2386,6 +2386,7 @@ int gnss_background_tick(void)
     static int n10 = 0, n100 = 0;
     int p;
 
+    (void)gnss_spool_drain(64U);   /* MOD10: periodic KPI / report, <= one UART FIFO per 10 ms */
     if (restart_pending > 0 && --restart_pending == 0) {
         bg_mark();
         (void)gnss_autostart_run();

@@ -195,3 +195,13 @@ Sections: NOW (state, radio, RX, jammer + detected TYPE, null) / JAMMER TYPES
 (how each type is detected and its automatic averaging, AGC rule and RX filter,
 '*' on the type seen now) / AUTOMATIC FEATURES (clean hold, pulse mode, tracking,
 RX filter, printing: state + switch command) / CONTROL / CHECK / SETTINGS / HELP.
+
+## MOD10 (18 Nov 2026) -- power-up STAP + automatic printing no longer depend on main.c
+On the board MOD9 booted with TX1 SILENT: its menu (gnss_ant.c) was new, but the
+main.c that was built was older, and MOD8 had put the power-up stap=1 and the
+periodic printing in main.c. Now:
+- power-up stap=1 is inside gnss_ant_boot() (gnss_ant.c), which every main.c calls;
+  GNSS_CFG_BOOT_STAP 0 (gnss_ant.c) = TX1 silent at power-up.
+- the KPI (10 s) / report (11 s) scheduling is in gnss_ant_poll_events() (every 0.5 s)
+  and the spool is sent by gnss_background_tick() (<= 64 bytes per 10 ms).
+- main.c is back to its MOD7 content (no MOD8 code: nothing runs twice).
