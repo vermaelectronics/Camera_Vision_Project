@@ -233,7 +233,7 @@ void gnss_ant_menu(void)
 	printf("           status?   rx?   stap?   selftest?\r\n");
 	printf("  SETTINGS band=N (band? lists)   tx1_att=mdB   agc=1|0   rxgain=dB\r\n");
 	printf("           gnss_agcstep=dB,s   gnss_agcclip=ppm   gnss_rxoff=dB (rxoff?)   gnss_ajbw=MHz\r\n");
-	printf("           taps=N (1..16)   smi=K,A   smiavg=N\r\n");
+	printf("           taps=N (1..16)   smi=K,A   smiavg=N   gnss_clean=1|0\r\n");
 	printf("  Enter = this menu   help? = these commands   commands? = ALL commands\r\n");
 	printf("  (AD9361 vendor commands rx_lo_freq=, tx1_attenuation=, rx1_rf_gain=, dds_* ...\r\n");
 	printf("   and every MVDR2 gnss_ command are all still there: commands? lists them)\r\n");
@@ -274,6 +274,7 @@ void get_ant_help(double *param, char param_no)
 	printf("  ADVANCED\r\n");
 	item("smi=K,A", "SMI window 2^K snapshots (6..12, def 8), loading A x lambda_min (def 3)");
 	item("smiavg=N", "covariance averaging 0..4 (def 2 = beta 1/4, steadier satellites)");
+	item("gnss_clean=1|0", "no jammer: fixed RX1 path on TX1 (faster lock); 0 = always solved weights");
 	item("gnss_kpi?", "all figures on one key=value line (for the e310lab logger)");
 	item("commands?", "ALL commands: AD9361 vendor + every MVDR2 gnss_ command");
 	printf("--------------------------------------------------------------------------------\r\n");
@@ -403,6 +404,15 @@ void get_stap(double *param, char param_no)
 			printf("            weights in the FPGA now: %d taps on RX1, %d on RX2 (the rest 0)\r\n", w1, w2);
 		else
 			printf("            weights in the FPGA now: -- (no solve yet: stap=1)\r\n");
+		{
+			int cen, chold;
+			double cin, cout;
+			uint32_t cn;
+			gnss_smi_get_clean(&cen, &cin, &cout, &chold, &cn);
+			printf("  clean     %s\r\n", !cen ? "OFF (solved weights always on TX1)" :
+			       chold ? "HOLDING: no jammer, TX1 = fixed RX1 path (fast satellite lock)" :
+			       "on: solved weights on TX1 (jammer, or not yet 2 s clear)");
+		}
 		printf("            averaging beta 1/%d, steady 1/%d (%s), %.0f snapshots in R\r\n",
 		       m.ss.avg_sh ? (1 << m.ss.avg_sh) : 1,
 		       m.ss.avg_sh_st ? (1 << m.ss.avg_sh_st) : (m.ss.avg_sh ? (1 << m.ss.avg_sh) : 1),
@@ -776,6 +786,11 @@ void get_ant_kpi(double *param, char param_no)
 	printf(" tsolve=%.0f tupd=%.2f steady=%d ajbw=%d", m.ss.t_total_us, m.ss.t_int_us / 1000.0,
 	       m.ss.avg_steady, ajbw_on ? ajbw_mhz : 0);
 	{
+		int cen, chold;
+		gnss_smi_get_clean(&cen, NULL, NULL, &chold, NULL);
+		printf(" clean=%d", cen ? (chold ? 2 : 1) : 0);
+	}
+	{
 		double r = 0.0;
 		int bar = gnss_agc_barrage_rule(&r);
 		printf(" agcrule=%s cliprate=%.1f rxoff=%d", bar ? "CLIPRATE" : "PEAK", r, gnss_rx2_off_get());
@@ -1148,6 +1163,27 @@ void set_taps(double *param, char param_no)
 	else
 		printf("  stored: used when stap=1 starts the null (stap is off now)\r\n");
 	gnss_rep_event("TAPS        %d per antenna", ss.La);
+}
+
+void set_clean(double *param, char param_no)
+{
+	int en, hold;
+	double in_db, out_db;
+	uint32_t n;
+	gnss_smi_get_clean(&en, &in_db, &out_db, &hold, &n);
+	if (param_no >= 1) {
+		en = (param[0] != 0.0);
+		if (param_no >= 2) in_db = param[1];
+		if (param_no >= 3) out_db = param[2];
+		gnss_smi_set_clean(en, in_db, out_db);
+		gnss_smi_get_clean(&en, &in_db, &out_db, &hold, &n);
+		gnss_rep_event("CLEAN HOLD  %s (in %.1f dB, out %.1f dB)", en ? "on" : "off", in_db, out_db);
+	}
+	printf("  clean hold %s: no jammer (J/N < %.1f dB for 2 s) -> TX1 = RX1 reference tap,\r\n"
+	       "  fixed filter (the pass=1 signal); J/N > %.1f dB -> nulling weights within ~1.5 ms.\r\n"
+	       "  now: %s, entered %lu times.  gnss_clean=0 = always solved weights (before MOD-33c)\r\n",
+	       en ? "ON" : "OFF", in_db, out_db, hold ? "HOLDING (fixed RX1 path)" : "solved weights on TX1",
+	       (unsigned long)n);
 }
 
 void set_smiavg(double *param, char param_no)

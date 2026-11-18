@@ -149,6 +149,39 @@ static int      gain_skip = 0;
 static uint32_t gain_seq  = 0;
 static uint32_t gain_skipped = 0;
 uint32_t gnss_smi_gain_skipped(void) { return gain_skipped; }
+
+/* MOD-33c: CLEAN HOLD. With no jammer, power inversion with 16 time taps
+ * whitens the band: the filter keeps moving with the noise estimate (667
+ * updates/s), so the satellites see a slowly wandering amplitude, phase and
+ * group delay -- the receiver's carrier / code loops pull in and lock a little
+ * slower than on the raw RX1 path. While the SMI J/N stays under clean_in_db
+ * for 2 s, TX1 gets the fixed reference tap (RX1 delayed 8 samples: exactly
+ * the pass=1 signal) and nothing more is written. The solver keeps running on
+ * every window, so the first window with J/N over clean_out_db writes the
+ * nulling weights again (~1.5 ms): a jammer is nulled as before. */
+static int      clean_en     = 1;
+static double   clean_in_db  = -3.0;     /* enter under this J/N for 2 s */
+static double   clean_out_db = 0.0;      /* leave over this J/N at once */
+static int      clean_hold   = 0;
+static int      clean_cnt_ok = 0;        /* consecutive solves under clean_in_db */
+static uint32_t clean_enters = 0;
+static gnss_time_t clean_t0;
+void gnss_smi_set_clean(int en, double in_db, double out_db)
+{
+    clean_en = en ? 1 : 0;
+    if (out_db < in_db) { out_db = in_db; }
+    clean_in_db = in_db;
+    clean_out_db = out_db;
+    if (!clean_en) { clean_hold = 0; clean_cnt_ok = 0; }
+}
+void gnss_smi_get_clean(int *en, double *in_db, double *out_db, int *hold, uint32_t *enters)
+{
+    if (en) { *en = clean_en; }
+    if (in_db) { *in_db = clean_in_db; }
+    if (out_db) { *out_db = clean_out_db; }
+    if (hold) { *hold = clean_hold; }
+    if (enters) { *enters = clean_enters; }
+}
 void gnss_smi_gain_changed(void)
 {
     if (have_avg) { sm.avg_resets++; }
@@ -370,6 +403,7 @@ int gnss_smi_weight_taps(int *n1, int *n2)
 {
     int k, a = 0, b = 0;
     if (!sm.updates) { if (n1) { *n1 = 0; } if (n2) { *n2 = 0; } return -1; }
+    if (clean_hold) { if (n1) { *n1 = 1; } if (n2) { *n2 = 0; } return 0; }   /* MOD-33c */
     for (k = 0; k < nL; k++) {
         if (wr_[k] != 0.0 || wi_[k] != 0.0) { a++; }
         if (wr_[nL + k] != 0.0 || wi_[nL + k] != 0.0) { b++; }
@@ -459,6 +493,17 @@ static void write_weights(void)
         sm.img_gain += (wr_[i] * wr_[i] + wi_[i] * wi_[i]) * ldexp(1.0, -2 * k);
     }
     sm.ref_gain = (wr_[REF] * wr_[REF] + wi_[REF] * wi_[REF]) * ldexp(1.0, -2 * k);
+}
+
+/* MOD-33c: the reference tap alone (RX1 delayed REF samples = the pass=1 path) */
+static void write_identity(void)
+{
+    double sr[NM], si[NM];
+    int i;
+    for (i = 0; i < N; i++) { sr[i] = wr_[i]; si[i] = wi_[i]; wr_[i] = 0.0; wi_[i] = 0.0; }
+    wr_[REF] = 1.0;
+    write_weights();
+    for (i = 0; i < N; i++) { wr_[i] = sr[i]; wi_[i] = si[i]; }
 }
 
 /* conventional weights a / (a^H a): the start before the first window */
@@ -683,7 +728,34 @@ int gnss_smi_poll(void)
         return 1;
     }
     t3 = gnss_time_now();
-    write_weights();
+    {
+        int write_solved = 1;
+        if (clean_en && sm.updates > 0) {
+            gnss_null_t o;
+            double jn = (gnss_smi_null_analysis(&o) == 0) ? o.jn_in_db : 99.0;
+            if (!clean_hold) {
+                if (jn < clean_in_db) {
+                    if (clean_cnt_ok++ == 0) { clean_t0 = t3; }
+                    if (tus(clean_t0, t3) >= 2.0e6) {
+                        clean_hold = 1;
+                        clean_enters++;
+                        write_identity();
+                        write_solved = 0;
+                    }
+                } else {
+                    clean_cnt_ok = 0;
+                }
+            } else if (jn > clean_out_db) {
+                clean_hold = 0;               /* jammer: null from this window on */
+                clean_cnt_ok = 0;
+            } else {
+                write_solved = 0;             /* hold the fixed reference tap */
+            }
+        } else {
+            clean_hold = 0;
+        }
+        if (write_solved) { write_weights(); }
+    }
     t4 = gnss_time_now();
     sm.updates++;
     {

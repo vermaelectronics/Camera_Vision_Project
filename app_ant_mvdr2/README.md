@@ -107,3 +107,15 @@ window can measure (3/sqrt(K)). See the project doc suppression_jn_theory_12nov2
   16/17 Nov logs). stap? shows "after gain steps N".
 - stap?: "skipped" renamed "windows passed over" (normal: a window every
   0.31 ms, a solve every 1.5 ms).
+
+## 17 Nov 2026 (MOD-33c): clean hold -- faster satellite lock with no jammer
+- With no jammer, power inversion with 16 time taps keeps re-shaping (whitening)
+  the band 667 times a second from a noisy estimate: the satellites see a slowly
+  wandering amplitude / phase / group delay and the receiver locks a little slower.
+- Now: SMI J/N under -3 dB for 2 s -> TX1 gets the fixed RX1 reference tap (the
+  pass=1 signal) and nothing more is written. The solver still runs every window;
+  the first window with J/N over 0 dB writes the nulling weights again (~1.5 ms).
+- gnss_clean=1 (default) / gnss_clean=0 (old behaviour) / gnss_clean=1,in,out (J/N dB).
+- stap? shows "clean HOLDING ..."; gnss_kpi? has clean=0 off / 1 on / 2 holding.
+- Host test (gnss_smi.c with simulated windows): hold after 2 s, 0 weight loads
+  while holding, 20 dB jammer -> nulling weights on the first window, 30 dB S.
