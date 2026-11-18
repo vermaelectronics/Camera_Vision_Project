@@ -242,6 +242,12 @@ if want hdl; then
   cp "$xsa" "$bit" "$CRPA_BUILD/hdl/"
   rpt="$CRPA_HDL_PRJ_DIR/${CRPA_HDL_PRJ_NAME}.runs/impl_1/system_top_utilization_placed.rpt"
   [[ -f "$rpt" ]] && grep -E "^\| (Slice LUTs|Slice Registers|Block RAM Tile|DSPs) " "$rpt" | head -4
+  # Vivado's power / junction-temperature estimate of the implemented design
+  prpt=$(ls "$CRPA_HDL_PRJ_DIR/${CRPA_HDL_PRJ_NAME}.runs/impl_1/"*power_routed.rpt 2>/dev/null | head -1)
+  if [[ -n "$prpt" ]]; then
+    grep -E "^\| (Total On-Chip Power|Junction Temperature|Thermal Margin)" "$prpt" | sed 's/^/HDL: /'
+    cp "$prpt" "$CRPA_BUILD/hdl/power_routed.rpt"
+  fi
   echo "HDL: PASS -> $CRPA_BUILD/hdl/system_top.{bit,xsa} (timing met)"
 fi
 
