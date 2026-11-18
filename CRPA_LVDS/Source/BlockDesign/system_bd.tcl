@@ -252,7 +252,7 @@ ad_ip_parameter axi_ad9361 CONFIG.MODE_1R1T 0
 ad_ip_parameter axi_ad9361 CONFIG.ADC_INIT_DELAY 29
 
 # ---- lower-power options (CRPA_PWR_C / CRPA_PWR_B from crpa_algos.sh:
-#      loop-back: C + B, stap7x7: C, the other builds: neither)
+#      loop-back: C + B, stap7x7 / stap6x6: C, the other builds: neither)
 #  C. axi_ad9361 features the loop-back never uses: the DAC DDS tone generator
 #     (TX takes our samples, DAC source = DMA), the IQ correction (the driver
 #     runs it with coefficients 1.0 / 0.0 = no change) and the ADC DC filter

@@ -183,7 +183,7 @@ and `gnss_aj_math.c`.
 | `crpa_mode=0..3` | **crpa1 only**: all taps / RX2 + image / one weight / no image taps |
 | `crpa_direct=0..8` | **crpa27–31**: direct solves at a jammer's start (default 1) |
 | `crpa_track=1/0` | **crpa27–31**: re-solve when a moving jammer leaves the null (default on) |
-| `crpa_kalman=1/0` | **crpa27–31, stap7x7**: Kalman weight tracker (default on at boot; 0 = off) |
+| `crpa_kalman=1/0` | **crpa27–31, stap7x7, stap6x6**: Kalman weight tracker (default on at boot; 0 = off) |
 | `crpa_predict=1/0` | **crpa27–31**: simple weight prediction, used while `crpa_kalman=0` (default on) |
 | `crpa_passes=1..8` | **crpa27–31**: NLMS passes per capture (default 2) |
 
