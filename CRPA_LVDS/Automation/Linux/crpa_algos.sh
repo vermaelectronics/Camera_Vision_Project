@@ -12,6 +12,8 @@
 #    crpa30  stap_pi  16 + 16           8
 #    crpa31  stap_pi  18 + 18           9
 #    loopback  (none)  -                -    no anti-jam: RX1 -> TX1, RX2 -> TX2
+#    sfap    sfap_pi   256 bins, 1 weight + 2 image taps per bin, pulse blanker,
+#                      bin excision (SFAP-PI v6.3, Source/SFAP)
 #                                             (./build_all.sh --algo loopback)
 #
 #  The algorithm sources are Source/CRPA/<algo>/{fpga,arm}, exactly as
@@ -34,17 +36,22 @@ crpa_algo_params() {   # <algo> -> CRPA_NUM CRPA_CORE CRPA_NT CRPA_REF CRPA_NWTS
     crpa31) CRPA_NUM=31; CRPA_CORE=stap_pi; CRPA_NT=18; CRPA_REF=9 ;;
     # plain RX -> TX loop-back: no filter core, no solver (gnss_passthrough only)
     loopback) CRPA_NUM=0; CRPA_CORE=none; CRPA_NT=1; CRPA_REF=0 ;;
+    # SFAP-PI v6.3: 256-bin space-frequency filter (sources in Source/SFAP)
+    sfap) CRPA_NUM=0; CRPA_CORE=sfap_pi; CRPA_NT=1; CRPA_REF=0 ;;
     *) return 1 ;;
   esac
   CRPA_NW_USED=$((2 * CRPA_NT))
   if [[ "$CRPA_CORE" == none ]]; then
     CRPA_NWTS=1; CRPA_NW_USED=1; CRPA_NWCJ=1; CRPA_HAS_GAIN=0; CRPA_CORE_VER=0
+  elif [[ "$CRPA_CORE" == sfap_pi ]]; then
+    CRPA_NWTS=1; CRPA_NW_USED=1; CRPA_NWCJ=1; CRPA_HAS_GAIN=0; CRPA_CORE_VER=5.0
   elif [[ "$CRPA_CORE" == smi_pi ]]; then
     CRPA_NWTS=64; CRPA_NWCJ=2; CRPA_HAS_GAIN=0; CRPA_CORE_VER=4.9
   else
     CRPA_NWTS=$CRPA_NW_USED; CRPA_NWCJ=6; CRPA_HAS_GAIN=1; CRPA_CORE_VER=1.0
   fi
   CRPA_AJ_INFO=$(printf '0x%02X%02X%02X07' "$CRPA_NUM" "$CRPA_NT" "$CRPA_REF")
+  [[ "$CRPA_CORE" == sfap_pi ]] && CRPA_AJ_INFO=0x08070C05
   export CRPA_NUM CRPA_CORE CRPA_NT CRPA_REF CRPA_NWTS CRPA_NW_USED CRPA_NWCJ CRPA_HAS_GAIN CRPA_CORE_VER CRPA_AJ_INFO
   return 0
 }
