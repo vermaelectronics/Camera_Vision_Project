@@ -50,14 +50,15 @@ if [[ "$CRPA_CORE" == smi_pi ]]; then
   cmds='| `crpa_mode=0..3` | tap set: 0 = RX1 + RX2 taps + image (default), 1 = RX2 taps + image, 2 = one weight, 3 = no image taps |'
   moving='crpa1 has **no weight prediction**: its weights are one capture old, so a jammer that keeps moving leaks (C-sim: 11 dB at 2 degrees per capture). crpa27..31 are built for that case.'
 else
-  solver="STAP-NLMS: a direct (Wiener, Cholesky) solve on the first capture of a jammer, then NLMS on every capture (2 passes, step from the J/N); moving-jammer tracking re-solves directly when the null is lost; weight prediction commits weights predicted half a hold interval ahead while a moving jammer leaves the held ones behind."
+  solver="STAP-NLMS: a direct (Wiener, Cholesky) solve on the first capture of a jammer, then NLMS on every capture (2 passes, step from the J/N); moving-jammer tracking re-solves directly when the null is lost; a Kalman weight tracker (on at boot) filters the solved weights and commits them predicted half a hold interval ahead, so a moving jammer stays in the null."
   nimg=3; nw=$((2 * CRPA_NT - 1 + 6))
   dsp=$((3 * nw + 4))
   cmds='| `crpa_direct=0..8` | direct solves at the start of a jammer (default 1) |
 | `crpa_track=1/0` | re-solve when a moving jammer leaves the null (default on) |
-| `crpa_predict=1/0` | weight prediction for a moving jammer (default on) |
+| `crpa_kalman=1/0` | Kalman weight tracker (default **on** at boot; 0 = off) |
+| `crpa_predict=1/0` | simple weight prediction, used only while `crpa_kalman=0` (default on) |
 | `crpa_passes=1..8` | NLMS passes over each capture (default 2) |'
-  moving='Moving jammers: tracking and prediction are on by default; `crpa_report?` shows the re-solves, the prediction state and the lead.'
+  moving='Moving jammers: tracking and the Kalman tracker are on by default; `crpa_report?` shows the re-solves, the lead and a `Kalman tracker` line (steps, manoeuvres, NIS). `crpa_kalman=0` switches the Kalman tracker off.'
 fi
 
 # ---- test results ------------------------------------------------------------------------

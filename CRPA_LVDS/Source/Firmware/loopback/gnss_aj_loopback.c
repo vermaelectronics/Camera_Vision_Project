@@ -133,6 +133,7 @@ int  gnss_aj_set_direct(int n)     { (void)n; return -2; }
 int  gnss_aj_set_track(int on)     { (void)on; return -2; }
 int  gnss_aj_set_predict(int on)   { (void)on; return -2; }
 int  gnss_aj_set_passes(int n)     { (void)n; return -2; }
+int  gnss_aj_set_kalman(int on)    { (void)on; return -2; }
 void gnss_aj_set_log(int s)        { (void)s; }
 void gnss_aj_set_csv(int ms)       { (void)ms; }
 void gnss_aj_gain_stepped(int d)   { (void)d; }

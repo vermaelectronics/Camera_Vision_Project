@@ -79,6 +79,7 @@ int  gnss_aj_set_direct(int n);     /* direct solves at a jammer's start      */
 int  gnss_aj_set_track(int on);     /* moving-jammer re-solve                 */
 int  gnss_aj_set_predict(int on);   /* weight prediction                      */
 int  gnss_aj_set_passes(int n);     /* NLMS passes per capture                */
+int  gnss_aj_set_kalman(int on);    /* Kalman weight tracker (default on)     */
 void gnss_aj_set_log(int seconds);  /* periodic status line, 0 = events only */
 void gnss_aj_set_csv(int ms);       /* CSV line period, 0 = off              */
 /* the matched gain loop stepped both RX gains by delta_db (hook kept for

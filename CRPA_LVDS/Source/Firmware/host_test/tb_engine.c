@@ -47,7 +47,12 @@ static XTime tb_now;
 #define T_MOVE      4000000ULL
 #define T_JAM_OFF   6000000ULL
 #define T_END       8000000ULL
-static const double NOISE_SD = 3.0, JN_DB = 40.0, TURN_DEG_S = 150.0;
+static const double NOISE_SD = 3.0, JN_DB = 40.0, TURN_DEG_S =
+#ifdef TB_TURN
+	TB_TURN;
+#else
+	150.0;
+#endif
 /* the ARM's time for one solve (capture -> commit), so the committed weights are
  * as old as on the board and the weight prediction has something to do */
 #define SOLVE_US    20000ULL
@@ -298,6 +303,10 @@ int main(void)
 	gnss_aj_set_log(0);
 #ifdef TB_NOPRED
 	gnss_aj_set_predict(0);           /* A/B: the moving jammer without prediction */
+	gnss_aj_set_kalman(0);
+#endif
+#ifdef TB_NOKAL
+	gnss_aj_set_kalman(0);            /* A/B: the simple predictor instead of the Kalman tracker */
 #endif
 	if(!gnss_aj_enabled()) { printf("ENGINE_TB: FAIL - the engine refused to start\n"); return 1; }
 	while(tb_now < T_END) {

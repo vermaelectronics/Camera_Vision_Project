@@ -153,6 +153,7 @@ command cmd_list[] = {
 	{"crpa_track=", "crpa27..31: 1 = re-solve directly when a moving jammer leaves the null (default), 0 = off.", "crpa_track=1", set_gnss_aj_track},
 	{"crpa_predict=", "crpa27..31: 1 = commit weights predicted ahead for a moving jammer (default), 0 = off.", "crpa_predict=1", set_gnss_aj_predict},
 	{"crpa_passes=", "crpa27..31: NLMS passes over each capture, 1..8 (default 2).", "crpa_passes=2", set_gnss_aj_passes},
+	{"crpa_kalman=", "crpa27..31, stap7x7: 1 = Kalman weight tracker for a moving jammer (default, on at boot), 0 = off (then crpa_predict applies).", "crpa_kalman=0", set_gnss_aj_kalman},
 	{"gnss_band?", "RF profile and which GNSS signals it carries (GPS, Galileo, BeiDou, GLONASS).", "", get_gnss_band},
 	{"gnss_band=", "1 = boot profile 1568.5 MHz / 30.72 MS/s / 20 MHz (default, gnss_boot_config.h), 0 = L1 only, 2 = no BeiDou B1I, 3 = no GLONASS (2, 3: 50 MS/s), 4 = L1 anti-jam narrow 8 MHz, 5 = L1 anti-jam multipath 15.36 MS/s, 6 = the last gnss_band_custom=.", "gnss_band=1", set_gnss_band},
 	{"gnss_band_custom=", "Any RF profile: LO [MHz] rate [MS/s] RF bandwidth [MHz], RX and TX together, e.g. 1575.42 30.72 18.", "gnss_band_custom=1575.42 30.72 18", set_gnss_band_custom},
@@ -631,6 +632,12 @@ void set_gnss_aj_passes(double* param, char param_no)
 {
 	if(param_no < 1) { console_print("crpa_passes= needs 1..8\n"); return; }
 	aj_setting_result("crpa_passes", gnss_aj_set_passes((int)param[0]));
+}
+
+void set_gnss_aj_kalman(double* param, char param_no)
+{
+	if(param_no < 1) { console_print("crpa_kalman= needs 0 or 1\n"); return; }
+	aj_setting_result("crpa_kalman", gnss_aj_set_kalman((int)param[0] != 0));
 }
 
 void get_gnss_band(double* param, char param_no)

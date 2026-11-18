@@ -80,9 +80,12 @@ jammer, then the jammer moving at 150°/s, then no jammer.
 | | crpa1 | crpa27 – crpa31 |
 |---|---|---|
 | JAMMER ON → NULLED → OFF → bypass | yes | yes |
-| static jammer, mean residual over each hold | 0.00 dB | 0.24 – 0.25 dB |
-| moving jammer (150°/s), mean residual | 17.8 dB (no prediction) | 2.4 dB |
-| crpa27 with `crpa_predict=0` | | 15.6 dB |
+| static jammer, mean residual over each hold | 0.00 dB | 0.05 dB (Kalman on) |
+| moving jammer (150°/s), mean residual | 17.8 dB (no prediction) | 2.1 dB (Kalman on) |
+| with `crpa_kalman=0` (simple prediction) | | static 0.25 dB, moving 2.4 dB |
+| with `crpa_kalman=0` and `crpa_predict=0` | | moving 15.6 dB |
+| moving 30°/s: Kalman / simple prediction | | 0.4 dB / 3.9 dB |
+| moving 300°/s: Kalman / simple prediction | | 6.5 dB / 9.9 dB |
 
 ### HDL (`test/hdl_tb_results_v7.0.txt`)
 
@@ -180,7 +183,8 @@ and `gnss_aj_math.c`.
 | `crpa_mode=0..3` | **crpa1 only**: all taps / RX2 + image / one weight / no image taps |
 | `crpa_direct=0..8` | **crpa27–31**: direct solves at a jammer's start (default 1) |
 | `crpa_track=1/0` | **crpa27–31**: re-solve when a moving jammer leaves the null (default on) |
-| `crpa_predict=1/0` | **crpa27–31**: weight prediction (default on) |
+| `crpa_kalman=1/0` | **crpa27–31, stap7x7**: Kalman weight tracker (default on at boot; 0 = off) |
+| `crpa_predict=1/0` | **crpa27–31**: simple weight prediction, used while `crpa_kalman=0` (default on) |
 | `crpa_passes=1..8` | **crpa27–31**: NLMS passes per capture (default 2) |
 
 A command for the other algorithm family answers `not part of crpaN`.
@@ -193,7 +197,7 @@ A command for the other algorithm family answers `not part of crpaN`.
    then `NULLED in … ms` and a residual near 0 dB.
 3. For a moving jammer on crpa27–31, `crpa_report?` shows the
    `moving jammer` line with the re-solves, the prediction state and the lead.
-   Compare `crpa_predict=0` against `1`.
+   Compare `crpa_kalman=0` against `1` (the `Kalman tracker` line shows its steps and manoeuvres).
 
 ## 5. What is verified, what is not
 

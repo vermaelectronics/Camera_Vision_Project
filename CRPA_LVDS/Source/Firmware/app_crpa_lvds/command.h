@@ -262,6 +262,7 @@ void set_gnss_aj_direct(double* param, char param_no);
 void set_gnss_aj_track(double* param, char param_no);
 void set_gnss_aj_predict(double* param, char param_no);
 void set_gnss_aj_passes(double* param, char param_no);
+void set_gnss_aj_kalman(double* param, char param_no);
 void get_gnss_band(double* param, char param_no);
 void set_gnss_band(double* param, char param_no);
 void set_gnss_band_custom(double* param, char param_no);

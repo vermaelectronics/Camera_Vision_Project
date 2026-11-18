@@ -22,7 +22,7 @@ for a in "${list[@]}"; do
          "$CRPA_NUM" "$a" "$CRPA_CORE" "$CRPA_AJ_INFO" > "$d/crpa_build.h"
   echo 'extern unsigned int tb_capbuf[];' > "$d/tb_buf.h"
   gcc -O2 -std=gnu99 -Wall -Wextra -Wno-unused-parameter -Wno-pointer-to-int-cast -Wno-int-to-pointer-cast \
-      -include "$d/tb_buf.h" -DGNSS_AJ_BUF_ADDR='((uintptr_t)tb_capbuf)' \
+      -include "$d/tb_buf.h" -DGNSS_AJ_BUF_ADDR='((uintptr_t)tb_capbuf)' ${TB_CFLAGS:-} \
       -I"$d" -I"$here/stub" -I"$fw" \
       "$here/tb_engine.c" "$fw/gnss_aj.c" "$fw/gnss_passthrough.c" "$d/gnss_aj_math.c" -lm -o "$d/tb" || { fail=1; continue; }
   if [[ $verbose -eq 1 ]]; then "$d/tb" || fail=1

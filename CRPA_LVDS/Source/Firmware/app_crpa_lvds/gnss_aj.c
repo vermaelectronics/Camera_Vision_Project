@@ -133,6 +133,131 @@ static int      core_has_w;                    /* the core runs solved weights  
  * commit), smoothed; lead = (d + T/2) / T capture periods */
 static XTime    cap_t0, cap_t0_prev;
 static double   per_us = -1.0, dly_us = -1.0, lead = 1.0;
+
+/* ---- Kalman weight tracker (on by default; crpa_kalman=0 switches it off) --
+ * Every weight w_j (complex) is tracked with the state [w, v] (value, change
+ * per capture) and the constant-velocity model w(k+1) = w(k) + v(k), v(k+1) =
+ * v(k) + process noise (white acceleration, variance kQ). The measurement is
+ * the solved weight of each capture (Wiener start, then NLMS), with noise
+ * variance kR. All weights share one model, so one 2 x 2 covariance (kP) and
+ * one gain serve all of them. kR and kQ adapt: the normalised innovation
+ * (innovation power / its predicted variance, 1 when the model fits) raises
+ * kQ when the jammer moves faster than the model expects (manoeuvre) and lets
+ * it decay when it is steady; kR follows the innovation power while the
+ * model fits (covariance matching). The weights committed to the FPGA are
+ * the filtered ones predicted 'lead' captures ahead (the middle of the hold
+ * interval), w + lead v. It replaces the simpler aj_pred_* prediction while
+ * on; a direct (Wiener) solve restarts it. */
+static int      aj_kal_on = 1;
+static double   kw_r[AJ_NW], kw_i[AJ_NW], kv_r[AJ_NW], kv_i[AJ_NW];
+static double   kP11, kP12, kP22, kR = -1.0, kQ, kal_nis = 1.0;
+static int      kal_have, last_kal;
+static uint32_t kal_steps, kal_manoeuvres;
+
+static void kal_reset(void) { kal_have = 0; kR = -1.0; kal_nis = 1.0; }
+
+static int16_t kal_q312(double v)
+{
+	double s = v * 4096.0;
+	s = (s >= 0.0) ? s + 0.5 : s - 0.5;
+	if(s > 32767.0)  return 32767;
+	if(s < -32768.0) return -32768;
+	return (int16_t)s;
+}
+
+/* weights (Q3.12 x 2^ws words) from doubles; 1 if out of range / not finite */
+static int kal_pack(const double *wr, const double *wi, aj_result_t *r)
+{
+	double wmax = 0.0, sc;
+	int j, ws;
+	for(j = 0; j < AJ_NW; j++) {
+		double m = (j == AJ_REF) ? 0.0 : wr[j] * wr[j] + wi[j] * wi[j];
+		if(!(m == m) || m > 64.0) return 1;
+		if(m > wmax) wmax = m;
+	}
+	wmax = aj_sqrt(wmax);
+	ws = 0;
+	while(ws < AJ_MAXWS && wmax * (double)(2 << ws) <= 7.5) ws++;
+	sc = (double)(1 << ws);
+	for(j = 0; j < AJ_NW; j++) {
+		r->wre[j] = (j == AJ_REF) ? 0 : kal_q312(wr[j] * sc);
+		r->wim[j] = (j == AJ_REF) ? 0 : kal_q312(wi[j] * sc);
+	}
+	r->ws = ws;
+	return 0;
+}
+
+/* After a solve: filter the solved weights in r and write the predicted ones
+ * back into r. Returns 1 when r now holds Kalman weights. */
+static int kal_step(int direct, int ok, double lead_c, aj_result_t *r)
+{
+	const double sc = 1.0 / (4096.0 * (double)(1 << r->ws));
+	double zr[AJ_NW], zi[AJ_NW], pr[AJ_NW], pi[AJ_NW];
+	double z2 = 0.0, nu2 = 0.0, p11, p12, p22, S, k1, k2, nis;
+	int j, n = 0;
+
+	if(!ok) { kal_reset(); return 0; }
+	for(j = 0; j < AJ_NW; j++) {
+		zr[j] = sc * (double)r->wre[j]; zi[j] = sc * (double)r->wim[j];
+		if(j != AJ_REF) { z2 += zr[j] * zr[j] + zi[j] * zi[j]; n++; }
+	}
+	z2 /= (double)(2 * n);                        /* mean power per real dimension */
+	if(direct || !kal_have) {                     /* (re)start on the solved weights */
+		for(j = 0; j < AJ_NW; j++) { kw_r[j] = zr[j]; kw_i[j] = zi[j]; kv_r[j] = kv_i[j] = 0.0; }
+		if(kR <= 0.0) kR = 1e-4 * z2 + 1e-10;
+		kQ = 1e-2 * kR;
+		kP11 = kR; kP12 = 0.0; kP22 = kR;
+		kal_have = 1;
+		return 0;
+	}
+	/* predict */
+	for(j = 0; j < AJ_NW; j++) { kw_r[j] += kv_r[j]; kw_i[j] += kv_i[j]; }
+	p11 = kP11 + 2.0 * kP12 + kP22 + kQ / 3.0;
+	p12 = kP12 + kP22 + kQ / 2.0;
+	p22 = kP22 + kQ;
+	/* innovation */
+	for(j = 0; j < AJ_NW; j++) {
+		double a = zr[j] - kw_r[j], b = zi[j] - kw_i[j];
+		if(j != AJ_REF) nu2 += a * a + b * b;
+	}
+	nu2 /= (double)(2 * n);
+	S = p11 + kR;
+	nis = nu2 / S;
+	kal_nis = 0.7 * kal_nis + 0.3 * nis;
+	/* adapt the noises */
+	if(nis > 3.0) {                               /* manoeuvre: the jammer moved faster than */
+		double e = nu2 - S;                       /* the model expects: open the gain at once */
+		kQ = (kQ * 4.0 > e) ? kQ * 4.0 : e;
+		p11 += e; p12 += e; p22 += e;             /* forget the old velocity estimate too */
+		S = p11 + kR;
+		kal_manoeuvres++;
+	} else if(nis < 1.0) {
+		kQ *= 0.9;                                /* steady: narrow the gain back down */
+	}
+	if(nis < 1.5) {                               /* model fits: covariance matching for kR */
+		double rr = nu2 - p11;
+		if(rr < 0.1 * kR) rr = 0.1 * kR;
+		kR = 0.95 * kR + 0.05 * rr;
+	}
+	if(kR < 1e-12) kR = 1e-12;
+	if(kQ < 1e-6 * kR) kQ = 1e-6 * kR;
+	if(kQ > 1e3 * kR + z2) kQ = 1e3 * kR + z2;
+	/* update */
+	k1 = p11 / S; k2 = p12 / S;
+	for(j = 0; j < AJ_NW; j++) {
+		double a = zr[j] - kw_r[j], b = zi[j] - kw_i[j];
+		kw_r[j] += k1 * a; kw_i[j] += k1 * b;
+		kv_r[j] += k2 * a; kv_i[j] += k2 * b;
+	}
+	kP11 = (1.0 - k1) * p11;
+	kP12 = (1.0 - k1) * p12;
+	kP22 = p22 - k2 * p12;
+	kal_steps++;
+	/* commit the weights predicted to the middle of the hold interval */
+	for(j = 0; j < AJ_NW; j++) { pr[j] = kw_r[j] + lead_c * kv_r[j]; pi[j] = kw_i[j] + lead_c * kv_i[j]; }
+	if(kal_pack(pr, pi, r)) return 0;            /* out of range: the solved weights stay */
+	return 1;
+}
 #else
 /* ---- crpa1: SMI ------------------------------------------------------------ */
 static int      aj_mode = AJ_MODE_STAP;
@@ -274,6 +399,7 @@ static void solver_reset(void)
 	aj_committed(0);
 	aj_track_reset(&trk);
 	aj_pred_reset(&pred);
+	kal_reset();
 	direct_left = aj_direct_n;
 	core_has_w = 0;
 	nz_jam = -1.0;
@@ -429,6 +555,7 @@ static const char *solve_txt(void)
 {
 #if CRPA_STAP
 	if(last_direct) return "direct";
+	if(last_kal) return "NLMS+Kalman";
 	return last_pred ? "NLMS+pred" : "NLMS";
 #else
 	return "SMI";
@@ -747,7 +874,10 @@ static void solve_capture(XTime now)
 	res.supp_db = st_supp_db;
 
 	last_direct = direct;
-	last_pred = aj_pred_after(&pred, direct, ok, noise, lead, aj_pred_on, &res);
+	/* the simpler predictor only commits while the Kalman tracker is off (it
+	 * still measures the staleness for crpa_report?) */
+	last_pred = aj_pred_after(&pred, direct, ok, noise, lead, aj_pred_on && !aj_kal_on, &res);
+	last_kal = aj_kal_on ? kal_step(direct, ok, lead, &res) : 0;
 	res_valid = res_solved = 1;
 	n_upd++;
 	cnt_upd++;
@@ -998,6 +1128,17 @@ int gnss_aj_set_predict(int on)
 #endif
 }
 
+int gnss_aj_set_kalman(int on)
+{
+#if CRPA_STAP
+	aj_kal_on = on ? 1 : 0;
+	kal_reset();
+	return 0;
+#else
+	(void)on; return -2;
+#endif
+}
+
 int gnss_aj_set_passes(int n)
 {
 #if CRPA_STAP
@@ -1187,6 +1328,10 @@ void gnss_aj_report(void)
 			      (char*)(aj_track_on ? "ON" : "off"), (long)trk.redo,
 			      (char*)(aj_pred_on ? "ON" : "off"), (char*)(pred.on ? "active" : "idle"),
 			      f1(pred.stale_db), f2u(lead), (long)pred.used);
+		console_print("Kalman tracker: %s (%s), %d steps, %d manoeuvres, NIS %s, R %s, Q/R %s\n",
+			      (char*)(aj_kal_on ? "ON" : "off"), (char*)(last_kal ? "committing" : "idle"),
+			      (long)kal_steps, (long)kal_manoeuvres, f2u(kal_nis),
+			      (char*)(kR > 0.0 ? "set" : "-"), f2u(kR > 0.0 ? kQ / kR : 0.0));
 		if(nf0 <= 0.0)
 			console_print("noise         : from the canceller's output (%s LSB^2), no clean period yet\n",
 				      f1u(nz_jam));
