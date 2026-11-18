@@ -28,6 +28,7 @@
 #include "gnss_autostart.h"
 #include "command.h"
 #include "gnss_quiet.h"     /* LVDS console: engine output captured, see gnss_quiet.h */
+static int32_t rx2_off_v(void);   /* LVDS: RX2 = RX1 - gnss_rxoff */
 #define GNSS_QUIET_THIS_FILE
 #undef  printf
 #define printf        gnss_qprintf
@@ -278,6 +279,9 @@ static int chk_radio(void)
     ad9361_get_rx_rf_gain(ad9361_phy, 1, &g2);
     if (m1 == 0 && m2 == 0 && g1 == g2) {
         res(LV_PASS, "radio: RX1/RX2 gain MANUAL, %ld dB on both\n", (long)g1);
+    } else if (m1 == 0 && m2 == 0 && g1 - g2 == rx2_off_v()) {
+        res(LV_PASS, "radio: RX1/RX2 gain MANUAL, RX1 %ld dB, RX2 %ld dB (gnss_rxoff=%ld)\n",
+            (long)g1, (long)g2, (long)rx2_off_v());
     } else {
         res(LV_FAIL, "radio: RX1 mode %lu gain %ld dB, RX2 mode %lu gain %ld dB.\n",
             (unsigned long)m1, (long)g1, (unsigned long)m2, (long)g2);
@@ -708,10 +712,19 @@ double gnss_rx_floor_sig_dbfs(void)
 
 static void set_rx_gain_both(int32_t g)
 {
+    int32_t g2 = g - rx2_off_v();
+    if (g2 < GNSS_CFG_RX_GAIN_MIN_DB) { g2 = GNSS_CFG_RX_GAIN_MIN_DB; }
+    if (g2 > GNSS_CFG_RX_GAIN_MAX_DB) { g2 = GNSS_CFG_RX_GAIN_MAX_DB; }
     ad9361_set_rx_gain_control_mode(ad9361_phy, 0, 0);
     ad9361_set_rx_gain_control_mode(ad9361_phy, 1, 0);
     ad9361_set_rx_rf_gain(ad9361_phy, 0, g);
-    ad9361_set_rx_rf_gain(ad9361_phy, 1, g);
+    ad9361_set_rx_rf_gain(ad9361_phy, 1, g2);
+}
+/* re-apply the RX2 offset at the current RX1 gain (gnss_rxoff=) */
+void gnss_rx2_off_apply(void)
+{
+    int32_t g = 0;
+    if (ad9361_phy && ad9361_get_rx_rf_gain(ad9361_phy, 0, &g) == 0) { set_rx_gain_both(g); }
 }
 
 static int rx_meas_one = 0;   /* MOD-26b: 1/2 = only that channel's noise is plausible */
@@ -1925,6 +1938,46 @@ static int      agc_clip_hits = 0;        /* fast checks with any clipping    */
  * on every satellite while the receiver was trying to hold lock). */
 static int agc_fast_blank = 0;
 
+/* LVDS / ant board: barrage AGC on the clip RATE instead of the peak.
+ * A noise-like jammer has Gaussian tails: its 1-s peak sits 11-13 dB over
+ * its rms, so a peak limit keeps the gain ~5 dB lower than the ADC needs.
+ * Clipping 1e-4 of the samples clips at ~3.9 sigma: the clipped energy is
+ * ~60 dB under the jammer, far under the null depth, and the gain (= the
+ * satellite C/N0 when the AD9361 floor limits it) rises 4-6 dB.
+ * agc_clip_ppm = allowed clip rate (gnss_agcclip=ppm, 0 = old peak rule). */
+static int      agc_clip_ppm = 100;
+static int      agc_bar = 0;              /* barrage rule active (slow loop)   */
+static uint32_t agc_cs = 0, agc_cw = 0;   /* clipped samples / windows, 100 ms */
+static uint32_t agc_rs[20], agc_rw[20];   /* last 2 s, per 100 ms              */
+static int      agc_ri = 0;
+static double   agc_rate1 = 0.0, agc_rate2 = 0.0, agc_rate01 = 0.0;   /* ppm   */
+int  gnss_agc_set_clip_ppm(int ppm)
+{
+    if (ppm < 0 || ppm > 2000) { return -1; }
+    agc_clip_ppm = ppm;
+    return 0;
+}
+int  gnss_agc_get_clip_ppm(void) { return agc_clip_ppm; }
+int  gnss_agc_barrage_rule(double *rate_ppm_1s)
+{
+    if (rate_ppm_1s) { *rate_ppm_1s = agc_rate1; }
+    return agc_bar;
+}
+
+/* LVDS / ant board: RX2 gain = RX1 gain - rx2_off (gnss_rxoff=dB): one
+ * channel hotter than the other (antenna LNA, cable) sets the ADC headroom
+ * of both; with the offset both reach the ADC limit together. The MVDR
+ * weights absorb a flat gain difference; the STAP taps a small band shape. */
+static int32_t  rx2_off = 0;
+int  gnss_rx2_off_set(int db)
+{
+    if (db < -20 || db > 20) { return -1; }
+    rx2_off = db;
+    return 0;
+}
+int  gnss_rx2_off_get(void) { return (int)rx2_off; }
+static int32_t rx2_off_v(void) { return rx2_off; }
+
 /* LVDS / ant board: step-up with a jammer, gnss_agcstep=dB,s */
 static long agc_jstep_db = 1;              /* dB per step   (1..15) */
 static int  agc_jstep_s  = 1;              /* s between steps (1..10) */
@@ -1998,7 +2051,13 @@ static void agc_fast(void)
         return;
     }
     if (cm > 0U) { agc_clip_hits++; }
-    if (cm <= 8U) { return; }
+    agc_cs += cm;
+    agc_cw++;
+    if (agc_bar) {
+        /* barrage rule: a few clipped samples per window are the operating
+         * point; cut at once only when the jammer clearly stepped up */
+        if (cm <= 41U) { return; }
+    } else if (cm <= 8U) { return; }
     if (ad9361_get_rx_rf_gain(ad9361_phy, 0, &g) != 0) { return; }
     if (g <= GNSS_CFG_RX_GAIN_MIN_DB) {
         if (!agc_min_warned) {
@@ -2013,7 +2072,10 @@ static void agc_fast(void)
     }
     agc_min_warned = 0;
     /* clipped share of the 8192-sample window says how far over it is */
-    if      (cm > 410U) { step = 15; }      /* > 5 %   */
+    if (agc_bar) {
+        step = (cm > 410U) ? 10 : 4;        /* barrage: rate rule fine-tunes after */
+    }
+    else if (cm > 410U) { step = 15; }      /* > 5 %   */
     else if (cm > 41U)  { step = 10; }      /* > 0.5 % */
     else                { step = 6;  }      /* > 0.1 % */
     agc_apply(g, g - step, 0);
@@ -2098,7 +2160,48 @@ static void agc_slow(void)
      * nothing has changed for 2 s; noise must be >= 2 dB under the target. */
     clip_hits = agc_clip_hits;
     agc_clip_hits = 0;
-    if (clip_hits >= ((peak_lim > -4.0) ? 6 : 3)) {   /* light clipping in 3 (barrage: 6) of 10 checks */
+    {
+        /* clip rate, ppm of the samples, over 0.1 / 1 / 2 s */
+        uint32_t s1 = 0, w1 = 0, s2 = 0, w2 = 0;
+        int i, k;
+        agc_rs[agc_ri] = agc_cs; agc_rw[agc_ri] = agc_cw;
+        agc_rate01 = agc_cw ? 1e6 * (double)agc_cs / (8192.0 * (double)agc_cw) : 0.0;
+        agc_cs = 0; agc_cw = 0;
+        for (i = 0; i < 20; i++) {
+            k = (agc_ri - i + 20) % 20;
+            if (i < 10) { s1 += agc_rs[k]; w1 += agc_rw[k]; }
+            s2 += agc_rs[k]; w2 += agc_rw[k];
+        }
+        agc_ri = (agc_ri + 1) % 20;
+        agc_rate1 = w1 ? 1e6 * (double)s1 / (8192.0 * (double)w1) : 0.0;
+        agc_rate2 = w2 ? 1e6 * (double)s2 / (8192.0 * (double)w2) : 0.0;
+    }
+    agc_bar = (agc_auto && jam && peak_lim > -4.0 && agc_clip_ppm > 0) ? 1 : 0;
+    if (agc_bar) {
+        double t = (double)agc_clip_ppm;
+        long   want_b = have_nf ? (long)floor(rx_target_eff - nf + 0.5) : 0;
+        if (agc_rate01 > 20.0 * t && agc_since_change >= 2) {
+            agc_apply(g, g - 2, 0);
+            sprintf(agc_why, "barrage: clipping %.0f ppm (limit %d): -2 dB", agc_rate01, agc_clip_ppm);
+        } else if (agc_rate1 > 5.0 * t && agc_since_change >= 5) {
+            agc_apply(g, g - 1, 0);
+            sprintf(agc_why, "barrage: clipping %.0f ppm (limit %d): -1 dB", agc_rate1, agc_clip_ppm);
+        } else if (want_b < 2) {
+            sprintf(agc_why, "barrage: at the target noise (clipping %.0f ppm)", agc_rate1);
+        } else if (agc_up_lock > 0) {
+            sprintf(agc_why, "barrage: held %ld dB under the target: anti-hunt lock, %d s left",
+                    want_b, (agc_up_lock + 9) / 10);
+        } else if (agc_rate2 < 0.25 * t && agc_since_change >= 10 * agc_jstep_s &&
+                   agc_up_age >= 10 * agc_jstep_s) {
+            step = (want_b < agc_jstep_db) ? want_b : agc_jstep_db;
+            if (step > 2) { step = 2; }          /* tails: never more than 2 dB at once */
+            agc_apply(g, g + (int32_t)step, 1);
+            sprintf(agc_why, "barrage: clipping %.1f ppm (limit %d): +%ld dB", agc_rate2, agc_clip_ppm, step);
+        } else {
+            sprintf(agc_why, "barrage: held %ld dB under the target, clipping %.0f ppm (limit %d ppm)",
+                    want_b, agc_rate1, agc_clip_ppm);
+        }
+    } else if (clip_hits >= ((peak_lim > -4.0) ? 6 : 3)) {   /* light clipping in 3 (barrage: 6) of 10 checks */
         if (agc_since_change >= 2) {         /* MOD-27: every 0.2 s, 2 dB when clipping often */
             agc_apply(g, g - ((clip_hits >= 8) ? 2 : 1), 0);
             sprintf(agc_why, "lowering: light ADC clipping");

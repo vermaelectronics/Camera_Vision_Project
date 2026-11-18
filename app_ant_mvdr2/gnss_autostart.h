@@ -87,4 +87,12 @@ extern int  gnss_prompt_open;
 int  gnss_agc_set_jstep(int db, int sec);
 void gnss_agc_get_jstep(int *db, int *sec);
 
+/* LVDS / ant board: barrage AGC on the ADC clip rate, RX2 gain offset */
+int  gnss_agc_set_clip_ppm(int ppm);        /* 0 = old peak rule, 1..2000 */
+int  gnss_agc_get_clip_ppm(void);
+int  gnss_agc_barrage_rule(double *rate_ppm_1s);
+int  gnss_rx2_off_set(int db);              /* RX2 gain = RX1 gain - db */
+int  gnss_rx2_off_get(void);
+void gnss_rx2_off_apply(void);
+
 #endif /* GNSS_AUTOSTART_H_ */

@@ -232,7 +232,8 @@ void gnss_ant_menu(void)
 	printf("  CHECK    gnss_tx?   gnss_status?   gnss_jam?   gnss_mvdr?   gnss_spec?\r\n");
 	printf("           status?   rx?   stap?   selftest?\r\n");
 	printf("  SETTINGS band=N (band? lists)   tx1_att=mdB   agc=1|0   rxgain=dB\r\n");
-	printf("           gnss_agcstep=dB,s   taps=N (1..16)   smi=K,A   smiavg=N\r\n");
+	printf("           gnss_agcstep=dB,s   gnss_agcclip=ppm   gnss_rxoff=dB (rxoff?)\r\n");
+	printf("           taps=N (1..16)   smi=K,A   smiavg=N\r\n");
 	printf("  Enter = this menu   help? = these commands   commands? = ALL commands\r\n");
 	printf("  (AD9361 vendor commands rx_lo_freq=, tx1_attenuation=, rx1_rf_gain=, dds_* ...\r\n");
 	printf("   and every MVDR2 gnss_ command are all still there: commands? lists them)\r\n");
@@ -266,6 +267,8 @@ void get_ant_help(double *param, char param_no)
 	item("rxgain=dB", "manual RX gain, same on RX1 and RX2 (sets agc=0)");
 	item("gnss_agcstep=dB,s", "AGC rise with a jammer (def 1 dB every 1 s; e.g. 3,2)");
 	item("taps=N / taps?", "STAP taps per antenna in use, 1..16, live (16 = all)");
+	item("gnss_agcclip=ppm", "barrage AGC: allowed ADC clip rate (def 100 ppm; 0 = peak rule)");
+	item("gnss_rxoff=dB / rxoff?", "RX2 gain = RX1 gain - dB (one channel hotter); rxoff? measures it");
 	printf("  ADVANCED\r\n");
 	item("smi=K,A", "SMI window 2^K snapshots (6..12, def 8), loading A x lambda_min (def 3)");
 	item("smiavg=N", "covariance averaging 0..4 (def 2 = beta 1/4, steadier satellites)");
@@ -324,8 +327,22 @@ void get_rx_info(double *param, char param_no)
 	printf("            hunts since boot %lu (each locks the step-ups 10..80 s)\r\n",
 	       (unsigned long)m.hunts);
 	printf("  ADC       peak RX1 "); pv(m.pk1, 1); printf(" / RX2 "); pv(m.pk2, 1);
-	printf(" dBFS   clipped %lu / %lu per window (<= 8 allowed)\r\n",
+	printf(" dBFS   clipped %lu / %lu in the last window\r\n",
 	       (unsigned long)m.clip1, (unsigned long)m.clip2);
+	{
+		double r = 0.0;
+		int bar = gnss_agc_barrage_rule(&r);
+		printf("  rule      %s, ADC clip rate %.1f ppm (1 s)\r\n",
+		       bar ? "BARRAGE: gain on the clip rate" :
+		       "peak limit (-4 dBFS CW / no jammer)", r);
+		if (gnss_agc_get_clip_ppm() > 0)
+			printf("            barrage limit %d ppm (gnss_agcclip=ppm, 0 = peak rule)\r\n",
+			       gnss_agc_get_clip_ppm());
+		else
+			printf("            barrage clip-rate rule OFF (gnss_agcclip=100 turns it on)\r\n");
+	}
+	printf("  RX2 off   RX2 gain = RX1 gain - %d dB (gnss_rxoff=dB, rxoff? measures it)\r\n",
+	       gnss_rx2_off_get());
 	printf("  power     RX1 "); pv(m.p1, 1); printf(" / RX2 "); pv(m.p2, 1);
 	printf(" dBFS (reference tap, signal + noise)\r\n");
 	printf("  noise     floor "); pv(m.nf, 1); printf(" dBFS   target %.1f dBFS   AD9361 internal ", m.target);
@@ -340,8 +357,9 @@ void get_rx_info(double *param, char param_no)
 		int sdb = 1, ss = 1;
 		gnss_agc_get_jstep(&sdb, &ss);
 		printf("  how it works: a clip cuts the gain at once (6/10/15 dB by how much clips),\r\n");
-		printf("  then 30 ms with no further cut. With a jammer it rises %d dB every %d s, never\r\n", sdb, ss);
-		printf("  closer than 1 dB to the ADC limit (gnss_agcstep=dB,s). Without a jammer it\r\n");
+		printf("  then 30 ms with no further cut. CW: rises %d dB every %d s, never closer than\r\n", sdb, ss);
+		printf("  1 dB to -4 dBFS. BARRAGE: rises %d dB every %d s while the ADC clips < 1/4 of\r\n", sdb, ss);
+		printf("  the limit, -1 dB over 5x the limit (clipped tails cost nothing). Without a jammer it\r\n");
 		printf("  returns to the noise target at up to 10 dB per 0.3 s.\r\n");
 	}
 }
@@ -453,7 +471,8 @@ void get_ant_gnss_status(double *param, char param_no)
 	printf("  gain mode   RX1 %s (%u), RX2 %s (%u)   anti-jam AGC: %s\r\n",
 	       gc_name(gm1), gm1, gc_name(gm2), gm2, m.agc_auto ? "AUTO" : "MANUAL");
 	printf("  RX gain     RX1 %ld dB, RX2 %ld dB%s\r\n", (long)g1, (long)g2,
-	       (g1 != g2) ? "   (DIFFERENT: the null needs them equal)" : "");
+	       (g1 - g2 != gnss_rx2_off_get()) ? "   (NOT the set offset: agc=1 or rxgain= fixes it)" :
+	       (g1 != g2) ? "   (gnss_rxoff offset)" : "");
 	printf("  TX atten    TX1 %lu mdB%s, TX2 %lu mdB   (operating TX1 %lu mdB)\r\n",
 	       (unsigned long)a1, a1 >= GNSS_L1_TX_MAX_ATTEN_MDB ? " = silent" : "",
 	       (unsigned long)a2, (unsigned long)m.att_op);
@@ -619,13 +638,14 @@ void get_selftest(double *param, char param_no)
 
 	printf(" 4 RX1 / RX2 match (limits the null depth)\r\n");
 	if (m.p1 > NA + 1 && m.p2 > NA + 1 && !(m.aj.valid && m.aj.jammed)) {
-		double d = m.p2 - m.p1;
-		snprintf(t, sizeof(t), "RX2 - RX1 noise level %+.1f dB (no jammer)", d);
+		double d  = m.p2 - m.p1;                         /* at the ADC, offset applied */
+		double de = d + (double)(m.g1 - m.g2);           /* at equal gain: the hardware */
+		snprintf(t, sizeof(t), "RX2 - RX1 noise %+.1f dB at the ADC (%+.1f dB at equal gain, no jammer)", d, de);
 		verdict(fabs(d) <= 2.0 ? 0 : (fabs(d) <= 4.0 ? 1 : 2), t,
-			"RX1/RX2 levels differ: match the antennas, LNAs and cables of both channels");
+			"RX1/RX2 levels differ: fix the antenna/LNA/cable, or gnss_rxoff= (rxoff? suggests it)");
 	}
-	if (m.g1 != m.g2)
-		verdict(2, "RX1 and RX2 gains differ", "agc=1 (or rxgain=) sets both channels equal");
+	if (m.g1 - m.g2 != gnss_rx2_off_get())
+		verdict(2, "RX1 and RX2 gains are not the set offset", "agc=1 (or rxgain=) sets them again");
 
 	printf(" 5 ADC headroom (a clipped jammer cannot be nulled)\r\n");
 	snprintf(t, sizeof(t), "ADC peak %.1f dBFS, clipped %lu/%lu per window, AGC hunts %lu",
@@ -714,6 +734,11 @@ void get_ant_kpi(double *param, char param_no)
 	       (unsigned long)m.clip1, (unsigned long)m.clip2);
 	if (m.out_ok) printf(" out=%.1f", m.out); else printf(" out=na");
 	printf(" taps=%d alpha=%.1f", m.ss.La, m.ss.alpha);
+	{
+		double r = 0.0;
+		int bar = gnss_agc_barrage_rule(&r);
+		printf(" agcrule=%s cliprate=%.1f rxoff=%d", bar ? "CLIPRATE" : "PEAK", r, gnss_rx2_off_get());
+	}
 	printf(" wn=%.2f dacclip=%lu hunts=%lu keff=%.0f tx1=%lu\r\n",
 	       m.ss.wnorm_u, (unsigned long)m.dacclip, (unsigned long)m.hunts, m.ss.keff,
 	       (unsigned long)m.att1);
@@ -930,6 +955,58 @@ void set_smi(double *param, char param_no)
 	set_gnss_smi(param, param_no);
 	gnss_smi_get_state(&s);
 	printf("  SMI window 2^%lu, loading %.1f x lambda_min\r\n", (unsigned long)s.kexp, s.alpha);
+}
+
+/* rxoff? : RX1/RX2 level difference and the suggested RX2 gain offset */
+void get_rxoff(double *param, char param_no)
+{
+	gm_t m;
+	gnss_pt_jam_state_t j;
+	(void)param; (void)param_no;
+	gm_read(&m);
+	gnss_pt_jam_get_state(&j);
+	printf("  RX2 gain offset %d dB now: RX1 %ld dB, RX2 %ld dB\r\n", gnss_rx2_off_get(),
+	       (long)m.g1, (long)m.g2);
+	if (m.p1 > NA + 1 && m.p2 > NA + 1) {
+		double d = m.p2 - m.p1, de = d + (double)(m.g1 - m.g2);
+		printf("  RX2 - RX1 power %+.1f dB at the ADC, %+.1f dB at equal gain (%s)\r\n", d, de,
+		       (m.aj.valid && m.aj.jammed) ? "JAMMER: its level per antenna" : "noise, no jammer");
+		printf("  suggested: gnss_rxoff=%d  (puts both channels at the same ADC level)\r\n",
+		       (int)floor(de + 0.5));
+	} else {
+		printf("  no SMI window yet: stap=1 first\r\n");
+	}
+	if (j.available && j.have_ch && j.n1_q8 != (int16_t)GNSS_PT_JAM_Q8_NONE &&
+	    j.n2_q8 != (int16_t)GNSS_PT_JAM_Q8_NONE)
+		printf("  FPGA estimator noise RX2 - RX1 %+.1f dB at the ADC\r\n",
+		       (j.n2_q8 - j.n1_q8) / 256.0);
+	printf("  Best: fix the hardware (antenna LNA supply, cable). The offset is an A/B\r\n");
+	printf("  setting: compare J/N out, S and C/N0 with gnss_rxoff=0 and =N.\r\n");
+}
+
+void set_rxoff(double *param, char param_no)
+{
+	if (param_no < 1 || gnss_rx2_off_set((int)param[0]) != 0) {
+		printf("  gnss_rxoff=dB, -20..20 (RX2 gain = RX1 gain - dB), now %d\r\n", gnss_rx2_off_get());
+		return;
+	}
+	gnss_rx2_off_apply();
+	printf("  RX2 gain = RX1 gain - %d dB, applied (the null re-forms in a few ms)\r\n",
+	       gnss_rx2_off_get());
+	gnss_rep_event("RX2 OFFSET  RX2 gain = RX1 gain - %d dB", gnss_rx2_off_get());
+}
+
+void set_agcclip(double *param, char param_no)
+{
+	if (param_no < 1 || gnss_agc_set_clip_ppm((int)param[0]) != 0) {
+		printf("  gnss_agcclip=ppm, 0..2000 (0 = peak rule), now %d\r\n", gnss_agc_get_clip_ppm());
+		return;
+	}
+	if (gnss_agc_get_clip_ppm() > 0)
+		printf("  barrage AGC: gain up to an ADC clip rate of %d ppm (1e-6 of the samples)\r\n",
+		       gnss_agc_get_clip_ppm());
+	else
+		printf("  barrage AGC: old peak rule (-2 dBFS)\r\n");
 }
 
 /* taps= : STAP taps per antenna in use (1 .. what the bitstream has) */

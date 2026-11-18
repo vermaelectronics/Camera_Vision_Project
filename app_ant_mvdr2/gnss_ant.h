@@ -41,6 +41,9 @@ void set_rxgain(double *param, char param_no);
 void set_smi(double *param, char param_no);
 void set_smiavg(double *param, char param_no);
 void get_taps(double *param, char param_no);
+void get_rxoff(double *param, char param_no);
+void set_rxoff(double *param, char param_no);
+void set_agcclip(double *param, char param_no);
 void set_taps(double *param, char param_no);
 
 #endif

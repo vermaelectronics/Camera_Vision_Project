@@ -45,6 +45,8 @@ MVDR2 versions keep working under a new name:
 | `band?` / `band=N` | radio presets (3 = all four systems) |
 | `tx1_att=mdB` `agc=1/0` `rxgain=dB` | settings |
 | `gnss_agcstep=dB,s` | AGC rise with a jammer (default 1 dB every 1 s) |
+| `gnss_agcclip=ppm` | barrage AGC: gain up to this ADC clip rate (default 100 ppm; 0 = old -2 dBFS peak rule) |
+| `gnss_rxoff=dB` / `rxoff?` | RX2 gain = RX1 gain - dB when one channel is hotter; `rxoff?` measures and suggests it |
 | `taps=N` / `taps?` | STAP taps per antenna in use, 1..16, live (others set to 0) |
 | `smi=K,A` `smiavg=N` `gnss_kpi?` | advanced / logger |
 | `help?` / `commands?` | main commands / ALL commands |

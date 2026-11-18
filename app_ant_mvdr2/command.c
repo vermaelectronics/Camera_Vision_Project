@@ -102,8 +102,11 @@ command cmd_list[] = {
 	{"smiavg=", "Covariance averaging 0..4.", "smiavg=2", set_smiavg},
 	{"taps?", "STAP taps per antenna in use.", "", get_taps},
 	{"taps=", "STAP taps per antenna, 1..16 (live, no restart).", "taps=8", set_taps},
+	{"gnss_agcclip=", "Barrage AGC: allowed ADC clip rate in ppm (0 = peak rule).", "gnss_agcclip=100", set_agcclip},
+	{"gnss_rxoff=", "RX2 gain = RX1 gain - dB (one channel hotter).", "gnss_rxoff=6", set_rxoff},
+	{"rxoff?", "RX1/RX2 level difference and the suggested gnss_rxoff.", "", get_rxoff},
 	{"gnss_kpi?", "All figures on one line (logger).", "", get_ant_kpi},
-#define CMD_ANT_END 24
+#define CMD_ANT_END 27
 	/* ---- MVDR2 console: AD9361 vendor commands and every gnss_ command,
 	 * unchanged. gnss_status_full?, gnss_jam_est?, gnss_kpi_full? and
 	 * commands? are the MVDR2 gnss_status?, gnss_jam?, gnss_kpi?, help?. ---- */
@@ -623,7 +626,7 @@ static int gnss_check_matched_gain(void)
 	ad9361_get_rx_gain_control_mode(ad9361_phy, 1, &m2);
 	ad9361_get_rx_rf_gain(ad9361_phy, 0, &g1);
 	ad9361_get_rx_rf_gain(ad9361_phy, 1, &g2);
-	if(m1 != 0 || m2 != 0 || g1 != g2) {
+	if(m1 != 0 || m2 != 0 || g1 - g2 != gnss_rx2_off_get()) {
 		console_print("  WARNING: MVDR needs MANUAL and EQUAL gain on RX1/RX2. Now: "
 			      "RX1 mode %d gain %d dB, RX2 mode %d gain %d dB.\n"
 			      "           Fix with gnss_rxgain=%d\n",
@@ -1132,7 +1135,7 @@ static void print_mvdr_txrx_parameters(void)
 	console_print("  RX1 gain       : %d dB\n", (long)rx1_gain);
 	console_print("  RX2 gc mode    : %d (%s)\n", (long)rx2_mode, (char *)gc_mode_name(rx2_mode));
 	console_print("  RX2 gain       : %d dB\n", (long)rx2_gain);
-	if(rx1_mode != 0 || rx2_mode != 0 || rx1_gain != rx2_gain)
+	if(rx1_mode != 0 || rx2_mode != 0 || rx1_gain - rx2_gain != gnss_rx2_off_get())
 		console_print("  WARNING: MVDR needs MANUAL, EQUAL RX1/RX2 gain "
 			      "(gnss_rxgain=N sets both).\n");
 	/* The MVDR datapath clock, measured: the check for the timing question
@@ -1328,7 +1331,9 @@ void set_gnss_rxgain(double* param, char param_no)
 	p[0] = 0;          set_rx1_gc_mode(p, 1);
 	p[0] = 0;          set_rx2_gc_mode(p, 1);
 	p[0] = (double)g;  set_rx1_rf_gain(p, 1);
-	p[0] = (double)g;  set_rx2_rf_gain(p, 1);
+	p[0] = (double)(g - gnss_rx2_off_get());   /* LVDS: gnss_rxoff */
+	if (p[0] < GNSS_CFG_RX_GAIN_MIN_DB) p[0] = GNSS_CFG_RX_GAIN_MIN_DB;
+	set_rx2_rf_gain(p, 1);
 
 	/* Let the 8192-sample window (182 us at 45 MSPS) refill at the new gain,
 	 * and the jammer estimator average (~1.5 ms) settle. */
