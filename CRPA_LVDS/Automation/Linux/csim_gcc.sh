@@ -16,6 +16,8 @@ if [[ -z "${AP_INC:-}" ]]; then
   command -v vitis_hls >/dev/null 2>&1 || source "$XILINX_ROOT/Vitis_HLS/$XILINX_VER/settings64.sh" >/dev/null 2>&1
   AP_INC="${XILINX_HLS:-$XILINX_ROOT/Vitis_HLS/$XILINX_VER}/include"
 fi
+# no Vitis HLS: the open-source headers bundled with the package
+[[ -f "$AP_INC/ap_int.h" ]] || AP_INC="$CRPA_ROOT/Vendor/hls_headers"
 [[ -f "$AP_INC/ap_int.h" && -f "$AP_INC/hls_stream.h" ]] || { echo "ap_int.h / hls_stream.h not found in $AP_INC (set AP_INC)"; exit 2; }
 S="$CRPA_ROOT/Source"
 list=("$@"); [[ ${#list[@]} -eq 0 ]] && list=("${CRPA_ALGOS[@]}")

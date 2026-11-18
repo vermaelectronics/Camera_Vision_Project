@@ -19,7 +19,12 @@ export XILINX_VER="${XILINX_VER:-2023.2}"
 # The ADI hdl tree that already builds passthrough_lvds:
 #   <...>/antsdr-fw-patch/plutosdr-fw/hdl   (contains projects/passthrough_lvds,
 #   library/axi_ad9361, library/axi_vcxo_ctrl ...)
-export ADI_HDL_DIR="${ADI_HDL_DIR:-$HOME/CRPA_Project/NEW_PASSTHROUGH/workspace/antsdr-fw-patch/plutosdr-fw/hdl}"
+# A full package (Automation/Linux/bundle_full.sh) carries its own copy in
+# Vendor/adi_hdl; it is used when present and ADI_HDL_DIR is not set.
+if [[ -z "${ADI_HDL_DIR:-}" && -f "$CRPA_ROOT/Vendor/adi_hdl/scripts/adi_env.tcl" ]]; then
+  export ADI_HDL_DIR="$CRPA_ROOT/Vendor/adi_hdl"
+fi
+export ADI_HDL_DIR="${ADI_HDL_DIR:-$HOME/antsdr/antsdr-fw-patch/plutosdr-fw/hdl}"
 
 # Build outputs: one tree per algorithm, Build/<algo>/
 export CRPA_BUILD_ROOT="${CRPA_BUILD_ROOT:-$CRPA_ROOT/Build}"

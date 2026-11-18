@@ -201,6 +201,13 @@ default in \`env.sh\`, point to it:
 export ADI_HDL_DIR=\$HOME/CRPA_Project/NEW_PASSTHROUGH/workspace/antsdr-fw-patch/plutosdr-fw/hdl
 \`\`\`
 
+This package has a \`Vendor/\` folder:
+
+- \`Vendor/hls_headers\`: open-source ap_int headers for \`csim_gcc.sh\`, included.
+- \`Vendor/adi_hdl\`: your ADI HDL tree. \`bundle_full.sh\` adds it, see
+  section 7. Once it's there, the \`export ADI_HDL_DIR\` line above isn't
+  needed.
+
 ## 2. Check
 
 \`\`\`bash
@@ -280,6 +287,24 @@ Or run it over JTAG straight after the build:
 \`\`\`bash
 ./build_all.sh --from boot --jtag
 \`\`\`
+
+## 7. One complete zip, including your ADI HDL tree (run on your PC)
+
+This copies your ADI HDL tree (\`scripts/\`, \`projects/scripts\`,
+\`library/\` with all the IPs, including \`axi_vcxo_ctrl\`) into
+\`Vendor/adi_hdl\` and writes \`${name}_full.zip\` next to the package folder.
+On another PC that zip then needs only Vivado / Vitis / Vitis HLS 2023.2.
+
+\`\`\`bash
+cd ~/Downloads/$name/Automation/Linux
+\`\`\`
+
+\`\`\`bash
+./bundle_full.sh /home/sandeep/antsdr/antsdr-fw-patch/plutosdr-fw/hdl
+\`\`\`
+
+The Xilinx tools themselves can't go in the zip: they're licensed and many GB
+in size.
 EOF
 
 # ---- zip ------------------------------------------------------------------------------------
