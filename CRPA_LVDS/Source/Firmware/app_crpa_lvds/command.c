@@ -296,6 +296,9 @@ void gnss_boot_autostart(void)
 	ad9361_get_tx_attenuation(ad9361_phy, 1, &a2);
 	ad9361_get_rx_rf_gain(ad9361_phy, 0, &g1);
 	ad9361_get_rx_rf_gain(ad9361_phy, 1, &g2);
+#if GNSS_BOOT_FIFO_AUTOTUNE
+	if(gnss_tx_on) gnss_fifo_autotune();
+#endif
 	console_print("gnss_boot: read back: TX1 %d mdB, TX2 %d mdB, RX1 %d dB, RX2 %d dB, TX %s\n",
 		      (long)a1, (long)a2, (long)g1, (long)g2, (char*)(gnss_tx_on ? "ON" : "OFF (see above)"));
 	{
@@ -453,6 +456,54 @@ void set_gnss_dac_rate(double* param, char param_no)
 	gnss_pt_clear_counters();
 	console_print("GNSS_DAC_RATE: set to %d; measuring...\n", (long)dac_rate_read());
 	get_gnss_fifo(param, param_no);
+}
+
+/**************************************************************************//***
+ * @brief Power-up rate match of the RX -> TX buffers (GNSS_BOOT_FIFO_AUTOTUNE):
+ * measure RX and TX sample rates over 200 ms; if TX / RX is not 1.00, scale the
+ * DAC rate control (dac_valid every N+1 clocks) by that ratio and measure again,
+ * up to 3 times. Returns 0 when the rates match.
+*******************************************************************************/
+int gnss_fifo_autotune(void)
+{
+	int tries;
+	for(tries = 0; tries < 4; tries++) {
+		gnss_pt_state_t a, b;
+		uint32_t drx, dtx, r100, rate = dac_rate_read();
+		gnss_pt_get_state(&a);
+		no_os_mdelay(200);
+		gnss_pt_get_state(&b);
+		drx = b.rx_count_ch0 - a.rx_count_ch0;
+		dtx = b.tx_count_ch0 - a.tx_count_ch0;
+		if(drx == 0 || dtx == 0) {
+			console_print("gnss_boot: buffer check: %s, rate match skipped\n",
+				      (char*)(drx == 0 ? "no RX samples" : "no TX requests"));
+			return -1;
+		}
+		r100 = (uint32_t)(((uint64_t)dtx * 100U + drx / 2U) / drx);
+		if(r100 >= 99U && r100 <= 101U) {
+			gnss_pt_clear_counters();
+			no_os_mdelay(100);
+			gnss_pt_get_state(&b);
+			console_print("gnss_boot: buffers OK: TX / RX = %d.%02d, DAC rate control %d, level ch0 %d ch1 %d (of 32)\n",
+				      (long)(r100 / 100U), (long)(r100 % 100U), (long)rate,
+				      (long)b.fifo_level_ch0, (long)b.fifo_level_ch1);
+			return 0;
+		}
+		if(tries == 3) break;
+		{
+			uint32_t want = (uint32_t)((((uint64_t)(rate + 1U) * r100) + 50U) / 100U);
+			if(want < 1U)   want = 1U;
+			if(want > 256U) want = 256U;
+			console_print("gnss_boot: TX / RX = %d.%02d with DAC rate control %d -> setting %d\n",
+				      (long)(r100 / 100U), (long)(r100 % 100U), (long)rate, (long)(want - 1U));
+			if(ad9361_phy && ad9361_phy->tx_dac)
+				axi_dac_write(ad9361_phy->tx_dac, GNSS_DAC_REG_RATECNTRL, want - 1U);
+			gnss_pt_clear_counters();
+		}
+	}
+	console_print("gnss_boot: buffers: RX / TX rates still differ after 3 corrections; run gnss_fifo? and send the output\n");
+	return -1;
 }
 
 void get_gnss_status(double* param, char param_no)

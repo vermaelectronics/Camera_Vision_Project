@@ -55,6 +55,15 @@
 #define GNSS_BOOT_BW_HZ            20000000U       /* 20 MHz, RX and TX       */
 #endif
 
+/* After gnss_tx=1 at power-up: measure the RX and TX sample rates of the
+ * passthrough (gnss_fifo?) and, if TX requests samples at a different rate
+ * than RX delivers them, set the DAC rate control so they match, then check
+ * again (up to 3 times). Matched, the RX -> TX buffers sit about half full
+ * (16 of 32) instead of empty, and no sample is repeated or lost. */
+#ifndef GNSS_BOOT_FIFO_AUTOTUNE
+#define GNSS_BOOT_FIFO_AUTOTUNE    1
+#endif
+
 /* gnss_tx=1 (at boot and later) goes to this TX1 attenuation */
 #ifndef GNSS_TX_START_ATTEN_MDB
 #define GNSS_TX_START_ATTEN_MDB    GNSS_BOOT_TX1_ATTEN_MDB

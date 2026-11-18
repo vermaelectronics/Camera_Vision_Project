@@ -245,6 +245,7 @@ void get_gnss_status(double* param, char param_no);
  * crpa_predict= / crpa_passes= the STAP-NLMS solver (crpa27..31), gnss_band=
  * the RF profile. */
 void gnss_boot_autostart(void);                         /* gnss_boot_config.h */
+int  gnss_fifo_autotune(void);                          /* power-up RX/TX rate match */
 void get_gnss_fifo(double* param, char param_no);       /* RX/TX rate + buffer check */
 void set_gnss_fifo_clear(double* param, char param_no);
 void get_gnss_dac_rate(double* param, char param_no);
