@@ -143,6 +143,25 @@ if os.path.isfile(lscript):
 else:
     print("NOTE: no lscript.ld in the app src folder; stack/heap left at the template default")
 
+# Vitis 2023.2 SDT BSP: xparameters_ps.h defines XPAR_CPU_CORTEXA9_CORE_CLOCK_FREQ_HZ
+# as XPAR_CPU_CORTEXA9_0_CPU_CLK_FREQ_HZ, which the generated xparameters.h does
+# not define (it has XPAR_CPU_CORE_CLOCK_FREQ_HZ). xtime_l.h's COUNTS_PER_SECOND
+# needs it, so gnss_aj.c and gnss_smi_agc.c (the two files that time with
+# XTime) do not compile. Map it on the compiler line (same CPU clock value).
+CPU_CLK_DEF = "XPAR_CPU_CORTEXA9_0_CPU_CLK_FREQ_HZ=XPAR_CPU_CORE_CLOCK_FREQ_HZ"
+ucfg = os.path.join(WS, APP, "src", "UserConfig.cmake")
+if os.path.isfile(ucfg):
+    txt = open(ucfg).read()
+    if CPU_CLK_DEF not in txt:
+        txt, n = re.subn(r"set\(USER_COMPILE_DEFINITIONS\s*\n", "set(USER_COMPILE_DEFINITIONS\n" + CPU_CLK_DEF + "\n", txt, count=1)
+        if n:
+            open(ucfg, "w").write(txt)
+            print("UserConfig.cmake: compile definition", CPU_CLK_DEF)
+        else:
+            print("WARNING: USER_COMPILE_DEFINITIONS not found in UserConfig.cmake; CPU clock define not added")
+else:
+    print("WARNING: no UserConfig.cmake in the app src folder; CPU clock define not added")
+
 step(4, "build " + APP)
 comp.build()
 elf = find_one(os.path.join(WS, APP, "build", APP + ".elf"), "application .elf")
