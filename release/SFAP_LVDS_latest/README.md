@@ -6,7 +6,7 @@ This package holds SFAP-PI v6.3 (a 256-bin space-frequency power-inversion filte
 |---|---|---|
 | SFAP HDL (`gnss_passthrough` v6.3), block design, XDC | `source/HDL`, `source/BlockDesign`, `source/XDC` (copies in `project/Pass_SFAP`) | Unchanged from Source.zip |
 | SFAP HLS core `sfap_pi` 5.0 | `source/HLS/sfap_pi` (sources) and `prebuilt_ip/sfap_pi` (Vitis HLS 2023.2 export) | Unchanged |
-| Firmware `app_sfap_lvds` | `source/Firmware/app_sfap_lvds` | **6.3a**: 6.3 plus the two new `gnss_band` profiles below. Nothing else changed. |
+| Firmware `app_sfap_lvds` | `source/Firmware/app_sfap_lvds` | **6.3a**: 6.3 plus the two new `gnss_band` profiles below, and **`gnss_tx=1` runs automatically at boot**. Nothing else changed. |
 | Vivado project scripts | `project/Pass_SFAP/system_project.tcl`, `finish_hw.tcl`, `ps7_ddr_drc.xdc` | New |
 | Build scripts | `build_all.sh`, `scripts/build_ip.sh`, `build_hw.sh`, `build_fw.sh`, `build_fw.py` | New |
 
@@ -102,11 +102,11 @@ vivado passthrough_sfap.xpr &
 Copy `output/BOOT.bin` to the SD card, boot from SD, and open the console at 115200 baud. Then:
 ```
 gnss_band=7          1568.5 MHz, 30.72 MS/s, 20 MHz, RX 40 dB, TX1 att 30 dB
-gnss_tx=1            retransmit (anti-jam filter in when a jammer is seen)
+gnss_tx=1            retransmit (already done at boot; again after gnss_tx=0)
 sfap-pi_report?      everything: radio, gains, g2, jammer, events
 gnss_band?           profiles and which GNSS signals they carry
 ```
-As in 6.3, TX1 is silent after boot until you type `gnss_tx=1`.
+**Auto start:** this build runs `gnss_tx=1` by itself right after boot, exactly as if you typed it. TX1 goes to maximum attenuation first, then to the start level: 70 dB with the default `gnss_band=1`. The console shows `AUTO START: gnss_tx=1`. `gnss_tx=0` silences it as usual. To get the RF-silent start of 6.3 back, set `GNSS_AUTO_GNSS_TX` to 0 in `source/Firmware/app_sfap_lvds/gnss_build_defines.h` and rebuild the firmware. **Use conducted, attenuated coax on TX1; the firmware can't see what is connected.**
 
 ## Notes
 - **Power and temperature are not the same as the STAP build.** It's a different design: SFAP has more DSPs and a 256-bin FFT filter bank on the 100 MHz clock. The same corrections are applied (power optimization, waivers); compare `reports/3_power_temperature.txt` with STAP's 3.753 W and 68.3 °C.

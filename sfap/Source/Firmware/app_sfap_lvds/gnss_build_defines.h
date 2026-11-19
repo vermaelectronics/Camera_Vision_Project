@@ -28,8 +28,13 @@
 #ifndef GNSS_BUILD_DEFINES_H_
 #define GNSS_BUILD_DEFINES_H_
 
-/* No build-variant defines. This is the normal JTAG development build:
- * TX is RF-silent at start-up and transmission requires a deliberate
- * gnss_tx=1 or gnss_ddr_tx=1 on the console. */
+/* v6.3a: AUTO gnss_tx=1. Right after boot (radio up, gnss_band default
+ * profile, anti-jam engine started) the firmware runs exactly what typing
+ * gnss_tx=1 on the console does: TX1 at maximum attenuation first, then the
+ * RX1/anti-jam -> TX1 path at the start level (70 dB, or the profile's own
+ * TX1 attenuation). gnss_tx=0 silences it as usual.
+ * CONDUCTED, ATTENUATED COAX ONLY: the firmware cannot see what is on TX1.
+ * Remove this line (or set it to 0) for the RF-silent start of v6.3. */
+#define GNSS_AUTO_GNSS_TX 1
 
 #endif /* GNSS_BUILD_DEFINES_H_ */

@@ -1205,6 +1205,13 @@ int main(void)
 	if((gnss_pt_read(GNSS_PT_REG_STATUS) & GNSS_PT_ST_PASS_EN_SYNCED) &&
 	   (gnss_pt_read(GNSS_PT_REG_STATUS) & GNSS_PT_ST_DAC_EN_I0))
 		gnss_aj_note_tx(1);
+#elif defined(GNSS_AUTO_GNSS_TX) && GNSS_AUTO_GNSS_TX
+	/* v6.3a: the same as typing gnss_tx=1 (gnss_build_defines.h). */
+	{
+		double auto_tx_param[5] = {1.0, 0.0, 0.0, 0.0, 0.0};
+		console_print("\nAUTO START: gnss_tx=1 (build option GNSS_AUTO_GNSS_TX)\n");
+		set_gnss_tx(auto_tx_param, 1);
+	}
 #endif
 	console_set_idle_hook(gnss_idle);
 
