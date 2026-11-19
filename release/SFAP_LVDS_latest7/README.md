@@ -1,4 +1,4 @@
-# SFAP_LVDS_latest6: SFAP-PI anti-jam build package
+# SFAP_LVDS_latest7: SFAP-PI anti-jam build package
 
 This package holds SFAP-PI v6.3 (a 256-bin space-frequency power-inversion filter) for the ANTSDR E310 LVDS board, with its own firmware `app_sfap_lvds`. It builds through the same pipeline as Pass_MVDR_STAP: Vivado → XSA → Vitis → `BOOT.bin`. It also has the same corrections: power optimization, the DDR DRC waiver, and the methodology waivers.
 
@@ -42,10 +42,10 @@ The STAP/MVDR design is not in this build. SFAP takes its place in the FPGA, and
 
 **1. Unzip the package and go into it:**
 ```bash
-unzip -o ~/Downloads/SFAP_LVDS_latest6.zip -d ~/work
+unzip -o ~/Downloads/SFAP_LVDS_latest7.zip -d ~/work
 ```
 ```bash
-cd ~/work/SFAP_LVDS_latest6
+cd ~/work/SFAP_LVDS_latest7
 ```
 
 **2. Load Vivado:**
@@ -98,6 +98,12 @@ vivado -mode batch -source fix_timing.tcl -log fix_timing.log -nojournal
 ```
 ```bash
 grep -E "impl_[0-9]  |BEST:|TIMING:|CRITICAL WARNINGS LEFT|NO RUN|XSA written" fix_timing.log
+```
+
+## Check everything (latest7)
+After `build_hw.sh` and `build_fw.sh`, run one command. It checks the hardware reports, the XSA addresses, the platform, the app build settings, the firmware values, the ELF and `BOOT.bin`, and prints PASS / FAIL / INFO per item, saved to `check_report.txt`:
+```bash
+./scripts/check_all.sh ~/antsdr/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_SFAP /tools/Xilinx/Vitis/2023.2
 ```
 
 ## Check the hardware result
