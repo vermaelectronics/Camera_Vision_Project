@@ -1,0 +1,14 @@
+#-----------------------------------------------------------
+# Vivado v2023.2 (64-bit)
+# SW Build 4029153 on Fri Oct 13 20:13:54 MDT 2023
+# IP Build 4028589 on Sat Oct 14 00:45:43 MDT 2023
+# SharedData Build 4025554 on Tue Oct 10 17:18:54 MDT 2023
+# Start of session at: Wed Nov 11 18:31:14 2026
+# Process ID: 289637
+# Current directory: /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP
+# Command line: vivado -mode batch -source system_project.tcl
+# Log file: /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/vivado.log
+# Journal file: /home/nishant/AntSDR/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_MVDR_STAP/vivado.jou
+# Running On: nishant-kumar-desktop, OS: Linux, CPU Frequency: 2200.000 MHz, CPU Physical cores: 16, Host memory: 33536 MB
+#-----------------------------------------------------------
+source system_project.tcl
