@@ -1,4 +1,4 @@
-# SFAP_LVDS_latest4: SFAP-PI anti-jam build package
+# SFAP_LVDS_latest5: SFAP-PI anti-jam build package
 
 This package holds SFAP-PI v6.3 (a 256-bin space-frequency power-inversion filter) for the ANTSDR E310 LVDS board, with its own firmware `app_sfap_lvds`. It builds through the same pipeline as Pass_MVDR_STAP: Vivado → XSA → Vitis → `BOOT.bin`. It also has the same corrections: power optimization, the DDR DRC waiver, and the methodology waivers.
 
@@ -42,10 +42,10 @@ The STAP/MVDR design is not in this build. SFAP takes its place in the FPGA, and
 
 **1. Unzip the package and go into it:**
 ```bash
-unzip -o ~/Downloads/SFAP_LVDS_latest4.zip -d ~/work
+unzip -o ~/Downloads/SFAP_LVDS_latest5.zip -d ~/work
 ```
 ```bash
-cd ~/work/SFAP_LVDS_latest4
+cd ~/work/SFAP_LVDS_latest5
 ```
 
 **2. Load Vivado:**
@@ -134,4 +134,5 @@ gnss_band?           profiles and which GNSS signals they carry
 - **Linker settings:** the firmware is built with a 64 KiB stack and 64 KiB heap. The weight solver keeps 4 KiB arrays on the stack, so the 8 KiB template default is too tight.
 - **Device-tree fix (latest3):** Vitis 2023.2 copied the `axi_tdd` default polarity `0b010` from the XSA into the generated `pl.dtsi`, and `dtc` cannot read binary numbers (`pl.dtsi:139.30-31 syntax error`). `build_fw.py` now gives Vitis a copy of the XSA (`build/PASS_SFAP_sdt.xsa`) with that value written as `2` in the `.hwh` description. It's the same number, and the bitstream is copied byte for byte. If platform creation still fails, the script prints dtc's error and the bad lines.
 - **CPU clock define (latest4):** the Vitis 2023.2 BSP header `xparameters_ps.h` uses `XPAR_CPU_CORTEXA9_0_CPU_CLK_FREQ_HZ`, but the generated `xparameters.h` only has `XPAR_CPU_CORE_CLOCK_FREQ_HZ`. The timer constant `COUNTS_PER_SECOND` therefore didn't compile, which broke `gnss_aj.c` and `gnss_smi_agc.c`. `build_fw.py` now adds `XPAR_CPU_CORTEXA9_0_CPU_CLK_FREQ_HZ=XPAR_CPU_CORE_CLOCK_FREQ_HZ` to the app's `UserConfig.cmake`. It's the same CPU clock, and no firmware source changed.
+- **Timer header (latest5):** the Vitis 2023.2 BSP has no `xtime_l.h`. Its replacement `XTime_GetTime()` (xiltimer) reads the 32-bit SCU private timer, which counts down. The SFAP firmware expects the classic 64-bit global timer counting up at CPU/2. `build_fw.py` writes an `xtime_l.h` into the app source folder that reads the global timer (`0xF8F00200`) the classic way, the same timer the STAP firmware's `gnss_time.h` uses. No firmware source changed.
 - **Tool version:** the SFAP firmware notes mention Vitis 2026.1, while the HLS, block design and this package use 2023.2. If the firmware build reports a missing `XPAR_...` name, send me the error.
