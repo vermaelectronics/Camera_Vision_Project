@@ -1,4 +1,4 @@
-# SFAP_LVDS_latest: SFAP-PI anti-jam build package
+# SFAP_LVDS_latest1: SFAP-PI anti-jam build package
 
 This package holds SFAP-PI v6.3 (a 256-bin space-frequency power-inversion filter) for the ANTSDR E310 LVDS board, with its own firmware `app_sfap_lvds`. It builds through the same pipeline as Pass_MVDR_STAP: Vivado → XSA → Vitis → `BOOT.bin`. It also has the same corrections: power optimization, the DDR DRC waiver, and the methodology waivers.
 
@@ -42,10 +42,10 @@ The STAP/MVDR design is not in this build. SFAP takes its place in the FPGA, and
 
 **1. Unzip the package and go into it:**
 ```bash
-unzip -o ~/Downloads/SFAP_LVDS_latest.zip -d ~/work
+unzip -o ~/Downloads/SFAP_LVDS_latest1.zip -d ~/work
 ```
 ```bash
-cd ~/work/SFAP_LVDS_latest
+cd ~/work/SFAP_LVDS_latest1
 ```
 
 **2. Load Vivado:**
