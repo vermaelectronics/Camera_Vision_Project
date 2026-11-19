@@ -143,24 +143,65 @@ if os.path.isfile(lscript):
 else:
     print("NOTE: no lscript.ld in the app src folder; stack/heap left at the template default")
 
+# gnss_passthrough register base. gnss_passthrough.h takes it from xparameters.h
+# (XPAR_GNSS_PASSTHROUGH_0_BASEADDR / _BASEADDR / _S_AXI_BASEADDR) and otherwise
+# falls back to 0x44A00000, which is NOT where the SFAP block design puts it
+# (ad_cpu_interconnect 0x43C10000). Read the address from the XSA itself and,
+# if the generated xparameters.h has none of those names, pass it to the compiler.
+def pt_base_from_xsa(xsa):
+    import zipfile
+    with zipfile.ZipFile(xsa) as z:
+        for n in z.namelist():
+            if n.lower().endswith(".hwh"):
+                t = z.read(n).decode("utf-8", errors="replace")
+                for tag in re.findall(r"<MEMRANGE\b[^>]*>", t):
+                    if 'INSTANCE="gnss_passthrough"' in tag:
+                        m = re.search(r'BASEVALUE="(0[xX][0-9a-fA-F]+)"', tag)
+                        if m:
+                            return m.group(1)
+    return None
+
+PT_NAMES = ("XPAR_GNSS_PASSTHROUGH_0_BASEADDR", "XPAR_GNSS_PASSTHROUGH_BASEADDR",
+            "XPAR_GNSS_PASSTHROUGH_S_AXI_BASEADDR")
+xpar = os.path.join(WS, PLAT, "export", PLAT, "sw", DOMAIN, "include", "xparameters.h")
+pt_xsa = pt_base_from_xsa(XSA)
+pt_bsp = None
+if os.path.isfile(xpar):
+    xt = open(xpar).read()
+    for nm in PT_NAMES:
+        m = re.search(r"#define\s+" + nm + r"\s+(0[xX][0-9a-fA-F]+)", xt)
+        if m:
+            pt_bsp = (nm, m.group(1))
+            break
+print("gnss_passthrough base: XSA", pt_xsa, "| xparameters.h", pt_bsp if pt_bsp else "none")
+PT_DEF = None
+if pt_bsp:
+    if pt_xsa and int(pt_bsp[1], 16) != int(pt_xsa, 16):
+        die("xparameters.h says %s = %s but the XSA says %s" % (pt_bsp[0], pt_bsp[1], pt_xsa))
+elif pt_xsa:
+    PT_DEF = "XPAR_GNSS_PASSTHROUGH_BASEADDR=" + pt_xsa
+else:
+    die("gnss_passthrough base address not found in the XSA or in xparameters.h")
+
 # Vitis 2023.2 SDT BSP: xparameters_ps.h defines XPAR_CPU_CORTEXA9_CORE_CLOCK_FREQ_HZ
 # as XPAR_CPU_CORTEXA9_0_CPU_CLK_FREQ_HZ, which the generated xparameters.h does
 # not define (it has XPAR_CPU_CORE_CLOCK_FREQ_HZ). xtime_l.h's COUNTS_PER_SECOND
 # needs it, so gnss_aj.c and gnss_smi_agc.c (the two files that time with
 # XTime) do not compile. Map it on the compiler line (same CPU clock value).
 CPU_CLK_DEF = "XPAR_CPU_CORTEXA9_0_CPU_CLK_FREQ_HZ=XPAR_CPU_CORE_CLOCK_FREQ_HZ"
+defs = [CPU_CLK_DEF] + ([PT_DEF] if PT_DEF else [])
 ucfg = os.path.join(WS, APP, "src", "UserConfig.cmake")
-if os.path.isfile(ucfg):
-    txt = open(ucfg).read()
-    if CPU_CLK_DEF not in txt:
-        txt, n = re.subn(r"set\(USER_COMPILE_DEFINITIONS\s*\n", "set(USER_COMPILE_DEFINITIONS\n" + CPU_CLK_DEF + "\n", txt, count=1)
-        if n:
-            open(ucfg, "w").write(txt)
-            print("UserConfig.cmake: compile definition", CPU_CLK_DEF)
-        else:
-            print("WARNING: USER_COMPILE_DEFINITIONS not found in UserConfig.cmake; CPU clock define not added")
-else:
-    print("WARNING: no UserConfig.cmake in the app src folder; CPU clock define not added")
+if not os.path.isfile(ucfg):
+    die("no UserConfig.cmake in " + os.path.dirname(ucfg) + " - cannot add the compile definitions " + ", ".join(defs))
+txt = open(ucfg).read()
+add = [d for d in defs if d not in txt]
+if add:
+    txt, n = re.subn(r"set\(USER_COMPILE_DEFINITIONS\s*\n", "set(USER_COMPILE_DEFINITIONS\n" + "\n".join(add) + "\n", txt, count=1)
+    if not n:
+        die("USER_COMPILE_DEFINITIONS not found in UserConfig.cmake - cannot add " + ", ".join(add))
+    open(ucfg, "w").write(txt)
+for d in defs:
+    print("UserConfig.cmake: compile definition", d)
 
 # Vitis 2023.2 SDT BSP has no xtime_l.h (gnss_aj.c and gnss_smi_agc.c include
 # it), and its xiltimer XTime_GetTime() reads the SCU private timer: a 32-bit

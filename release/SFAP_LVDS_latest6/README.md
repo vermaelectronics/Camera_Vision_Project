@@ -1,4 +1,4 @@
-# SFAP_LVDS_latest5: SFAP-PI anti-jam build package
+# SFAP_LVDS_latest6: SFAP-PI anti-jam build package
 
 This package holds SFAP-PI v6.3 (a 256-bin space-frequency power-inversion filter) for the ANTSDR E310 LVDS board, with its own firmware `app_sfap_lvds`. It builds through the same pipeline as Pass_MVDR_STAP: Vivado → XSA → Vitis → `BOOT.bin`. It also has the same corrections: power optimization, the DDR DRC waiver, and the methodology waivers.
 
@@ -42,10 +42,10 @@ The STAP/MVDR design is not in this build. SFAP takes its place in the FPGA, and
 
 **1. Unzip the package and go into it:**
 ```bash
-unzip -o ~/Downloads/SFAP_LVDS_latest5.zip -d ~/work
+unzip -o ~/Downloads/SFAP_LVDS_latest6.zip -d ~/work
 ```
 ```bash
-cd ~/work/SFAP_LVDS_latest5
+cd ~/work/SFAP_LVDS_latest6
 ```
 
 **2. Load Vivado:**
@@ -135,4 +135,25 @@ gnss_band?           profiles and which GNSS signals they carry
 - **Device-tree fix (latest3):** Vitis 2023.2 copied the `axi_tdd` default polarity `0b010` from the XSA into the generated `pl.dtsi`, and `dtc` cannot read binary numbers (`pl.dtsi:139.30-31 syntax error`). `build_fw.py` now gives Vitis a copy of the XSA (`build/PASS_SFAP_sdt.xsa`) with that value written as `2` in the `.hwh` description. It's the same number, and the bitstream is copied byte for byte. If platform creation still fails, the script prints dtc's error and the bad lines.
 - **CPU clock define (latest4):** the Vitis 2023.2 BSP header `xparameters_ps.h` uses `XPAR_CPU_CORTEXA9_0_CPU_CLK_FREQ_HZ`, but the generated `xparameters.h` only has `XPAR_CPU_CORE_CLOCK_FREQ_HZ`. The timer constant `COUNTS_PER_SECOND` therefore didn't compile, which broke `gnss_aj.c` and `gnss_smi_agc.c`. `build_fw.py` now adds `XPAR_CPU_CORTEXA9_0_CPU_CLK_FREQ_HZ=XPAR_CPU_CORE_CLOCK_FREQ_HZ` to the app's `UserConfig.cmake`. It's the same CPU clock, and no firmware source changed.
 - **Timer header (latest5):** the Vitis 2023.2 BSP has no `xtime_l.h`. Its replacement `XTime_GetTime()` (xiltimer) reads the 32-bit SCU private timer, which counts down. The SFAP firmware expects the classic 64-bit global timer counting up at CPU/2. `build_fw.py` writes an `xtime_l.h` into the app source folder that reads the global timer (`0xF8F00200`) the classic way, the same timer the STAP firmware's `gnss_time.h` uses. No firmware source changed.
+- **gnss_passthrough address (latest6):** `gnss_passthrough.h` takes the register base from `xparameters.h`, and if it isn't there it falls back to `0x44A00000`. The SFAP block design puts the block at **`0x43C10000`**. `build_fw.py` now reads the address from the XSA. If `xparameters.h` has no entry, it passes `XPAR_GNSS_PASSTHROUGH_BASEADDR=<XSA address>` to the compiler. If the two disagree, it stops. The build log shows `gnss_passthrough base: XSA 0x43C10000 | xparameters.h ...`.
 - **Tool version:** the SFAP firmware notes mention Vitis 2026.1, while the HLS, block design and this package use 2023.2. If the firmware build reports a missing `XPAR_...` name, send me the error.
+
+## Audit (latest6): what was checked
+
+| Area | Item | Result |
+|---|---|---|
+| Hardware | Timing (fix_timing, `impl_2` Performance_ExtraTimingOpt) | WNS +0.076 ns, WHS +0.037 ns: met |
+| Hardware | Critical warnings | 0 (methodology 0, DRC 0); 31 methodology + DDR IOSTDTYPE-1 waived with reasons |
+| Hardware | Clocks | 100 / 200 MHz (PS7), rx_clk 4 ns (AD9361 LVDS): unchanged from Source |
+| Address map | AD9361 0x79020000, RX DMA 0x7C400000, TX DMA 0x7C420000, TDD 0x7C440000, VCXO 0x43C00000 | Block design = `parameters.h` |
+| Address map | gnss_passthrough 0x43C10000 | Taken from the XSA by `build_fw.py` (the firmware fallback 0x44A00000 would be wrong) |
+| BSP | PS7 SPI0 reference 166.67 MHz | Matches the `xparam_compat.h` default (the SPI0 warning is expected) |
+| BSP | `xtime_l.h` / `COUNTS_PER_SECOND` | Generated header: 64-bit global timer, counts up, CPU/2 = 333,333,343 Hz |
+| BSP | `XPAR_CPU_CORTEXA9_0_CPU_CLK_FREQ_HZ` | Mapped to `XPAR_CPU_CORE_CLOCK_FREQ_HZ` |
+| Platform | dtc on `axi_tdd` `0b010` | XSA copy with `2` in the `.hwh` only; the bitstream is byte-identical |
+| Firmware | All 28 C files against the real 2023.2 BSP headers | 0 errors (host syntax check) |
+| Firmware | `gnss_band` 0 to 8, MANUAL, the radio guard | Guard restores LO / rate / bandwidth only; levels apply only when a band is selected |
+| Firmware | Auto `gnss_tx=1` | Same code as the command: maximum attenuation first, then 70 dB (or the band's own attenuation) |
+| Memory | DDR use | ELF from 0x100000 (about 2 MB + 64 KiB stack + 64 KiB heap), ADC 0x800000, captures 0x10000000 / 0x10800000, AJ 0x11000000, DAC 0xA000000: no overlap |
+
+Not verifiable without the board: RF behaviour (null depth, satellite lock), real temperature (`sfap-pi_report?`, Zynq die temperature), and the final link on your Vitis 2023.2.
