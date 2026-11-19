@@ -257,6 +257,7 @@ void set_gnss_aj_mode(double* param, char param_no);
 void get_gnss_band(double* param, char param_no);
 void set_gnss_band(double* param, char param_no);
 void set_gnss_band_custom(double* param, char param_no);
+void set_gnss_band_manual(double* param, char param_no);
 void get_gnss_rx_gain(double* param, char param_no);
 void set_gnss_rx_gain(double* param, char param_no);
 void set_gnss_rx_agc(double* param, char param_no);

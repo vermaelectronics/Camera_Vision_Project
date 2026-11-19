@@ -145,8 +145,9 @@ command cmd_list[] = {
 	{"sfap-pi_csv=", "CSV line (AJCSV,...) every N ms, 100 to 60000; 0 = off (default).", "sfap-pi_csv=0", set_gnss_aj_csv},
 	{"sfap-pi_mode=", "0 = SFAP 256 bins, b + 2 image taps per bin (default), 1 = SFAP b only (no image taps), 2 = one weight for the whole band (v3).", "sfap-pi_mode=0", set_gnss_aj_mode},
 	{"gnss_band?", "RF profile and which GNSS signals it carries (GPS, Galileo, BeiDou, GLONASS).", "", get_gnss_band},
-	{"gnss_band=", "1 = ALL incl. BeiDou + GLONASS 1582.5 MHz/61.44 MS/s (default), 0 = L1 only, 2 = no BeiDou B1I, 3 = no GLONASS (2, 3: 50 MS/s), 4 = L1 anti-jam narrow 8 MHz, 5 = L1 anti-jam multipath 15.36 MS/s, 6 = the last gnss_band_custom=.", "gnss_band=1", set_gnss_band},
+	{"gnss_band=", "1 = ALL incl. BeiDou + GLONASS 1582.5 MHz/61.44 MS/s (default), 0 = L1 only, 2 = no BeiDou B1I, 3 = no GLONASS (2, 3: 50 MS/s), 4 = L1 anti-jam narrow 8 MHz, 5 = L1 anti-jam multipath 15.36 MS/s, 6 = the last gnss_band_custom=, 7 = 1568.5 MHz 30.72 MS/s 20 MHz with RX gain 40 dB + TX1 att 30 dB, 8 = MANUAL (gnss_band_manual=).", "gnss_band=1", set_gnss_band},
 	{"gnss_band_custom=", "Any RF profile: LO [MHz] rate [MS/s] RF bandwidth [MHz], RX and TX together, e.g. 1575.42 30.72 18.", "gnss_band_custom=1575.42 30.72 18", set_gnss_band_custom},
+	{"gnss_band_manual=", "MANUAL profile (gnss_band=8): LO [MHz] rate [MS/s] RF bandwidth [MHz] RX gain [dB] TX1 attenuation [dB], 0 = leave gain / attenuation unchanged, e.g. 1568.5 30.72 20 40 30.", "gnss_band_manual=1568.5 30.72 20 40 30", set_gnss_band_manual},
 	{"gnss_rx_gain?", "Gets RX1/RX2 gain mode and gain [dB].", "", get_gnss_rx_gain},
 	{"gnss_rx_gain=", "Sets RX1 AND RX2 to the same gain [dB] (also the auto reference).", "gnss_rx_gain=40", set_gnss_rx_gain},
 	{"gnss_rx_agc=", "0 = manual locked, 1 = AD9361 AGC per channel, 2 = matched auto (for SFAP-PI).", "gnss_rx_agc=2", set_gnss_rx_agc},
@@ -185,6 +186,7 @@ static int gnss_tx_on = 0;
 *******************************************************************************/
 void set_gnss_tx(double* param, char param_no)
 {
+	uint32_t tx_start_mdb = GNSS_TX_START_ATTEN_MDB;
 	if(param_no < 1) {
 		console_print("gnss_tx= needs 0 or 1\n");
 		return;
@@ -216,8 +218,12 @@ void set_gnss_tx(double* param, char param_no)
 		 * data path opens. At 89.75 dB the receiver sees almost nothing, and
 		 * every second spent stepping down by hand added to its time to
 		 * fix. tx1_attenuation= still changes it afterwards. */
+		/* v6.3a: a profile with its own TX1 attenuation (gnss_band=7, or
+		 * gnss_band_manual= with an attenuation) starts there instead. */
+		tx_start_mdb = gnss_band_tx_att_mdb() > 0 ? (uint32_t)gnss_band_tx_att_mdb()
+		                                          : (uint32_t)GNSS_TX_START_ATTEN_MDB;
 		if(gnss_l1_set_tx_attenuation(ad9361_phy,
-				GNSS_TX_START_ATTEN_MDB) != GNSS_L1_OK) {
+				tx_start_mdb) != GNSS_L1_OK) {
 			console_print("gnss_tx: attenuation not confirmed; NOT transmitting\n");
 			(void)gnss_l1_set_tx_attenuation(ad9361_phy, GNSS_L1_TX_MAX_ATTEN_MDB);
 			return;
@@ -243,7 +249,7 @@ void set_gnss_tx(double* param, char param_no)
 		console_print("GNSS_TX: ON  - %s is being retransmitted on TX1 at "
 			      "%d mdB attenuation.\n",
 			      (char*)(gnss_aj_enabled() ? "the ANTI-JAM output (RX1+RX2; bypassed = RX1 while no jammer)" : "RX1"),
-			      (long)GNSS_TX_START_ATTEN_MDB);
+			      (long)tx_start_mdb);
 		console_print("         Change it with tx1_attenuation= (smaller = "
 			      "louder). Abort with gnss_tx=0\n");
 		gnss_aj_note_tx(1);
@@ -414,7 +420,7 @@ void get_gnss_band(double* param, char param_no)
 void set_gnss_band(double* param, char param_no)
 {
 	if(param_no < 1 || param[0] < 0.0 || param[0] > (double)(GNSS_BAND_COUNT - 1)) {
-		console_print("gnss_band= needs 0..6 (gnss_band? lists them; 6 = custom)\n");
+		console_print("gnss_band= needs 0..8 (gnss_band? lists them; 6 = custom, 8 = manual)\n");
 		return;
 	}
 	if(gnss_band_set((int)param[0]) != 0)
@@ -441,6 +447,33 @@ void set_gnss_band_custom(double* param, char param_no)
 		console_print("gnss_band_custom: the AD9361 refused it; the previous profile is back.\n");
 	else if(param[2] > 0.8 * param[1])
 		console_print("gnss_band_custom: note, bandwidth > 0.8 x rate: signals beyond +-0.4 x rate\n"
+			      "                  fall in the AD9361's filter edge (weaker), see the table.\n");
+	gnss_band_print();
+}
+
+/* v6.3a: gnss_band_manual=LO_MHz FS_MSPS BW_MHz RXGAIN_dB TX1ATT_dB (space
+ * separated, 5 values = the console's maximum). 0 for the gain or the
+ * attenuation leaves it unchanged. Stored as profile 8 (MANUAL) until reboot. */
+void set_gnss_band_manual(double* param, char param_no)
+{
+	int r;
+	if(param_no < 5) {
+		console_print("gnss_band_manual= needs 5 values: LO [MHz] rate [MS/s] bandwidth [MHz]\n"
+			      "                  RX gain [dB] TX1 attenuation [dB] (0 = unchanged)\n"
+			      "                  e.g. gnss_band_manual=1568.5 30.72 20 40 30\n");
+		return;
+	}
+	r = gnss_band_set_manual(param[0], param[1], param[2], param[3], param[4]);
+	if(r == -1) {
+		console_print("gnss_band_manual: out of range. LO 70..6000 MHz, rate 2.5..61.44 MS/s,\n"
+			      "                  bandwidth 0.2..56 MHz and not above the rate, RX gain 0 or\n"
+			      "                  1..76 dB, TX1 attenuation 0 or 0.25..89.75 dB. Nothing changed.\n");
+		return;
+	}
+	if(r == -2)
+		console_print("gnss_band_manual: the AD9361 refused it; the previous profile is back.\n");
+	else if(param[2] > 0.8 * param[1])
+		console_print("gnss_band_manual: note, bandwidth > 0.8 x rate: signals beyond +-0.4 x rate\n"
 			      "                  fall in the AD9361's filter edge (weaker), see the table.\n");
 	gnss_band_print();
 }

@@ -1145,8 +1145,13 @@ void gnss_aj_report(void)
  * profile (1584.5 MHz, 50 MS/s) put B1I at -23.4 MHz = 0.94 of Nyquist, in
  * the filters' transition band, attenuated twice (RX and TX) -- that is
  * why BeiDou was not seen -- and the upper GLONASS channels at the edge. */
-struct band_cfg { uint64_t lo; uint32_t fs, bw; const char *name; };
-static struct band_cfg bands[GNSS_BAND_COUNT] = {      /* [6] is written by gnss_band_custom= */
+/* v6.3a: rxg_db / txatt_mdb: RX gain [dB] (both channels, also the gain
+ * loop's reference) and TX1 attenuation [mdB] a profile sets when it is
+ * SELECTED (gnss_band=, gnss_band_manual=); 0 = leave it as it is.
+ * The 1 s radio guard only restores LO / rate / bandwidth, never the levels,
+ * so the matched gain loop and the TX level hold keep working. */
+struct band_cfg { uint64_t lo; uint32_t fs, bw; const char *name; int32_t rxg_db; int32_t txatt_mdb; };
+static struct band_cfg bands[GNSS_BAND_COUNT] = {      /* [6] gnss_band_custom=, [8] gnss_band_manual= */
 	{1575420000ULL, 30720000U, 18000000U, "GPS, Galileo, QZSS, SBAS, BeiDou B1C: L1 only (narrow)"},
 	{1582500000ULL, 61440000U, 56000000U, "ALL: GPS, Galileo, QZSS, SBAS, BeiDou B1I + B1C, GLONASS G1"},
 	{1589500000ULL, 50000000U, 40000000U, "GPS, Galileo, GLONASS G1 at 50 MS/s (no BeiDou B1I)"},
@@ -1165,6 +1170,16 @@ static struct band_cfg bands[GNSS_BAND_COUNT] = {      /* [6] is written by gnss
 	/* v6.2.2: CUSTOM, set by gnss_band_custom=LO_MHz FS_MSPS BW_MHz. Until
 	 * then it holds the default profile's values. Not kept over a reboot. */
 	{1582500000ULL, 61440000U, 56000000U, "CUSTOM (gnss_band_custom=LO_MHz FS_MSPS BW_MHz)"},
+	/* v6.3a: 1568.5 MHz, 30.72 MS/s, 20 MHz RF bandwidth (+-10 MHz:
+	 * 1558.5..1578.5 MHz -- BeiDou B1I 1561.098, GPS L1 / Galileo E1 /
+	 * BeiDou B1C 1575.42), RX gain 40 dB, TX1 attenuation 30 dB. */
+	{1568500000ULL, 30720000U, 20000000U, "1568.5 MHz 20 MHz: BeiDou B1I + GPS L1 / Galileo E1 / B1C (RX 40 dB, TX1 att 30 dB)",
+	 40, 30000},
+	/* v6.3a: MANUAL preset, start values from gnss_aj.h (GNSS_BAND_MANUAL_*),
+	 * changed live by gnss_band_manual=LO FS BW RXG ATT. */
+	{GNSS_BAND_MANUAL_LO_HZ, GNSS_BAND_MANUAL_FS_HZ, GNSS_BAND_MANUAL_BW_HZ,
+	 "MANUAL (gnss_band_manual=LO_MHz FS_MSPS BW_MHz RXGAIN_dB TX1ATT_dB)",
+	 GNSS_BAND_MANUAL_RXGAIN_DB, GNSS_BAND_MANUAL_TXATT_MDB},
 };
 static int band_applied;
 
@@ -1214,7 +1229,46 @@ static void print_band_cover(void)
 
 int gnss_band_get(void) { return band; }
 
+int32_t gnss_band_tx_att_mdb(void)
+{
+	return bands[band].txatt_mdb > 0 ? bands[band].txatt_mdb : 0;
+}
+
+/* v6.3a: the RX gain and TX1 attenuation a profile asks for, applied when it
+ * is SELECTED. RX gain: both channels and the matched loop's reference
+ * (gnss_rx_gain=). TX1 attenuation: only while TX1 is on (gnss_tx=1); with
+ * TX1 off it stays at the maximum and gnss_tx=1 starts at the profile's
+ * value instead of GNSS_TX_START_ATTEN_MDB. */
+static void band_apply_levels(const struct band_cfg *c)
+{
+	if(!ad9361_phy) return;
+	if(c->rxg_db > 0) {
+		gnss_rxg_set_gain(c->rxg_db);
+		console_print("gnss_band: RX1/RX2 gain %d dB (profile)\n", (long)c->rxg_db);
+	}
+	if(c->txatt_mdb > 0) {
+		if(tx_noted == 1) {
+			ad9361_set_tx_attenuation(ad9361_phy, 0, (uint32_t)c->txatt_mdb);
+			console_print("gnss_band: TX1 attenuation %d mdB (profile)\n", (long)c->txatt_mdb);
+		} else {
+			console_print("gnss_band: TX1 is off; gnss_tx=1 will start at %d mdB (profile)\n",
+				      (long)c->txatt_mdb);
+		}
+	}
+}
+
+static int band_radio_set(int b);
+
 int gnss_band_set(int b)
+{
+	int r = band_radio_set(b);
+	if(r == 0) band_apply_levels(&bands[b]);
+	return r;
+}
+
+/* LO, rate, bandwidth only (the 1 s radio guard and the profile switches
+ * use this; it never touches the RX gain or the TX1 attenuation). */
+static int band_radio_set(int b)
 {
 	const struct band_cfg *c;
 	int r = 0;
@@ -1266,10 +1320,10 @@ int gnss_band_set_custom(double lo_mhz, double fs_msps, double bw_mhz)
 	bands[GNSS_BAND_CUSTOM].lo = (uint64_t)(lo_mhz * 1e6 + 0.5);
 	bands[GNSS_BAND_CUSTOM].fs = (uint32_t)(fs_msps * 1e6 + 0.5);
 	bands[GNSS_BAND_CUSTOM].bw = (uint32_t)(bw_mhz * 1e6 + 0.5);
-	if(gnss_band_set(GNSS_BAND_CUSTOM) != 0) {
+	if(band_radio_set(GNSS_BAND_CUSTOM) != 0) {
 		bands[GNSS_BAND_CUSTOM] = old;
 		if(prev == GNSS_BAND_CUSTOM) prev = GNSS_BAND_DEFAULT;
-		gnss_band_set(prev);
+		band_radio_set(prev);
 		return -2;
 	}
 	/* keep what the chip really set (rate and LO are synthesised) */
@@ -1279,6 +1333,46 @@ int gnss_band_set_custom(double lo_mhz, double fs_msps, double bw_mhz)
 	if(lo) bands[GNSS_BAND_CUSTOM].lo = lo;
 	if(fs) bands[GNSS_BAND_CUSTOM].fs = fs;
 	if(bw) bands[GNSS_BAND_CUSTOM].bw = bw;
+	return 0;
+}
+
+/* v6.3a: MANUAL preset (gnss_band=8). Same limits as the custom profile, plus
+ * RX gain 0 (unchanged) or 1..76 dB and TX1 attenuation 0 (unchanged) or
+ * 0.25..89.75 dB. Applied at once; the values are what gnss_band=8 selects
+ * until the next reboot. */
+int gnss_band_set_manual(double lo_mhz, double fs_msps, double bw_mhz,
+                         double rxgain_db, double txatt_db)
+{
+	struct band_cfg old = bands[GNSS_BAND_MANUAL];
+	int prev = band;
+	uint64_t lo = 0;
+	uint32_t fs = 0, bw = 0;
+
+	if(!ad9361_phy) return -1;
+	if(lo_mhz < 70.0 || lo_mhz > 6000.0 || fs_msps < 2.5 || fs_msps > 61.44 ||
+	   bw_mhz < 0.2 || bw_mhz > 56.0 || bw_mhz > fs_msps ||
+	   rxgain_db < 0.0 || rxgain_db > 76.0 || (rxgain_db > 0.0 && rxgain_db < 1.0) ||
+	   txatt_db < 0.0 || txatt_db > 89.75 || (txatt_db > 0.0 && txatt_db < 0.25))
+		return -1;
+	bands[GNSS_BAND_MANUAL].lo = (uint64_t)(lo_mhz * 1e6 + 0.5);
+	bands[GNSS_BAND_MANUAL].fs = (uint32_t)(fs_msps * 1e6 + 0.5);
+	bands[GNSS_BAND_MANUAL].bw = (uint32_t)(bw_mhz * 1e6 + 0.5);
+	bands[GNSS_BAND_MANUAL].rxg_db = (int32_t)(rxgain_db + 0.5);
+	bands[GNSS_BAND_MANUAL].txatt_mdb = (int32_t)(txatt_db * 1000.0 + 0.5);
+	if(band_radio_set(GNSS_BAND_MANUAL) != 0) {
+		bands[GNSS_BAND_MANUAL] = old;
+		if(prev == GNSS_BAND_MANUAL) prev = GNSS_BAND_DEFAULT;
+		band_radio_set(prev);
+		return -2;
+	}
+	/* keep what the chip really set (rate and LO are synthesised) */
+	ad9361_get_rx_lo_freq(ad9361_phy, &lo);
+	ad9361_get_rx_sampling_freq(ad9361_phy, &fs);
+	ad9361_get_rx_rf_bandwidth(ad9361_phy, &bw);
+	if(lo) bands[GNSS_BAND_MANUAL].lo = lo;
+	if(fs) bands[GNSS_BAND_MANUAL].fs = fs;
+	if(bw) bands[GNSS_BAND_MANUAL].bw = bw;
+	band_apply_levels(&bands[GNSS_BAND_MANUAL]);
 	return 0;
 }
 
@@ -1307,10 +1401,18 @@ void gnss_band_print(void)
 	}
 	console_print("  profiles (gnss_band=N):\n");
 	for(i = 0; i < GNSS_BAND_COUNT; i++)
+	{
 		console_print("    %d = %s MHz, %s MS/s, %s MHz: %s%s\n", (long)i, f3u((double)bands[i].lo / 1e6),
 			      f2u((double)bands[i].fs / 1e6), f1u((double)bands[i].bw / 1e6), (char*)bands[i].name,
 			      (char*)(i == GNSS_BAND_DEFAULT ? " (default)" : ""));
+		if(bands[i].rxg_db > 0 || bands[i].txatt_mdb > 0)
+			console_print("        sets RX gain %s, TX1 attenuation %s\n",
+				      (char*)(bands[i].rxg_db > 0 ? f1u((double)bands[i].rxg_db) : "unchanged"),
+				      (char*)(bands[i].txatt_mdb > 0 ? f2u((double)bands[i].txatt_mdb / 1000.0) : "unchanged"));
+	}
 	console_print("  custom: gnss_band_custom=LO_MHz FS_MSPS BW_MHz, e.g. gnss_band_custom=1575.42 30.72 18\n");
+	console_print("  manual: gnss_band_manual=LO_MHz FS_MSPS BW_MHz RXGAIN_dB TX1ATT_dB (0 = unchanged),\n"
+		      "          e.g. gnss_band_manual=1568.5 30.72 20 40 30\n");
 	console_print("  Your receiver must also have the constellation switched ON (e.g. BeiDou is\n"
 		      "  off by default in many receivers; some track only 3 systems at once).\n");
 }
@@ -1350,7 +1452,7 @@ static void radio_guard(void)
 		      "     FIR RX %s TX %s) -> profile %d restored. Use gnss_band= to change the band.\n",
 		      f3u((double)rlo / 1e6), f3u((double)tlo / 1e6), f2u((double)rfs / 1e6),
 		      f2u((double)tfs / 1e6), (char*)(rf ? "ON" : "off"), (char*)(tf ? "ON" : "off"), (long)band);
-	gnss_band_set(band);
+	band_radio_set(band);   /* v6.3a: radio only, the gain loop keeps the levels */
 }
 
 /* ---- the console idle hook ------------------------------------------------------- */

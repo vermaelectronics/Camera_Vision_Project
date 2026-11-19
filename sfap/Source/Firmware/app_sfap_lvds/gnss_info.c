@@ -786,6 +786,8 @@ static void info_quickstart(void)
     console_print("   gnss_band=1 / 0 / 2 / 3     RF profile (1 = ALL incl. BeiDou, default)\n");
     console_print("   gnss_band?                  which GNSS signals the profile carries\n");
     console_print("   gnss_band_custom=LO FS BW   any profile, MHz / MS/s / MHz (e.g. 1575.42 30.72 18)\n");
+    console_print("   gnss_band=7                 1568.5 MHz, 30.72 MS/s, 20 MHz, RX 40 dB, TX1 att 30 dB\n");
+    console_print("   gnss_band_manual=LO FS BW G A  MANUAL profile 8: + RX gain dB, TX1 att dB (0 = keep)\n");
     console_print("   sfap-pi_freeze=1 / =0       hold the filter / automatic\n");
     console_print("   gnss_rx_gain?               RX1/RX2 gain, mode, TX level hold\n");
     console_print("   gnss_rx_gain=<dB>           same gain on RX1+RX2 (auto reference)\n");

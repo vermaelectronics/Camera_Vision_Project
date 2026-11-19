@@ -49,7 +49,7 @@
 #define GNSS_AJ_BUF_ADDR   0x11000000U
 #endif
 
-#define GNSS_AJ_VERSION_STR  "6.3"
+#define GNSS_AJ_VERSION_STR  "6.3a"   /* 6.3 + gnss_band=7 (1568.5 MHz) and 8 (MANUAL) */
 
 /* RF profiles (gnss_band=). RX and TX are always set together, so the
  * retransmitted signal comes out on the frequency it came in on and the
@@ -66,8 +66,33 @@
                                   /*   256 bins tolerate at 61.44 MS/s            */
 #define GNSS_BAND_CUSTOM      6   /* v6.2.2: any LO / rate / bandwidth, set with  */
                                   /* gnss_band_custom=LO_MHz FS_MSPS BW_MHz       */
-#define GNSS_BAND_COUNT       7
+#define GNSS_BAND_1568_20     7   /* v6.3a: 1568.5 MHz, 30.72 MS/s, 20 MHz,       */
+                                  /*   RX gain 40 dB, TX1 attenuation 30 dB      */
+#define GNSS_BAND_MANUAL      8   /* v6.3a: MANUAL preset, values below; changed */
+                                  /*   live with gnss_band_manual=LO FS BW RXG ATT */
+#define GNSS_BAND_COUNT       9
 #define GNSS_BAND_DEFAULT     GNSS_BAND_ALL
+
+/* v6.3a: start values of the MANUAL preset (gnss_band=8). Edit here before
+ * building to change what gnss_band=8 selects after every boot;
+ * gnss_band_manual= changes them at run time (not kept over a reboot).
+ * RX gain 0 = leave the RX gain as it is; TX1 attenuation 0 = leave it
+ * (a profile never asks for 0 dB, the loudest setting). */
+#ifndef GNSS_BAND_MANUAL_LO_HZ
+#define GNSS_BAND_MANUAL_LO_HZ     1575420000ULL   /* LO [Hz], RX and TX       */
+#endif
+#ifndef GNSS_BAND_MANUAL_FS_HZ
+#define GNSS_BAND_MANUAL_FS_HZ       30720000U     /* sample rate [S/s]        */
+#endif
+#ifndef GNSS_BAND_MANUAL_BW_HZ
+#define GNSS_BAND_MANUAL_BW_HZ       18000000U     /* RF bandwidth [Hz]        */
+#endif
+#ifndef GNSS_BAND_MANUAL_RXGAIN_DB
+#define GNSS_BAND_MANUAL_RXGAIN_DB   0             /* 1..76 dB, 0 = unchanged  */
+#endif
+#ifndef GNSS_BAND_MANUAL_TXATT_MDB
+#define GNSS_BAND_MANUAL_TXATT_MDB   0             /* mdB, 0 = unchanged       */
+#endif
 
 void gnss_aj_init(void);            /* once, after the radio and DMA are up  */
 void gnss_aj_enable(int on);        /* filter in the TX1 path + engine       */
@@ -105,6 +130,14 @@ int  gnss_band_set(int band);
  * is out of range (nothing changed), -2 if the AD9361 refused it (the previous
  * profile is put back). */
 int  gnss_band_set_custom(double lo_mhz, double fs_msps, double bw_mhz);
+/* v6.3a: MANUAL preset (gnss_band=8): LO, rate, bandwidth, RX gain [dB]
+ * (0 = unchanged) and TX1 attenuation [dB] (0 = unchanged), applied at once.
+ * Returns 0, -1 out of range (nothing changed), -2 refused by the AD9361. */
+int  gnss_band_set_manual(double lo_mhz, double fs_msps, double bw_mhz,
+                          double rxgain_db, double txatt_db);
+/* v6.3a: TX1 attenuation [mdB] the active profile asks for, or 0 if it
+ * leaves TX1 attenuation alone (gnss_tx=1 then uses its own start level). */
+int32_t gnss_band_tx_att_mdb(void);
 int  gnss_band_get(void);
 void gnss_band_print(void);
 
