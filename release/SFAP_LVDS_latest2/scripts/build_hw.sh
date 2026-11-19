@@ -14,6 +14,7 @@
 #      (power_opt_design on, DDR DRC waiver), bitstream          ~1-2 h
 #   4. finish_hw.tcl: methodology waivers, implementation again, reports,
 #      PASS_SFAP.xsa only if timing is met                         ~0.5-1 h
+#   4b. only if timing is not met: fix_timing.tcl (4 strategies in parallel)
 #   5. copies PASS_SFAP.xsa to hw/
 set -e
 HDL="${1:?usage: $0 <path to plutosdr-fw/hdl>}"
@@ -60,7 +61,13 @@ echo "=== 4. finish_hw.tcl (waivers, implementation again, reports, XSA) ==="
 vivado -mode batch -nojournal -log finish_hw.log -source finish_hw.tcl
 grep -E "WAIVED|TIMING:|CRITICAL WARNINGS LEFT|LEFT:|NOT MET|XSA written" finish_hw.log || true
 
-test -f PASS_SFAP.xsa || { echo "ERROR: PASS_SFAP.xsa not written (timing not met?) - see finish_hw.log and reports/"; exit 1; }
+if [ ! -f PASS_SFAP.xsa ]; then
+  echo "=== 4b. timing not met -> fix_timing.tcl (4 other strategies in parallel, best one kept) ==="
+  vivado -mode batch -nojournal -log fix_timing.log -source fix_timing.tcl
+  grep -E "RESULTS|impl_[0-9]  |BEST:|TIMING:|CRITICAL WARNINGS LEFT|LEFT:|NOT MET|NO RUN|XSA written" fix_timing.log || true
+fi
+
+test -f PASS_SFAP.xsa || { echo "ERROR: PASS_SFAP.xsa not written (timing not met) - see finish_hw.log, fix_timing.log and reports*/"; exit 1; }
 cp PASS_SFAP.xsa "$PKG/hw/PASS_SFAP.xsa"
 echo
 echo "XSA: $PKG/hw/PASS_SFAP.xsa"

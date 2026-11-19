@@ -1,4 +1,4 @@
-# SFAP_LVDS_latest1: SFAP-PI anti-jam build package
+# SFAP_LVDS_latest2: SFAP-PI anti-jam build package
 
 This package holds SFAP-PI v6.3 (a 256-bin space-frequency power-inversion filter) for the ANTSDR E310 LVDS board, with its own firmware `app_sfap_lvds`. It builds through the same pipeline as Pass_MVDR_STAP: Vivado → XSA → Vitis → `BOOT.bin`. It also has the same corrections: power optimization, the DDR DRC waiver, and the methodology waivers.
 
@@ -42,10 +42,10 @@ The STAP/MVDR design is not in this build. SFAP takes its place in the FPGA, and
 
 **1. Unzip the package and go into it:**
 ```bash
-unzip -o ~/Downloads/SFAP_LVDS_latest1.zip -d ~/work
+unzip -o ~/Downloads/SFAP_LVDS_latest2.zip -d ~/work
 ```
 ```bash
-cd ~/work/SFAP_LVDS_latest1
+cd ~/work/SFAP_LVDS_latest2
 ```
 
 **2. Load Vivado:**
@@ -78,6 +78,26 @@ ls -l output/
 **Short way: all of steps 2 to 5 in one command.**
 ```bash
 ./build_all.sh ~/antsdr/antsdr-fw-patch/plutosdr-fw/hdl
+```
+
+## If timing is not met (`TIMING NOT MET` in finish_hw.log)
+`build_hw.sh` then runs **`fix_timing.tcl`** by itself. It sends the same synthesized design through 4 other implementation strategies in parallel and keeps the best run that meets timing:
+- Performance_ExtraTimingOpt
+- Performance_NetDelay_high
+- ExplorePostRoutePhysOpt with AggressiveExplore
+- Performance_Retiming
+
+Every run keeps power optimization and all the waivers. The RTL, block design, clocks and firmware are unchanged.
+
+To run it by hand on an existing Pass_SFAP project (about 1 to 1.5 hours):
+```bash
+cd ~/antsdr/antsdr-fw-patch/plutosdr-fw/hdl/projects/Pass_SFAP
+```
+```bash
+vivado -mode batch -source fix_timing.tcl -log fix_timing.log -nojournal
+```
+```bash
+grep -E "impl_[0-9]  |BEST:|TIMING:|CRITICAL WARNINGS LEFT|NO RUN|XSA written" fix_timing.log
 ```
 
 ## Check the hardware result
