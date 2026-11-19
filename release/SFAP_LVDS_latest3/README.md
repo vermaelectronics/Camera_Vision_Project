@@ -1,4 +1,4 @@
-# SFAP_LVDS_latest2: SFAP-PI anti-jam build package
+# SFAP_LVDS_latest3: SFAP-PI anti-jam build package
 
 This package holds SFAP-PI v6.3 (a 256-bin space-frequency power-inversion filter) for the ANTSDR E310 LVDS board, with its own firmware `app_sfap_lvds`. It builds through the same pipeline as Pass_MVDR_STAP: Vivado → XSA → Vitis → `BOOT.bin`. It also has the same corrections: power optimization, the DDR DRC waiver, and the methodology waivers.
 
@@ -42,10 +42,10 @@ The STAP/MVDR design is not in this build. SFAP takes its place in the FPGA, and
 
 **1. Unzip the package and go into it:**
 ```bash
-unzip -o ~/Downloads/SFAP_LVDS_latest2.zip -d ~/work
+unzip -o ~/Downloads/SFAP_LVDS_latest3.zip -d ~/work
 ```
 ```bash
-cd ~/work/SFAP_LVDS_latest2
+cd ~/work/SFAP_LVDS_latest3
 ```
 
 **2. Load Vivado:**
@@ -132,4 +132,5 @@ gnss_band?           profiles and which GNSS signals they carry
 - **Power and temperature are not the same as the STAP build.** It's a different design: SFAP has more DSPs and a 256-bin FFT filter bank on the 100 MHz clock. The same corrections are applied (power optimization, waivers); compare `reports/3_power_temperature.txt` with STAP's 3.753 W and 68.3 °C.
 - **Waivers:** TIMING-54, TIMING-9 and TIMING-18 (methodology) and IOSTDTYPE-1 on the PS7 DDR pins (DRC), each with a written reason. Any other critical warning is not waived; `finish_hw.tcl` lists it as `LEFT:`.
 - **Linker settings:** the firmware is built with a 64 KiB stack and 64 KiB heap. The weight solver keeps 4 KiB arrays on the stack, so the 8 KiB template default is too tight.
+- **Device-tree fix (latest3):** Vitis 2023.2 copied the `axi_tdd` default polarity `0b010` from the XSA into the generated `pl.dtsi`, and `dtc` cannot read binary numbers (`pl.dtsi:139.30-31 syntax error`). `build_fw.py` now gives Vitis a copy of the XSA (`build/PASS_SFAP_sdt.xsa`) with that value written as `2` in the `.hwh` description. It's the same number, and the bitstream is copied byte for byte. If platform creation still fails, the script prints dtc's error and the bad lines.
 - **Tool version:** the SFAP firmware notes mention Vitis 2026.1, while the HLS, block design and this package use 2023.2. If the firmware build reports a missing `XPAR_...` name, send me the error.

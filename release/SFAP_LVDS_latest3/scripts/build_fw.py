@@ -66,8 +66,65 @@ os.makedirs(OUT, exist_ok=True)
 client = vitis.create_client()
 client.set_workspace(path=WS)
 
+def xsa_for_sdt(src):
+    """Vitis 2023.2 writes IP parameters from the XSA's .hwh straight into the
+    system device tree (pl.dtsi). A binary literal such as the axi_tdd default
+    polarity 0b010 (system_bd.tcl: TDD_DEFAULT_POL) becomes <0b010>, which dtc
+    cannot parse ("pl.dtsi:139.30-31 syntax error"). Copy the XSA with every
+    VALUE="0b..." in the .hwh written in decimal (same number). The bitstream
+    and everything else in the XSA are copied unchanged."""
+    import zipfile
+    dst = os.path.join(ROOT, "build", PLAT + "_sdt.xsa")
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    pat = re.compile(r'(VALUE=")0[bB]([01]+)(")')
+    changed = []
+    with zipfile.ZipFile(src) as zin, zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as zout:
+        for item in zin.infolist():
+            data = zin.read(item.filename)
+            if item.filename.lower().endswith(".hwh"):
+                txt = data.decode("utf-8", errors="surrogateescape")
+                def repl(m):
+                    changed.append(item.filename + ": 0b" + m.group(2) + " -> " + str(int(m.group(2), 2)))
+                    return m.group(1) + str(int(m.group(2), 2)) + m.group(3)
+                txt = pat.sub(repl, txt)
+                data = txt.encode("utf-8", errors="surrogateescape")
+            zout.writestr(item, data)
+    for c in changed:
+        print("SDT fix:", c)
+    if not changed:
+        print("SDT fix: no binary literals in the .hwh (nothing changed)")
+    return dst
+
+
+def dtc_diagnose():
+    """After a failed platform creation: show dtc's error and every device
+    tree line whose <...> cells hold something dtc cannot read."""
+    pp = os.path.join(WS, ".rigel_lopper", "system-top.dts.pp")
+    dtc = shutil.which("dtc") or os.path.join(os.environ.get("XILINX_VITIS", ""), "bin", "dtc")
+    if not os.path.isfile(pp):
+        print("(no", pp, "to check)")
+        return
+    try:
+        out = subprocess.run([dtc, "-I", "dts", "-O", "dtb", "-o", os.devnull, pp],
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True).stdout
+        print("dtc says:\n" + "\n".join(out.splitlines()[:5]))
+    except Exception as e:
+        print("could not run dtc:", e)
+    tok_ok = re.compile(r'^(&[\w.-]+|0[xX][0-9a-fA-F]+|\d+|\(.*\))$')
+    for n, line in enumerate(open(pp, errors="replace"), 1):
+        m = re.search(r'=\s*<([^>]*)>', line)
+        if m and any(not tok_ok.match(t) for t in m.group(1).split()):
+            print("  bad cells, .pp line %d: %s" % (n, line.strip()))
+
+
 step(2, "platform " + PLAT + " from " + XSA)
-platform = client.create_platform_component(name=PLAT, hw=XSA, os="standalone", cpu=CPU)
+XSA_SDT = xsa_for_sdt(XSA)
+try:
+    platform = client.create_platform_component(name=PLAT, hw=XSA_SDT, os="standalone", cpu=CPU)
+except Exception as e:
+    print("\nPlatform creation failed:", e)
+    dtc_diagnose()
+    die("platform not created - send the lines above")
 platform.build()
 xpfm = find_one(os.path.join(WS, PLAT, "export", PLAT, PLAT + ".xpfm"), "platform .xpfm")
 print("platform:", xpfm)
